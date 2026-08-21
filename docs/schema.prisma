@@ -1,0 +1,1158 @@
+// Prisma-схема платформы «Енисей» (Этап 1).
+// Реализует раздел docs/TZ.md → «Модель данных».
+//
+// Ещё не подключена к реальному Node/Prisma-проекту — это черновик для ревью
+// перед сборкой каркаса монорепозитория. Но схема не умозрительная: она
+// разворачивается на PostgreSQL 18 (28 таблиц), ограничения из
+// schema-constraints.sql накатываются, и сценарии docs/schema-tests.sql
+// проходят — включая проверку, что база физически не даёт смешать данные
+// двух клубов. Прогон: bash docs/verify-schema.sh
+//
+// Проверено на Prisma 6.x. На Prisma 7 схема не валидируется: там `url` из
+// блока datasource переехал в prisma.config.ts.
+//
+// ---------------------------------------------------------------------------
+// ДВА СКВОЗНЫХ ПРАВИЛА, БЕЗ КОТОРЫХ СХЕМУ НЕЛЬЗЯ ЧИТАТЬ ПРАВИЛЬНО
+// ---------------------------------------------------------------------------
+//
+// 1. ВСЕ ДЕНЕЖНЫЕ СУММЫ ХРАНЯТСЯ В КОПЕЙКАХ (Int).
+//    700 ₽ = 70000. Дробных рублей в БД не существует — округление и
+//    форматирование только на границе с ЮKassa и с UI. Причина: float для
+//    денег недопустим, а Decimal в JS требует отдельной библиотеки.
+//
+// 2. ИЗОЛЯЦИЯ КЛУБОВ ДЕРЖИТСЯ НА СОСТАВНЫХ ВНЕШНИХ КЛЮЧАХ.
+//    tenantId продублирован во все дочерние таблицы, а связи идут не по
+//    одному id, а по паре (id, tenantId). Родители объявляют @@unique([id,
+//    tenantId]) — именно на неё ссылается составной FK.
+//    Что это даёт: база физически не примет бронь, у которой сессия из
+//    клуба А, а клиент из клуба Б. Забытый `where: { tenantId }` больше не
+//    превращается в утечку между клубами — целостность гарантирует Postgres,
+//    а не аккуратность разработчика.
+//
+// 3. УДАЛЕНИЕ ПО УМОЛЧАНИЮ ЗАПРЕЩЕНО (onDelete: Restrict).
+//    Почти все связи объявляют Restrict явно, и это осознанный выбор: за
+//    каждой строкой здесь стоят деньги или обязательства перед клиентом.
+//    Каскадное удаление клиента унесло бы его платежи и историю визитов —
+//    ровно то, что требуется для бухгалтерии. Поэтому «удаление» клиента и
+//    сотрудника — это deactivatedAt/anonymizedAt на User, а не DELETE.
+//    Cascade оставлен только там, где дочерняя строка бессмысленна без
+//    родителя и не содержит финансовых следов: профили при удалении учётки,
+//    уведомления, настройки клуба.
+//    Полагаться на молчаливые дефолты Prisma (Restrict для обязательных,
+//    SetNull для необязательных связей) в денежной схеме нельзя: SetNull
+//    тихо обнулил бы ссылку на платёж вместо того, чтобы остановить удаление.
+//
+// Ограничения, которые Prisma не умеет выразить (запрет пересечения броней
+// стола, частичные уникальные индексы, check-констрейнты), лежат рядом в
+// docs/schema-constraints.sql и накатываются как raw-SQL миграция.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ---------------------------------------------------------------------------
+// Enums — справочники допустимых значений полей
+// ---------------------------------------------------------------------------
+
+/// Роль пользователя внутри одного клуба (tenant). Один и тот же человек в
+/// разных клубах может иметь разные роли — роль хранится на User, а не глобально.
+enum Role {
+  CLIENT // клиент клуба
+  ADMIN // администратор клуба
+  COACH // тренер
+  OWNER // руководство клуба: те же права, что ADMIN, плюс управление персоналом
+}
+
+/// Как появилась запись на тренировку: клиент записался сам через сайт, или
+/// администратор добавил её вручную (в т.ч. задним числом).
+enum BookingSource {
+  ONLINE
+  MANUAL
+}
+
+/// Единый статус для брони тренировки / турнира / стола.
+enum BookingStatus {
+  BOOKED // запись активна, оплата холдирована
+  CANCELLED // клиент отменил (списание зависит от времени отмены — см. chargeRatio)
+  ATTENDED // администратор подтвердил присутствие
+  NO_SHOW // клиент не пришёл и не отменил — 100% списание
+}
+
+/// Минимальный шаг бронирования стола — клуб выбирает один из вариантов при
+/// настройке профиля.
+enum BookingStep {
+  MIN_10
+  MIN_15
+  MIN_20
+  MIN_30
+  HOUR_1
+}
+
+/// Каким способом клиент заплатил за конкретную бронь/визит.
+enum PaymentMethod {
+  YOOKASSA // онлайн-оплата картой через ЮKassa (двухстадийно: холд → списание)
+  SUBSCRIPTION_BALANCE // списание визита с баланса абонемента
+  CASH // наличные — только первый визит незарегистрированного клиента «с порога»
+}
+
+/// Статус денег в рамках двухстадийного платежа ЮKassa.
+enum PaymentStatus {
+  HELD // сумма заморожена (холд) при записи, ещё не списана
+  CAPTURED // списана полностью (100% — неявка без отмены)
+  PARTIALLY_CAPTURED // списана частично (50% — поздняя отмена)
+  REFUNDED // холд снят полностью (0% — ранняя отмена)
+  CANCELLED // платёж отменён/не состоялся
+}
+
+/// Назначение платежа. Нужно, чтобы отличить оплату разовой услуги от
+/// покупки абонемента и от подписки клуба на платформу.
+enum PaymentPurpose {
+  SERVICE // тренировка / турнир / аренда стола
+  SUBSCRIPTION_PURCHASE // клиент купил абонемент
+}
+
+/// Статус подписки клуба на платформу.
+enum PlatformSubscriptionStatus {
+  ACTIVE
+  PAST_DUE // просрочен платёж, доступ ещё не заблокирован (грейс-период джобы)
+  SUSPENDED // доступ клуба заблокирован из-за неоплаты
+  EXEMPT // клуб не платит подписку (статус «Енисея» как пилотного клиента)
+}
+
+/// Причина движения визитов по балансу абонемента (см. SubscriptionLedger).
+enum LedgerReason {
+  PURCHASE // начисление визитов при покупке абонемента
+  VISIT_CHARGED // визит списан за состоявшееся посещение
+  VISIT_REFUNDED // визит возвращён (клиент отменил вовремя)
+  VISIT_BURNED // визит сгорел из-за неявки без отмены
+  ADMIN_ADJUSTMENT // ручная корректировка администратором
+  EXPIRED // остаток аннулирован по истечении срока абонемента
+}
+
+/// Откуда взялся визит в VisitLog.
+enum VisitSourceType {
+  TRAINING
+  TOURNAMENT
+  TABLE
+  WALK_IN // первый визит клиента «с порога», без онлайн-брони
+}
+
+enum NotificationChannel {
+  TELEGRAM
+  WEB_PUSH
+}
+
+/// Тип уведомления, включая служебные эскалации по неотмеченному присутствию.
+enum NotificationType {
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  BOOKING_REMINDER
+  ATTENDANCE_ESCALATION_HOUR // напоминание админу/руководству спустя час после мероприятия
+  ATTENDANCE_AUTO_NO_SHOW // уведомление об автоматической фиксации неявки через сутки
+  SUBSCRIPTION_PAST_DUE // клубу — про просрочку подписки на платформу
+}
+
+/// Кто выполнил действие в журнале аудита. Далеко не всё делают люди:
+/// автоматическая неявка через сутки и захват холда по вебхуку — тоже
+/// денежные операции, и у них должен быть различимый автор.
+enum ActorType {
+  USER // администратор, тренер, клиент
+  SYSTEM_JOB // фоновая джоба (эскалация присутствия, биллинг подписки)
+  WEBHOOK // входящее уведомление платёжного провайдера
+}
+
+/// Действия, попадающие в журнал аудита. Список намеренно узкий: сюда
+/// пишется только то, что двигает деньги, меняет права или трогает
+/// персональные данные, — иначе журнал превращается в свалку и в нём
+/// невозможно ничего найти.
+enum AuditAction {
+  BOOKING_CREATED
+  BOOKING_CANCELLED
+  ATTENDANCE_MARKED // отмечено присутствие → списание по факту
+  NO_SHOW_MARKED // отмечена неявка вручную → списание 100%
+  AUTO_NO_SHOW_APPLIED // неявка зафиксирована джобой автоматически
+  PAYMENT_HELD
+  PAYMENT_CAPTURED
+  PAYMENT_REFUNDED
+  SUBSCRIPTION_BALANCE_ADJUSTED // ручная корректировка баланса абонемента
+  PRICE_CHANGED // изменён прайс клуба или тип услуги
+  CANCELLATION_POLICY_CHANGED
+  ROLE_CHANGED
+  CLIENT_ANONYMIZED // удаление персданных по требованию субъекта
+}
+
+/// Тип юридического документа, который человек принимает.
+enum LegalDocumentType {
+  PUBLIC_OFFER // оферта клуба: условия услуг, холдирования и списания
+  PERSONAL_DATA_CONSENT // согласие на обработку персональных данных (152-ФЗ)
+  RECURRENT_PAYMENT_CONSENT // согласие на списания с сохранённой карты без ввода реквизитов
+  PRIVACY_POLICY // политика обработки ПДн (документ платформы, не клуба)
+}
+
+// ---------------------------------------------------------------------------
+// Клуб (Tenant) и его подписка на платформу
+// ---------------------------------------------------------------------------
+
+/// Клуб-арендатор платформы. Одна запись Tenant = один клуб настольного
+/// тенниса со своими настройками, ценами и пользователями. Корень всей
+/// изоляции данных: каждая таблица ниже несёт tenantId и связана с соседями
+/// составным ключом, включающим его.
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Часовой пояс клуба в формате IANA (напр. «Asia/Krasnoyarsk»).
+  // Не косметика: от него зависят деньги и отчётность. Все моменты времени
+  // хранятся в UTC (timestamptz), но «за час до начала», «сутки на отметку
+  // присутствия» и границы операционного дня считаются в местном времени
+  // клуба. Клуб во Владивостоке и клуб в Калининграде на одной платформе —
+  // штатная ситуация, а не экзотика.
+  timezone String @default("Asia/Krasnoyarsk")
+
+  // --- Профиль клуба: то, что владелец/админ клуба настраивает сам, без
+  // --- участия разработчика (см. ТЗ → «Профиль клуба»). Цены — в копейках.
+  // Количество столов отдельным полем не хранится: столы — это строки в
+  // Table, и счётчик рядом с ними неизбежно разошёлся бы с реальностью
+  // (добавили стол, забыли обновить число). «Настройка количества столов»
+  // из ТЗ — это добавление и удаление записей Table в админке.
+  hasRobotOption       Boolean     @default(false) // есть ли аренда «стол + робот»
+  bookingStep          BookingStep @default(MIN_30) // минимальный шаг брони стола
+  tableHourPrice       Int // цена 1 часа аренды стола без робота
+  tableExtra30MinPrice Int // доплата за каждые следующие 30 минут без робота
+  robot30MinPrice      Int? // цена 30 минут с роботом (своя сетка цен)
+  robot60MinPrice      Int? // цена 60 минут с роботом
+  robotExtra30MinPrice Int? // доплата за каждые следующие 30 минут с роботом
+
+  // --- Политика отмены: настройка клуба, а не константа в коде.
+  //
+  // ВНИМАНИЕ: настраиваемость политики — решение уровня продукта, принятое
+  // при проектировании схемы. В ТЗ политика описана как фиксированная
+  // («за час — 0%, позже — 50%, неявка — 100%»), и для «Енисея» именно
+  // такие значения и заводятся. Настраиваемой она сделана потому, что
+  // продукт тиражируемый: у второго клуба пороги будут свои, и менять их
+  // не должно означать релиз. Конкретные значения для других клубов с
+  // владельцем не обсуждались.
+  //
+  // Ступени лежат в CancellationTier, здесь — то, что ступенями не выражается.
+  noShowChargePercent Int @default(100) // сколько списать, если клиент не отменил и не пришёл
+
+  // Мягкое правило для абонементов: визит сгорает только при неявке, а при
+  // любой отмене возвращается на баланс (ТЗ → «Оплата и политика отмены»).
+  subscriptionBurnsOnNoShowOnly Boolean @default(true)
+
+  // Через сколько минут после мероприятия напоминать администратору, что
+  // присутствие не отмечено, и через сколько — фиксировать неявку
+  // автоматически. У «Енисея»: час и сутки.
+  attendanceReminderAfterMinutes Int @default(60)
+  attendanceAutoNoShowAfterMinutes Int @default(1440)
+
+  // --- Обратные связи: всё, что принадлежит этому клубу.
+  users                   User[]
+  clientProfiles          ClientProfile[]
+  coachProfiles           CoachProfile[]
+  cancellationTiers       CancellationTier[]
+  trainingTypes           TrainingType[]
+  trainingSessions        TrainingSession[]
+  trainingBookings        TrainingBooking[]
+  tournamentTypes         TournamentType[]
+  tournaments             Tournament[]
+  tournamentRegistrations TournamentRegistration[]
+  tables                  Table[]
+  tableBookings           TableBooking[]
+  subscriptionPlans       SubscriptionPlan[]
+  planTrainingTypes       SubscriptionPlanTrainingType[]
+  planTournamentTypes     SubscriptionPlanTournamentType[]
+  subscriptions           Subscription[]
+  subscriptionLedger      SubscriptionLedger[]
+  refreshTokens           RefreshToken[]
+  payments                Payment[]
+  visitLogs               VisitLog[]
+  notifications           Notification[]
+  auditLogs               AuditLog[]
+  legalDocuments          LegalDocument[]
+  legalAcceptances        LegalAcceptance[]
+  platformSubscription    TenantSubscription?
+}
+
+/// Ступень политики отмены клуба: «если клиент отменил не позднее чем за
+/// minMinutesBeforeStart минут до начала — списать chargePercent процентов».
+///
+/// Как считать: взять ступени клуба, отсортировать по minMinutesBeforeStart
+/// по убыванию и выбрать первую, у которой порог не превышает фактический
+/// запас времени до начала. Ступень с порогом 0 обязательна — она ловит все
+/// поздние отмены и делает набор правил полным.
+///
+/// Для «Енисея» это ровно две строки:
+///   { minMinutesBeforeStart: 60, chargePercent: 0 }   — отмена за час и раньше
+///   { minMinutesBeforeStart: 0,  chargePercent: 50 }  — отмена позже
+/// а неявка без отмены берётся из Tenant.noShowChargePercent = 100.
+model CancellationTier {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  minMinutesBeforeStart Int
+  chargePercent         Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, minMinutesBeforeStart])
+}
+
+/// Тарифный план платформы: за сколько и на какой срок клуб покупает доступ
+/// к сервису. Не привязан к клубу — это прайс самой платформы, общий для
+/// всех арендаторов.
+///
+/// Тарифы вынесены в таблицу, а не в enum с ценами: поднять цену не должно
+/// означать миграцию БД. Строки при этом не редактируются — новая цена
+/// заводится новой строкой, а старая помечается isActive = false. Иначе
+/// правка цены задним числом переписала бы условия уже купленных подписок.
+///
+/// Значения «Енисея» из ТЗ заводятся сидом: 1 месяц — 5 000 ₽,
+/// 12 месяцев — 50 000 ₽, 36 месяцев — 130 000 ₽ (в копейках).
+/// Срок хранится числом месяцев, а не набором фиксированных периодов, —
+/// чтобы добавить, скажем, полугодовой тариф тоже можно было без релиза.
+model PlatformPlan {
+  id           String @id @default(cuid())
+  name         String // как показывать в интерфейсе: «Месяц», «Год», «3 года»
+  periodMonths Int
+  price        Int // копейки
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions TenantSubscription[]
+
+  @@index([isActive])
+}
+
+/// Подписка клуба на саму платформу (деньги «клуб → платформа»). Это не то
+/// же самое, что клиентский абонемент (Subscription/SubscriptionPlan ниже) —
+/// там деньги идут от клиента клубу за тренировки/турниры/аренду.
+model TenantSubscription {
+  id       String @id @default(cuid())
+  tenantId String @unique
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Тариф и зафиксированная цена покупки. Оба пусты только у клубов со
+  // статусом EXEMPT — «Енисей» как пилотный клиент подписку не оплачивает,
+  // и тарифа у него нет вовсе. Для всех остальных обязательны: это
+  // проверяет check-констрейнт, см. schema-constraints.sql.
+  //
+  // priceAtPurchase — та же логика, что и priceAtBooking у броней: клуб
+  // купил трёхлетний доступ за 130 000 ₽, и последующее изменение прайса
+  // платформы не должно менять сумму его продлений задним числом.
+  planId          String?
+  plan            PlatformPlan? @relation(fields: [planId], references: [id], onDelete: Restrict)
+  priceAtPurchase Int?
+
+  status               PlatformSubscriptionStatus @default(ACTIVE)
+  nextChargeDate       DateTime? // дата следующего автосписания ЮKassa — читает джоба биллинга
+  savedPaymentMethodId String? // сохранённый способ оплаты клуба в ЮKassa
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+
+  @@index([status, nextChargeDate])
+}
+
+// ---------------------------------------------------------------------------
+// Пользователи
+// ---------------------------------------------------------------------------
+
+/// Учётная запись для входа. Хранит только общие для всех ролей поля;
+/// специфика роли живёт в ClientProfile/CoachProfile (связь 1:1, опционально).
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  email        String
+  phone        String?
+  passwordHash String
+  role         Role
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // --- Мягкое удаление и анонимизация (152-ФЗ).
+  //
+  // Физически удалять клиента нельзя: за ним висят платежи и визиты, которые
+  // нужны бухгалтерии и налоговой. Но субъект персональных данных вправе
+  // потребовать прекратить их обработку. Поэтому два разных состояния:
+  //
+  //   deactivatedAt — учётка отключена, войти нельзя, данные на месте
+  //                   (уволенный тренер, ушедший клиент);
+  //   anonymizedAt  — персданные затёрты необратимо, финансовая история
+  //                   сохранена в обезличенном виде.
+  //
+  // Анонимизация ОБЯЗАНА затирать и email: он входит в уникальный ключ
+  // ниже, и оставленный адрес не даст человеку зарегистрироваться заново.
+  // Штатный приём — заменить на «deleted-<id>@invalid».
+  deactivatedAt DateTime?
+  anonymizedAt  DateTime?
+
+  clientProfile    ClientProfile? // заполнен, если role = CLIENT
+  coachProfile     CoachProfile? // заполнен, если role = COACH
+  notifications    Notification[]
+  visitsRecorded   VisitLog[]        @relation("VisitRecordedBy")
+  legalAcceptances LegalAcceptance[]
+  refreshTokens    RefreshToken[]
+  auditEntries     AuditLog[]        @relation("AuditActor")
+
+  // Email уникален в рамках клуба, а не глобально по всей платформе: один
+  // человек в будущем сможет быть клиентом/сотрудником в разных клубах под
+  // одним и тем же email.
+  @@unique([tenantId, email])
+  // Мишень для составных FK из профилей: гарантирует, что профиль не может
+  // ссылаться на пользователя другого клуба.
+  @@unique([id, tenantId])
+  @@index([tenantId, role])
+}
+
+/// Данные клиента: анкета + всё, что с ним связано (брони, абонементы,
+/// платежи, история визитов).
+model ClientProfile {
+  userId               String    @id
+  tenantId             String // продублирован из User ради составных FK
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user                 User      @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  // Персональные данные по 152-ФЗ. При анонимизации затираются на
+  // плейсхолдеры («Удалённый клиент», null), а строки Payment и VisitLog
+  // остаются — они обезличены и нужны для бухгалтерии.
+  fullName             String
+  birthDate            DateTime?
+  rating               Int? // справочное поле, без проверки/гейта на регистрацию (см. ТЗ → «Вне скоупа»)
+  savedPaymentMethodId String? // сохранённый способ оплаты в ЮKassa — привязывается один раз при регистрации
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trainingBookings        TrainingBooking[]
+  tournamentRegistrations TournamentRegistration[]
+  tableBookings           TableBooking[]           @relation("ClientTableBookings")
+  subscriptions           Subscription[]
+  payments                Payment[]
+  visitLogs               VisitLog[]
+
+  @@unique([userId, tenantId])
+}
+
+/// Публичная карточка тренера + служебные связи (какие сессии ведёт, чью
+/// статистику считать). Редактирует сам тренер (свою) или admin/owner (любую).
+model CoachProfile {
+  userId       String  @id
+  tenantId     String // продублирован из User ради составных FK
+  tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user         User    @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  photoUrl     String?
+  achievements String?
+  inventory    String?
+  priceInfo    String?
+  socialLinks  Json? // ссылки на соцсети произвольной структуры
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trainingSessions TrainingSession[] // сессии, которые ведёт этот тренер
+  tableBookings    TableBooking[]    @relation("CoachTableBookings") // брони стола, инициированные тренером (спарринги)
+  visitLogs        VisitLog[] // визиты его учеников — для статистики посещаемости
+
+  @@unique([userId, tenantId])
+}
+
+// ---------------------------------------------------------------------------
+// Тренировки
+// ---------------------------------------------------------------------------
+
+/// Тип тренировки клуба (напр. «Общая групповая», «Детская», «Первая
+/// подача»). Определяет ТЕКУЩУЮ цену; список редактирует admin/owner.
+/// Важно: цена отсюда — только для новых броней. Уже созданные брони хранят
+/// свою копию цены (priceAtBooking), поэтому смена прайса не переписывает
+/// историю задним числом.
+model TrainingType {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  name      String
+  price     Int // копейки
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions          TrainingSession[]
+  subscriptionPlans SubscriptionPlanTrainingType[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId])
+}
+
+/// Конкретное занятие — сущность-сессия (тренер, интервал, лимит мест),
+/// а не «тренировка вообще на день». В один будний день может быть
+/// несколько сессий у разных тренеров с разными лимитами.
+model TrainingSession {
+  id             String       @id @default(cuid())
+  tenantId       String
+  tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  trainingTypeId String
+  trainingType   TrainingType @relation(fields: [trainingTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  coachId        String
+  coach          CoachProfile @relation(fields: [coachId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
+  // Один интервал вместо прежней пары date + startTime: два поля позволяли
+  // записать несогласованные дату и время. Timestamptz — потому что от
+  // момента старта зависят деньги (порог отмены «за 1 час»), а клуб живёт
+  // не в UTC.
+  startsAt DateTime @db.Timestamptz(3)
+  endsAt   DateTime @db.Timestamptz(3)
+
+  capacity  Int // лимит мест в группе
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bookings TrainingBooking[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, startsAt])
+}
+
+/// Запись клиента на конкретную тренировочную сессию.
+model TrainingBooking {
+  id        String          @id @default(cuid())
+  tenantId  String
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  sessionId String
+  session   TrainingSession @relation(fields: [sessionId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  clientId  String
+  client    ClientProfile   @relation(fields: [clientId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+  status    BookingStatus   @default(BOOKED)
+  source    BookingSource   @default(ONLINE) // ONLINE — клиент записался сам; MANUAL — добавил admin
+
+  // Копия цены на момент записи (копейки). Без неё изменение прайса или
+  // удаление типа тренировки исказило бы всю историю. Заполняется и при
+  // оплате абонементом — иначе стоимость визита не восстановить вообще.
+  priceAtBooking Int
+
+  cancelledAt DateTime? @db.Timestamptz(3)
+  chargeRatio Int? // процент списания по политике отмены клуба (0..100)
+  paymentId   String?   @unique
+  payment     Payment?  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  // --- Следы работы джобы эскалации присутствия.
+  // Без них джоба не идемпотентна: она отбирает брони, у которых занятие
+  // прошло, а присутствие не отмечено, — и на каждом прогоне заново шлёт
+  // администратору одно и то же напоминание. Отметки времени превращают
+  // «надо ли слать» из вопроса о времени в вопрос о факте.
+  reminderSentAt      DateTime? @db.Timestamptz(3)
+  autoNoShowAppliedAt DateTime? @db.Timestamptz(3)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  visitLogs      VisitLog[]
+  ledgerEntries  SubscriptionLedger[]
+
+  // Повторную запись того же клиента на ту же сессию запрещает частичный
+  // уникальный индекс (только для status = BOOKED) — см. schema-constraints.sql.
+  // Обычный @@unique здесь не годится: он запретил бы записаться заново
+  // после отмены.
+  @@unique([id, tenantId])
+  @@index([sessionId])
+  @@index([clientId])
+  @@index([tenantId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Турниры
+// ---------------------------------------------------------------------------
+
+/// Тип турнира клуба (напр. «Абсолют», «Клуб 100», «Пятничное турне»).
+/// Список из 6 базовых типов редактирует admin: добавляет/меняет/удаляет.
+model TournamentType {
+  id          String  @id @default(cuid())
+  tenantId    String
+  tenant      Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  name        String
+  ratingLabel String? // справочное число-ограничение в названии (напр. «100» у «Клуб 100») — не проверяется системой, чисто информация для игрока
+  price       Int // текущая цена участия, копейки
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tournaments       Tournament[]
+  subscriptionPlans SubscriptionPlanTournamentType[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId])
+}
+
+/// Конкретный турнир клуба на определённую дату (обычно по выходным).
+model Tournament {
+  id               String         @id @default(cuid())
+  tenantId         String
+  tenant           Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tournamentTypeId String
+  tournamentType   TournamentType @relation(fields: [tournamentTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  startsAt DateTime @db.Timestamptz(3)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  registrations TournamentRegistration[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, startsAt])
+}
+
+/// Регистрация клиента на турнир — та же механика отмены/неявки, что и у
+/// TrainingBooking.
+model TournamentRegistration {
+  id           String        @id @default(cuid())
+  tenantId     String
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tournamentId String
+  tournament   Tournament    @relation(fields: [tournamentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  clientId     String
+  client       ClientProfile @relation(fields: [clientId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+  status       BookingStatus @default(BOOKED)
+
+  priceAtBooking Int // копия цены участия на момент регистрации, копейки
+
+  cancelledAt DateTime? @db.Timestamptz(3)
+  chargeRatio Int?
+  paymentId   String?   @unique
+  payment     Payment?  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  // Следы джобы эскалации присутствия — см. TrainingBooking.
+  reminderSentAt      DateTime? @db.Timestamptz(3)
+  autoNoShowAppliedAt DateTime? @db.Timestamptz(3)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  visitLogs     VisitLog[]
+  ledgerEntries SubscriptionLedger[]
+
+  // Повторная регистрация запрещена частичным уникальным индексом,
+  // см. schema-constraints.sql.
+  @@unique([id, tenantId])
+  @@index([tournamentId])
+  @@index([clientId])
+  @@index([tenantId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Столы / робот / спарринг
+// ---------------------------------------------------------------------------
+
+/// Один физический стол клуба (просто идентифицируемый ресурс — цены и
+/// доступность робота настраиваются на уровне Tenant, не по каждому столу).
+model Table {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  label     String // например «Стол 1»
+  createdAt DateTime @default(now())
+
+  bookings TableBooking[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, label])
+  @@index([tenantId])
+}
+
+/// Бронь стола: самостоятельная онлайн-аренда клиента (без подтверждения
+/// администратора) либо спарринг, инициированный тренером тем же механизмом.
+///
+/// Двойное бронирование одного стола на пересекающееся время запрещено
+/// exclusion-констрейнтом Postgres (btree_gist по tableId + диапазону
+/// времени) — см. schema-constraints.sql. Проверкой в коде это надёжно не
+/// решается: два параллельных запроса оба увидят стол свободным.
+model TableBooking {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tableId  String
+  table    Table  @relation(fields: [tableId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  // Ровно одно из двух полей заполнено: клиент бронирует сам себе (clientId),
+  // либо тренер инициирует спарринг (coachId + isSparring = true).
+  // Проверяется check-констрейнтом, см. schema-constraints.sql.
+  clientId String?
+  client   ClientProfile? @relation("ClientTableBookings", fields: [clientId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+  coachId  String?
+  coach    CoachProfile?  @relation("CoachTableBookings", fields: [coachId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
+  isSparring Boolean @default(false)
+  withRobot  Boolean @default(false) // отдельная услуга со своей сеткой цен, не наценка поверх обычной аренды
+
+  // Явный интервал вместо startTime + durationMinutes: exclusion-констрейнту
+  // нужен диапазон, а длительность выводится как endsAt - startsAt.
+  startsAt DateTime @db.Timestamptz(3)
+  endsAt   DateTime @db.Timestamptz(3)
+
+  priceAtBooking Int // копия рассчитанной стоимости аренды на момент брони, копейки
+
+  status      BookingStatus @default(BOOKED)
+  cancelledAt DateTime?     @db.Timestamptz(3)
+  chargeRatio Int?
+  paymentId   String?       @unique
+  payment     Payment?      @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  // Следы джобы эскалации присутствия — см. TrainingBooking.
+  reminderSentAt      DateTime? @db.Timestamptz(3)
+  autoNoShowAppliedAt DateTime? @db.Timestamptz(3)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  visitLogs     VisitLog[]
+  ledgerEntries SubscriptionLedger[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, startsAt])
+  @@index([tableId, startsAt])
+  // Рабочий запрос джобы эскалации: «брони этого клуба, всё ещё BOOKED,
+  // у которых занятие уже закончилось». Без составного индекса это
+  // последовательное чтение всей таблицы на каждом прогоне.
+  @@index([tenantId, status, endsAt])
+}
+
+// ---------------------------------------------------------------------------
+// Абонементы клиента
+// ---------------------------------------------------------------------------
+
+/// Тариф абонемента, который продаёт клуб (напр. «Первая подача»,
+/// «Повышаем обороты»). У каждого клуба свой набор тарифов и цен.
+///
+/// Покрытие услуг задаётся ссылками на конкретные типы услуг этого клуба, а
+/// не набором фиксированных категорий. Прежний вариант (enum со значениями
+/// вида KIDS_TRAINING / GROUP_TRAINING) был ошибкой проектирования: он
+/// намертво зашивал в код услуги «Енисея», и клуб с другим набором типов
+/// тренировок настроить абонемент уже не смог бы. Заодно категория «турниры»
+/// была слишком грубой — абонемент «Первая подача» покрывает не турниры
+/// вообще, а именно «Клуб 50».
+model SubscriptionPlan {
+  id           String @id @default(cuid())
+  tenantId     String
+  tenant       Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  name         String
+  visitsCount  Int? // сколько визитов покрывает тариф; null = безлимит
+  durationDays Int // срок действия абонемента в днях
+  price        Int // копейки
+
+  // Покрывает ли тариф аренду стола. Отдельным флагом, а не связью: столы —
+  // не типизированная услуга, аренда либо входит, либо нет.
+  coversTableRental Boolean @default(false)
+
+  // Правило тарифа «Повышаем обороты»: аренда стола входит только в
+  // безлимитные варианты этого тарифа, не в лимитированные по визитам.
+  tableRentalUnlimitedOnly Boolean @default(false)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  coveredTrainingTypes   SubscriptionPlanTrainingType[]
+  coveredTournamentTypes SubscriptionPlanTournamentType[]
+  subscriptions          Subscription[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId])
+}
+
+/// Какие типы тренировок покрывает тариф абонемента.
+/// Для «Енисея»: «Детский абонемент» → «Детская тренировка»;
+/// «Первая подача» → «Первая подача»; «Повышаем обороты» → «Общая групповая».
+model SubscriptionPlanTrainingType {
+  planId         String
+  trainingTypeId String
+  tenantId       String
+
+  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  plan         SubscriptionPlan @relation(fields: [planId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  trainingType TrainingType     @relation(fields: [trainingTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@id([planId, trainingTypeId])
+  @@index([tenantId])
+}
+
+/// Какие типы турниров покрывает тариф абонемента.
+/// Для «Енисея»: «Первая подача» → «Клуб 50» (именно этот тип, а не турниры
+/// вообще); «Повышаем обороты» → все типы турниров клуба.
+model SubscriptionPlanTournamentType {
+  planId           String
+  tournamentTypeId String
+  tenantId         String
+
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  plan           SubscriptionPlan @relation(fields: [planId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  tournamentType TournamentType   @relation(fields: [tournamentTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@id([planId, tournamentTypeId])
+  @@index([tenantId])
+}
+
+/// Купленный клиентом абонемент конкретного тарифа.
+///
+/// remainingVisits — это КЭШ, а не источник правды: настоящая история
+/// движений лежит в SubscriptionLedger. Любое изменение баланса обязано в
+/// одной транзакции писать строку в леджер и обновлять это поле, иначе
+/// спор «у меня было 10 визитов» разрешить нечем и починить данные после
+/// бага невозможно.
+model Subscription {
+  id       String           @id @default(cuid())
+  tenantId String
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  clientId String
+  client   ClientProfile    @relation(fields: [clientId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+  planId   String
+  plan     SubscriptionPlan @relation(fields: [planId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  remainingVisits Int? // текущий остаток визитов; null = безлимит
+  purchasedAt     DateTime  @default(now())
+  expiresAt       DateTime? @db.Timestamptz(3)
+
+  // Платёж за покупку самого абонемента. Раньше эти деньги в схеме оседать
+  // было негде: клиент платил 49 000 ₽, а следа не оставалось.
+  paymentId String?  @unique
+  payment   Payment? @relation("SubscriptionPurchase", fields: [paymentId], references: [id], onDelete: Restrict)
+
+  ledger SubscriptionLedger[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, clientId])
+}
+
+/// Журнал движений визитов по абонементу — единственный источник правды по
+/// балансу. Только вставки, без изменений и удалений: баланс на любой момент
+/// восстанавливается суммой delta.
+model SubscriptionLedger {
+  id             String       @id @default(cuid())
+  tenantId       String
+  tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  delta        Int // +N при покупке/возврате, -N при списании
+  balanceAfter Int? // остаток после операции; null для безлимитных абонементов
+  reason       LedgerReason
+
+  // За какой визит движение — настоящие связи вместо прежней безымянной
+  // пары sourceType/sourceId. Все три пусты у начисления при покупке
+  // абонемента, у ручной корректировки и у сгорания остатка по сроку.
+  trainingBookingId String?
+  trainingBooking   TrainingBooking? @relation(fields: [trainingBookingId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  tournamentRegistrationId String?
+  tournamentRegistration   TournamentRegistration? @relation(fields: [tournamentRegistrationId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  tableBookingId String?
+  tableBooking   TableBooking? @relation(fields: [tableBookingId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  createdByUserId String? // кто инициировал, если это ручная корректировка админа
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId, subscriptionId])
+}
+
+// ---------------------------------------------------------------------------
+// Платежи
+// ---------------------------------------------------------------------------
+
+/// Один платёж (холд/списание/возврат) за услугу или за покупку абонемента.
+///
+/// Связь с тем, что оплачено, — не жёсткая внешняя связь, а опциональная 1:1
+/// с каждой стороны: в Prisma нет полиморфных связей, поэтому у
+/// TrainingBooking, TournamentRegistration, TableBooking, VisitLog и
+/// Subscription свой необязательный paymentId, и для конкретного платежа
+/// заполнен ровно один из них.
+model Payment {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  // null — для наличной оплаты первого визита ещё не зарегистрированного
+  // клиента «с порога» (клиента в системе на момент оплаты просто нет).
+  clientId String?
+  client   ClientProfile? @relation(fields: [clientId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
+  purpose PaymentPurpose @default(SERVICE)
+  method  PaymentMethod
+  status  PaymentStatus
+
+  holdAmount     Int? // сумма, поставленная на холд при записи, копейки
+  capturedAmount Int? // фактически списанная сумма (0/50/100% от holdAmount), копейки
+
+  // id платежа в ЮKassa. Уникален — это второй рубеж защиты от повторной
+  // обработки одного и того же платежа (первый — таблица WebhookEvent).
+  externalId String? @unique
+
+  savedPaymentMethodId String? // каким сохранённым способом оплаты списано (копия на момент платежа)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Обратные связи 1:1 — что именно оплачено этим платежом.
+  trainingBooking        TrainingBooking?
+  tournamentRegistration TournamentRegistration?
+  tableBooking           TableBooking?
+  visitLog               VisitLog?
+  subscriptionPurchase   Subscription?           @relation("SubscriptionPurchase")
+
+  @@index([tenantId])
+}
+
+/// Журнал входящих вебхуков платёжного провайдера — защита от повторной
+/// обработки. ЮKassa переотправляет уведомление, пока не получит 200, и без
+/// этой таблицы ретрай означал бы повторное списание или повторное
+/// начисление визитов.
+///
+/// Первичный ключ — id события у провайдера, поэтому повторная вставка
+/// падает на уникальности, а обработчик понимает, что событие уже принято.
+/// processedAt заполняется после успешной обработки: событие принято, но не
+/// обработано — это видимое состояние, а не потерянный платёж.
+model WebhookEvent {
+  id          String    @id // id события у провайдера, не наш cuid
+  provider    String    @default("yookassa")
+  eventType   String
+  payload     Json
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+  error       String?
+
+  @@index([processedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Посещения и уведомления
+// ---------------------------------------------------------------------------
+
+/// Факт присутствия/неявки клиента. Помимо статусов на самих бронях, это
+/// отдельный журнал для статистики тренера и для визитов, которые не
+/// привязаны ни к какой онлайн-брони (флоу «с порога», ручная сверка истории
+/// клиента задним числом).
+model VisitLog {
+  id       String        @id @default(cuid())
+  tenantId String
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  clientId String
+  client   ClientProfile @relation(fields: [clientId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+  coachId  String?
+  coach    CoachProfile? @relation(fields: [coachId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
+  sourceType VisitSourceType
+
+  // Откуда визит. Раньше здесь была одна строка sourceId без внешнего ключа
+  // — и база не могла отличить настоящую ссылку от опечатки или от брони,
+  // удалённой в другом клубе. Теперь три отдельные необязательные связи:
+  // заполнена ровно одна, либо ни одной (для WALK_IN и для визитов,
+  // добавленных администратором вручную при сверке истории клиента).
+  // Согласованность с sourceType и запрет «двух источников сразу» проверяет
+  // check-констрейнт, см. schema-constraints.sql.
+  trainingBookingId String?
+  trainingBooking   TrainingBooking? @relation(fields: [trainingBookingId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  tournamentRegistrationId String?
+  tournamentRegistration   TournamentRegistration? @relation(fields: [tournamentRegistrationId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  tableBookingId String?
+  tableBooking   TableBooking? @relation(fields: [tableBookingId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  paymentId String?  @unique // опциональная привязка к историческому платежу (напр. наличные «с порога»)
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  attended Boolean
+
+  // Кто из admin/owner отметил присутствие. Настоящая связь, а не просто
+  // строка: за этой отметкой стоит списание денег, и она должна указывать на
+  // реально существующего пользователя того же клуба.
+  recordedByUserId String
+  recordedBy       User     @relation("VisitRecordedBy", fields: [recordedByUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recordedAt       DateTime @default(now())
+
+  @@index([tenantId, clientId])
+  @@index([tenantId, coachId])
+}
+
+// ---------------------------------------------------------------------------
+// Сессии входа
+// ---------------------------------------------------------------------------
+
+/// Выданный refresh-токен. Access-токен живёт минуты и хранится только у
+/// клиента, а refresh живёт долго — и без этой таблицы его нельзя отозвать:
+/// «выйти на всех устройствах», отобрать доступ у уволенного тренера или
+/// погасить украденный токен было бы нечем.
+///
+/// Хранится ХЭШ токена, а не сам токен. Утечка дампа базы не должна давать
+/// возможность войти под чужой учёткой — по той же причине, по которой
+/// рядом лежит passwordHash, а не пароль.
+model RefreshToken {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User   @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  tokenHash String   @unique
+  expiresAt DateTime @db.Timestamptz(3)
+
+  // Отзыв вместо удаления: строка нужна, чтобы отличить «токен погашен» от
+  // «токена никогда не было» и заметить попытку переиспользования.
+  revokedAt DateTime?
+
+  // Обстоятельства выдачи — для списка активных сессий в личном кабинете.
+  userAgent String?
+  ipAddress String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, userId])
+  @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Аудит денежных действий
+// ---------------------------------------------------------------------------
+
+/// Append-only журнал действий, за которыми стоят деньги, права или
+/// персональные данные. Только вставки: строки никогда не изменяются и не
+/// удаляются, иначе журнал не имеет доказательной силы.
+///
+/// Зачем: администратор отмечает неявку — и у клиента списывается 100%.
+/// Клиент через неделю приходит с «я был на тренировке». Без журнала
+/// предъявить нечего: в брони лежит только текущий статус, без следа, кто и
+/// когда его поставил и что было до. Каждое денежное действие обязано
+/// писать сюда строку в той же транзакции, что и само изменение.
+model AuditLog {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  action AuditAction
+
+  // Автор действия. actorUserId пуст, когда действовал не человек: джоба
+  // автонеявки или вебхук ЮKassa. Тип автора хранится отдельно, чтобы
+  // «система» не выглядела как потерянная ссылка.
+  actorType   ActorType @default(USER)
+  actorUserId String?
+  actor       User?     @relation("AuditActor", fields: [actorUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  // На что подействовали: имя модели и её id. Полиморфная пара, как в
+  // VisitLog, — жёсткой связи нет, потому что целей больше десятка.
+  entityType String
+  entityId   String
+
+  // Состояние до и после — то, без чего запись «изменено» бесполезна.
+  // Хранить только изменившиеся поля, а не всю сущность целиком.
+  before Json?
+  after  Json?
+
+  // Причина, если действие ручное и требует объяснения: ручная
+  // корректировка баланса, отмена неявки по просьбе клиента.
+  reason String?
+
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, actorUserId])
+}
+
+// ---------------------------------------------------------------------------
+// Юридические документы и согласия
+// ---------------------------------------------------------------------------
+
+/// Версия юридического документа: оферта клуба, согласие на обработку
+/// персданных, согласие на рекуррентные списания.
+///
+/// Версионирование здесь — не бюрократия. Доказать, что клиент согласился
+/// на удержание денег, можно только предъявив ТОТ текст, который он видел в
+/// момент согласия. Документ правится раз в год — значит нужны обе версии и
+/// точное знание, кто на какой подписался. Поэтому строки неизменяемы:
+/// новая редакция — это новая строка, а не UPDATE существующей.
+///
+/// tenantId пуст у документов самой платформы (политика обработки ПДн),
+/// заполнен у документов конкретного клуба (оферта на услуги).
+model LegalDocument {
+  id       String  @id @default(cuid())
+  tenantId String?
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  type    LegalDocumentType
+  version String // человекочитаемая версия, напр. «2026-08-21» или «1.2»
+
+  // Где лежит текст и его контрольная сумма. Хэш нужен, чтобы доказать, что
+  // опубликованный документ не подменили задним числом.
+  url         String
+  contentHash String
+
+  publishedAt DateTime
+  createdAt   DateTime @default(now())
+
+  acceptances LegalAcceptance[]
+
+  @@unique([tenantId, type, version])
+  @@index([tenantId, type])
+}
+
+/// Факт принятия конкретной версии документа конкретным человеком.
+///
+/// Это и есть недостающее звено из ТЗ: «схема заморозки денег требует
+/// юридического документа». Сам документ — задача юриста, но без этой
+/// таблицы он бесполезен: удержание обосновано только тогда, когда доказано
+/// согласие конкретного клиента с конкретной редакцией.
+model LegalAcceptance {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  userId String
+  user   User   @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  documentId String
+  document   LegalDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+
+  acceptedAt DateTime @default(now())
+
+  // Обстоятельства акцепта — обычные доказательства в спорах.
+  ipAddress String?
+  userAgent String?
+
+  // Отзыв согласия. Не удаление строки: факт, что согласие было и когда его
+  // отозвали, сам по себе юридически значим.
+  revokedAt DateTime?
+
+  @@unique([userId, documentId])
+  @@index([tenantId, userId])
+}
+
+/// Уведомление пользователю по одному из каналов (Telegram-бот, Web Push),
+/// включая служебные эскалации по неотмеченному присутствию.
+model Notification {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User   @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  channel NotificationChannel
+  type    NotificationType
+  payload Json? // произвольные данные под конкретный тип уведомления
+
+  sentAt    DateTime?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([tenantId, userId])
+}

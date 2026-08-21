@@ -1,5 +1,10 @@
 # Build Log
 
+## [2026-08-21T15:19:50+07:00] compile | 2026-08-21.md
+- Source: daily/2026-08-21.md
+- Articles created: [[concepts/yenisey-platform-overview]], [[concepts/booking-payment-engine]], [[concepts/club-subscription-billing]], [[concepts/cancellation-hold-policy]], [[concepts/tournament-module]], [[concepts/cash-payment-flow]], [[connections/payment-hold-legal-dependency]]
+- Articles updated: (none)
+
 ## [2026-08-13T22:21:00+07:00] compile | 2026-08-13.md
 - Source: daily/2026-08-13.md
 - Articles created: (none)
