@@ -1,0 +1,12 @@
+{
+  // Пакет не содержит собственного TypeScript: его содержимое — клиент,
+  // который генерирует Prisma (готовый CommonJS плюс .d.ts). Барреля-обёртки
+  // намеренно нет: она была бы .ts-файлом, а Node в рантайме требует от таких
+  // модулей явных расширений в импортах и на каталоге спотыкается.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowJs": false
+  },
+  "include": ["prisma/seed.ts", "prisma/clean-probes.ts"]
+}

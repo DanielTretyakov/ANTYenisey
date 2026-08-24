@@ -1,12 +1,11 @@
 // Prisma-схема платформы «Енисей» (Этап 1).
 // Реализует раздел docs/TZ.md → «Модель данных».
 //
-// Ещё не подключена к реальному Node/Prisma-проекту — это черновик для ревью
-// перед сборкой каркаса монорепозитория. Но схема не умозрительная: она
-// разворачивается на PostgreSQL 18 (28 таблиц), ограничения из
-// schema-constraints.sql накатываются, и сценарии docs/schema-tests.sql
-// проходят — включая проверку, что база физически не даёт смешать данные
-// двух клубов. Прогон: bash docs/verify-schema.sh
+// Схема развёрнута на PostgreSQL 18 (28 таблиц), ограничения из
+// prisma/constraints.sql накатываются миграцией, сценарии
+// prisma/tests/schema-tests.sql проходят — включая проверку, что база
+// физически не даёт смешать данные двух клубов.
+// Прогон против одноразовой базы: pnpm --filter @yenisey/database verify
 //
 // Проверено на Prisma 6.x. На Prisma 7 схема не валидируется: там `url` из
 // блока datasource переехал в prisma.config.ts.
@@ -47,12 +46,19 @@
 // docs/schema-constraints.sql и накатываются как raw-SQL миграция.
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  // Теневая база нужна prisma migrate dev: он сверяет с ней состояние
+  // миграций. Отдельная база, а не схема внутри рабочей — Prisma её дропает.
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
 generator client {
   provider = "prisma-client-js"
+  // Клиент кладём внутрь пакета, а не в node_modules/.prisma: при pnpm с
+  // isolated node-linker сгенерированный клиент из node_modules не виден
+  // соседним пакетам workspace.
+  output   = "../generated/client"
 }
 
 // ---------------------------------------------------------------------------

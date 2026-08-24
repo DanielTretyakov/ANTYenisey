@@ -1,0 +1,38 @@
+{
+  "name": "yenisey",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Платформа академии настольного тенниса «Енисей» — SaaS для клубов",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "db:generate": "pnpm --filter @yenisey/database generate",
+    "db:migrate": "pnpm --filter @yenisey/database migrate",
+    "db:studio": "pnpm --filter @yenisey/database studio",
+    "db:seed": "pnpm --filter @yenisey/database seed",
+    "db:verify": "pnpm --filter @yenisey/database verify",
+    "db:clean-probes": "pnpm --filter @yenisey/database clean-probes",
+    "smoke": "node apps/api/scripts/smoke-auth.mjs"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "argon2",
+      "prisma",
+      "sharp"
+    ]
+  }
+}

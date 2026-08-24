@@ -1,0 +1,14 @@
+# По умолчанию git на Windows забирает файлы с CRLF. Для большей части
+# репозитория это безобидно, но не для всего.
+* text=auto
+
+# Скрипты и SQL остаются с LF при любой настройке core.autocrlf. Причина
+# прикладная: разворачиваться будем на Linux-VPS, а bash-скрипт с CRLF там
+# падает с «bad interpreter: /usr/bin/env bash^M» — ошибкой, по тексту
+# которой причину не угадать.
+*.sh text eol=lf
+*.sql text eol=lf
+*.mjs text eol=lf
+
+# Lock-файл трогать не нужно вовсе: его пишет и читает только pnpm.
+pnpm-lock.yaml -diff linguist-generated

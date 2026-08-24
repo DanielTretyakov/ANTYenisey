@@ -1,0 +1,164 @@
+/* Оформления пока нет намеренно: каркас проверяет сквозной сценарий, а не
+   дизайн. Tailwind + shadcn/ui подключаются отдельной задачей. */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #16181d;
+  --muted: #6b7280;
+  --border: #d4d7dd;
+  --accent: #1f6feb;
+  --error: #b4232c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a;
+    --fg: #e9eaee;
+    --muted: #9aa1ad;
+    --border: #2c313a;
+    --accent: #4a90ff;
+    --error: #ff7b7b;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 2.5rem 1.25rem;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+main {
+  max-width: 26rem;
+  margin: 0 auto;
+}
+
+h1 {
+  font-size: 1.5rem;
+  margin: 0 0 1.5rem;
+}
+
+label {
+  display: block;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+input {
+  display: block;
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+button {
+  width: 100%;
+  padding: 0.7rem;
+  border: 0;
+  border-radius: 0.4rem;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.error {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--error);
+  border-radius: 0.4rem;
+  color: var(--error);
+  font-size: 0.875rem;
+}
+
+.hint {
+  margin-top: 1.25rem;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+a {
+  color: var(--accent);
+}
+
+dl {
+  margin: 0;
+}
+
+dt {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+dd {
+  margin: 0.1rem 0 0.9rem;
+}
+
+/* --- Клуб: не поле ввода, а показ значения ------------------------------ */
+.club-field {
+  margin-bottom: 1.25rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+
+.club-label {
+  display: block;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.club-name {
+  display: block;
+  margin-top: 0.1rem;
+  font-weight: 600;
+}
+
+/* --- Телефон: несъёмный префикс +7 -------------------------------------- */
+.phone-row {
+  display: flex;
+  align-items: stretch;
+  margin-top: 0.35rem;
+}
+
+.phone-prefix {
+  display: flex;
+  align-items: center;
+  padding: 0 0.7rem;
+  border: 1px solid var(--border);
+  border-right: 0;
+  border-radius: 0.4rem 0 0 0.4rem;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.phone-row input {
+  margin-top: 0;
+  border-radius: 0 0.4rem 0.4rem 0;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}

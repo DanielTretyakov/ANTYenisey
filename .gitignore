@@ -25,3 +25,22 @@ scripts/uv.lock
 Thumbs.db
 
 .obsidian/
+
+# Node / монорепозиторий
+node_modules/
+dist/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# Секреты окружения (.env.example — в репозитории, .env — нет)
+.env
+.env.local
+.env.*.local
+
+# Сгенерированный Prisma-клиент
+packages/database/generated/
+
+# Кеш инкрементальной компиляции TypeScript (отключён в tsconfig.base.json,
+# но Next.js пишет свой)
+*.tsbuildinfo
