@@ -18,7 +18,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-from config import AGENTS_FILE, CONCEPTS_DIR, CONNECTIONS_DIR, DAILY_DIR, KNOWLEDGE_DIR, now_iso
+from config import AGENTS_FILE, CONCEPTS_DIR, CONNECTIONS_DIR, DAILY_DIR, KNOWLEDGE_DIR, ensure_git_bash, force_utf8_io, now_iso
 from utils import (
     file_hash,
     list_raw_files,
@@ -37,6 +37,9 @@ async def compile_daily_log(log_path: Path, state: dict) -> float:
 
     Returns the API cost of the compilation.
     """
+    # Claude Code на Windows требует git-bash; окружение может его не
+    # передать, поэтому находим путь до обращения к SDK.
+    ensure_git_bash()
     from claude_agent_sdk import (
         AssistantMessage,
         ClaudeAgentOptions,
@@ -164,6 +167,7 @@ Read the daily log above and compile it into wiki articles following the schema 
 
 
 def main():
+    force_utf8_io()
     parser = argparse.ArgumentParser(description="Compile daily logs into knowledge articles")
     parser.add_argument("--all", action="store_true", help="Force recompile all logs")
     parser.add_argument("--file", type=str, help="Compile a specific daily log file")

@@ -23,6 +23,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from config import ensure_git_bash, force_utf8_io
+
 ROOT = Path(__file__).resolve().parent.parent
 DAILY_DIR = ROOT / "daily"
 SCRIPTS_DIR = ROOT / "scripts"
@@ -32,11 +34,17 @@ LOG_FILE = SCRIPTS_DIR / "flush.log"
 # Set up file-based logging so we can verify the background process ran.
 # The parent process sends stdout/stderr to DEVNULL (to avoid the inherited
 # file handle bug on Windows), so this is our only observability channel.
+force_utf8_io()
+
 logging.basicConfig(
     filename=str(LOG_FILE),
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
+    # Без encoding logging берёт кодировку локали (на этой машине cp1251)
+    # и роняет запись на ₽, эмодзи и длинном тире — ровно на том, что чаще
+    # всего попадает в выжимку по этому проекту.
+    encoding="utf-8",
 )
 
 
@@ -116,6 +124,20 @@ respond with exactly: FLUSH_OK
 
     response = ""
 
+    # Без git-bash Claude Code на Windows не стартует, а SDK сообщает лишь
+    # «exit code 1». Находим его сами: окружение хука может не содержать
+    # CLAUDE_CODE_GIT_BASH_PATH.
+    bash_path = ensure_git_bash()
+    if bash_path:
+        logging.info("git-bash: %s", bash_path)
+    else:
+        logging.warning("git-bash не найден — Claude Code, вероятно, не запустится")
+
+    # stderr CLI пишем в лог. Раньше он уходил в никуда, и любая ошибка
+    # запуска выглядела как «Check stderr output for details».
+    def log_stderr(line: str) -> None:
+        logging.error("CLI stderr: %s", line)
+
     try:
         async for message in query(
             prompt=prompt,
@@ -123,6 +145,7 @@ respond with exactly: FLUSH_OK
                 cwd=str(ROOT),
                 allowed_tools=[],
                 max_turns=2,
+                stderr=log_stderr,
             ),
         ):
             if isinstance(message, AssistantMessage):

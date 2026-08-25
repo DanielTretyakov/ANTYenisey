@@ -16,7 +16,7 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from config import KNOWLEDGE_DIR, QA_DIR, now_iso
+from config import KNOWLEDGE_DIR, QA_DIR, ensure_git_bash, force_utf8_io, now_iso
 from utils import load_state, read_all_wiki_content, save_state
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -24,6 +24,9 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 
 async def run_query(question: str, file_back: bool = False) -> str:
     """Query the knowledge base and optionally file the answer back."""
+    # Claude Code на Windows требует git-bash; окружение может его не
+    # передать, поэтому находим путь до обращения к SDK.
+    ensure_git_bash()
     from claude_agent_sdk import (
         AssistantMessage,
         ClaudeAgentOptions,
@@ -112,6 +115,7 @@ consulting the knowledge base below.
 
 
 def main():
+    force_utf8_io()
     parser = argparse.ArgumentParser(description="Query the personal knowledge base")
     parser.add_argument("question", help="The question to ask")
     parser.add_argument(

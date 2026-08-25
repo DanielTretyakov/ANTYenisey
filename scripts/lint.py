@@ -15,7 +15,7 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from config import KNOWLEDGE_DIR, REPORTS_DIR, now_iso, today_iso
+from config import KNOWLEDGE_DIR, REPORTS_DIR, ensure_git_bash, force_utf8_io, now_iso, today_iso
 from utils import (
     count_inbound_links,
     extract_wikilinks,
@@ -147,6 +147,9 @@ def check_sparse_articles() -> list[dict]:
 
 async def check_contradictions() -> list[dict]:
     """Use LLM to detect contradictions across articles."""
+    # Claude Code на Windows требует git-bash; окружение может его не
+    # передать, поэтому находим путь до обращения к SDK.
+    ensure_git_bash()
     from claude_agent_sdk import (
         AssistantMessage,
         ClaudeAgentOptions,
@@ -248,6 +251,7 @@ def generate_report(all_issues: list[dict]) -> str:
 
 
 def main():
+    force_utf8_io()
     parser = argparse.ArgumentParser(description="Lint the knowledge base")
     parser.add_argument(
         "--structural-only",
