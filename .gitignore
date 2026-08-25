@@ -44,3 +44,6 @@ packages/database/generated/
 # Кеш инкрементальной компиляции TypeScript (отключён в tsconfig.base.json,
 # но Next.js пишет свой)
 *.tsbuildinfo
+
+# Артефакт pytest-coverage внутри вендоренных скиллов
+.coverage

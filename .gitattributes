@@ -12,3 +12,11 @@
 
 # Lock-файл трогать не нужно вовсе: его пишет и читает только pnpm.
 pnpm-lock.yaml -diff linguist-generated
+
+# Скиллы Claude Code вендорятся в репозиторий целиком. Их контрольные суммы
+# считаются по LF-байтам, поэтому core.autocrlf=true на Windows превращает
+# свежий чекаут в «stale snapshot» — скилл молча не грузится. Правило
+# дублирует .claude/skills/ui-ux-pro-max/data/.gitattributes, но на весь
+# каталог: там же лежат SKILL.md, python-скрипты и csv-каталоги.
+.claude/skills/** text eol=lf
+.claude/skills/**/*.ttf binary

@@ -1,0 +1,3 @@
+# sha256-снимки в catalog-summary.json считаются по LF-байтам.
+# Без этого core.autocrlf=true ломает validate_data.py на Windows.
+* text eol=lf
