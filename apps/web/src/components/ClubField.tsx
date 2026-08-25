@@ -34,9 +34,9 @@ export function ClubField() {
   }, []);
 
   return (
-    <div className="club-field">
-      <span className="club-label">Клуб</span>
-      <span className="club-name">{name ?? TENANT_SLUG}</span>
+    <div className="mb-5 rounded-control border border-border-accent bg-surface-accent-soft px-3.5 py-3">
+      <span className="block text-[0.75rem] tracking-[0.12em] text-text-accent uppercase">Клуб</span>
+      <span className="mt-0.5 block font-medium text-text">{name ?? TENANT_SLUG}</span>
     </div>
   );
 }

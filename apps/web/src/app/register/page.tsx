@@ -5,6 +5,10 @@ import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { ClubField } from '@/components/ClubField';
 import { PhoneField } from '@/components/PhoneField';
+import { AuthLayout } from '@/components/layout/AuthLayout';
+import { Alert } from '@/components/ui/Alert';
+import { Button } from '@/components/ui/Button';
+import { Field } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
 import { TENANT_SLUG } from '@/lib/config';
 import { saveSession } from '@/lib/session';
@@ -51,56 +55,45 @@ export default function RegisterPage() {
   }
 
   return (
-    <main>
-      <h1>Регистрация</h1>
-
-      {error && <p className="error">{error}</p>}
+    <AuthLayout
+      title="Регистрация"
+      subtitle="Одна анкета — и запись на тренировки, столы и турниры открыта."
+      footer={
+        <>
+          Уже есть учётная запись?{' '}
+          <Link href="/login" className="font-medium text-text-accent hover:underline">
+            Войти
+          </Link>
+        </>
+      }
+    >
+      {error && <Alert>{error}</Alert>}
 
       <form onSubmit={handleSubmit}>
         <ClubField />
 
-        <label>
-          Фамилия
-          <input name="lastName" autoComplete="family-name" required />
-        </label>
-
-        <label>
-          Имя
-          <input name="firstName" autoComplete="given-name" required />
-        </label>
-
-        <label>
-          Отчество
-          <input name="middleName" autoComplete="additional-name" required />
-        </label>
+        <Field label="Фамилия" name="lastName" autoComplete="family-name" required />
+        <Field label="Имя" name="firstName" autoComplete="given-name" required />
+        <Field label="Отчество" name="middleName" autoComplete="additional-name" required />
 
         <PhoneField />
 
-        <label>
-          Электронная почта
-          <input name="email" type="email" autoComplete="email" required />
-        </label>
+        <Field label="Электронная почта" name="email" type="email" autoComplete="email" required />
 
-        <label>
-          Пароль
-          <input
-            name="password"
-            type="password"
-            minLength={8}
-            autoComplete="new-password"
-            required
-          />
-          <span className="field-hint">Не короче 8 символов</span>
-        </label>
+        <Field
+          label="Пароль"
+          name="password"
+          type="password"
+          minLength={8}
+          autoComplete="new-password"
+          hint="Не короче 8 символов"
+          required
+        />
 
-        <button type="submit" disabled={pending}>
+        <Button type="submit" pending={pending} fullWidth size="lg" className="mt-2">
           {pending ? 'Отправляю…' : 'Зарегистрироваться'}
-        </button>
+        </Button>
       </form>
-
-      <p className="hint">
-        Уже есть учётная запись? <Link href="/login">Войти</Link>
-      </p>
-    </main>
+    </AuthLayout>
   );
 }

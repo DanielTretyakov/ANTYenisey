@@ -1,164 +1,199 @@
-/* Оформления пока нет намеренно: каркас проверяет сквозной сценарий, а не
-   дизайн. Tailwind + shadcn/ui подключаются отдельной задачей. */
-:root {
-  color-scheme: light dark;
-  --bg: #ffffff;
-  --fg: #16181d;
-  --muted: #6b7280;
-  --border: #d4d7dd;
-  --accent: #1f6feb;
-  --error: #b4232c;
+@import 'tailwindcss';
+@import '../styles/tokens.css';
+
+/* Классы собираются из исходников приложения. Указано явно, потому что корень
+   монорепозитория лежит на два уровня выше и автоопределение цепляет лишнее. */
+@source "../../src/**/*.{ts,tsx}";
+
+/* ==========================================================================
+   Мост между токенами и утилитами Tailwind
+   --------------------------------------------------------------------------
+   `@theme inline` не копирует значение, а оставляет ссылку на переменную.
+   Это принципиально: bg-surface компилируется в `background: var(--surface)`,
+   поэтому смена темы происходит без пересборки классов — меняется только
+   значение переменной на :root.
+
+   Если написать просто `@theme`, Tailwind подставит вычисленное значение
+   светлой темы, и тёмная перестанет работать.
+   ========================================================================== */
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-inverse: var(--surface-inverse);
+  --color-surface-accent-soft: var(--surface-accent-soft);
+
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-subtle: var(--text-subtle);
+  --color-text-inverse: var(--text-inverse);
+  --color-text-accent: var(--text-accent);
+
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-accent: var(--border-accent);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-active: var(--accent-active);
+  --color-accent-text: var(--accent-text);
+
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-border: var(--danger-border);
+
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-border: var(--warning-border);
+
+
+  /* Палитра доступна и напрямую — для мест, где нужен именно фирменный цвет
+     независимо от темы: логотип, иллюстрации, печатные макеты. */
+  --color-brand-50: var(--brand-50);
+  --color-brand-100: var(--brand-100);
+  --color-brand-200: var(--brand-200);
+  --color-brand-300: var(--brand-300);
+  --color-brand-400: var(--brand-400);
+  --color-brand-500: var(--brand-500);
+  --color-brand-600: var(--brand-600);
+  --color-brand-700: var(--brand-700);
+  --color-brand-800: var(--brand-800);
+  --color-brand-900: var(--brand-900);
+  --color-brand-950: var(--brand-950);
+
+  /* Шрифты приходят из next/font (см. src/lib/fonts.ts) — там же лежат
+     запасные семейства на случай, если файлы шрифта не загрузились. */
+  --font-sans: var(--font-onest);
+  --font-display: var(--font-unbounded);
+
+  --shadow-sm: var(--elev-sm);
+  --shadow-md: var(--elev-md);
+  --shadow-lg: var(--elev-lg);
+
+  --radius-card: 0.875rem;
+  --radius-control: 0.625rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14161a;
-    --fg: #e9eaee;
-    --muted: #9aa1ad;
-    --border: #2c313a;
-    --accent: #4a90ff;
-    --error: #ff7b7b;
+/* ==========================================================================
+   База
+   ========================================================================== */
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--surface);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Широкий гротеск — только первому уровню и крупным акцентам. Заголовки
+     разделов набираются интерфейсным шрифтом: на кегле 18–20 px широкие
+     пропорции перестают работать на образ и начинают рвать строку. */
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    line-height: 1.08;
+    text-wrap: balance;
+  }
+
+  h2,
+  h3 {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  /* Единое кольцо фокуса на всё приложение: клавиатурная навигация должна
+     читаться одинаково на кнопке, поле и ссылке. */
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: 0.25rem;
+  }
+
+  /* Автозаполнение Chrome заливает поле собственным жёлтым фоном и игнорирует
+     background — перекрываем внутренней тенью в цвет поверхности. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--text);
+    -webkit-box-shadow: 0 0 0 1000px var(--surface-raised) inset;
+    caret-color: var(--text);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
-* {
-  box-sizing: border-box;
+/* ==========================================================================
+   Фирменные приёмы
+   ========================================================================== */
+
+/* --- Логотип -------------------------------------------------------------
+   Файл из брендбука нарисован тёмной краской по прозрачному фону. На тёмном
+   фоне он обращается фильтром: чёрный становится белым, серый мяча — светло-
+   серым. brightness после invert поднимает мяч с #595959 до различимого
+   уровня — без этого он проваливается в фон.
+
+   Три состояния темы разбираются так же, как в токенах: медиазапрос защищён
+   проверкой :not([data-theme='light']), иначе выбранная вручную светлая тема
+   ночью показывала бы обращённый логотип. */
+@layer components {
+  /* Обязательно внутри слоя: безслойные правила выигрывают у слойных при
+     равной специфичности, и `.brand-logo { display: block }` молча перебивал
+     бы `hidden` — логотип нельзя было бы спрятать ни на одном экране. */
+  .brand-logo {
+    display: block;
+    max-width: 100%;
+  }
+
+  .brand-logo--on-dark {
+    filter: invert(1) brightness(1.3);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) .brand-logo:not(.brand-logo--on-dark) {
+      filter: invert(1) brightness(1.3);
+    }
+  }
+
+  :root[data-theme='dark'] .brand-logo:not(.brand-logo--on-dark) {
+    filter: invert(1) brightness(1.3);
+  }
 }
 
-body {
-  margin: 0;
-  padding: 2.5rem 1.25rem;
-  background: var(--bg);
-  color: var(--fg);
-  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
-}
-
-main {
-  max-width: 26rem;
-  margin: 0 auto;
-}
-
-h1 {
-  font-size: 1.5rem;
-  margin: 0 0 1.5rem;
-}
-
-label {
-  display: block;
-  margin-bottom: 1rem;
-  font-size: 0.875rem;
-  color: var(--muted);
-}
-
-input {
-  display: block;
-  width: 100%;
-  margin-top: 0.35rem;
-  padding: 0.6rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 0.4rem;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-}
-
-button {
-  width: 100%;
-  padding: 0.7rem;
+@utility river-rule {
+  /* Тонкая изумрудная линия, растворяющаяся к краям, — река в графике.
+     Используется вместо обычных разделителей там, где нужен акцент. */
+  height: 1px;
   border: 0;
-  border-radius: 0.4rem;
-  background: var(--accent);
-  color: #fff;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: progress;
-}
-
-.error {
-  margin: 0 0 1rem;
-  padding: 0.6rem 0.7rem;
-  border: 1px solid var(--error);
-  border-radius: 0.4rem;
-  color: var(--error);
-  font-size: 0.875rem;
-}
-
-.hint {
-  margin-top: 1.25rem;
-  font-size: 0.875rem;
-  color: var(--muted);
-}
-
-a {
-  color: var(--accent);
-}
-
-dl {
-  margin: 0;
-}
-
-dt {
-  font-size: 0.8125rem;
-  color: var(--muted);
-}
-
-dd {
-  margin: 0.1rem 0 0.9rem;
-}
-
-/* --- Клуб: не поле ввода, а показ значения ------------------------------ */
-.club-field {
-  margin-bottom: 1.25rem;
-  padding: 0.6rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 0.4rem;
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
-}
-
-.club-label {
-  display: block;
-  font-size: 0.8125rem;
-  color: var(--muted);
-}
-
-.club-name {
-  display: block;
-  margin-top: 0.1rem;
-  font-weight: 600;
-}
-
-/* --- Телефон: несъёмный префикс +7 -------------------------------------- */
-.phone-row {
-  display: flex;
-  align-items: stretch;
-  margin-top: 0.35rem;
-}
-
-.phone-prefix {
-  display: flex;
-  align-items: center;
-  padding: 0 0.7rem;
-  border: 1px solid var(--border);
-  border-right: 0;
-  border-radius: 0.4rem 0 0 0.4rem;
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
-  color: var(--fg);
-  font-weight: 600;
-}
-
-.phone-row input {
-  margin-top: 0;
-  border-radius: 0 0.4rem 0.4rem 0;
-}
-
-.field-hint {
-  display: block;
-  margin-top: 0.25rem;
-  font-size: 0.8125rem;
-  color: var(--muted);
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--border-accent) 20%,
+    var(--border-accent) 80%,
+    transparent
+  );
 }

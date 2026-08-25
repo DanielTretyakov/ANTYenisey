@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, type ChangeEvent } from 'react';
+import { inputClassName } from '@/components/ui/Field';
+import { cn } from '@/lib/cn';
 
 /**
  * Поле телефона с несъёмным «+7».
@@ -31,30 +33,43 @@ export function PhoneField({ name = 'phone' }: { name?: string }) {
   }
 
   return (
-    <label>
-      Телефон
-      <span className="phone-row">
-        <span className="phone-prefix" aria-hidden="true">
+    <div className="mb-4">
+      <label
+        htmlFor="phone-input"
+        className="mb-1.5 block text-[0.8125rem] font-medium text-text-muted"
+      >
+        Телефон
+      </label>
+
+      <div className="flex items-stretch">
+        <span
+          className="inline-flex items-center rounded-l-control border border-r-0 border-border bg-surface-sunken px-3.5 font-medium text-text-muted"
+          aria-hidden="true"
+        >
           +7
         </span>
         <input
+          id="phone-input"
           type="tel"
           inputMode="numeric"
           autoComplete="tel-national"
           placeholder="999 123-45-67"
           value={formatForDisplay(digits)}
           onChange={handleChange}
+          className={cn(inputClassName, 'rounded-l-none')}
           // Значение для формы отдаёт скрытое поле: в видимом лежит текст с
           // пробелами и дефисами, а серверу нужен строгий E.164.
           aria-describedby={`${name}-hint`}
           required
         />
-      </span>
+      </div>
+
       <input type="hidden" name={name} value={digits.length === 10 ? `+7${digits}` : ''} />
-      <span id={`${name}-hint`} className="field-hint">
+
+      <p id={`${name}-hint`} className="mt-1.5 text-[0.8125rem] text-text-subtle">
         Десять цифр без кода страны
-      </span>
-    </label>
+      </p>
+    </div>
   );
 }
 

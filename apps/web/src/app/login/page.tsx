@@ -4,6 +4,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { ClubField } from '@/components/ClubField';
+import { AuthLayout } from '@/components/layout/AuthLayout';
+import { Alert } from '@/components/ui/Alert';
+import { Button } from '@/components/ui/Button';
+import { Field } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
 import { TENANT_SLUG } from '@/lib/config';
 import { saveSession } from '@/lib/session';
@@ -36,32 +40,37 @@ export default function LoginPage() {
   }
 
   return (
-    <main>
-      <h1>Вход</h1>
+    <AuthLayout
+      title="Вход"
+      subtitle="Войдите, чтобы записаться на тренировку или забронировать стол."
+      footer={
+        <>
+          Нет учётной записи?{' '}
+          <Link href="/register" className="font-medium text-text-accent hover:underline">
+            Зарегистрироваться
+          </Link>
+        </>
+      }
+    >
+      {error && <Alert>{error}</Alert>}
 
-      {error && <p className="error">{error}</p>}
-
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} noValidate={false}>
         <ClubField />
 
-        <label>
-          Электронная почта
-          <input name="email" type="email" autoComplete="email" required />
-        </label>
+        <Field label="Электронная почта" name="email" type="email" autoComplete="email" required />
 
-        <label>
-          Пароль
-          <input name="password" type="password" autoComplete="current-password" required />
-        </label>
+        <Field
+          label="Пароль"
+          name="password"
+          type="password"
+          autoComplete="current-password"
+          required
+        />
 
-        <button type="submit" disabled={pending}>
+        <Button type="submit" pending={pending} fullWidth size="lg" className="mt-2">
           {pending ? 'Проверяю…' : 'Войти'}
-        </button>
+        </Button>
       </form>
-
-      <p className="hint">
-        Нет учётной записи? <Link href="/register">Зарегистрироваться</Link>
-      </p>
-    </main>
+    </AuthLayout>
   );
 }
