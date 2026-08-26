@@ -273,6 +273,8 @@ model Tenant {
   tournamentRegistrations TournamentRegistration[]
   tables                  Table[]
   tableBookings           TableBooking[]
+  tableClosureRules       TableClosureRule[]
+  tableClosures           TableClosure[]
   subscriptionPlans       SubscriptionPlan[]
   planTrainingTypes       SubscriptionPlanTrainingType[]
   planTournamentTypes     SubscriptionPlanTournamentType[]
@@ -679,11 +681,76 @@ model Table {
   label     String // например «Стол 1»
   createdAt DateTime @default(now())
 
-  bookings TableBooking[]
+  bookings     TableBooking[]
+  closureRules TableClosureRule[]
+  closures     TableClosure[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, label])
   @@index([tenantId])
+}
+
+/// Регулярно закрытое время стола: постоянное недельное правило.
+///
+/// Клуб живёт по расписанию — групповые тренировки, секции, детские группы
+/// занимают часть столов в одни и те же часы каждую неделю. Заводить это
+/// разовыми окнами значит переписывать их вручную каждую неделю, а однажды
+/// забыть — и стол уйдёт клиенту прямо под тренировку.
+///
+/// Закрыто ТОЛЬКО для клиента: администратор посадить человека за такой стол
+/// по-прежнему может. Жизнь в зале всегда сложнее расписания, и тупик здесь
+/// обошёлся бы дороже ошибки.
+///
+/// Одна строка — один стол: «закрыть столы 1 и 2» это две строки. Так
+/// хранение совпадает с тем, что администратор видит в сетке, и не нужна
+/// таблица связей ради множества столов в одном правиле.
+model TableClosureRule {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tableId  String
+  table    Table  @relation(fields: [tableId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  /// День недели по ISO-8601: 1 — понедельник, 7 — воскресенье.
+  weekday Int
+
+  /// Границы окна в минутах от полуночи ПО ВРЕМЕНИ КЛУБА (Tenant.timezone),
+  /// а не в UTC. Правило «каждый вторник с 15:00» должно оставаться в силе
+  /// вне зависимости от того, какому мгновению UTC это соответствует.
+  /// Полночь как конец окна — это 1440, а не 0: иначе интервал вывернулся бы.
+  startMinute Int
+  endMinute   Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, weekday])
+  @@index([tableId])
+}
+
+/// Разово закрытое время стола: турнир, ремонт, аренда зала целиком.
+///
+/// В отличие от недельного правила, привязано к конкретным мгновениям, а не к
+/// дню недели, и живёт в UTC, как и брони.
+model TableClosure {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tableId  String
+  table    Table  @relation(fields: [tableId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  startsAt DateTime @db.Timestamptz(3)
+  endsAt   DateTime @db.Timestamptz(3)
+
+  /// Зачем закрыто. Видит только персонал клуба — клиенту это время просто не
+  /// показывается в сетке.
+  reason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, startsAt])
+  @@index([tableId])
 }
 
 /// Бронь стола: самостоятельная онлайн-аренда клиента (без подтверждения

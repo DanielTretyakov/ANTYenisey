@@ -81,3 +81,71 @@ export interface ClubTable {
 export interface TableRequest {
   label: string;
 }
+
+/**
+ * День недели по ISO-8601: 1 — понедельник, 7 — воскресенье.
+ *
+ * Ноль как обозначение дня запрещён намеренно: в разных языках он означает то
+ * воскресенье, то понедельник, и одно такое значение тихо сдвинуло бы всё
+ * расписание на день.
+ */
+export type Weekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+/**
+ * Постоянное недельное правило: стол закрыт для клиентов в эти часы каждую
+ * неделю.
+ *
+ * Закрыто **только для клиента** — администратор посадить человека за такой
+ * стол по-прежнему может. Жизнь в зале всегда сложнее расписания, и тупик
+ * здесь обошёлся бы дороже ошибки.
+ */
+export interface ClosureRule {
+  id: string;
+  tableId: string;
+  weekday: Weekday;
+  /**
+   * Границы окна в минутах от полуночи **по времени клуба**, а не в UTC:
+   * правило «каждый вторник с 15:00» не должно зависеть от того, какому
+   * мгновению UTC это соответствует. Полночь как конец окна — 1440, а не 0.
+   */
+  startMinute: number;
+  endMinute: number;
+}
+
+/** Правило, которого ещё нет в базе: у него нет идентификатора. */
+export type ClosureRuleDraft = Omit<ClosureRule, 'id'>;
+
+/**
+ * Замена всего недельного расписания разом.
+ *
+ * Не поштучное добавление и удаление: администратор правит расписание в
+ * сетке, где одно движение мыши меняет десяток окон сразу. Присылать разницу
+ * значит собирать её на клиенте и надеяться, что она сошлась.
+ */
+export interface ReplaceClosureRulesRequest {
+  rules: ClosureRuleDraft[];
+}
+
+/** Разовое закрытие: турнир, ремонт, аренда зала целиком. */
+export interface ClosureException {
+  id: string;
+  tableId: string;
+  /** Мгновения в ISO-8601 с зоной — как и брони, хранятся в UTC. */
+  startsAt: string;
+  endsAt: string;
+  /** Зачем закрыто. Видит только персонал клуба. */
+  reason: string | null;
+}
+
+export interface ClosureExceptionRequest {
+  tableId: string;
+  startsAt: string;
+  endsAt: string;
+  reason?: string | null;
+}
+
+/** Всё закрытое время клуба разом — так его показывает и правит админка. */
+export interface ClubClosures {
+  rules: ClosureRule[];
+  exceptions: ClosureException[];
+}

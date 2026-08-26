@@ -230,3 +230,48 @@ ALTER TABLE "PlatformPlan"
 -- счётчик "bookedCount" на TrainingSession с CHECK ("bookedCount" <=
 -- "capacity"), обновляемый в той же транзакции. Даёт защиту от любого
 -- клиента БД, но требует держать счётчик в согласии с реальностью.
+
+-- ---------------------------------------------------------------------------
+-- 12. Закрытое время столов
+-- ---------------------------------------------------------------------------
+--
+-- Накатано отдельной миграцией *_table_closures: этот файл правится вместе со
+-- схемой, а применённую миграцию Prisma сверяет по контрольной сумме и
+-- откажется работать с изменённой задним числом.
+
+-- Границы окна недельного правила: полночь как конец — это 1440, а не 0,
+-- иначе интервал вывернулся бы и правило «с 23:00 до полуночи» стало бы
+-- пустым.
+ALTER TABLE "TableClosureRule"
+  ADD CONSTRAINT "TableClosureRule_minutes_range"
+  CHECK ("startMinute" >= 0 AND "endMinute" <= 1440 AND "endMinute" > "startMinute");
+
+-- День недели по ISO-8601: 1 — понедельник, 7 — воскресенье. Ноль здесь
+-- запрещён намеренно: в разных языках он означает то воскресенье, то
+-- понедельник, и одна такая строка тихо сдвинула бы расписание на день.
+ALTER TABLE "TableClosureRule"
+  ADD CONSTRAINT "TableClosureRule_weekday_range"
+  CHECK ("weekday" BETWEEN 1 AND 7);
+
+-- Одно и то же время одного стола не должно быть закрыто двумя правилами:
+-- иначе снятие блокировки в сетке убирало бы одну строку, а вторая оставляла
+-- бы стол закрытым, и администратор не понимал бы, почему.
+-- Диапазон полуоткрытый '[)': окна 15:00-17:00 и 17:00-19:00 стыкуются.
+ALTER TABLE "TableClosureRule"
+  ADD CONSTRAINT "TableClosureRule_no_overlap"
+  EXCLUDE USING gist (
+    "tableId" WITH =,
+    "weekday" WITH =,
+    int4range("startMinute", "endMinute", '[)') WITH &&
+  );
+
+ALTER TABLE "TableClosure"
+  ADD CONSTRAINT "TableClosure_time_order" CHECK ("endsAt" > "startsAt");
+
+-- То же для разовых окон.
+ALTER TABLE "TableClosure"
+  ADD CONSTRAINT "TableClosure_no_overlap"
+  EXCLUDE USING gist (
+    "tableId" WITH =,
+    tstzrange("startsAt", "endsAt", '[)') WITH &&
+  );

@@ -3,13 +3,15 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { ClubSettings, ClubTable, Role } from '@yenisey/types';
+import type { ClubClosures, ClubSettings, ClubTable, Role } from '@yenisey/types';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { api, ApiError } from '@/lib/api';
 import { useSession } from '@/lib/useSession';
+import { ClosuresCard } from './ClosuresCard';
+import { ExceptionsCard } from './ExceptionsCard';
 import { SettingsForm } from './SettingsForm';
 import { TablesCard } from './TablesCard';
 
@@ -28,7 +30,11 @@ export default function ClubPage() {
   const session = useSession();
   const router = useRouter();
 
-  const [data, setData] = useState<{ settings: ClubSettings; tables: ClubTable[] } | null>(null);
+  const [data, setData] = useState<{
+    settings: ClubSettings;
+    tables: ClubTable[];
+    closures: ClubClosures;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const allowed = session.status === 'ready' && CLUB_MANAGERS.includes(session.user.role);
@@ -48,9 +54,9 @@ export default function ClubPage() {
 
     // Настройки и столы грузятся разом: они показываются на одном экране, и
     // ждать их по очереди означало бы удвоить ожидание на ровном месте.
-    Promise.all([api.clubSettings(), api.clubTables()])
-      .then(([settings, tables]) => {
-        if (!cancelled) setData({ settings, tables });
+    Promise.all([api.clubSettings(), api.clubTables(), api.clubClosures()])
+      .then(([settings, tables, closures]) => {
+        if (!cancelled) setData({ settings, tables, closures });
       })
       .catch((cause: unknown) => {
         if (!cancelled) {
@@ -92,6 +98,12 @@ export default function ClubPage() {
         <div className="grid gap-6">
           <SettingsForm initial={data.settings} />
           <TablesCard initial={data.tables} />
+          <ClosuresCard tables={data.tables} initial={data.closures.rules} />
+          <ExceptionsCard
+            tables={data.tables}
+            initial={data.closures.exceptions}
+            timezone={data.settings.timezone}
+          />
         </div>
       )}
     </AppShell>

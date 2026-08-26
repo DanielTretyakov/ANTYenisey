@@ -1,5 +1,10 @@
 import type {
   AuthResponse,
+  ClosureException,
+  ClosureExceptionRequest,
+  ClosureRule,
+  ClosureRuleDraft,
+  ClubClosures,
   ClubSettings,
   ClubTable,
   LoginRequest,
@@ -134,4 +139,16 @@ export const api = {
 
   deleteTable: (id: string): Promise<void> =>
     authorized(`/club/tables/${id}`, { method: 'DELETE' }),
+
+  clubClosures: (): Promise<ClubClosures> => authorized('/club/closures'),
+
+  /** Расписание заменяется целиком — см. ClosuresService.replaceRules на сервере. */
+  replaceClosureRules: (rules: ClosureRuleDraft[]): Promise<ClosureRule[]> =>
+    authorized('/club/closures/rules', json('PUT', { rules })),
+
+  createClosureException: (payload: ClosureExceptionRequest): Promise<ClosureException> =>
+    authorized('/club/closures/exceptions', json('POST', payload)),
+
+  deleteClosureException: (id: string): Promise<void> =>
+    authorized(`/club/closures/exceptions/${id}`, { method: 'DELETE' }),
 };

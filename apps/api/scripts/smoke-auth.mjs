@@ -434,6 +434,128 @@ async function main() {
     check('стол удалён', 204, r.status);
     r = await asAdmin(`/club/tables/${tableId}`, { method: 'DELETE' });
     check('повторное удаление — не найден', 404, r.status);
+
+    console.log('=== 20. Закрытое время столов');
+    r = await asAdmin('/club/tables', { method: 'POST', json: { label: `Стол закрытий ${RUN}` } });
+    const closureTable = r.body?.id;
+
+    r = await asAdmin('/club/closures');
+    check('расписание прочитано', 200, r.status);
+    const originalRules = (r.body?.rules ?? []).map(({ id, ...rule }) => rule);
+    assert('разовые окна пришли отдельным списком', Array.isArray(r.body?.exceptions));
+
+    // «Вторник, 15:00–19:00» — ровно тот случай из ТЗ, когда столы заняты
+    // групповой тренировкой.
+    const schedule = [
+      ...originalRules,
+      { tableId: closureTable, weekday: 2, startMinute: 900, endMinute: 1140 },
+      { tableId: closureTable, weekday: 2, startMinute: 1140, endMinute: 1200 },
+    ];
+
+    r = await asAdmin('/club/closures/rules', { method: 'PUT', json: { rules: schedule } });
+    check('расписание сохранено', 200, r.status);
+    assert(
+      'окна встык приняты — стык пересечением не считается',
+      Array.isArray(r.body) && r.body.length === schedule.length,
+    );
+
+    r = await asAdmin('/club/closures/rules', {
+      method: 'PUT',
+      json: {
+        rules: [
+          { tableId: closureTable, weekday: 2, startMinute: 900, endMinute: 1140 },
+          { tableId: closureTable, weekday: 2, startMinute: 1080, endMinute: 1200 },
+        ],
+      },
+    });
+    check('наложение окон отклонено', 400, r.status);
+    assert(
+      'в тексте названы конфликтующие часы',
+      JSON.stringify(r.body?.message ?? '').includes('15:00'),
+    );
+
+    r = await asAdmin('/club/closures/rules', {
+      method: 'PUT',
+      json: { rules: [{ tableId: closureTable, weekday: 0, startMinute: 0, endMinute: 60 }] },
+    });
+    check('нулевой день недели отклонён', 400, r.status);
+
+    r = await asAdmin('/club/closures/rules', {
+      method: 'PUT',
+      json: { rules: [{ tableId: closureTable, weekday: 2, startMinute: 0, endMinute: 1441 }] },
+    });
+    check('конец за пределами суток отклонён', 400, r.status);
+
+    r = await asAdmin('/club/closures/rules', {
+      method: 'PUT',
+      json: { rules: [{ tableId: 'chuzhoy-stol', weekday: 2, startMinute: 0, endMinute: 60 }] },
+    });
+    check('чужой стол в расписании отклонён', 400, r.status);
+
+    console.log('=== 21. Разовые окна');
+    r = await asAdmin('/club/closures/exceptions', {
+      method: 'POST',
+      json: {
+        tableId: closureTable,
+        startsAt: '2026-09-12T03:00:00.000Z',
+        endsAt: '2026-09-12T09:00:00.000Z',
+        reason: 'Турнир',
+      },
+    });
+    check('разовое окно заведено', 201, r.status);
+    const exceptionId = r.body?.id;
+    assert('причина сохранена', r.body?.reason === 'Турнир');
+
+    r = await asAdmin('/club/closures/exceptions', {
+      method: 'POST',
+      json: {
+        tableId: closureTable,
+        startsAt: '2026-09-12T06:00:00.000Z',
+        endsAt: '2026-09-12T12:00:00.000Z',
+      },
+    });
+    check('пересекающееся окно отклонено', 409, r.status);
+
+    r = await asAdmin('/club/closures/exceptions', {
+      method: 'POST',
+      json: {
+        tableId: closureTable,
+        startsAt: '2026-09-12T09:00:00.000Z',
+        endsAt: '2026-09-12T12:00:00.000Z',
+      },
+    });
+    check('окно встык принято', 201, r.status);
+    const adjacentId = r.body?.id;
+
+    r = await asAdmin('/club/closures/exceptions', {
+      method: 'POST',
+      json: {
+        tableId: closureTable,
+        startsAt: '2026-09-13T09:00:00.000Z',
+        endsAt: '2026-09-13T09:00:00.000Z',
+      },
+    });
+    check('окно нулевой длины отклонено', 400, r.status);
+
+    r = await call('/club/closures', { headers: { Authorization: `Bearer ${access}` } });
+    check('клиенту расписание закрыто', 403, r.status);
+
+    r = await asAdmin(`/club/closures/exceptions/${exceptionId}`, { method: 'DELETE' });
+    check('окно убрано', 204, r.status);
+    r = await asAdmin(`/club/closures/exceptions/${exceptionId}`, { method: 'DELETE' });
+    check('повторное удаление — не найдено', 404, r.status);
+    await asAdmin(`/club/closures/exceptions/${adjacentId}`, { method: 'DELETE' });
+
+    // Расписание клуба разработчика возвращается как было: удаление стола
+    // унесёт его правила каскадом, но чужие трогать нельзя.
+    r = await asAdmin('/club/closures/rules', {
+      method: 'PUT',
+      json: { rules: originalRules },
+    });
+    check('расписание возвращено в исходное состояние', 200, r.status);
+
+    r = await asAdmin(`/club/tables/${closureTable}`, { method: 'DELETE' });
+    check('временный стол убран', 204, r.status);
   }
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);

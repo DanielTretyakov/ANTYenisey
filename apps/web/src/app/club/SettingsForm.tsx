@@ -10,7 +10,9 @@ import { MoneyField } from '@/components/ui/MoneyField';
 import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
 import { api, ApiError } from '@/lib/api';
+import { cn } from '@/lib/cn';
 import { inputToKopecks, kopecksToInput } from '@/lib/money';
+import { timezoneOptions } from '@/lib/timezones';
 
 const BOOKING_STEPS: { value: BookingStep; label: string }[] = [
   { value: 'MIN_10', label: '10 минут' },
@@ -146,12 +148,12 @@ export function SettingsForm({ initial }: { initial: ClubSettings }) {
             onChange={(event) => set('name', event.target.value)}
             required
           />
-          <Field
+          <Select
             label="Часовой пояс"
-            hint="Зона IANA, например Asia/Krasnoyarsk. От неё зависят пороги отмены и границы дня."
+            hint="От него считаются пороги отмены, напоминания и границы операционного дня."
+            options={timezoneOptions(initial.timezone)}
             value={form.timezone}
             onChange={(event) => set('timezone', event.target.value)}
-            required
           />
         </CardBody>
       </Card>
@@ -244,12 +246,22 @@ export function SettingsForm({ initial }: { initial: ClubSettings }) {
             />
           </div>
 
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Абонементы"
+          description="Что происходит с визитом на балансе, когда бронь не состоялась. Денег это не касается: абонемент уже оплачен, и штраф за отмену к нему не применяется."
+        />
+        <CardBody>
           <Toggle
-            label="Визит абонемента сгорает только при неявке"
-            hint="При любой отмене визит возвращается на баланс клиента."
+            label="Мягкое правило: визит сгорает только при неявке"
             checked={form.subscriptionBurnsOnNoShowOnly}
             onChange={(event) => set('subscriptionBurnsOnNoShowOnly', event.target.checked)}
           />
+
+          <SubscriptionRules soft={form.subscriptionBurnsOnNoShowOnly} />
         </CardBody>
       </Card>
 
@@ -259,6 +271,65 @@ export function SettingsForm({ initial }: { initial: ClubSettings }) {
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * Разбор трёх случаев, которыми отличаются мягкое и строгое правила.
+ *
+ * Одного переключателя мало: «сгорает только при неявке» не говорит, что
+ * будет с поздней отменой, а именно она и есть спорный случай. Поэтому
+ * показаны все три исхода сразу, и различающийся выделен.
+ */
+function SubscriptionRules({ soft }: { soft: boolean }) {
+  const rules = [
+    {
+      event: 'Клиент отменил заранее',
+      detail: 'не позднее порога из политики отмены клуба',
+      outcome: 'Визит возвращается на баланс',
+      differs: false,
+    },
+    {
+      event: 'Клиент отменил поздно',
+      detail: 'позже порога, вплоть до самого начала',
+      outcome: soft ? 'Визит возвращается на баланс' : 'Визит сгорает',
+      differs: true,
+    },
+    {
+      event: 'Клиент не отменил и не пришёл',
+      detail: 'неявку отмечает администратор или система',
+      outcome: 'Визит сгорает',
+      differs: false,
+    },
+  ];
+
+  return (
+    <>
+      <dl className="mt-1 divide-y divide-border border-y border-border">
+        {rules.map((rule) => (
+          <div key={rule.event} className="grid gap-1 py-3 sm:grid-cols-2 sm:gap-4">
+            <dt>
+              <span className="text-[0.9375rem] text-text">{rule.event}</span>
+              <span className="block text-[0.8125rem] text-text-subtle">{rule.detail}</span>
+            </dt>
+            <dd
+              className={cn(
+                'text-[0.9375rem]',
+                rule.differs ? 'font-medium text-text-accent' : 'text-text-muted',
+              )}
+            >
+              {rule.outcome}
+            </dd>
+          </div>
+        ))}
+      </dl>
+
+      <p className="mt-4 text-[0.875rem] text-text-muted">
+        {soft
+          ? 'Так работает «Енисей» по ТЗ: отменить запись можно в любой момент, даже за пять минут до начала, и визит сохранится. Правило мягче, чем для оплаты картой, — там поздняя отмена всё равно стоит денег.'
+          : 'Строгое правило: визит подчиняется той же политике отмены, что и оплата картой, — поздняя отмена сгорает наравне с неявкой. Для «Енисея» в ТЗ описано мягкое правило, так что этот вариант — отступление от него.'}
+      </p>
+    </>
   );
 }
 
