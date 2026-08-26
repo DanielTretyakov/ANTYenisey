@@ -3,7 +3,7 @@
 -- ради чего заведены.
 -- ---------------------------------------------------------------------------
 --
--- СТАТУС: прогнано на PostgreSQL 18 (21.08.2026) — 22 из 22 сценариев прошли.
+-- СТАТУС: прогнано на PostgreSQL 18 (27.08.2026) — 22 из 22 сценариев прошли.
 -- Дополнительно проверено, что отказы приходят именно от нужных ограничений,
 -- а не по случайной причине: exclusion-констрейнт даёт 23P01, составные
 -- внешние ключи — 23503, частичный уникальный индекс — 23505, check'и — 23514.
@@ -14,31 +14,35 @@
 -- добавлении новых сценариев проверяйте код ошибки и имя ограничения через
 -- GET STACKED DIAGNOSTICS, а не только факт отказа.
 --
--- Как запустить, когда появится Postgres:
+-- Как запустить:
 --
---   1. Сгенерировать DDL из схемы:
---      npx prisma@6 migrate diff --from-empty \
---        --to-schema-datamodel docs/schema.prisma --script > ddl.sql
---   2. Применить по порядку:
---      psql -v ON_ERROR_STOP=1 -f ddl.sql
---      psql -v ON_ERROR_STOP=1 -f docs/schema-constraints.sql
---      psql -f docs/schema-tests.sql
+--   DATABASE_URL="postgresql://postgres:пароль@127.0.0.1:5432/yenisey_verify"
+--     pnpm --filter @yenisey/database verify
+--
+-- Строку подключения передавать БЕЗ «?schema=public»: psql такой URI не
+-- принимает. Направлять только на пустую одноразовую базу — тесты пишут туда
+-- заведомо некорректные данные, и на рабочей базе это недопустимо.
 --
 -- Каждый тест печатает «OK (ожидалось)» либо «ПРОВАЛ». Тесты, которые ждут
 -- отказа базы, специально пишут в неё заведомо некорректные данные.
 
 \set ON_ERROR_STOP off
 
--- Два клуба
-INSERT INTO "Tenant" (id,name,slug,"createdAt","updatedAt","hasRobotOption","tableHourPrice","tableExtra30MinPrice")
-VALUES ('t1','Енисей','yenisey',now(),now(),false,40000,20000),
-       ('t2','Другой клуб','other',now(),now(),false,50000,25000);
+-- Два клуба. Цены и шаг брони живут у зала, а не у клуба.
+INSERT INTO "Tenant" (id,name,slug,"createdAt","updatedAt")
+VALUES ('t1','Енисей','yenisey',now(),now()),
+       ('t2','Другой клуб','other',now(),now());
 
--- Клиент в клубе 1
-INSERT INTO "User" (id,"tenantId",email,"passwordHash",role,"fullName","createdAt","updatedAt")
-VALUES ('u1','t1','a@a.ru','x','CLIENT','Иванов Иван',now(),now()),
-       ('c1','t1','coach@a.ru','x','COACH','Тренеров Тренер',now(),now()),
-       ('u2','t2','b@b.ru','x','CLIENT','Петров Пётр',now(),now());
+-- По залу в каждом клубе: без зала не завести ни стол, ни цену.
+INSERT INTO "Hall" (id,"tenantId",name,"tableHourPrice","tableExtra30MinPrice","hasRobotOption","createdAt","updatedAt")
+VALUES ('h1','t1','Основной зал',40000,20000,false,now(),now()),
+       ('h2','t2','Основной зал',50000,25000,false,now(),now());
+
+-- Клиент в клубе 1. Телефон и дата рождения обязательны у всех ролей.
+INSERT INTO "User" (id,"tenantId",email,phone,"birthDate","passwordHash",role,"fullName","createdAt","updatedAt")
+VALUES ('u1','t1','a@a.ru','+79990000001',DATE '1990-01-01','x','CLIENT','Иванов Иван',now(),now()),
+       ('c1','t1','coach@a.ru','+79990000002',DATE '1985-05-05','x','COACH','Тренеров Тренер',now(),now()),
+       ('u2','t2','b@b.ru','+79990000003',DATE '1992-03-03','x','CLIENT','Петров Пётр',now(),now());
 
 INSERT INTO "ClientProfile" ("userId","tenantId","createdAt","updatedAt")
 VALUES ('u1','t1',now(),now()),
@@ -47,7 +51,7 @@ VALUES ('u1','t1',now(),now()),
 INSERT INTO "CoachProfile" ("userId","tenantId","createdAt","updatedAt")
 VALUES ('c1','t1',now(),now());
 
-INSERT INTO "Table" (id,"tenantId",label,"createdAt") VALUES ('tb1','t1','Стол 1',now());
+INSERT INTO "Table" (id,"tenantId","hallId",label,"createdAt") VALUES ('tb1','t1','h1','Стол 1',now());
 
 INSERT INTO "TrainingType" (id,"tenantId",name,price,"isActive","createdAt","updatedAt")
 VALUES ('tt1','t1','Общая групповая',70000,true,now(),now());
