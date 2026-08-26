@@ -140,6 +140,7 @@ Read the daily log above and compile it into wiki articles following the schema 
                 allowed_tools=["Read", "Write", "Edit", "Glob", "Grep"],
                 permission_mode="acceptEdits",
                 max_turns=30,
+                stderr=_stderr_reporter("compile"),
             ),
         ):
             if isinstance(message, AssistantMessage):
@@ -165,6 +166,18 @@ Read the daily log above and compile it into wiki articles following the schema 
 
     return cost
 
+
+
+def _stderr_reporter(label: str):
+    """Колбэк для ClaudeAgentOptions(stderr=...): печатает stderr дочернего CLI.
+
+    Без него SDK сообщает только «Command failed with exit code 1 / Check
+    stderr output for details», и причина остаётся невидимой.
+    """
+    def report(line: str) -> None:
+        print(f"  [{label} stderr] {line}", flush=True)
+
+    return report
 
 def main():
     force_utf8_io()
