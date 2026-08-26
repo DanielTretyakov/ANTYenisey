@@ -1,14 +1,15 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import type { PublicUser, Role } from '@yenisey/types';
 import { AppShell } from '@/components/layout/AppShell';
-import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
-import { api, ApiError } from '@/lib/api';
-import { clearSession, readAccessToken, saveSession } from '@/lib/session';
+import { api } from '@/lib/api';
+import { clearSession } from '@/lib/session';
+import { useSession } from '@/lib/useSession';
 
 const ROLE_LABELS: Record<Role, string> = {
   CLIENT: 'Клиент',
@@ -17,59 +18,18 @@ const ROLE_LABELS: Record<Role, string> = {
   OWNER: 'Руководство клуба',
 };
 
+/** Роли, которым доступен профиль клуба. */
+const CLUB_MANAGERS: Role[] = ['ADMIN', 'OWNER'];
+
 export default function CabinetPage() {
   const router = useRouter();
-  const [user, setUser] = useState<PublicUser | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const session = useSession();
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function load(): Promise<void> {
-      const accessToken = readAccessToken();
-
-      // Access-токен живёт только в памяти вкладки, поэтому после
-      // перезагрузки страницы его нет — это норма, а не выход из системы.
-      // Сессию восстанавливаем обменом httpOnly-куки с refresh-токеном.
-      if (!accessToken) {
-        const restored = await tryRefresh();
-        if (cancelled) return;
-        if (restored) {
-          setUser(restored);
-        } else {
-          router.replace('/login');
-        }
-        return;
-      }
-
-      try {
-        const profile = await api.me(accessToken);
-        if (!cancelled) setUser(profile);
-      } catch (cause) {
-        // Access живёт 15 минут, refresh — 30 дней: истёкший короткий токен
-        // это штатное состояние, а не повод выкидывать клиента на форму входа.
-        if (cause instanceof ApiError && cause.status === 401) {
-          const refreshed = await tryRefresh();
-          if (!cancelled && refreshed) {
-            setUser(refreshed);
-            return;
-          }
-          if (!cancelled) router.replace('/login');
-          return;
-        }
-
-        if (!cancelled) {
-          setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
-        }
-      }
+    if (session.status === 'anonymous') {
+      router.replace('/login');
     }
-
-    void load();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
+  }, [session.status, router]);
 
   async function handleLogout(): Promise<void> {
     // Токен гасится на сервере, а не только стирается локально: иначе
@@ -81,36 +41,47 @@ export default function CabinetPage() {
     router.replace('/login');
   }
 
+  const user = session.status === 'ready' ? session.user : null;
+
   return (
     <AppShell
       actions={
         user ? (
-          <Button variant="ghost" size="sm" onClick={() => void handleLogout()}>
-            Выйти
-          </Button>
+          <>
+            {CLUB_MANAGERS.includes(user.role) && (
+              <Link href="/club">
+                <Button variant="ghost" size="sm">
+                  Настройки клуба
+                </Button>
+              </Link>
+            )}
+            <Button variant="ghost" size="sm" onClick={() => void handleLogout()}>
+              Выйти
+            </Button>
+          </>
         ) : null
       }
     >
       <h1 className="mb-7 text-[1.75rem]">Личный кабинет</h1>
 
-      {error && <Alert>{error}</Alert>}
-
-      {!error && !user && <ProfileSkeleton />}
-
-      {user && (
-        <Card className="max-w-2xl">
-          <CardHeader title="Профиль" description="Данные, которые видит администратор клуба." />
-          <CardBody>
-            <dl className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
-              <Row label="ФИО" value={user.fullName} />
-              <Row label="Электронная почта" value={user.email} />
-              <Row label="Телефон" value={user.phone ?? '—'} />
-              <Row label="Роль" value={ROLE_LABELS[user.role]} />
-            </dl>
-          </CardBody>
-        </Card>
-      )}
+      {user ? <Profile user={user} /> : <ProfileSkeleton />}
     </AppShell>
+  );
+}
+
+function Profile({ user }: { user: PublicUser }) {
+  return (
+    <Card className="max-w-2xl">
+      <CardHeader title="Профиль" description="Данные, которые видит администратор клуба." />
+      <CardBody>
+        <dl className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
+          <Row label="ФИО" value={user.fullName} />
+          <Row label="Электронная почта" value={user.email} />
+          <Row label="Телефон" value={user.phone ?? '—'} />
+          <Row label="Роль" value={ROLE_LABELS[user.role]} />
+        </dl>
+      </CardBody>
+    </Card>
   );
 }
 
@@ -145,21 +116,4 @@ function ProfileSkeleton() {
       </CardBody>
     </Card>
   );
-}
-
-/**
- * Обновление пары токенов. Возвращает профиль или null, если сессия мертва.
- *
- * Refresh-токен не передаётся: он в httpOnly-куке, и браузер приложит её сам.
- * Поэтому проверить наличие сессии заранее нельзя — остаётся спросить сервер.
- */
-async function tryRefresh(): Promise<PublicUser | null> {
-  try {
-    const auth = await api.refresh();
-    saveSession(auth);
-    return auth.user;
-  } catch {
-    clearSession();
-    return null;
-  }
 }

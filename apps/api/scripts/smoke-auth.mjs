@@ -316,6 +316,126 @@ async function main() {
   });
   check('вход в другую учётку не задет', 200, r.status);
 
+  console.log('=== 17. Профиль клуба: кому закрыт');
+  r = await call('/club/settings');
+  check('без токена', 401, r.status);
+  r = await call('/club/settings', { headers: { Authorization: `Bearer ${access}` } });
+  check('клиенту закрыто', 403, r.status);
+  r = await call('/club/tables', { headers: { Authorization: `Bearer ${access}` } });
+  check('список столов клиенту закрыт', 403, r.status);
+
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('=== 18. Правка настроек — ПРОПУЩЕНА');
+    console.log('     нужна учётка админа: SMOKE_ADMIN_EMAIL и SMOKE_ADMIN_PASSWORD');
+    console.log('     завести: pnpm db:create-admin -- --email ... --password ... --name "..."');
+  } else {
+    console.log('=== 18. Правка настроек администратором');
+    r = await post('/auth/login', {
+      tenantSlug: 'yenisey',
+      email: adminEmail,
+      password: adminPassword,
+    });
+    check('вход администратора', 200, r.status);
+
+    const adminAuth = { Authorization: `Bearer ${r.body?.accessToken ?? ''}` };
+    const asAdmin = (path, options = {}) =>
+      call(path, { ...options, headers: { ...adminAuth, ...options.headers } });
+    const patchSettings = (json) =>
+      asAdmin('/club/settings', { method: 'PATCH', json });
+
+    r = await asAdmin('/club/settings');
+    check('настройки прочитаны', 200, r.status);
+    const original = r.body;
+    assert('цена аренды пришла целым числом копеек', Number.isInteger(original?.tableHourPrice));
+    assert(
+      'служебные поля наружу не утекают',
+      original !== null && !('id' in original) && !('slug' in original),
+    );
+
+    r = await patchSettings({ bookingStep: 'MIN_15' });
+    check('шаг бронирования изменён', 200, r.status);
+    assert('ответ отдал новое значение', r.body?.bookingStep === 'MIN_15');
+
+    // Цены гасятся тем же запросом: у «Енисея» они заданы сидом, и одна лишь
+    // установка флага была бы проверкой, которая всегда проходит.
+    r = await patchSettings({
+      hasRobotOption: true,
+      robot30MinPrice: null,
+      robot60MinPrice: null,
+      robotExtra30MinPrice: null,
+    });
+    check('опция робота без цен отклонена', 400, r.status);
+    assert(
+      'в тексте перечислено, каких цен не хватает',
+      JSON.stringify(r.body?.message ?? '').includes('30 минут'),
+    );
+
+    r = await patchSettings({ timezone: 'Asia/Krasnayarsk' });
+    check('опечатка в часовом поясе отклонена', 400, r.status);
+
+    r = await patchSettings({
+      attendanceReminderAfterMinutes: 120,
+      attendanceAutoNoShowAfterMinutes: 60,
+    });
+    check('неявка раньше напоминания отклонена', 400, r.status);
+
+    r = await patchSettings({ tableHourPrice: 400.5 });
+    check('цена дробью отклонена', 400, r.status);
+    r = await patchSettings({ tableHourPrice: -1 });
+    check('отрицательная цена отклонена', 400, r.status);
+    r = await patchSettings({ noShowChargePercent: 101 });
+    check('процент больше ста отклонён', 400, r.status);
+    r = await patchSettings({ tenantId: 'chuzhoy-klub' });
+    check('лишнее поле отрезано', 400, r.status);
+
+    // Настройки клуба разработчика возвращаются как были: скрипт гоняется по
+    // рабочей базе, и оставлять её со сдвинутым шагом бронирования нельзя.
+    r = await patchSettings(original);
+    check('настройки возвращены в исходное состояние', 200, r.status);
+    assert(
+      'вернулось всё, а не только шаг брони',
+      JSON.stringify(r.body) === JSON.stringify(original),
+    );
+
+    console.log('=== 19. Столы клуба');
+    const label = `Стол проверки ${RUN}`;
+    r = await asAdmin('/club/tables', { method: 'POST', json: { label } });
+    check('стол добавлен', 201, r.status);
+    const tableId = r.body?.id;
+    assert('у нового стола нет броней', r.body?.hasBookings === false);
+
+    r = await asAdmin('/club/tables', { method: 'POST', json: { label } });
+    check('повторное название отклонено', 409, r.status);
+
+    r = await asAdmin('/club/tables', { method: 'POST', json: { label: '   ' } });
+    check('пустое название отклонено', 400, r.status);
+
+    r = await asAdmin(`/club/tables/${tableId}`, {
+      method: 'PATCH',
+      json: { label: `  ${label}  переименован  ` },
+    });
+    check('стол переименован', 200, r.status);
+    assert(
+      `лишние пробелы схлопнуты (получено «${r.body?.label}»)`,
+      r.body?.label === `${label} переименован`,
+    );
+
+    r = await asAdmin('/club/tables');
+    check('список столов прочитан', 200, r.status);
+    assert(
+      'переименованный стол в списке',
+      Array.isArray(r.body) && r.body.some((table) => table.id === tableId),
+    );
+
+    r = await asAdmin(`/club/tables/${tableId}`, { method: 'DELETE' });
+    check('стол удалён', 204, r.status);
+    r = await asAdmin(`/club/tables/${tableId}`, { method: 'DELETE' });
+    check('повторное удаление — не найден', 404, r.status);
+  }
+
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
 }

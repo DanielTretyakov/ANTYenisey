@@ -19,9 +19,11 @@
     "db:seed": "pnpm --filter @yenisey/database seed",
     "db:verify": "pnpm --filter @yenisey/database verify",
     "db:clean-probes": "pnpm --filter @yenisey/database clean-probes",
+    "db:create-admin": "dotenv -e .env -- node --experimental-strip-types apps/api/scripts/create-admin.ts",
     "smoke": "node apps/api/scripts/smoke-auth.mjs"
   },
   "devDependencies": {
+    "dotenv-cli": "^8.0.0",
     "prettier": "^3.4.2",
     "turbo": "^2.3.3",
     "typescript": "^5.7.2"

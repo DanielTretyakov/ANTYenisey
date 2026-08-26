@@ -5,6 +5,7 @@ import type { ExecutionContext } from '@nestjs/common';
 import type { Request } from 'express';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
+import { ClubModule } from './club/club.module';
 import { parseDuration } from './auth/tokens';
 import { isLoopback } from './common/network';
 import { HealthController } from './health.controller';
@@ -50,6 +51,7 @@ import { validateEnv, type Env } from './config/env';
     PrismaModule,
     UsersModule,
     AuthModule,
+    ClubModule,
     TenantsModule,
   ],
   controllers: [HealthController],

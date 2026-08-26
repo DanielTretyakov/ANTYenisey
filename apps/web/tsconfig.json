@@ -12,6 +12,10 @@
     "jsx": "preserve",
     "allowJs": true,
     "noEmit": true,
+    // Тесты чистых функций запускаются напрямую через node --test с нативным
+    // срезанием типов, а он требует расширение .ts в импорте. Сборкой
+    // занимается Next, этот конфиг ничего не порождает.
+    "allowImportingTsExtensions": true,
     "declaration": false,
     "declarationMap": false,
     "isolatedModules": true,

@@ -22,19 +22,9 @@ import type {
 import { PrismaService } from '../prisma/prisma.service';
 import { AttemptLimiter, attemptKey } from './attempt-limiter';
 import { joinFullName } from './full-name';
+import { ARGON2_OPTIONS, hashPassword } from './password';
 import { hashToken, parseDuration } from './tokens';
 import type { Env } from '../config/env';
-
-/**
- * Параметры argon2id. OWASP-минимум: 19 МиБ памяти, 2 прохода. Память здесь
- * важнее числа итераций — именно она делает перебор на GPU невыгодным.
- */
-const ARGON2_OPTIONS: argon2.Options = {
-  type: argon2.argon2id,
-  memoryCost: 19456,
-  timeCost: 2,
-  parallelism: 1,
-};
 
 @Injectable()
 export class AuthService {
@@ -71,7 +61,7 @@ export class AuthService {
       throw new ConflictException('Регистрация невозможна: проверьте клуб и адрес почты');
     }
 
-    const passwordHash = await argon2.hash(dto.password, ARGON2_OPTIONS);
+    const passwordHash = await hashPassword(dto.password);
 
     try {
       // Транзакция обязательна: клиент без ClientProfile — это учётка, которая
