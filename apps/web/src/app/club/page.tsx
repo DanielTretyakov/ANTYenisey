@@ -8,7 +8,7 @@ import type {
   ClubTable,
   Hall,
   Role,
-  Tournament,
+  TournamentType,
   TrainingType,
 } from '@yenisey/types';
 import { AppShell } from '@/components/layout/AppShell';
@@ -32,7 +32,7 @@ type Loaded = {
   tables: ClubTable[];
   coaches: ClubCoach[];
   trainingTypes: TrainingType[];
-  tournaments: Tournament[];
+  tournamentTypes: TournamentType[];
 };
 
 /**
@@ -75,9 +75,9 @@ export default function ClubPage() {
       api.clubTables(),
       api.coaches(),
       api.trainingTypes(),
-      api.tournaments(),
+      api.tournamentTypes(),
     ])
-      .then(([settings, halls, tables, coaches, trainingTypes, tournaments]) => {
+      .then(([settings, halls, tables, coaches, trainingTypes, tournamentTypes]) => {
         if (cancelled) return;
 
         // В сетку предлагаются только действующие типы: снятый с продажи не
@@ -88,7 +88,7 @@ export default function ClubPage() {
           tables,
           coaches,
           trainingTypes: trainingTypes.filter((type) => type.isActive),
-          tournaments,
+          tournamentTypes: tournamentTypes.filter((type) => type.isActive),
         });
         setHallId((previous) => previous ?? halls[0]?.id ?? null);
       })
@@ -225,8 +225,11 @@ export default function ClubPage() {
                   tables={data.tables}
                   coaches={data.coaches}
                   trainingTypes={data.trainingTypes}
-                  tournaments={data.tournaments}
+                  tournamentTypes={data.tournamentTypes}
                   timezone={data.settings.timezone}
+                  // Постановка турнира в сетку заводит его: список в разделе
+                  // «Занятия и турниры» после этого устарел.
+                  onTournamentsChanged={() => undefined}
                 />
               </div>
             )}

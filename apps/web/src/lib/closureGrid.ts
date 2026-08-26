@@ -55,6 +55,15 @@ export interface CellValue {
   trainingTypeId: string | null;
   /** Турнир — только у турнира и только в расписании даты. */
   tournamentId: string | null;
+  /**
+   * Тип турнира, выбранный кистью, пока сам турнир ещё не заведён.
+   *
+   * Живёт только на экране: турнир создаётся при сохранении, из даты
+   * расписания и времени первого закрашенного окна. Заводить его на каждый
+   * мазок значило бы засорять базу турнирами, которые администратор тут же
+   * стёр.
+   */
+  tournamentTypeId: string | null;
 }
 
 /**
@@ -162,6 +171,9 @@ export function slotsToCells(
         clientId: slot.clientId,
         trainingTypeId: slot.trainingTypeId,
         tournamentId: slot.tournamentId,
+        // Загруженное с сервера окно турнира уже имеет идентификатор — тип
+        // ему больше не нужен.
+        tournamentTypeId: null,
       });
     }
   }
@@ -181,8 +193,8 @@ export function cellsToSlots(
   cells: Cells,
   lanes: readonly string[],
   tableIds: readonly string[],
-): (ClosureSlot & { lane: string })[] {
-  const slots: (ClosureSlot & { lane: string })[] = [];
+): (ClosureSlot & { lane: string; tournamentTypeId: string | null })[] {
+  const slots: (ClosureSlot & { lane: string; tournamentTypeId: string | null })[] = [];
 
   for (const lane of lanes) {
     for (const tableId of tableIds) {
@@ -200,7 +212,8 @@ export function cellsToSlots(
           value.coachId === runValue.coachId &&
           value.clientId === runValue.clientId &&
           value.trainingTypeId === runValue.trainingTypeId &&
-          value.tournamentId === runValue.tournamentId;
+          value.tournamentId === runValue.tournamentId &&
+          value.tournamentTypeId === runValue.tournamentTypeId;
 
         if (!continues && runStart !== null && runValue !== null) {
           slots.push({
@@ -213,6 +226,7 @@ export function cellsToSlots(
             clientId: runValue.clientId,
             trainingTypeId: runValue.trainingTypeId,
             tournamentId: runValue.tournamentId,
+            tournamentTypeId: runValue.tournamentTypeId,
           });
           runStart = null;
           runValue = null;
@@ -288,7 +302,8 @@ export function sameCells(a: Cells, b: Cells): boolean {
       other.coachId !== value.coachId ||
       other.clientId !== value.clientId ||
       other.trainingTypeId !== value.trainingTypeId ||
-      other.tournamentId !== value.tournamentId
+      other.tournamentId !== value.tournamentId ||
+      other.tournamentTypeId !== value.tournamentTypeId
     ) {
       return false;
     }

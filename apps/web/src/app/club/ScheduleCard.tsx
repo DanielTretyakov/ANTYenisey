@@ -7,7 +7,7 @@ import type {
   ClubPerson,
   ClubTable,
   DayClosure,
-  Tournament,
+  TournamentType,
   TrainingType,
   Weekday,
 } from '@yenisey/types';
@@ -15,7 +15,9 @@ import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { inputClassName } from '@/components/ui/Field';
+import type { ClosureSlot } from '@yenisey/types';
 import { api, ApiError } from '@/lib/api';
+import { zonedToInstant } from '@/lib/timezones';
 import { cn } from '@/lib/cn';
 import { shortName } from '@/lib/names';
 import { personColors, type PersonColor } from '@/lib/personColor';
@@ -67,15 +69,18 @@ export function ScheduleCard({
   tables,
   coaches,
   trainingTypes,
-  tournaments,
+  tournamentTypes,
   timezone,
+  onTournamentsChanged,
 }: {
   hallId: string;
   tables: ClubTable[];
   coaches: ClubCoach[];
   trainingTypes: TrainingType[];
-  tournaments: Tournament[];
+  tournamentTypes: TournamentType[];
   timezone: string;
+  /** Постановка турнира в сетку заводит его — список в разделе устарел. */
+  onTournamentsChanged: () => void;
 }) {
   const [mode, setMode] = useState<Mode>('template');
   const [weekday, setWeekday] = useState<Weekday>(1);
@@ -94,7 +99,9 @@ export function ScheduleCard({
   const [trainingTypeId, setTrainingTypeId] = useState<string | null>(
     trainingTypes[0]?.id ?? null,
   );
-  const [tournamentId, setTournamentId] = useState<string | null>(tournaments[0]?.id ?? null);
+  const [tournamentTypeId, setTournamentTypeId] = useState<string | null>(
+    tournamentTypes[0]?.id ?? null,
+  );
   /**
    * Имена людей, встречающихся в расписании.
    *
@@ -262,7 +269,10 @@ export function ScheduleCard({
       coachId: attachment === 'coach' ? coachId : null,
       clientId: attachment === 'client' ? (client?.id ?? null) : null,
       trainingTypeId: brush === 'TRAINING' ? trainingTypeId : null,
-      tournamentId: brush === 'TOURNAMENT' ? tournamentId : null,
+      // Турнир ещё не заведён — в клетке пока только его тип. Сам турнир
+      // создастся при сохранении, из даты расписания и времени первого окна.
+      tournamentId: null,
+      tournamentTypeId: brush === 'TOURNAMENT' ? tournamentTypeId : null,
     };
   }
 
@@ -304,7 +314,7 @@ export function ScheduleCard({
       const slots = cellsToSlots(cells, lanes, tableIds);
 
       if (mode === 'template') {
-        const rules = slots.map(({ lane: laneKey, ...slot }) => ({
+        const rules = slots.map(({ lane: laneKey, tournamentTypeId: _type, ...slot }) => ({
           ...slot,
           weekday: Number(laneKey) as Weekday,
         }));
@@ -321,7 +331,12 @@ export function ScheduleCard({
         setCells(next);
         setSaved(next);
       } else {
-        const closures = slots.map(({ lane: _lane, ...slot }) => slot);
+        const closures = await resolveTournaments(
+          slots.map(({ lane: _lane, ...slot }) => slot),
+          date,
+          timezone,
+          onTournamentsChanged,
+        );
 
         const stored = await api.replaceDay(hallId, date, [
           ...(night as DayClosure[]).map(({ id: _id, ...rest }) => rest),
@@ -450,9 +465,9 @@ export function ScheduleCard({
           trainingTypes={trainingTypes}
           trainingTypeId={trainingTypeId}
           onTrainingType={setTrainingTypeId}
-          tournaments={tournaments}
-          tournamentId={tournamentId}
-          onTournament={setTournamentId}
+          tournamentTypes={tournamentTypes}
+          tournamentTypeId={tournamentTypeId}
+          onTournamentType={setTournamentTypeId}
           // Турнир привязан к конкретной дате, поэтому в шаблоне недели его
           // кисти нет вовсе — не только запрещено сервером, но и не предложено.
           allowTournament={mode === 'day'}
@@ -775,6 +790,65 @@ function Legend({
         ))}
     </div>
   );
+}
+
+/**
+ * Заведение турниров под окна, где выбран только тип.
+ *
+ * Турнир создаётся не мазком кисти, а сохранением: иначе база наполнялась бы
+ * турнирами, которые администратор тут же стёр. Один турнир на тип и дату —
+ * два турнира одного типа в один день клуб не проводит, а если проведёт,
+ * второй заводится сменой типа.
+ *
+ * Время начала берётся у самого раннего закрашенного окна: именно его
+ * администратор и разметил как начало.
+ */
+async function resolveTournaments(
+  closures: (ClosureSlot & { tournamentTypeId: string | null })[],
+  date: string,
+  timezone: string,
+  onCreated: () => void,
+): Promise<ClosureSlot[]> {
+  const pending = closures.filter(
+    (slot) => slot.purpose === 'TOURNAMENT' && !slot.tournamentId && slot.tournamentTypeId,
+  );
+
+  const created = new Map<string, string>();
+
+  for (const typeId of new Set(pending.map((slot) => slot.tournamentTypeId!))) {
+    const earliest = Math.min(
+      ...pending.filter((slot) => slot.tournamentTypeId === typeId).map((slot) => slot.startMinute),
+    );
+
+    const startsAt = zonedToInstant(date, formatMinute(earliest), timezone);
+
+    if (!startsAt) {
+      throw new ApiError('Не удалось определить время начала турнира', 400);
+    }
+
+    const tournament = await api.createTournament({
+      tournamentTypeId: typeId,
+      startsAt: startsAt.toISOString(),
+    });
+
+    created.set(typeId, tournament.id);
+  }
+
+  if (created.size > 0) {
+    onCreated();
+  }
+
+  return closures.map(({ tournamentTypeId, ...slot }) => ({
+    ...slot,
+    tournamentId:
+      slot.tournamentId ?? (tournamentTypeId ? (created.get(tournamentTypeId) ?? null) : null),
+  }));
+}
+
+/** Минуты от полуночи в «15:00» — для сборки момента начала турнира. */
+function formatMinute(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  return `${String(hours).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
 /** Сегодняшняя дата по времени клуба, а не браузера. */

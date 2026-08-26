@@ -89,12 +89,7 @@ export default function CatalogPage() {
             onChange={setTournamentTypes}
             onError={setError}
           />
-          <TournamentsCard
-            tournaments={tournaments}
-            types={tournamentTypes}
-            onChange={setTournaments}
-            onError={setError}
-          />
+          <TournamentsCard tournaments={tournaments} onChange={setTournaments} onError={setError} />
         </div>
       )}
     </AppShell>
@@ -210,7 +205,7 @@ function TrainingTypesCard({
           </ul>
         )}
 
-        <form onSubmit={handleAdd} className="flex flex-wrap items-end gap-3">
+        <form onSubmit={handleAdd} className="flex flex-wrap items-stretch gap-3">
           <input
             aria-label="Название типа тренировки"
             placeholder="Общая групповая"
@@ -219,9 +214,7 @@ function TrainingTypesCard({
             onChange={(event) => setName(event.target.value)}
             className={cn(inputClassName, 'min-w-56 flex-1')}
           />
-          <div className="w-40">
-            <MoneyField label="Цена" value={price} onChange={setPrice} />
-          </div>
+          <MoneyField className="w-36" value={price} onChange={setPrice} />
           <Button type="submit" variant="secondary" pending={pending} disabled={name.trim() === ''}>
             Добавить
           </Button>
@@ -308,7 +301,7 @@ function TournamentTypesCard({
           </ul>
         )}
 
-        <form onSubmit={handleAdd} className="flex flex-wrap items-end gap-3">
+        <form onSubmit={handleAdd} className="flex flex-wrap items-stretch gap-3">
           <input
             aria-label="Название типа турнира"
             placeholder="Клуб 100"
@@ -325,9 +318,7 @@ function TournamentTypesCard({
             onChange={(event) => setRating(event.target.value)}
             className={cn(inputClassName, 'w-44')}
           />
-          <div className="w-40">
-            <MoneyField label="Цена участия" value={price} onChange={setPrice} />
-          </div>
+          <MoneyField className="w-36" value={price} onChange={setPrice} />
           <Button type="submit" variant="secondary" pending={pending} disabled={name.trim() === ''}>
             Добавить
           </Button>
@@ -340,54 +331,20 @@ function TournamentTypesCard({
 /** Конкретные турниры: тип плюс дата и время проведения. */
 function TournamentsCard({
   tournaments,
-  types,
   onChange,
   onError,
 }: {
   tournaments: Tournament[];
-  types: TournamentType[];
   onChange: (tournaments: Tournament[]) => void;
   onError: (message: string | null) => void;
 }) {
-  const active = types.filter((type) => type.isActive);
-  const [typeId, setTypeId] = useState('');
-  const [date, setDate] = useState('');
-  const [time, setTime] = useState('');
   const [pending, setPending] = useState(false);
-
-  async function handleAdd(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-
-    const startsAt = new Date(`${date}T${time}:00`);
-
-    if (Number.isNaN(startsAt.getTime())) {
-      onError('Заполните дату и время турнира');
-      return;
-    }
-
-    onError(null);
-    setPending(true);
-
-    try {
-      const created = await api.createTournament({
-        tournamentTypeId: typeId || active[0]!.id,
-        startsAt: startsAt.toISOString(),
-      });
-      onChange([created, ...tournaments]);
-      setDate('');
-      setTime('');
-    } catch (cause) {
-      onError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
-    } finally {
-      setPending(false);
-    }
-  }
 
   return (
     <Card>
       <CardHeader
         title="Турниры"
-        description="Заведённый турнир появляется в палитре расписания — его ставят в сетку как занятое время, отмечая, какие столы он занимает."
+        description="Заводятся прямо в расписании зала: выбираете тип, закрашиваете время — турнир появляется здесь уже с датой и числом занятых окон."
       />
       <CardBody>
         {tournaments.length === 0 ? (
@@ -437,43 +394,11 @@ function TournamentsCard({
           </ul>
         )}
 
-        {active.length === 0 ? (
-          <p className="text-[0.9375rem] text-text-muted">
-            Сначала заведите тип турнира — из него собирается конкретное проведение.
-          </p>
-        ) : (
-          <form onSubmit={handleAdd} className="flex flex-wrap items-end gap-3">
-            <select
-              aria-label="Тип турнира"
-              value={typeId || active[0]!.id}
-              onChange={(event) => setTypeId(event.target.value)}
-              className={cn(inputClassName, 'min-w-48 flex-1 py-2.5')}
-            >
-              {active.map((type) => (
-                <option key={type.id} value={type.id}>
-                  {type.name}
-                </option>
-              ))}
-            </select>
-            <input
-              aria-label="Дата турнира"
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
-              className={cn(inputClassName, 'w-44')}
-            />
-            <input
-              aria-label="Время начала"
-              type="time"
-              value={time}
-              onChange={(event) => setTime(event.target.value)}
-              className={cn(inputClassName, 'w-32')}
-            />
-            <Button type="submit" variant="secondary" pending={pending}>
-              Завести турнир
-            </Button>
-          </form>
-        )}
+        <p className="text-[0.8125rem] text-text-subtle">
+          Турнир заводится в расписании зала: выберите кисть «Турнир», его тип и закрасьте
+          время, которое он занимает. Дата и время начала берутся из сетки — вводить их
+          дважды незачем.
+        </p>
       </CardBody>
     </Card>
   );

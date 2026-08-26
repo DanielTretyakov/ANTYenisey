@@ -5,7 +5,7 @@ import type {
   ClosurePurpose,
   ClubCoach,
   ClubPerson,
-  Tournament,
+  TournamentType,
   TrainingType,
 } from '@yenisey/types';
 import { inputClassName } from '@/components/ui/Field';
@@ -25,10 +25,22 @@ export const PURPOSES: { value: ClosurePurpose; label: string; cell: string; chi
   { value: 'TRAINING', label: 'Тренировка', cell: 'bg-accent/65', chip: 'bg-accent/80' },
   { value: 'ROBOT', label: 'Робот', cell: 'bg-amber-500/55', chip: 'bg-amber-500/70' },
   { value: 'TOURNAMENT', label: 'Турнир', cell: 'bg-rose-500/55', chip: 'bg-rose-500/70' },
-  { value: 'OTHER', label: 'Другое', cell: 'bg-zinc-500/55', chip: 'bg-zinc-500/70' },
 ];
 
-export const PURPOSE_LABEL = new Map(PURPOSES.map((item) => [item.value, item.label]));
+/**
+ * OTHER в палитре нет, но в базе он остаётся.
+ *
+ * Назначение «другое» ничего не объясняло ни администратору через месяц, ни
+ * статистике, и вместо него в сетке теперь турнир. Убирать значение из enum
+ * нельзя: на него ссылаются уже заведённые окна, и цвет с подписью им нужны.
+ */
+const OTHER_CELL = 'bg-zinc-500/55';
+const OTHER_MARK = '·';
+
+export const PURPOSE_LABEL = new Map<ClosurePurpose, string>([
+  ...PURPOSES.map((item) => [item.value, item.label] as const),
+  ['OTHER', 'Другое'],
+]);
 
 /**
  * Однобуквенная метка назначения для клетки.
@@ -43,10 +55,15 @@ export const PURPOSE_MARK = new Map<ClosurePurpose, string>([
   ['TRAINING', 'Т'],
   ['ROBOT', 'Р'],
   ['TOURNAMENT', 'К'],
-  ['OTHER', '·'],
+  ['OTHER', OTHER_MARK],
 ]);
-export const PURPOSE_CELL = new Map(PURPOSES.map((item) => [item.value, item.cell]));
-export const PURPOSE_CHIP = new Map(PURPOSES.map((item) => [item.value, item.chip]));
+export const PURPOSE_CELL = new Map<ClosurePurpose, string>([
+  ...PURPOSES.map((item) => [item.value, item.cell] as const),
+  ['OTHER', OTHER_CELL],
+]);
+export const PURPOSE_CHIP = new Map<ClosurePurpose, string>(
+  PURPOSES.map((item) => [item.value, item.chip] as const),
+);
 
 /** Кого прикрепляют к окну: тренера, клиента или никого. */
 export function attachmentOf(purpose: Brush): 'coach' | 'client' | 'none' {
@@ -74,9 +91,9 @@ export function SchedulePalette({
   trainingTypes,
   trainingTypeId,
   onTrainingType,
-  tournaments,
-  tournamentId,
-  onTournament,
+  tournamentTypes,
+  tournamentTypeId,
+  onTournamentType,
   allowTournament,
 }: {
   brush: Brush;
@@ -90,10 +107,15 @@ export function SchedulePalette({
   trainingTypes: TrainingType[];
   trainingTypeId: string | null;
   onTrainingType: (id: string | null) => void;
-  tournaments: Tournament[];
-  tournamentId: string | null;
-  onTournament: (id: string | null) => void;
-  /** В шаблоне недели турниров не бывает — кисть там не показывается. */
+  /** Типы турниров: из них турнир и собирается прямо здесь, в сетке. */
+  tournamentTypes: TournamentType[];
+  tournamentTypeId: string | null;
+  onTournamentType: (id: string | null) => void;
+  /**
+   * В шаблоне недели турниров не бывает: у турнира дата проведения, а «каждую
+   * субботу один и тот же турнир» — это не турнир, а серия разных. Кисть там
+   * показывается погашенной, а не пропадает: иначе непонятно, куда она делась.
+   */
   allowTournament: boolean;
 }) {
   const attachment = attachmentOf(brush);
@@ -103,14 +125,21 @@ export function SchedulePalette({
 
   return (
     <div className="mb-3 flex flex-wrap items-center gap-1.5">
-      {PURPOSES.filter((purpose) => allowTournament || purpose.value !== 'TOURNAMENT').map((purpose) => (
+      {PURPOSES.map((purpose) => (
         <button
           key={purpose.value}
           type="button"
           aria-pressed={brush === purpose.value}
+          disabled={purpose.value === 'TOURNAMENT' && !allowTournament}
+          title={
+            purpose.value === 'TOURNAMENT' && !allowTournament
+              ? 'Турнир ставится на конкретную дату — переключитесь на «Отдельный день»'
+              : undefined
+          }
           onClick={() => onBrush(purpose.value)}
           className={cn(
             'flex items-center gap-2 rounded-control border px-3 py-1.5 text-[0.875rem] transition-colors',
+            'disabled:cursor-not-allowed disabled:opacity-45',
             brush === purpose.value
               ? 'border-border-strong bg-surface-sunken text-text'
               : 'border-border text-text-muted hover:bg-surface-sunken',
@@ -182,17 +211,15 @@ export function SchedulePalette({
         <label className="flex items-center gap-2 text-[0.875rem] text-text-muted">
           Турнир
           <select
-            value={tournamentId ?? ''}
-            onChange={(event) => onTournament(event.target.value || null)}
+            value={tournamentTypeId ?? ''}
+            onChange={(event) => onTournamentType(event.target.value || null)}
             className={cn(inputClassName, 'w-auto py-1.5 text-[0.875rem]')}
           >
-            {tournaments.length === 0 && <option value="">турниров нет</option>}
-            {tournaments.map((tournament) => (
-              <option key={tournament.id} value={tournament.id}>
-                {tournament.typeName} —{' '}
-                {new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short' }).format(
-                  new Date(tournament.startsAt),
-                )}
+            {tournamentTypes.length === 0 && <option value="">типов турниров нет</option>}
+            {tournamentTypes.map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.name}
+                {type.ratingLabel ? ` (рейтинг ${type.ratingLabel})` : ''}
               </option>
             ))}
           </select>

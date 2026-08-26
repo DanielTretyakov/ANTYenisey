@@ -17,26 +17,38 @@ export function MoneyField({
   value,
   onChange,
   invalid = false,
+  className,
 }: {
-  label: string;
+  /**
+   * Подпись над полем. Без неё поле рисуется одной строкой — так оно встаёт в
+   * ряд с обычными полями ввода в компактных формах добавления, где подписи
+   * заменяет placeholder. Смешивать подписанное с неподписанным в одной
+   * строке нельзя: подпись поднимает поле, и ряд разъезжается по высоте.
+   */
+  label?: string;
   hint?: string;
   value: string;
   onChange: (value: string) => void;
   /** Введено не число — поле подсвечивается, но введённое не стирается. */
   invalid?: boolean;
+  className?: string;
 }) {
   const fieldId = useId();
   const hintId = hint ? `${fieldId}-hint` : undefined;
 
   return (
-    <div className="mb-4">
-      <label htmlFor={fieldId} className="mb-1.5 block text-[0.8125rem] font-medium text-text-muted">
-        {label}
-      </label>
+    <div className={cn(label ? 'mb-4' : '', className)}>
+      {label && (
+        <label htmlFor={fieldId} className="mb-1.5 block text-[0.8125rem] font-medium text-text-muted">
+          {label}
+        </label>
+      )}
 
       <div className="flex items-stretch">
         <input
           id={fieldId}
+          aria-label={label ? undefined : 'Цена в рублях'}
+          placeholder={label ? undefined : 'цена'}
           // Не type="number": он режет запятую на части раскладок и молча
           // отдаёт пустую строку вместо введённого. Разбор всё равно наш.
           type="text"
