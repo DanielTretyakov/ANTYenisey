@@ -15,6 +15,7 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { inputClassName } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
+import { shortName } from '@/lib/names';
 import {
   cellKey,
   cellsToSlots,
@@ -348,7 +349,7 @@ export function ScheduleCard({
                 aria-label="Дата расписания"
                 value={date}
                 onChange={(event) => setDate(event.target.value)}
-                className={cn(inputClassName, 'h-9 w-auto py-1 text-[0.875rem]')}
+                className={cn(inputClassName, 'w-auto py-1.5 text-[0.875rem]')}
               />
               <span className="text-[0.8125rem] text-text-subtle">
                 {customised
@@ -526,6 +527,7 @@ function Palette({
   onCoach: (id: string | null) => void;
 }) {
   const needsCoach = brush === 'TRAINING' || brush === 'SPARRING';
+  const current = coaches.find((coach) => coach.id === coachId);
 
   return (
     <div className="mb-3 flex flex-wrap items-center gap-1.5">
@@ -567,7 +569,7 @@ function Palette({
           <select
             value={coachId ?? ''}
             onChange={(event) => onCoach(event.target.value || null)}
-            className={cn(inputClassName, 'h-9 w-auto py-1 text-[0.875rem]')}
+            className={cn(inputClassName, 'w-auto py-1.5 text-[0.875rem]')}
           >
             {/* У тренировки тренер обязателен, у спарринга — нет: спарринг
                 заводят заранее, ещё не зная, кто его проведёт. */}
@@ -580,6 +582,17 @@ function Palette({
             ))}
           </select>
         </label>
+      )}
+
+      {needsCoach && (
+        <p className="w-full text-[0.8125rem] text-text-subtle">
+          {/* Тренер — часть кисти, а не настройка дня: чтобы поставить другого,
+              выберите его здесь и закрасьте нужное время. Уже закрашенное
+              перекрашивается поверх. */}
+          Закрашиваете: {brush === 'TRAINING' ? 'тренировка' : 'спарринг'}
+          {current ? `, ${shortName(current.fullName)}` : ''} Чтобы поставить другого тренера,
+          выберите его и закрасьте нужные часы — поверх уже закрашенного тоже можно.
+        </p>
       )}
     </div>
   );
@@ -644,6 +657,16 @@ function Grid({
                 const label = value ? PURPOSE_LABEL.get(value.purpose) : 'свободно';
                 const coach = value?.coachId ? coachName.get(value.coachId) : undefined;
 
+                // Подпись ставится только там, где окно начинается: иначе
+                // четырёхчасовая тренировка повторила бы фамилию восемь раз
+                // подряд и сетку стало бы невозможно читать.
+                const above = cells.get(cellKey(lane, table.id, slot - 1));
+                const startsHere =
+                  value !== undefined &&
+                  (above === undefined ||
+                    above.purpose !== value.purpose ||
+                    above.coachId !== value.coachId);
+
                 return (
                   <td key={table.id} className="border-b border-l border-border p-0">
                     <button
@@ -676,12 +699,22 @@ function Grid({
                         }
                       }}
                       className={cn(
-                        'block h-7 w-full transition-colors',
+                        'block h-7 w-full overflow-hidden px-1 text-left text-[0.6875rem] leading-none whitespace-nowrap transition-colors',
                         value
                           ? PURPOSE_CELL.get(value.purpose)
                           : 'hover:bg-surface-sunken',
                       )}
-                    />
+                    >
+                      {startsHere && coach && (
+                        <span className="text-accent-text/90">{shortName(coach)}</span>
+                      )}
+                      {startsHere && value?.purpose === 'TRAINING' && !coach && (
+                        // Тренировка без тренера не сохранится: сервер её
+                        // отклонит. Лучше сказать об этом сразу в клетке, чем
+                        // сообщением после нажатия «Сохранить».
+                        <span className="text-warning">нужен тренер</span>
+                      )}
+                    </button>
                   </td>
                 );
               })}
