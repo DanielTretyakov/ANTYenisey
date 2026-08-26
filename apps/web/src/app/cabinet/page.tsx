@@ -102,7 +102,7 @@ export default function CabinetPage() {
           <CardHeader title="Профиль" description="Данные, которые видит администратор клуба." />
           <CardBody>
             <dl className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
-              <Row label="ФИО" value={user.fullName ?? '—'} />
+              <Row label="ФИО" value={user.fullName} />
               <Row label="Электронная почта" value={user.email} />
               <Row label="Телефон" value={user.phone ?? '—'} />
               <Row label="Роль" value={ROLE_LABELS[user.role]} />

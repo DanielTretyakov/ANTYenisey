@@ -84,6 +84,7 @@ export class AuthService {
             phone: dto.phone,
             passwordHash,
             role: Role.CLIENT,
+            fullName: joinFullName(dto),
           },
         });
 
@@ -91,7 +92,6 @@ export class AuthService {
           data: {
             userId: created.id,
             tenantId: tenant.id,
-            fullName: joinFullName(dto),
           },
         });
 
@@ -105,7 +105,7 @@ export class AuthService {
           email: user.email,
           phone: user.phone,
           role: user.role,
-          fullName: joinFullName(dto),
+          fullName: user.fullName,
         },
         context,
       );
@@ -141,10 +141,10 @@ export class AuthService {
         email: true,
         phone: true,
         role: true,
+        fullName: true,
         passwordHash: true,
         deactivatedAt: true,
         anonymizedAt: true,
-        clientProfile: { select: { fullName: true } },
       },
     });
 
@@ -173,7 +173,7 @@ export class AuthService {
         email: user.email,
         phone: user.phone,
         role: user.role,
-        fullName: user.clientProfile?.fullName ?? null,
+        fullName: user.fullName,
       },
       context,
     );
@@ -239,9 +239,9 @@ export class AuthService {
         email: true,
         phone: true,
         role: true,
+        fullName: true,
         deactivatedAt: true,
         anonymizedAt: true,
-        clientProfile: { select: { fullName: true } },
       },
     });
 
@@ -256,7 +256,7 @@ export class AuthService {
         email: user.email,
         phone: user.phone,
         role: user.role,
-        fullName: user.clientProfile?.fullName ?? null,
+        fullName: user.fullName,
       },
       context,
     );

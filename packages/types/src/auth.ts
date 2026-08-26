@@ -58,8 +58,11 @@ export interface PublicUser {
   email: string;
   phone: string | null;
   role: Role;
-  /** Из ClientProfile/CoachProfile; null, если профиль ещё не заведён. */
-  fullName: string | null;
+  /**
+   * ФИО есть у любой роли: оно живёт в User, а не в профиле. У анонимизированной
+   * учётки здесь плейсхолдер, а не null, — поле обязательное.
+   */
+  fullName: string;
 }
 
 export interface AuthTokens {

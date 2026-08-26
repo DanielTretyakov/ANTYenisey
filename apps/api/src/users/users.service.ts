@@ -22,7 +22,7 @@ export class UsersService {
         email: true,
         phone: true,
         role: true,
-        clientProfile: { select: { fullName: true } },
+        fullName: true,
       },
     });
 
@@ -36,7 +36,7 @@ export class UsersService {
       email: user.email,
       phone: user.phone,
       role: user.role,
-      fullName: user.clientProfile?.fullName ?? null,
+      fullName: user.fullName,
     };
   }
 }

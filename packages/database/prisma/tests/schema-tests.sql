@@ -35,14 +35,14 @@ VALUES ('t1','Енисей','yenisey',now(),now(),false,40000,20000),
        ('t2','Другой клуб','other',now(),now(),false,50000,25000);
 
 -- Клиент в клубе 1
-INSERT INTO "User" (id,"tenantId",email,"passwordHash",role,"createdAt","updatedAt")
-VALUES ('u1','t1','a@a.ru','x','CLIENT',now(),now()),
-       ('c1','t1','coach@a.ru','x','COACH',now(),now()),
-       ('u2','t2','b@b.ru','x','CLIENT',now(),now());
+INSERT INTO "User" (id,"tenantId",email,"passwordHash",role,"fullName","createdAt","updatedAt")
+VALUES ('u1','t1','a@a.ru','x','CLIENT','Иванов Иван',now(),now()),
+       ('c1','t1','coach@a.ru','x','COACH','Тренеров Тренер',now(),now()),
+       ('u2','t2','b@b.ru','x','CLIENT','Петров Пётр',now(),now());
 
-INSERT INTO "ClientProfile" ("userId","tenantId","fullName","createdAt","updatedAt")
-VALUES ('u1','t1','Иванов Иван',now(),now()),
-       ('u2','t2','Петров Пётр',now(),now());
+INSERT INTO "ClientProfile" ("userId","tenantId","createdAt","updatedAt")
+VALUES ('u1','t1',now(),now()),
+       ('u2','t2',now(),now());
 
 INSERT INTO "CoachProfile" ("userId","tenantId","createdAt","updatedAt")
 VALUES ('c1','t1',now(),now());
