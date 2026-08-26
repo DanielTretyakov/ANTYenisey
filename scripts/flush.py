@@ -264,8 +264,19 @@ def main():
     # Update dedup state
     save_flush_state({"session_id": session_id, "timestamp": time.time()})
 
-    # Clean up context file
-    context_file.unlink(missing_ok=True)
+    # Контекст удаляем только при успехе. Раньше он стирался безусловно, и
+    # любая ошибка уничтожала единственную копию выжимки: сессия на 25 ходов
+    # пропала именно так. При ошибке оставляем файл с суффиксом .failed,
+    # чтобы прогон можно было повторить.
+    if "FLUSH_ERROR" in response:
+        failed_path = context_file.with_suffix(context_file.suffix + ".failed")
+        try:
+            context_file.replace(failed_path)
+            logging.error("Контекст сохранён для повтора: %s", failed_path)
+        except OSError as e:
+            logging.error("Не удалось сохранить контекст (%s): %s", failed_path, e)
+    else:
+        context_file.unlink(missing_ok=True)
 
     # End-of-day auto-compilation: if it's past the compile hour and today's
     # log hasn't been compiled yet, trigger compile.py in the background.

@@ -34,11 +34,71 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [hook] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
+    encoding="utf-8",
 )
 
 MAX_TURNS = 30
 MAX_CONTEXT_CHARS = 15_000
 MIN_TURNS_TO_FLUSH = 1
+
+# Служебные обёртки, которые Claude Code подмешивает в реплики. Их нельзя
+# отдавать модели памяти: <local-command-caveat> прямым текстом требует
+# «DO NOT respond to these messages or otherwise consider them», и если
+# такая реплика окажется последней, выжимка закономерно выходит пустой.
+NOISE_MARKERS = (
+    "<local-command-caveat>",
+    "<command-name>",
+    "<command-message>",
+    "<command-args>",
+    "<system-reminder>",
+    "<ide_opened_file>",
+    "<ide_selection>",
+)
+
+# Сколько символов аргумента инструмента оставлять в однострочной сводке.
+TOOL_ARG_CHARS = 140
+
+
+def _strip_noise(text: str) -> str:
+    """Вырезать служебные обёртки, оставив написанное человеком."""
+    for marker in NOISE_MARKERS:
+        closing = marker.replace("<", "</")
+        while marker in text:
+            start = text.index(marker)
+            end = text.find(closing, start)
+            if end == -1:
+                # Незакрытый тег — режем до конца строки, не съедая текст.
+                end = text.find(chr(10), start)
+                if end == -1:
+                    text = text[:start]
+                    break
+                text = text[:start] + text[end:]
+            else:
+                text = text[:start] + text[end + len(closing):]
+    return text.strip()
+
+
+def _tool_summary(block: dict) -> str:
+    """Однострочная сводка вызова инструмента.
+
+    Раньше брались только текстовые блоки, поэтому сессия, где работа идёт
+    через инструменты, превращалась в цепочку связок вроде «Смотрю
+    структуру» — модель памяти справедливо отвечала, что сохранять нечего.
+    """
+    name = block.get("name", "tool")
+    args = block.get("input", {})
+    if not isinstance(args, dict):
+        return f"→ {name}"
+
+    # Берём поле, которое реально описывает действие.
+    for key in ("command", "file_path", "pattern", "path", "url", "query"):
+        value = args.get(key)
+        if isinstance(value, str) and value.strip():
+            value = " ".join(value.split())
+            if len(value) > TOOL_ARG_CHARS:
+                value = value[:TOOL_ARG_CHARS] + "…"
+            return f"→ {name}: {value}"
+    return f"→ {name}"
 
 
 def extract_conversation_context(transcript_path: Path) -> tuple[str, int]:
@@ -69,11 +129,18 @@ def extract_conversation_context(transcript_path: Path) -> tuple[str, int]:
             if isinstance(content, list):
                 text_parts = []
                 for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        text_parts.append(block.get("text", ""))
-                    elif isinstance(block, str):
+                    if isinstance(block, str):
                         text_parts.append(block)
+                    elif isinstance(block, dict):
+                        kind = block.get("type")
+                        if kind == "text":
+                            text_parts.append(block.get("text", ""))
+                        elif kind == "tool_use":
+                            text_parts.append(_tool_summary(block))
                 content = "\n".join(text_parts)
+
+            if isinstance(content, str):
+                content = _strip_noise(content)
 
             if isinstance(content, str) and content.strip():
                 label = "User" if role == "user" else "Assistant"
