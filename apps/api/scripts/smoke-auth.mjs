@@ -115,6 +115,7 @@ const registration = (overrides = {}) => ({
   firstName: 'Пётр',
   middleName: 'Сергеевич',
   phone: '+79991234567',
+  birthDate: '2001-05-17',
   ...overrides,
 });
 
@@ -157,6 +158,16 @@ async function main() {
     `двойной пробел не доехал до базы (получено «${r.body?.user?.fullName}»)`,
     r.body?.user?.fullName === 'Салтыков Щедрин Пётр Сергеевич',
   );
+
+  console.log('=== 5б. Проверка даты рождения');
+  r = await post('/auth/register', registration({ birthDate: undefined }));
+  check('без даты рождения отклонено', 400, r.status);
+  r = await post('/auth/register', registration({ birthDate: '17.05.2001' }));
+  check('дата не в том формате отклонена', 400, r.status);
+  r = await post('/auth/register', registration({ birthDate: '2099-01-01' }));
+  check('дата в будущем отклонена', 409, r.status);
+  r = await post('/auth/register', registration({ birthDate: '2001-02-31' }));
+  check('несуществующая дата отклонена', 409, r.status);
 
   console.log('=== 6. Проверка телефона');
   r = await post('/auth/register', registration({ phone: '88005553535' }));
@@ -589,6 +600,35 @@ async function main() {
     r = await asAdmin(`/club/people?search=${encodeURIComponent(first.email)}`);
     check('поиск по почте', 200, r.status);
     assert('нашёлся ровно один', r.body?.total === 1);
+
+    const probe = r.body?.items?.[0];
+    assert('телефон и дата рождения пришли', Boolean(probe?.phone) && Boolean(probe?.birthDate));
+
+    console.log('=== 21г. Смена роли');
+    r = await asAdmin(`/club/people/${probe.id}/role`, { method: 'PATCH', json: { role: 'COACH' } });
+    check('клиент повышен до тренера', 200, r.status);
+    assert('роль изменилась', r.body?.role === 'COACH');
+
+    r = await asAdmin('/club/coaches');
+    assert(
+      'и он появился в списке тренеров — значит, профиль тренера заведён',
+      Array.isArray(r.body) && r.body.some((coach) => coach.id === probe.id),
+    );
+
+    r = await asAdmin(`/club/people/${probe.id}/role`, { method: 'PATCH', json: { role: 'CLIENT' } });
+    check('и разжалован обратно', 200, r.status);
+
+    r = await asAdmin(`/club/people/${probe.id}/role`, { method: 'PATCH', json: { role: 'CLIENT' } });
+    check('повтор той же роли отклонён', 409, r.status);
+
+    r = await asAdmin(`/club/people/${probe.id}/role`, { method: 'PATCH', json: { role: 'KTO-TO' } });
+    check('неизвестная роль отклонена', 400, r.status);
+
+    // Себе роль менять нельзя: единственный владелец, разжаловавший себя,
+    // запер бы клуб — вернуть роль было бы уже некому.
+    const me = (await asAdmin('/auth/me')).body;
+    r = await asAdmin(`/club/people/${me?.id}/role`, { method: 'PATCH', json: { role: 'CLIENT' } });
+    check('свою роль изменить нельзя', 409, r.status);
 
     // Стол СОСЕДНЕГО зала в расписание этого зала попасть не должен: составной
     // внешний ключ проверяет клуб, но не зал.

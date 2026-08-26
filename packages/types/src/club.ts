@@ -216,7 +216,9 @@ export interface ClubPerson {
   id: string;
   fullName: string;
   email: string;
-  phone: string | null;
+  phone: string;
+  /** Дата рождения, «2001-05-17». */
+  birthDate: string;
   role: Role;
   /** Когда учётка заведена — по ней список и сортируется по умолчанию. */
   createdAt: string;
@@ -232,6 +234,16 @@ export interface ClubPeoplePage {
   items: ClubPerson[];
   /** Сколько всего подходит под фильтр — для «показано 50 из 1240». */
   total: number;
+}
+
+/**
+ * Смена роли человека.
+ *
+ * Повышение клиента до тренера и обратно — обычная жизнь клуба, и делать это
+ * должен администратор, а не разработчик командой в консоли.
+ */
+export interface ChangeRoleRequest {
+  role: Role;
 }
 
 export interface ClubPeopleQuery {

@@ -7,6 +7,7 @@ import {
 import { Prisma, Role } from '@yenisey/database';
 import type {
   ClubCoach,
+  Role as RoleName,
   ClubPeoplePage,
   ClubPeopleQuery,
   ClubPerson,
@@ -18,6 +19,7 @@ import type {
   UpdateHallRequest,
 } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
+import { formatBirthDate } from '../auth/birth-date';
 import { clubSettingsViolations, hallViolations } from './settings-rules';
 
 /**
@@ -360,6 +362,7 @@ export class ClubService {
           fullName: true,
           email: true,
           phone: true,
+          birthDate: true,
           role: true,
           createdAt: true,
           deactivatedAt: true,
@@ -384,12 +387,91 @@ export class ClubService {
         fullName: person.fullName,
         email: person.email,
         phone: person.phone,
+        birthDate: formatBirthDate(person.birthDate),
         role: person.role,
         createdAt: person.createdAt.toISOString(),
         deactivated: person.deactivatedAt !== null,
       })),
       total,
     };
+  }
+
+  /**
+   * Смена роли человека.
+   *
+   * Повышение клиента до тренера и обратно — обычная жизнь клуба, и делать это
+   * должен администратор, а не разработчик командой в консоли.
+   *
+   * Профили ролей при этом не удаляются, а заводятся по мере надобности:
+   * тренер, разжалованный в клиенты, сохраняет карточку с достижениями, и
+   * повышение обратно не начинается с чистого листа. Заодно на профили
+   * ссылается расписание, и удаление упёрлось бы во внешний ключ.
+   */
+  async changeRole(
+    tenantId: string,
+    actorId: string,
+    userId: string,
+    role: RoleName,
+  ): Promise<ClubPerson> {
+    // Себе роль не меняют: единственный владелец, разжаловавший себя в
+    // клиенты, запирает клуб — вернуть роль будет уже некому.
+    if (actorId === userId) {
+      throw new ConflictException('Свою собственную роль изменить нельзя');
+    }
+
+    const person = await this.prisma.user.findFirst({
+      where: { id: userId, tenantId, anonymizedAt: null },
+      select: { id: true, role: true },
+    });
+
+    if (!person) {
+      throw new NotFoundException('Человек не найден');
+    }
+
+    if (person.role === role) {
+      throw new ConflictException('У человека уже эта роль');
+    }
+
+    // Последнего владельца не разжаловать: клуб без владельца остаётся без
+    // того, кто может назначить нового.
+    if (person.role === Role.OWNER) {
+      const owners = await this.prisma.user.count({
+        where: { tenantId, role: Role.OWNER, deactivatedAt: null, anonymizedAt: null },
+      });
+
+      if (owners <= 1) {
+        throw new ConflictException('Это единственное руководство клуба, роль менять нельзя');
+      }
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: userId }, data: { role } });
+
+      if (role === Role.COACH) {
+        await tx.coachProfile.upsert({
+          where: { userId },
+          update: {},
+          create: { userId, tenantId },
+        });
+      }
+
+      if (role === Role.CLIENT) {
+        await tx.clientProfile.upsert({
+          where: { userId },
+          update: {},
+          create: { userId, tenantId },
+        });
+      }
+    });
+
+    const updated = await this.listPeople(tenantId, { ids: [userId], limit: 1 });
+    const result = updated.items[0];
+
+    if (!result) {
+      throw new NotFoundException('Человек не найден');
+    }
+
+    return result;
   }
 
   // --- Разбор ошибок базы --------------------------------------------------

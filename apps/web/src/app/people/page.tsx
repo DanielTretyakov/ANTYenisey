@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import type { ClubPeoplePage, ClubPerson, Role } from '@yenisey/types';
@@ -100,15 +99,7 @@ export default function PeoplePage() {
   const total = page?.total ?? 0;
 
   return (
-    <AppShell
-      actions={
-        <Link href="/cabinet">
-          <Button variant="ghost" size="sm">
-            В кабинет
-          </Button>
-        </Link>
-      }
-    >
+    <AppShell>
       <h1 className="mb-2 text-[1.75rem]">Состав клуба</h1>
       <p className="mb-7 max-w-2xl text-[0.9375rem] text-text-muted">
         Сотрудники и клиенты одним списком. Отключённые учётки остаются здесь и
@@ -170,15 +161,32 @@ export default function PeoplePage() {
                   <thead>
                     <tr className="border-b border-border text-left text-text-subtle">
                       <th className="py-2 pr-4 font-medium">ФИО</th>
-                      <th className="py-2 pr-4 font-medium">Роль</th>
                       <th className="py-2 pr-4 font-medium">Почта</th>
                       <th className="py-2 pr-4 font-medium">Телефон</th>
-                      <th className="py-2 font-medium">В клубе с</th>
+                      <th className="py-2 pr-4 font-medium">Дата рождения</th>
+                      <th className="py-2 font-medium">Роль</th>
                     </tr>
                   </thead>
                   <tbody>
                     {items.map((person) => (
-                      <PersonRow key={person.id} person={person} />
+                      <PersonRow
+                        key={person.id}
+                        person={person}
+                        self={session.status === 'ready' && session.user.id === person.id}
+                        onChanged={(updated) =>
+                          setPage((previous) =>
+                            previous
+                              ? {
+                                  ...previous,
+                                  items: previous.items.map((item) =>
+                                    item.id === updated.id ? updated : item,
+                                  ),
+                                }
+                              : previous,
+                          )
+                        }
+                        onError={setError}
+                      />
                     ))}
                   </tbody>
                 </table>
@@ -217,7 +225,41 @@ export default function PeoplePage() {
   );
 }
 
-function PersonRow({ person }: { person: ClubPerson }) {
+/**
+ * Строка человека с возможностью сменить роль.
+ *
+ * Роль — выпадающий список прямо в таблице, а не отдельный экран: повышение
+ * клиента до тренера случается на ходу, и заводить ради него мастер из трёх
+ * шагов значит сделать так, чтобы им не пользовались.
+ */
+function PersonRow({
+  person,
+  self,
+  onChanged,
+  onError,
+}: {
+  person: ClubPerson;
+  /** Свою роль изменить нельзя — сервер это тоже запрещает. */
+  self: boolean;
+  onChanged: (person: ClubPerson) => void;
+  onError: (message: string) => void;
+}) {
+  const [pending, setPending] = useState(false);
+
+  async function change(role: Role): Promise<void> {
+    if (role === person.role) return;
+
+    setPending(true);
+
+    try {
+      onChanged(await api.changeRole(person.id, role));
+    } catch (cause) {
+      onError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
     <tr className="border-b border-border last:border-0">
       <td className="py-2.5 pr-4 text-text">
@@ -228,14 +270,38 @@ function PersonRow({ person }: { person: ClubPerson }) {
           </span>
         )}
       </td>
-      <td className="py-2.5 pr-4 text-text-muted">{ROLE_LABELS[person.role]}</td>
       <td className="py-2.5 pr-4 text-text-muted">{person.email}</td>
-      <td className="py-2.5 pr-4 text-text-muted">{person.phone ?? '—'}</td>
-      <td className="py-2.5 text-text-subtle">
-        {new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium' }).format(new Date(person.createdAt))}
+      <td className="py-2.5 pr-4 text-text-muted">{person.phone}</td>
+      <td className="py-2.5 pr-4 text-text-muted">{formatDate(person.birthDate)}</td>
+      <td className="py-2.5">
+        {self ? (
+          <span className="text-text-muted" title="Свою собственную роль изменить нельзя">
+            {ROLE_LABELS[person.role]}
+          </span>
+        ) : (
+          <select
+            aria-label={`Роль: ${person.fullName}`}
+            value={person.role}
+            disabled={pending}
+            onChange={(event) => void change(event.target.value as Role)}
+            className={cn(inputClassName, 'w-auto py-1 text-[0.8125rem]')}
+          >
+            {(Object.keys(ROLE_LABELS) as Role[]).map((role) => (
+              <option key={role} value={role}>
+                {ROLE_LABELS[role]}
+              </option>
+            ))}
+          </select>
+        )}
       </td>
     </tr>
   );
+}
+
+/** «2001-05-17» → «17.05.2001». Заглушку из миграции показываем как есть. */
+function formatDate(iso: string): string {
+  const [year, month, day] = iso.split('-');
+  return `${day}.${month}.${year}`;
 }
 
 /** Русское склонение по числу: 1 человека, 2 человек, 5 человек. */

@@ -5,6 +5,7 @@ import type {
   ClubCoach,
   ClubPeoplePage,
   ClubPeopleQuery,
+  ClubPerson,
   ClubSettings,
   ClubTable,
   CreateHallRequest,
@@ -175,6 +176,10 @@ export const api = {
 
     return authorized(`/club/people${search ? `?${search}` : ''}`);
   },
+
+  /** Повышение клиента до тренера и обратно. */
+  changeRole: (userId: string, role: ClubPerson['role']): Promise<ClubPerson> =>
+    authorized(`/club/people/${userId}/role`, json('PATCH', { role })),
 
   // --- Расписание зала
   /** Постоянный шаблон недели: как зал живёт обычно. */

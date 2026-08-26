@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { PublicUser } from '@yenisey/types';
+import { formatBirthDate } from '../auth/birth-date';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -21,6 +22,7 @@ export class UsersService {
         tenantId: true,
         email: true,
         phone: true,
+        birthDate: true,
         role: true,
         fullName: true,
       },
@@ -35,6 +37,7 @@ export class UsersService {
       tenantId: user.tenantId,
       email: user.email,
       phone: user.phone,
+      birthDate: formatBirthDate(user.birthDate),
       role: user.role,
       fullName: user.fullName,
     };

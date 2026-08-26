@@ -16,6 +16,7 @@ import type {
   ClosureRule,
   ClubCoach,
   ClubPeoplePage,
+  ClubPerson,
   ClubSettings,
   ClubTable,
   DaySchedule,
@@ -31,7 +32,7 @@ import {
   ReplaceTemplateDto,
   UpdateHallDto,
 } from './dto/schedule.dto';
-import { ClubPeopleQueryDto } from './dto/people.dto';
+import { ChangeRoleDto, ClubPeopleQueryDto } from './dto/people.dto';
 import { UpdateClubSettingsDto } from './dto/update-settings.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -152,6 +153,21 @@ export class ClubController {
     @Query() query: ClubPeopleQueryDto,
   ): Promise<ClubPeoplePage> {
     return this.club.listPeople(user.tenantId, query);
+  }
+
+  /**
+   * Смена роли: повышение клиента до тренера и обратно.
+   *
+   * Кто именно меняет, важно: свою собственную роль изменить нельзя, иначе
+   * единственный владелец мог бы запереть клуб.
+   */
+  @Patch('people/:id/role')
+  changeRole(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id') userId: string,
+    @Body() dto: ChangeRoleDto,
+  ): Promise<ClubPerson> {
+    return this.club.changeRole(user.tenantId, user.sub, userId, dto.role);
   }
 
   // --- Расписание зала -----------------------------------------------------

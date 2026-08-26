@@ -21,6 +21,7 @@ import type {
 } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { AttemptLimiter, attemptKey } from './attempt-limiter';
+import { formatBirthDate, parseBirthDate } from './birth-date';
 import { joinFullName } from './full-name';
 import { ARGON2_OPTIONS, hashPassword } from './password';
 import { hashToken, parseDuration } from './tokens';
@@ -61,6 +62,14 @@ export class AuthService {
       throw new ConflictException('Регистрация невозможна: проверьте клуб и адрес почты');
     }
 
+    const birthDate = parseBirthDate(dto.birthDate);
+
+    if (!birthDate) {
+      throw new ConflictException(
+        'Проверьте дату рождения: она не может быть в будущем или раньше 1900 года',
+      );
+    }
+
     const passwordHash = await hashPassword(dto.password);
 
     try {
@@ -75,6 +84,7 @@ export class AuthService {
             passwordHash,
             role: Role.CLIENT,
             fullName: joinFullName(dto),
+            birthDate,
           },
         });
 
@@ -96,6 +106,7 @@ export class AuthService {
           phone: user.phone,
           role: user.role,
           fullName: user.fullName,
+          birthDate: formatBirthDate(user.birthDate),
         },
         context,
       );
@@ -132,6 +143,7 @@ export class AuthService {
         phone: true,
         role: true,
         fullName: true,
+        birthDate: true,
         passwordHash: true,
         deactivatedAt: true,
         anonymizedAt: true,
@@ -164,6 +176,7 @@ export class AuthService {
         phone: user.phone,
         role: user.role,
         fullName: user.fullName,
+        birthDate: formatBirthDate(user.birthDate),
       },
       context,
     );
@@ -230,6 +243,7 @@ export class AuthService {
         phone: true,
         role: true,
         fullName: true,
+        birthDate: true,
         deactivatedAt: true,
         anonymizedAt: true,
       },
@@ -247,6 +261,7 @@ export class AuthService {
         phone: user.phone,
         role: user.role,
         fullName: user.fullName,
+        birthDate: formatBirthDate(user.birthDate),
       },
       context,
     );

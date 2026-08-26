@@ -44,6 +44,7 @@ export default function RegisterPage() {
         firstName: String(form.get('firstName')),
         middleName: String(form.get('middleName')),
         phone,
+        birthDate: String(form.get('birthDate')),
       });
 
       saveSession(auth);
@@ -77,6 +78,15 @@ export default function RegisterPage() {
         <Field label="Отчество" name="middleName" autoComplete="additional-name" required />
 
         <PhoneField />
+
+        <Field
+          label="Дата рождения"
+          name="birthDate"
+          type="date"
+          autoComplete="bday"
+          hint="Нужна для детских групп и возрастных турниров."
+          required
+        />
 
         <Field label="Электронная почта" name="email" type="email" autoComplete="email" required />
 

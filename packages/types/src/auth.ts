@@ -34,6 +34,12 @@ export interface RegisterRequest {
   middleName: string;
   /** Телефон в E.164: +79991234567. Основной канал связи клуба с клиентом. */
   phone: string;
+  /**
+   * Дата рождения, «2001-05-17». Обязательна: от неё зависят детские группы и
+   * возрастные турниры, а спрашивать её потом, когда человек уже записался, —
+   * значит не спросить никогда.
+   */
+  birthDate: string;
 }
 
 export interface LoginRequest {
@@ -56,7 +62,9 @@ export interface PublicUser {
   id: string;
   tenantId: string;
   email: string;
-  phone: string | null;
+  phone: string;
+  /** Дата рождения, «2001-05-17». */
+  birthDate: string;
   role: Role;
   /**
    * ФИО есть у любой роли: оно живёт в User, а не в профиле. У анонимизированной

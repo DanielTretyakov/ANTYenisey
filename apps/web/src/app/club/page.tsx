@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { ClubCoach, ClubSettings, ClubTable, Hall, Role } from '@yenisey/types';
@@ -111,22 +110,7 @@ export default function ClubPage() {
   }
 
   return (
-    <AppShell
-      actions={
-        <>
-          <Link href="/people">
-            <Button variant="ghost" size="sm">
-              Состав клуба
-            </Button>
-          </Link>
-          <Link href="/cabinet">
-            <Button variant="ghost" size="sm">
-              В кабинет
-            </Button>
-          </Link>
-        </>
-      }
-    >
+    <AppShell>
       <h1 className="mb-2 text-[1.75rem]">Настройки клуба</h1>
       <p className="mb-7 max-w-2xl text-[0.9375rem] text-text-muted">
         Всё на этой странице клуб меняет сам, без участия разработчика. Изменения

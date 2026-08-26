@@ -14,6 +14,7 @@
  * ФИО — так сбрасывают забытый пароль администратора, не заводя вторую учётку.
  */
 import { PrismaClient, Role } from '@yenisey/database';
+import { parseBirthDate } from '../src/auth/birth-date.ts';
 import { hashPassword } from '../src/auth/password.ts';
 
 const prisma = new PrismaClient();
@@ -64,12 +65,26 @@ async function main(): Promise<void> {
   const fullName = args.name?.trim();
   const slug = args.club?.trim() ?? 'yenisey';
   const role = (args.role ?? 'ADMIN').toUpperCase();
+  // Телефон приходит как угодно — «8 (999) 123-45-67» тоже: чистим до цифр и
+  // приводим к E.164, как это делает форма регистрации.
+  const phone = normalisePhone(args.phone ?? '');
+  const birthDate = parseBirthDate(args.birthdate?.trim() ?? '');
 
   if (!email || !password || !fullName) {
     fail(
       'Нужны --email, --password и --name.\n' +
         'Пример: pnpm db:create-admin -- --email a@club.ru --password "..." --name "Иванов Иван Иванович"',
     );
+  }
+
+  // Телефон и дата рождения обязательны у всех ролей, а не только у клиента:
+  // телефон — основной канал связи клуба, дата рождения нужна кадровому учёту.
+  if (!phone) {
+    fail('Нужен --phone в виде +79991234567');
+  }
+
+  if (!birthDate) {
+    fail('Нужен --birthdate в виде 1985-03-12 — не в будущем и не раньше 1900 года');
   }
 
   if (role !== Role.ADMIN && role !== Role.OWNER && role !== Role.COACH) {
@@ -101,7 +116,15 @@ async function main(): Promise<void> {
       // Отметки деактивации снимаются намеренно: команда используется в том
       // числе чтобы вернуть доступ, и оставленный deactivatedAt тихо не пустил
       // бы человека войти со свежим паролем.
-      data: { passwordHash, role, fullName, deactivatedAt: null, anonymizedAt: null },
+      data: {
+        passwordHash,
+        role,
+        fullName,
+        phone,
+        birthDate,
+        deactivatedAt: null,
+        anonymizedAt: null,
+      },
     });
 
     await ensureCoachProfile(existing.id, tenant.id, role);
@@ -111,13 +134,23 @@ async function main(): Promise<void> {
   }
 
   const created = await prisma.user.create({
-    data: { tenantId: tenant.id, email, passwordHash, role, fullName },
+    data: { tenantId: tenant.id, email, passwordHash, role, fullName, phone, birthDate },
     select: { id: true },
   });
 
   await ensureCoachProfile(created.id, tenant.id, role);
 
   console.log(`Заведена учётка ${email} (${role}) в клубе «${tenant.name}».`);
+}
+
+/** Телефон в E.164 или пустая строка, если из аргумента его не собрать. */
+function normalisePhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  // Номер с восьмёркой или семёркой в начале — это код страны, а не первая
+  // цифра номера.
+  const national = digits.length > 10 && /^[78]/.test(digits) ? digits.slice(1) : digits;
+
+  return national.length === 10 ? `+7${national}` : '';
 }
 
 /**

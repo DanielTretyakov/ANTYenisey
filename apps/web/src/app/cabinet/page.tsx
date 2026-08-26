@@ -1,14 +1,10 @@
 'use client';
 
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import type { PublicUser, Role } from '@yenisey/types';
 import { AppShell } from '@/components/layout/AppShell';
-import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
-import { api } from '@/lib/api';
-import { clearSession } from '@/lib/session';
 import { useSession } from '@/lib/useSession';
 
 const ROLE_LABELS: Record<Role, string> = {
@@ -17,9 +13,6 @@ const ROLE_LABELS: Record<Role, string> = {
   ADMIN: 'Администратор',
   OWNER: 'Руководство клуба',
 };
-
-/** Роли, которым доступен профиль клуба. */
-const CLUB_MANAGERS: Role[] = ['ADMIN', 'OWNER'];
 
 export default function CabinetPage() {
   const router = useRouter();
@@ -31,44 +24,10 @@ export default function CabinetPage() {
     }
   }, [session.status, router]);
 
-  async function handleLogout(): Promise<void> {
-    // Токен гасится на сервере, а не только стирается локально: иначе
-    // украденная копия осталась бы рабочей все 30 дней после «выхода». Сервер
-    // же стирает и куку — из браузера её этому коду не достать.
-    await api.logout().catch(() => undefined);
-
-    clearSession();
-    router.replace('/login');
-  }
-
   const user = session.status === 'ready' ? session.user : null;
 
   return (
-    <AppShell
-      actions={
-        user ? (
-          <>
-            {CLUB_MANAGERS.includes(user.role) && (
-              <>
-                <Link href="/people">
-                  <Button variant="ghost" size="sm">
-                    Состав клуба
-                  </Button>
-                </Link>
-                <Link href="/club">
-                  <Button variant="ghost" size="sm">
-                    Настройки клуба
-                  </Button>
-                </Link>
-              </>
-            )}
-            <Button variant="ghost" size="sm" onClick={() => void handleLogout()}>
-              Выйти
-            </Button>
-          </>
-        ) : null
-      }
-    >
+    <AppShell>
       <h1 className="mb-7 text-[1.75rem]">Личный кабинет</h1>
 
       {user ? <Profile user={user} /> : <ProfileSkeleton />}

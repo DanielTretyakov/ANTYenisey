@@ -9,7 +9,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import type { ClubPeopleQuery, Role } from '@yenisey/types';
+import type { ChangeRoleRequest, ClubPeopleQuery, Role } from '@yenisey/types';
 
 const ROLES: Role[] = ['CLIENT', 'ADMIN', 'COACH', 'OWNER'];
 
@@ -61,4 +61,10 @@ export class ClubPeopleQueryDto implements ClubPeopleQuery {
   @IsInt()
   @Min(0)
   offset?: number;
+}
+
+/** Смена роли: повышение клиента до тренера и обратно. */
+export class ChangeRoleDto implements ChangeRoleRequest {
+  @IsIn(ROLES, { message: 'Неизвестная роль' })
+  role: Role;
 }

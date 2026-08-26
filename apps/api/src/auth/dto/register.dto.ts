@@ -71,4 +71,14 @@ export class RegisterDto implements RegisterRequest {
     message: 'phone: ожидается формат +79991234567',
   })
   phone: string;
+
+  /**
+   * Дата рождения «2001-05-17». Разумность даты проверяет `parseBirthDate` в
+   * сервисе: границы «не в будущем» и «не полтора века назад» считаются от
+   * текущего дня, а декораторы такого не умеют.
+   */
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'birthDate: ожидается дата в виде 2001-05-17',
+  })
+  birthDate: string;
 }

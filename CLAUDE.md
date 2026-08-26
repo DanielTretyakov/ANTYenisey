@@ -21,7 +21,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 pnpm dev            # apps/api и apps/web в watch-режиме
 pnpm typecheck      # по всем пакетам
 pnpm test           # node --test
-pnpm smoke          # 125 сценариев против поднятого API и живого Postgres
+pnpm smoke          # 137 сценариев против поднятого API и живого Postgres
 pnpm db:migrate     # prisma migrate dev
 pnpm db:studio
 pnpm db:create-admin -- --email a@club.ru --password "..." --name "Иванов Иван"
@@ -61,7 +61,7 @@ uv run python scripts/lint.py
 
 - **Деньги — целые числа в копейках.** Не рубли с дробной частью. Конвертация только на границе представления.
 - **Удаления нет.** Клиент деактивируется через `deactivatedAt`/`anonymizedAt`; на внешних ключах `onDelete: Restrict`.
-- **Часть ограничений живёт в raw SQL.** `packages/database/prisma/constraints.sql` — 28 CHECK, 2 частичных уникальных индекса и 3 EXCLUDE (пересечение броней, шаблона недели и расписания дня). Prisma такое не выражает, поэтому при изменении схемы этот файл правится руками отдельно от миграции.
+- **Часть ограничений живёт в raw SQL.** `packages/database/prisma/constraints.sql` — 30 CHECK, 2 частичных уникальных индекса и 3 EXCLUDE (пересечение броней, шаблона недели и расписания дня). Prisma такое не выражает, поэтому при изменении схемы этот файл правится руками отдельно от миграции.
 - **Цены и шаг брони — у зала (`Hall`), а не у клуба.** У клуба остаётся то, что составляет договор с клиентом: часовой пояс, политика неявки, правила абонемента.
 
 Сценарии на изоляцию — `packages/database/prisma/tests/schema-tests.sql`.
