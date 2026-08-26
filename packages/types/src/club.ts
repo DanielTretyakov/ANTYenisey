@@ -6,10 +6,14 @@
  * контракт не попадают ни разу: 0.1 + 0.2 в двоичной плавающей точке даёт
  * 0.30000000000000004, и на длинной аренде такая копейка расходится с кассой.
  * Перевод в рубли — только на границе показа человеку.
+ *
+ * Настройки разделены надвое. У **клуба** — то, что составляет договор с
+ * клиентом: название, часовой пояс, политика неявки, правила абонемента.
+ * У **зала** — то, что различается между помещениями: цены и шаг брони.
  */
 
 /**
- * Минимальный шаг брони стола. Набор закрытый: клуб выбирает из вариантов,
+ * Минимальный шаг брони стола. Набор закрытый: зал выбирает из вариантов,
  * а не вводит число, — произвольный шаг вроде 7 минут ломает и сетку
  * расписания, и расчёт цены.
  *
@@ -18,32 +22,17 @@
  */
 export type BookingStep = 'MIN_10' | 'MIN_15' | 'MIN_20' | 'MIN_30' | 'HOUR_1';
 
-/** Настройки клуба в том виде, в каком их отдаёт и принимает API. */
+/** Настройки клуба: общие для всех его залов. */
 export interface ClubSettings {
   /** Официальное название клуба — то, что видит клиент. */
   name: string;
   /**
    * Часовой пояс клуба (IANA, напр. «Asia/Krasnoyarsk»). Не косметика: от него
-   * зависят пороги отмены и границы операционного дня.
+   * зависят пороги отмены, границы операционного дня и то, какой календарной
+   * дате принадлежит расписание.
    */
   timezone: string;
 
-  // --- Аренда стола
-  bookingStep: BookingStep;
-  /** Цена первого часа аренды стола без робота, копейки. */
-  tableHourPrice: number;
-  /** Доплата за каждые следующие 30 минут без робота, копейки. */
-  tableExtra30MinPrice: number;
-
-  // --- Аренда «стол + робот»: отдельная услуга со своей сеткой цен, а не
-  // --- наценка поверх обычной аренды (ТЗ → «Пользовательские сценарии»).
-  hasRobotOption: boolean;
-  /** Копейки. Обязательны, когда `hasRobotOption` включена, иначе null. */
-  robot30MinPrice: number | null;
-  robot60MinPrice: number | null;
-  robotExtra30MinPrice: number | null;
-
-  // --- Присутствие и неявка
   /** Сколько списать с клиента, который не отменил и не пришёл, в процентах. */
   noShowChargePercent: number;
   /** Через сколько минут после мероприятия напомнить админу отметить присутствие. */
@@ -61,7 +50,35 @@ export interface ClubSettings {
 export type UpdateClubSettingsRequest = Partial<ClubSettings>;
 
 /**
- * Стол клуба.
+ * Зал: помещение со своим набором столов и своей ценой.
+ *
+ * Залы различаются тем, что стоит денег, — оборудованием, размером, наличием
+ * роботов. Поэтому цены и шаг брони здесь, а не на клубе.
+ */
+export interface Hall {
+  id: string;
+  name: string;
+
+  bookingStep: BookingStep;
+  /** Цена первого часа аренды стола без робота, копейки. */
+  tableHourPrice: number;
+  /** Доплата за каждые следующие 30 минут без робота, копейки. */
+  tableExtra30MinPrice: number;
+
+  // Аренда «стол + робот»: отдельная услуга со своей сеткой цен, а не
+  // наценка поверх обычной аренды (ТЗ → «Пользовательские сценарии»).
+  hasRobotOption: boolean;
+  /** Копейки. Обязательны, когда `hasRobotOption` включена, иначе null. */
+  robot30MinPrice: number | null;
+  robot60MinPrice: number | null;
+  robotExtra30MinPrice: number | null;
+}
+
+export type CreateHallRequest = Omit<Hall, 'id'>;
+export type UpdateHallRequest = Partial<CreateHallRequest>;
+
+/**
+ * Стол зала.
  *
  * «Настройка количества столов» из ТЗ — это добавление и удаление строк, а не
  * поле со счётчиком: счётчик рядом с реальными столами неизбежно разошёлся бы
@@ -69,18 +86,38 @@ export type UpdateClubSettingsRequest = Partial<ClubSettings>;
  */
 export interface ClubTable {
   id: string;
-  /** Название, которое видит клиент: «Стол 1», «Стол у окна». Уникально в клубе. */
+  hallId: string;
+  /** Название, которое видит клиент: «Стол 1», «Стол у окна». Уникально в зале. */
   label: string;
   /**
    * Есть ли у стола брони. Стол с историей удалить нельзя — за бронями висят
    * платежи, нужные бухгалтерии.
    */
   hasBookings: boolean;
+  /**
+   * Сколько окон занятого времени на столе — в шаблоне недели и в расписаниях
+   * дней. Удаление стола унесёт их с собой, поэтому число показывается
+   * администратору до того, как он нажмёт «Удалить».
+   */
+  closureCount: number;
 }
 
-export interface TableRequest {
+export interface CreateTableRequest {
+  hallId: string;
   label: string;
 }
+
+export interface RenameTableRequest {
+  label: string;
+}
+
+/**
+ * Почему стол недоступен для самостоятельной онлайн-брони.
+ *
+ * Клиент видит только то, что время занято; расшифровка нужна персоналу клуба
+ * и статистике. Значения совпадают с enum `ClosurePurpose` из schema.prisma.
+ */
+export type ClosurePurpose = 'RENT' | 'SPARRING' | 'TRAINING' | 'ROBOT' | 'OTHER';
 
 /**
  * День недели по ISO-8601: 1 — понедельник, 7 — воскресенье.
@@ -91,61 +128,72 @@ export interface TableRequest {
  */
 export type Weekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
-/**
- * Постоянное недельное правило: стол закрыт для клиентов в эти часы каждую
- * неделю.
- *
- * Закрыто **только для клиента** — администратор посадить человека за такой
- * стол по-прежнему может. Жизнь в зале всегда сложнее расписания, и тупик
- * здесь обошёлся бы дороже ошибки.
- */
-export interface ClosureRule {
-  id: string;
+/** Занятое время стола — общая часть шаблона недели и расписания дня. */
+export interface ClosureSlot {
   tableId: string;
-  weekday: Weekday;
   /**
    * Границы окна в минутах от полуночи **по времени клуба**, а не в UTC:
-   * правило «каждый вторник с 15:00» не должно зависеть от того, какому
-   * мгновению UTC это соответствует. Полночь как конец окна — 1440, а не 0.
+   * «каждый вторник с 15:00» не должно зависеть от того, какому мгновению UTC
+   * это соответствует. Полночь как конец окна — 1440, а не 0.
    */
   startMinute: number;
   endMinute: number;
+  purpose: ClosurePurpose;
+  /**
+   * Тренер, ведущий занятие. Обязателен при `purpose: 'TRAINING'` — иначе
+   * проведённая тренировка не попадёт в его статистику. Для аренды, робота и
+   * прочего запрещён.
+   */
+  coachId: string | null;
 }
 
-/** Правило, которого ещё нет в базе: у него нет идентификатора. */
+/** Окно шаблона недели: «каждый вторник с 15:00 до 19:00». */
+export interface ClosureRule extends ClosureSlot {
+  id: string;
+  weekday: Weekday;
+}
+
 export type ClosureRuleDraft = Omit<ClosureRule, 'id'>;
 
+/** Окно расписания конкретной даты. */
+export interface DayClosure extends ClosureSlot {
+  id: string;
+}
+
+export type DayClosureDraft = Omit<DayClosure, 'id'>;
+
 /**
- * Замена всего недельного расписания разом.
+ * Замена расписания разом — и шаблона, и дня.
  *
  * Не поштучное добавление и удаление: администратор правит расписание в
  * сетке, где одно движение мыши меняет десяток окон сразу. Присылать разницу
  * значит собирать её на клиенте и надеяться, что она сошлась.
  */
-export interface ReplaceClosureRulesRequest {
+export interface ReplaceTemplateRequest {
   rules: ClosureRuleDraft[];
 }
 
-/** Разовое закрытие: турнир, ремонт, аренда зала целиком. */
-export interface ClosureException {
+export interface ReplaceDayRequest {
+  closures: DayClosureDraft[];
+}
+
+/**
+ * Расписание зала на конкретную дату.
+ *
+ * `customised: false` означает, что день не правили и действует шаблон недели;
+ * `closures` тогда пуст. Пустое расписание правленого дня — осмысленное
+ * состояние («в эту субботу тренировок нет»), и отличить его от «не правили»
+ * можно только этим признаком.
+ */
+export interface DaySchedule {
+  /** Календарная дата по времени клуба, «2026-03-12». */
+  date: string;
+  customised: boolean;
+  closures: DayClosure[];
+}
+
+/** Тренер клуба — для выбора при назначении тренировки. */
+export interface ClubCoach {
   id: string;
-  tableId: string;
-  /** Мгновения в ISO-8601 с зоной — как и брони, хранятся в UTC. */
-  startsAt: string;
-  endsAt: string;
-  /** Зачем закрыто. Видит только персонал клуба. */
-  reason: string | null;
-}
-
-export interface ClosureExceptionRequest {
-  tableId: string;
-  startsAt: string;
-  endsAt: string;
-  reason?: string | null;
-}
-
-/** Всё закрытое время клуба разом — так его показывает и правит админка. */
-export interface ClubClosures {
-  rules: ClosureRule[];
-  exceptions: ClosureException[];
+  fullName: string;
 }

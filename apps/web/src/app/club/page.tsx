@@ -3,23 +3,31 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { ClubClosures, ClubSettings, ClubTable, Role } from '@yenisey/types';
+import type { ClubCoach, ClubSettings, ClubTable, Hall, Role } from '@yenisey/types';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { api, ApiError } from '@/lib/api';
+import { cn } from '@/lib/cn';
 import { useSession } from '@/lib/useSession';
-import { ClosuresCard } from './ClosuresCard';
-import { ExceptionsCard } from './ExceptionsCard';
+import { HallForm } from './HallForm';
+import { ScheduleCard } from './ScheduleCard';
 import { SettingsForm } from './SettingsForm';
 import { TablesCard } from './TablesCard';
 
 /** Роли, которым доступен профиль клуба. */
 const CLUB_MANAGERS: Role[] = ['ADMIN', 'OWNER'];
 
+type Loaded = {
+  settings: ClubSettings;
+  halls: Hall[];
+  tables: ClubTable[];
+  coaches: ClubCoach[];
+};
+
 /**
- * Настройки клуба: цены, шаг бронирования, столы, правила присутствия.
+ * Настройки клуба: общие правила, залы, столы и расписание.
  *
  * Проверка роли здесь — это удобство, а не защита: она убирает со страницы то,
  * чем человек всё равно не сможет воспользоваться. Настоящий запрет стоит на
@@ -30,12 +38,10 @@ export default function ClubPage() {
   const session = useSession();
   const router = useRouter();
 
-  const [data, setData] = useState<{
-    settings: ClubSettings;
-    tables: ClubTable[];
-    closures: ClubClosures;
-  } | null>(null);
+  const [data, setData] = useState<Loaded | null>(null);
+  const [hallId, setHallId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [addingHall, setAddingHall] = useState(false);
 
   const allowed = session.status === 'ready' && CLUB_MANAGERS.includes(session.user.role);
 
@@ -52,11 +58,14 @@ export default function ClubPage() {
 
     let cancelled = false;
 
-    // Настройки и столы грузятся разом: они показываются на одном экране, и
-    // ждать их по очереди означало бы удвоить ожидание на ровном месте.
-    Promise.all([api.clubSettings(), api.clubTables(), api.clubClosures()])
-      .then(([settings, tables, closures]) => {
-        if (!cancelled) setData({ settings, tables, closures });
+    // Всё грузится разом: это один экран, и ждать части по очереди означало бы
+    // умножить ожидание на ровном месте.
+    Promise.all([api.clubSettings(), api.halls(), api.clubTables(), api.coaches()])
+      .then(([settings, halls, tables, coaches]) => {
+        if (cancelled) return;
+
+        setData({ settings, halls, tables, coaches });
+        setHallId((previous) => previous ?? halls[0]?.id ?? null);
       })
       .catch((cause: unknown) => {
         if (!cancelled) {
@@ -68,6 +77,38 @@ export default function ClubPage() {
       cancelled = true;
     };
   }, [allowed]);
+
+  const hall = data?.halls.find((item) => item.id === hallId) ?? null;
+
+  async function addHall(): Promise<void> {
+    if (!data) return;
+
+    setError(null);
+    setAddingHall(true);
+
+    try {
+      // Новый зал заводится с настройками текущего: второй зал клуба обычно
+      // похож на первый, и переписывать цены с нуля незачем.
+      const source = hall ?? data.halls[0];
+      const created = await api.createHall({
+        name: nextHallName(data.halls),
+        bookingStep: source?.bookingStep ?? 'MIN_30',
+        tableHourPrice: source?.tableHourPrice ?? 0,
+        tableExtra30MinPrice: source?.tableExtra30MinPrice ?? 0,
+        hasRobotOption: false,
+        robot30MinPrice: null,
+        robot60MinPrice: null,
+        robotExtra30MinPrice: null,
+      });
+
+      setData({ ...data, halls: [...data.halls, created].sort(byName) });
+      setHallId(created.id);
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
+    } finally {
+      setAddingHall(false);
+    }
+  }
 
   return (
     <AppShell
@@ -96,19 +137,101 @@ export default function ClubPage() {
 
       {data && (
         <div className="grid gap-6">
-          <SettingsForm initial={data.settings} />
-          <TablesCard initial={data.tables} />
-          <ClosuresCard tables={data.tables} initial={data.closures.rules} />
-          <ExceptionsCard
-            tables={data.tables}
-            initial={data.closures.exceptions}
-            timezone={data.settings.timezone}
+          <SettingsForm
+            initial={data.settings}
+            onSaved={(settings) => setData({ ...data, settings })}
           />
+
+          <div>
+            <div className="mb-4 flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-[0.8125rem] tracking-[0.06em] text-text-subtle uppercase">
+                Залы
+              </span>
+
+              {data.halls.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-pressed={item.id === hallId}
+                  onClick={() => setHallId(item.id)}
+                  className={cn(
+                    'rounded-control border px-3.5 py-1.5 text-[0.875rem] transition-colors',
+                    item.id === hallId
+                      ? 'border-border-accent bg-surface-accent-soft text-text-accent'
+                      : 'border-border text-text-muted hover:bg-surface-sunken',
+                  )}
+                >
+                  {item.name}
+                </button>
+              ))}
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                pending={addingHall}
+                onClick={() => void addHall()}
+              >
+                + Зал
+              </Button>
+            </div>
+
+            {hall && (
+              <div className="grid gap-6">
+                <HallForm
+                  hall={hall}
+                  canDelete={data.halls.length > 1}
+                  onSaved={(updated) =>
+                    setData({
+                      ...data,
+                      halls: data.halls.map((item) => (item.id === updated.id ? updated : item)),
+                    })
+                  }
+                  onDeleted={(removed) => {
+                    const halls = data.halls.filter((item) => item.id !== removed);
+                    setData({ ...data, halls });
+                    setHallId(halls[0]?.id ?? null);
+                  }}
+                />
+
+                <TablesCard
+                  hallId={hall.id}
+                  tables={data.tables}
+                  onChange={(tables) => setData({ ...data, tables })}
+                />
+
+                <ScheduleCard
+                  // Смена зала должна полностью пересобрать сетку: иначе в новом
+                  // зале останутся клетки предыдущего.
+                  key={hall.id}
+                  hallId={hall.id}
+                  tables={data.tables}
+                  coaches={data.coaches}
+                  timezone={data.settings.timezone}
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
     </AppShell>
   );
 }
+
+/** Следующее свободное имя вида «Зал 2». */
+function nextHallName(halls: Hall[]): string {
+  const taken = new Set(halls.map((hall) => hall.name));
+
+  for (let index = 2; ; index += 1) {
+    const name = `Зал ${index}`;
+
+    if (!taken.has(name)) {
+      return name;
+    }
+  }
+}
+
+const byName = (a: Hall, b: Hall): number => a.name.localeCompare(b.name, 'ru');
 
 /**
  * Заглушка на время загрузки.

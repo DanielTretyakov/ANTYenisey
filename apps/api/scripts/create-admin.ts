@@ -1,5 +1,5 @@
 /**
- * Заводит администратора или владельца клуба.
+ * Заводит сотрудника клуба: администратора, владельца или тренера.
  *
  * Отдельной командой, а не сидом: сид лежит в репозитории, и пароль из него
  * попал бы в git вместе с историей. Здесь пароль приходит аргументом и нигде
@@ -8,6 +8,7 @@
  * Запуск:
  *   pnpm db:create-admin -- --email a@club.ru --password "..." --name "Иванов Иван Иванович"
  *   pnpm db:create-admin -- --email o@club.ru --password "..." --name "..." --role OWNER
+ *   pnpm db:create-admin -- --email t@club.ru --password "..." --name "..." --role COACH
  *
  * Повторный запуск с тем же адресом меняет существующей учётке пароль, роль и
  * ФИО — так сбрасывают забытый пароль администратора, не заводя вторую учётку.
@@ -71,8 +72,8 @@ async function main(): Promise<void> {
     );
   }
 
-  if (role !== Role.ADMIN && role !== Role.OWNER) {
-    fail(`Роль должна быть ADMIN или OWNER, получено «${role}»`);
+  if (role !== Role.ADMIN && role !== Role.OWNER && role !== Role.COACH) {
+    fail(`Роль должна быть ADMIN, OWNER или COACH, получено «${role}»`);
   }
 
   // Порог тот же, что в форме регистрации: короткий пароль у администратора
@@ -103,15 +104,40 @@ async function main(): Promise<void> {
       data: { passwordHash, role, fullName, deactivatedAt: null, anonymizedAt: null },
     });
 
+    await ensureCoachProfile(existing.id, tenant.id, role);
+
     console.log(`Учётка ${email} обновлена: роль ${role}, пароль заменён.`);
     return;
   }
 
-  await prisma.user.create({
+  const created = await prisma.user.create({
     data: { tenantId: tenant.id, email, passwordHash, role, fullName },
+    select: { id: true },
   });
 
+  await ensureCoachProfile(created.id, tenant.id, role);
+
   console.log(`Заведена учётка ${email} (${role}) в клубе «${tenant.name}».`);
+}
+
+/**
+ * Тренеру нужен CoachProfile.
+ *
+ * Без него учётка с ролью COACH — это тренер, которого нельзя ни назначить на
+ * тренировку, ни показать на публичной странице: и то, и другое ссылается на
+ * профиль, а не на пользователя. Карточка при этом остаётся пустой — фото,
+ * достижения и контакты тренер заполняет сам.
+ */
+async function ensureCoachProfile(userId: string, tenantId: string, role: string): Promise<void> {
+  if (role !== Role.COACH) {
+    return;
+  }
+
+  await prisma.coachProfile.upsert({
+    where: { userId },
+    update: {},
+    create: { userId, tenantId },
+  });
 }
 
 main()

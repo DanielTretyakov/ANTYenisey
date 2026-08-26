@@ -134,17 +134,6 @@ ALTER TABLE "Payment"
     AND ("holdAmount" IS NULL OR "capturedAmount" IS NULL OR "capturedAmount" <= "holdAmount")
   );
 
--- Если клуб включил опцию робота, у него должны быть заданы цены робота —
--- иначе расчёт стоимости упрётся в NULL уже в проде.
-ALTER TABLE "Tenant"
-  ADD CONSTRAINT "Tenant_robot_prices_present"
-  CHECK (
-    NOT "hasRobotOption"
-    OR ("robot30MinPrice" IS NOT NULL
-        AND "robot60MinPrice" IS NOT NULL
-        AND "robotExtra30MinPrice" IS NOT NULL)
-  );
-
 -- Остаток визитов не уходит в минус (null = безлимитный абонемент).
 ALTER TABLE "Subscription"
   ADD CONSTRAINT "Subscription_visits_non_negative"
@@ -235,13 +224,12 @@ ALTER TABLE "PlatformPlan"
 -- 12. Закрытое время столов
 -- ---------------------------------------------------------------------------
 --
--- Накатано отдельной миграцией *_table_closures: этот файл правится вместе со
--- схемой, а применённую миграцию Prisma сверяет по контрольной сумме и
--- откажется работать с изменённой задним числом.
+-- Накатано отдельными миграциями *_table_closures и *_halls_and_day_schedules:
+-- этот файл правится вместе со схемой, а применённую миграцию Prisma сверяет
+-- по контрольной сумме и откажется работать с изменённой задним числом.
 
--- Границы окна недельного правила: полночь как конец — это 1440, а не 0,
--- иначе интервал вывернулся бы и правило «с 23:00 до полуночи» стало бы
--- пустым.
+-- Границы окна: полночь как конец — это 1440, а не 0, иначе интервал
+-- вывернулся бы и правило «с 23:00 до полуночи» стало бы пустым.
 ALTER TABLE "TableClosureRule"
   ADD CONSTRAINT "TableClosureRule_minutes_range"
   CHECK ("startMinute" >= 0 AND "endMinute" <= 1440 AND "endMinute" > "startMinute");
@@ -253,8 +241,8 @@ ALTER TABLE "TableClosureRule"
   ADD CONSTRAINT "TableClosureRule_weekday_range"
   CHECK ("weekday" BETWEEN 1 AND 7);
 
--- Одно и то же время одного стола не должно быть закрыто двумя правилами:
--- иначе снятие блокировки в сетке убирало бы одну строку, а вторая оставляла
+-- Одно и то же время одного стола не должно быть закрыто двумя окнами:
+-- иначе снятие блокировки в сетке убирало бы одно окно, а второе оставляло
 -- бы стол закрытым, и администратор не понимал бы, почему.
 -- Диапазон полуоткрытый '[)': окна 15:00-17:00 и 17:00-19:00 стыкуются.
 ALTER TABLE "TableClosureRule"
@@ -265,13 +253,64 @@ ALTER TABLE "TableClosureRule"
     int4range("startMinute", "endMinute", '[)') WITH &&
   );
 
-ALTER TABLE "TableClosure"
-  ADD CONSTRAINT "TableClosure_time_order" CHECK ("endsAt" > "startsAt");
+-- Тренировка без тренера не попадёт в его статистику, и через месяц выяснить,
+-- кто её вёл, будет неоткуда. У аренды и робота тренера нет вовсе — поле там
+-- запрещено, чтобы в него не складывали «просто кого-нибудь».
+-- Спарринг — единственный промежуточный случай: он всегда с тренером, но
+-- заводить его может и администратор, ещё не зная, кто именно проведёт.
+ALTER TABLE "TableClosureRule"
+  ADD CONSTRAINT "TableClosureRule_coach_matches_purpose"
+  CHECK (
+    ("purpose" = 'TRAINING'::"ClosurePurpose" AND "coachId" IS NOT NULL)
+    OR "purpose" = 'SPARRING'::"ClosurePurpose"
+    OR ("purpose" IN ('RENT'::"ClosurePurpose", 'ROBOT'::"ClosurePurpose", 'OTHER'::"ClosurePurpose")
+        AND "coachId" IS NULL)
+  );
 
--- То же для разовых окон.
-ALTER TABLE "TableClosure"
-  ADD CONSTRAINT "TableClosure_no_overlap"
+-- Те же правила для расписания на конкретную дату.
+ALTER TABLE "DayClosure"
+  ADD CONSTRAINT "DayClosure_minutes_range"
+  CHECK ("startMinute" >= 0 AND "endMinute" <= 1440 AND "endMinute" > "startMinute");
+
+ALTER TABLE "DayClosure"
+  ADD CONSTRAINT "DayClosure_no_overlap"
   EXCLUDE USING gist (
     "tableId" WITH =,
-    tstzrange("startsAt", "endsAt", '[)') WITH &&
+    "scheduleId" WITH =,
+    int4range("startMinute", "endMinute", '[)') WITH &&
+  );
+
+ALTER TABLE "DayClosure"
+  ADD CONSTRAINT "DayClosure_coach_matches_purpose"
+  CHECK (
+    ("purpose" = 'TRAINING'::"ClosurePurpose" AND "coachId" IS NOT NULL)
+    OR "purpose" = 'SPARRING'::"ClosurePurpose"
+    OR ("purpose" IN ('RENT'::"ClosurePurpose", 'ROBOT'::"ClosurePurpose", 'OTHER'::"ClosurePurpose")
+        AND "coachId" IS NULL)
+  );
+
+-- ---------------------------------------------------------------------------
+-- 13. Цены зала
+-- ---------------------------------------------------------------------------
+
+-- Если зал включил опцию робота, у него должны быть заданы цены робота —
+-- иначе расчёт стоимости упрётся в NULL уже в проде. Раньше это же правило
+-- стояло на Tenant; вместе с ценами оно переехало на зал.
+ALTER TABLE "Hall"
+  ADD CONSTRAINT "Hall_robot_prices_present"
+  CHECK (
+    NOT "hasRobotOption"
+    OR ("robot30MinPrice" IS NOT NULL
+        AND "robot60MinPrice" IS NOT NULL
+        AND "robotExtra30MinPrice" IS NOT NULL)
+  );
+
+ALTER TABLE "Hall"
+  ADD CONSTRAINT "Hall_prices_non_negative"
+  CHECK (
+    "tableHourPrice" >= 0
+    AND "tableExtra30MinPrice" >= 0
+    AND ("robot30MinPrice" IS NULL OR "robot30MinPrice" >= 0)
+    AND ("robot60MinPrice" IS NULL OR "robot60MinPrice" >= 0)
+    AND ("robotExtra30MinPrice" IS NULL OR "robotExtra30MinPrice" >= 0)
   );

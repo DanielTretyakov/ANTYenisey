@@ -1,68 +1,41 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import type { BookingStep, ClubSettings } from '@yenisey/types';
+import type { ClubSettings } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Field } from '@/components/ui/Field';
-import { MoneyField } from '@/components/ui/MoneyField';
 import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
 import { api, ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
-import { inputToKopecks, kopecksToInput } from '@/lib/money';
 import { timezoneOptions } from '@/lib/timezones';
 
-const BOOKING_STEPS: { value: BookingStep; label: string }[] = [
-  { value: 'MIN_10', label: '10 минут' },
-  { value: 'MIN_15', label: '15 минут' },
-  { value: 'MIN_20', label: '20 минут' },
-  { value: 'MIN_30', label: '30 минут' },
-  { value: 'HOUR_1', label: '1 час' },
-];
-
 /**
- * Форма настроек в состоянии редактирования.
+ * Настройки клуба: общие для всех его залов.
  *
- * Суммы и сроки держатся строками, а не числами: пока человек стирает старое
- * значение, поле законно пусто, и хранить это как число можно только через
- * NaN. Перевод в копейки и минуты — один раз, на отправке.
+ * Цен и шага бронирования здесь нет — они у зала. Здесь остаётся то, что
+ * составляет договор клуба с клиентом: как его зовут, по какому времени он
+ * живёт, что бывает при неявке и как ведут себя абонементы. Разные правила
+ * отмены в двух залах одного клуба пришлось бы отдельно оговаривать в оферте.
+ *
+ * Сроки держатся строками, а не числами: пока человек стирает старое значение,
+ * поле законно пусто, и хранить это как число можно только через NaN.
  */
 type FormState = {
   name: string;
   timezone: string;
-  bookingStep: BookingStep;
-  tableHourPrice: string;
-  tableExtra30MinPrice: string;
-  hasRobotOption: boolean;
-  robot30MinPrice: string;
-  robot60MinPrice: string;
-  robotExtra30MinPrice: string;
   noShowChargePercent: string;
   attendanceReminderAfterMinutes: string;
   attendanceAutoNoShowAfterMinutes: string;
   subscriptionBurnsOnNoShowOnly: boolean;
 };
 
-/** Копейки в строку поля; null — «не задано», а не ноль. */
-function priceToInput(kopecks: number | null): string {
-  return kopecks === null ? '' : kopecksToInput(kopecks);
-}
-
 function toForm(settings: ClubSettings): FormState {
   return {
     name: settings.name,
     timezone: settings.timezone,
-    bookingStep: settings.bookingStep,
-    tableHourPrice: kopecksToInput(settings.tableHourPrice),
-    tableExtra30MinPrice: kopecksToInput(settings.tableExtra30MinPrice),
-    hasRobotOption: settings.hasRobotOption,
-    // Незаданная цена робота остаётся пустой, а не нулевой: ноль — это
-    // «бесплатно», и подставлять его вместо «не задано» нельзя.
-    robot30MinPrice: priceToInput(settings.robot30MinPrice),
-    robot60MinPrice: priceToInput(settings.robot60MinPrice),
-    robotExtra30MinPrice: priceToInput(settings.robotExtra30MinPrice),
     noShowChargePercent: String(settings.noShowChargePercent),
     attendanceReminderAfterMinutes: String(settings.attendanceReminderAfterMinutes),
     attendanceAutoNoShowAfterMinutes: String(settings.attendanceAutoNoShowAfterMinutes),
@@ -76,7 +49,14 @@ function toWholeNumber(value: string): number | null {
   return /^\d+$/.test(trimmed) ? Number(trimmed) : null;
 }
 
-export function SettingsForm({ initial }: { initial: ClubSettings }) {
+export function SettingsForm({
+  initial,
+  onSaved,
+}: {
+  initial: ClubSettings;
+  /** Часовой пояс нужен расписанию — сообщаем наверх, когда он изменился. */
+  onSaved: (settings: ClubSettings) => void;
+}) {
   const [form, setForm] = useState<FormState>(() => toForm(initial));
   const [errors, setErrors] = useState<string[]>([]);
   const [saved, setSaved] = useState(false);
@@ -90,10 +70,16 @@ export function SettingsForm({ initial }: { initial: ClubSettings }) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
 
-    const collected = collect(form);
+    const noShowChargePercent = toWholeNumber(form.noShowChargePercent);
+    const attendanceReminderAfterMinutes = toWholeNumber(form.attendanceReminderAfterMinutes);
+    const attendanceAutoNoShowAfterMinutes = toWholeNumber(form.attendanceAutoNoShowAfterMinutes);
 
-    if (typeof collected === 'string') {
-      setErrors([collected]);
+    if (
+      noShowChargePercent === null ||
+      attendanceReminderAfterMinutes === null ||
+      attendanceAutoNoShowAfterMinutes === null
+    ) {
+      setErrors(['Проценты и сроки указываются целым числом']);
       return;
     }
 
@@ -101,11 +87,18 @@ export function SettingsForm({ initial }: { initial: ClubSettings }) {
     setPending(true);
 
     try {
-      const updated = await api.updateClubSettings(collected);
-      // Форма перезаполняется ответом сервера, а не тем, что человек ввёл:
-      // «400,5» превращается в «400,50», и видно, что именно сохранилось.
+      const updated = await api.updateClubSettings({
+        name: form.name.trim(),
+        timezone: form.timezone,
+        noShowChargePercent,
+        attendanceReminderAfterMinutes,
+        attendanceAutoNoShowAfterMinutes,
+        subscriptionBurnsOnNoShowOnly: form.subscriptionBurnsOnNoShowOnly,
+      });
+
       setForm(toForm(updated));
       setSaved(true);
+      onSaved(updated);
     } catch (cause) {
       setErrors(
         cause instanceof ApiError
@@ -116,9 +109,6 @@ export function SettingsForm({ initial }: { initial: ClubSettings }) {
       setPending(false);
     }
   }
-
-  const moneyInvalid = (value: string): boolean =>
-    value.trim() !== '' && inputToKopecks(value) === null;
 
   return (
     <form onSubmit={handleSubmit} className="grid gap-6">
@@ -136,10 +126,13 @@ export function SettingsForm({ initial }: { initial: ClubSettings }) {
         </Alert>
       )}
 
-      {saved && <Alert tone="info">Настройки сохранены.</Alert>}
+      {saved && <Alert tone="info">Настройки клуба сохранены.</Alert>}
 
       <Card>
-        <CardHeader title="Клуб" description="Как клуб называется и по какому времени живёт." />
+        <CardHeader
+          title="Клуб"
+          description="Общее для всех залов: как клуб называется и по какому времени живёт."
+        />
         <CardBody>
           <Field
             label="Название"
@@ -150,72 +143,11 @@ export function SettingsForm({ initial }: { initial: ClubSettings }) {
           />
           <Select
             label="Часовой пояс"
-            hint="От него считаются пороги отмены, напоминания и границы операционного дня."
+            hint="От него считаются пороги отмены, напоминания и то, какой дате принадлежит расписание."
             options={timezoneOptions(initial.timezone)}
             value={form.timezone}
             onChange={(event) => set('timezone', event.target.value)}
           />
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardHeader
-          title="Аренда стола"
-          description="Шаг сетки и цены. Клиент бронирует сам, без подтверждения администратора."
-        />
-        <CardBody>
-          <Select
-            label="Минимальный шаг брони"
-            hint="Из него собирается сетка свободного времени."
-            options={BOOKING_STEPS}
-            value={form.bookingStep}
-            onChange={(event) => set('bookingStep', event.target.value as BookingStep)}
-          />
-
-          <div className="grid gap-x-6 sm:grid-cols-2">
-            <MoneyField
-              label="Первый час"
-              value={form.tableHourPrice}
-              onChange={(value) => set('tableHourPrice', value)}
-              invalid={moneyInvalid(form.tableHourPrice)}
-            />
-            <MoneyField
-              label="Каждые следующие 30 минут"
-              value={form.tableExtra30MinPrice}
-              onChange={(value) => set('tableExtra30MinPrice', value)}
-              invalid={moneyInvalid(form.tableExtra30MinPrice)}
-            />
-          </div>
-
-          <Toggle
-            label="Есть аренда «стол + робот»"
-            hint="Отдельная услуга со своей сеткой цен, а не наценка поверх обычной аренды."
-            checked={form.hasRobotOption}
-            onChange={(event) => set('hasRobotOption', event.target.checked)}
-          />
-
-          {form.hasRobotOption && (
-            <div className="grid gap-x-6 sm:grid-cols-3">
-              <MoneyField
-                label="30 минут"
-                value={form.robot30MinPrice}
-                onChange={(value) => set('robot30MinPrice', value)}
-                invalid={moneyInvalid(form.robot30MinPrice)}
-              />
-              <MoneyField
-                label="60 минут"
-                value={form.robot60MinPrice}
-                onChange={(value) => set('robot60MinPrice', value)}
-                invalid={moneyInvalid(form.robot60MinPrice)}
-              />
-              <MoneyField
-                label="Следующие 30 минут"
-                value={form.robotExtra30MinPrice}
-                onChange={(value) => set('robotExtra30MinPrice', value)}
-                invalid={moneyInvalid(form.robotExtra30MinPrice)}
-              />
-            </div>
-          )}
         </CardBody>
       </Card>
 
@@ -245,7 +177,6 @@ export function SettingsForm({ initial }: { initial: ClubSettings }) {
               onChange={(event) => set('attendanceAutoNoShowAfterMinutes', event.target.value)}
             />
           </div>
-
         </CardBody>
       </Card>
 
@@ -267,7 +198,7 @@ export function SettingsForm({ initial }: { initial: ClubSettings }) {
 
       <div>
         <Button type="submit" pending={pending} size="lg">
-          Сохранить настройки
+          Сохранить настройки клуба
         </Button>
       </div>
     </form>
@@ -331,54 +262,4 @@ function SubscriptionRules({ soft }: { soft: boolean }) {
       </p>
     </>
   );
-}
-
-/**
- * Сбор формы в запрос. Возвращает текст ошибки, если что-то введено не числом,
- * — тогда до сервера дело не доходит.
- */
-function collect(form: FormState): ClubSettings | string {
-  const tableHourPrice = inputToKopecks(form.tableHourPrice);
-  const tableExtra30MinPrice = inputToKopecks(form.tableExtra30MinPrice);
-
-  if (tableHourPrice === null || tableExtra30MinPrice === null) {
-    return 'Цены аренды указываются числом, например 400 или 400,50';
-  }
-
-  const robotPrices = {
-    robot30MinPrice: form.robot30MinPrice.trim() === '' ? null : inputToKopecks(form.robot30MinPrice),
-    robot60MinPrice: form.robot60MinPrice.trim() === '' ? null : inputToKopecks(form.robot60MinPrice),
-    robotExtra30MinPrice:
-      form.robotExtra30MinPrice.trim() === '' ? null : inputToKopecks(form.robotExtra30MinPrice),
-  };
-
-  if (form.hasRobotOption && Object.values(robotPrices).some((price) => price === null)) {
-    return 'Опция робота включена — заполните все три цены числом';
-  }
-
-  const noShowChargePercent = toWholeNumber(form.noShowChargePercent);
-  const attendanceReminderAfterMinutes = toWholeNumber(form.attendanceReminderAfterMinutes);
-  const attendanceAutoNoShowAfterMinutes = toWholeNumber(form.attendanceAutoNoShowAfterMinutes);
-
-  if (
-    noShowChargePercent === null ||
-    attendanceReminderAfterMinutes === null ||
-    attendanceAutoNoShowAfterMinutes === null
-  ) {
-    return 'Проценты и сроки указываются целым числом';
-  }
-
-  return {
-    name: form.name.trim(),
-    timezone: form.timezone.trim(),
-    bookingStep: form.bookingStep,
-    tableHourPrice,
-    tableExtra30MinPrice,
-    hasRobotOption: form.hasRobotOption,
-    ...robotPrices,
-    noShowChargePercent,
-    attendanceReminderAfterMinutes,
-    attendanceAutoNoShowAfterMinutes,
-    subscriptionBurnsOnNoShowOnly: form.subscriptionBurnsOnNoShowOnly,
-  };
 }

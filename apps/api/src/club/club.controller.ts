@@ -12,22 +12,29 @@ import {
 } from '@nestjs/common';
 import type {
   AccessTokenPayload,
-  ClosureException,
   ClosureRule,
-  ClubClosures,
+  ClubCoach,
   ClubSettings,
   ClubTable,
+  DaySchedule,
+  Hall,
 } from '@yenisey/types';
-import { ClosuresService } from './closures.service';
 import { ClubService } from './club.service';
-import { ClosureExceptionDto, ReplaceClosureRulesDto } from './dto/closures.dto';
-import { TableDto } from './dto/table.dto';
+import { ScheduleService } from './schedule.service';
+import {
+  CreateHallDto,
+  CreateTableDto,
+  RenameTableDto,
+  ReplaceDayDto,
+  ReplaceTemplateDto,
+  UpdateHallDto,
+} from './dto/schedule.dto';
 import { UpdateClubSettingsDto } from './dto/update-settings.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 
 /**
- * Профиль клуба: цены, шаг бронирования, столы, правила присутствия.
+ * Профиль клуба: настройки, залы, столы и расписание.
  *
  * Весь раздел закрыт ролями `admin`/`owner` — на уровне контроллера, а не
  * отдельных методов: маршрут, добавленный сюда завтра, окажется закрытым по
@@ -42,8 +49,10 @@ import { Roles } from '../auth/decorators/roles.decorator';
 export class ClubController {
   constructor(
     private readonly club: ClubService,
-    private readonly closures: ClosuresService,
+    private readonly schedule: ScheduleService,
   ) {}
+
+  // --- Настройки клуба -----------------------------------------------------
 
   @Get('settings')
   findSettings(@CurrentUser() user: AccessTokenPayload): Promise<ClubSettings> {
@@ -58,6 +67,41 @@ export class ClubController {
     return this.club.updateSettings(user.tenantId, dto);
   }
 
+  // --- Залы ----------------------------------------------------------------
+
+  @Get('halls')
+  listHalls(@CurrentUser() user: AccessTokenPayload): Promise<Hall[]> {
+    return this.club.listHalls(user.tenantId);
+  }
+
+  @Post('halls')
+  createHall(
+    @CurrentUser() user: AccessTokenPayload,
+    @Body() dto: CreateHallDto,
+  ): Promise<Hall> {
+    return this.club.createHall(user.tenantId, dto);
+  }
+
+  @Patch('halls/:id')
+  updateHall(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id') hallId: string,
+    @Body() dto: UpdateHallDto,
+  ): Promise<Hall> {
+    return this.club.updateHall(user.tenantId, hallId, dto);
+  }
+
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete('halls/:id')
+  deleteHall(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id') hallId: string,
+  ): Promise<void> {
+    return this.club.deleteHall(user.tenantId, hallId);
+  }
+
+  // --- Столы ---------------------------------------------------------------
+
   @Get('tables')
   listTables(@CurrentUser() user: AccessTokenPayload): Promise<ClubTable[]> {
     return this.club.listTables(user.tenantId);
@@ -66,16 +110,16 @@ export class ClubController {
   @Post('tables')
   createTable(
     @CurrentUser() user: AccessTokenPayload,
-    @Body() dto: TableDto,
+    @Body() dto: CreateTableDto,
   ): Promise<ClubTable> {
-    return this.club.createTable(user.tenantId, dto.label);
+    return this.club.createTable(user.tenantId, dto.hallId, dto.label);
   }
 
   @Patch('tables/:id')
   renameTable(
     @CurrentUser() user: AccessTokenPayload,
     @Param('id') tableId: string,
-    @Body() dto: TableDto,
+    @Body() dto: RenameTableDto,
   ): Promise<ClubTable> {
     return this.club.renameTable(user.tenantId, tableId, dto.label);
   }
@@ -89,36 +133,68 @@ export class ClubController {
     return this.club.deleteTable(user.tenantId, tableId);
   }
 
-  // --- Закрытое время столов: недельное расписание и разовые окна.
+  // --- Тренеры -------------------------------------------------------------
 
-  @Get('closures')
-  findClosures(@CurrentUser() user: AccessTokenPayload): Promise<ClubClosures> {
-    return this.closures.findAll(user.tenantId);
+  @Get('coaches')
+  listCoaches(@CurrentUser() user: AccessTokenPayload): Promise<ClubCoach[]> {
+    return this.club.listCoaches(user.tenantId);
   }
 
-  /** Замена всего расписания разом — см. ClosuresService.replaceRules. */
-  @Put('closures/rules')
-  replaceRules(
+  // --- Расписание зала -----------------------------------------------------
+
+  /** Постоянный шаблон недели: как зал живёт обычно. */
+  @Get('halls/:hallId/template')
+  findTemplate(
     @CurrentUser() user: AccessTokenPayload,
-    @Body() dto: ReplaceClosureRulesDto,
+    @Param('hallId') hallId: string,
   ): Promise<ClosureRule[]> {
-    return this.closures.replaceRules(user.tenantId, dto.rules);
+    return this.schedule.findTemplate(user.tenantId, hallId);
   }
 
-  @Post('closures/exceptions')
-  createException(
+  @Put('halls/:hallId/template')
+  replaceTemplate(
     @CurrentUser() user: AccessTokenPayload,
-    @Body() dto: ClosureExceptionDto,
-  ): Promise<ClosureException> {
-    return this.closures.createException(user.tenantId, dto);
+    @Param('hallId') hallId: string,
+    @Body() dto: ReplaceTemplateDto,
+  ): Promise<ClosureRule[]> {
+    return this.schedule.replaceTemplate(user.tenantId, hallId, dto.rules);
   }
 
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @Delete('closures/exceptions/:id')
-  deleteException(
+  /** Даты, на которых расписание отличается от шаблона, — для подсветки в календаре. */
+  @Get('halls/:hallId/days')
+  findCustomisedDates(
     @CurrentUser() user: AccessTokenPayload,
-    @Param('id') id: string,
-  ): Promise<void> {
-    return this.closures.deleteException(user.tenantId, id);
+    @Param('hallId') hallId: string,
+  ): Promise<string[]> {
+    return this.schedule.findCustomisedDates(user.tenantId, hallId);
+  }
+
+  @Get('halls/:hallId/days/:date')
+  findDay(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('hallId') hallId: string,
+    @Param('date') date: string,
+  ): Promise<DaySchedule> {
+    return this.schedule.findDay(user.tenantId, hallId, date);
+  }
+
+  @Put('halls/:hallId/days/:date')
+  replaceDay(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('hallId') hallId: string,
+    @Param('date') date: string,
+    @Body() dto: ReplaceDayDto,
+  ): Promise<DaySchedule> {
+    return this.schedule.replaceDay(user.tenantId, hallId, date, dto.closures);
+  }
+
+  /** Возврат даты к шаблону. */
+  @Delete('halls/:hallId/days/:date')
+  resetDay(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('hallId') hallId: string,
+    @Param('date') date: string,
+  ): Promise<DaySchedule> {
+    return this.schedule.resetDay(user.tenantId, hallId, date);
   }
 }

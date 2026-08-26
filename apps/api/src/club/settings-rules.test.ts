@@ -1,13 +1,25 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { ClubSettings } from '@yenisey/types';
-import { isValidTimezone, settingsViolations } from './settings-rules.ts';
+import type { ClubSettings, Hall } from '@yenisey/types';
+import { clubSettingsViolations, hallViolations, isValidTimezone } from './settings-rules.ts';
 
-/** Настройки «Енисея» из ТЗ — точка отсчёта для точечных отклонений. */
+/** Настройки клуба «Енисей» из ТЗ — точка отсчёта для точечных отклонений. */
 function settings(overrides: Partial<ClubSettings> = {}): ClubSettings {
   return {
     name: 'АНТ «Енисей»',
     timezone: 'Asia/Krasnoyarsk',
+    noShowChargePercent: 100,
+    attendanceReminderAfterMinutes: 60,
+    attendanceAutoNoShowAfterMinutes: 1440,
+    subscriptionBurnsOnNoShowOnly: true,
+    ...overrides,
+  };
+}
+
+/** Основной зал «Енисея» с ценами из прайса. */
+function hall(overrides: Partial<Hall> = {}): Omit<Hall, 'id'> {
+  return {
+    name: 'Основной зал',
     bookingStep: 'MIN_30',
     tableHourPrice: 40_000,
     tableExtra30MinPrice: 20_000,
@@ -15,10 +27,6 @@ function settings(overrides: Partial<ClubSettings> = {}): ClubSettings {
     robot30MinPrice: null,
     robot60MinPrice: null,
     robotExtra30MinPrice: null,
-    noShowChargePercent: 100,
-    attendanceReminderAfterMinutes: 60,
-    attendanceAutoNoShowAfterMinutes: 1440,
-    subscriptionBurnsOnNoShowOnly: true,
     ...overrides,
   };
 }
@@ -42,13 +50,49 @@ describe('isValidTimezone', () => {
   });
 });
 
-describe('settingsViolations', () => {
+describe('clubSettingsViolations', () => {
   it('на настройках «Енисея» замечаний нет', () => {
-    assert.deepEqual(settingsViolations(settings()), []);
+    assert.deepEqual(clubSettingsViolations(settings()), []);
+  });
+
+  it('неявка, зафиксированная раньше напоминания, отклоняется', () => {
+    const violations = clubSettingsViolations(
+      settings({ attendanceReminderAfterMinutes: 120, attendanceAutoNoShowAfterMinutes: 60 }),
+    );
+
+    assert.equal(violations.length, 1);
+    assert.match(violations[0]!, /позже напоминания/);
+  });
+
+  it('совпадение сроков тоже отклоняется — эскалация теряет смысл', () => {
+    assert.equal(
+      clubSettingsViolations(
+        settings({ attendanceReminderAfterMinutes: 60, attendanceAutoNoShowAfterMinutes: 60 }),
+      ).length,
+      1,
+    );
+  });
+
+  it('нарушения возвращаются все разом, а не по одному', () => {
+    const violations = clubSettingsViolations(
+      settings({
+        timezone: 'Asia/Krasnayarsk',
+        attendanceReminderAfterMinutes: 120,
+        attendanceAutoNoShowAfterMinutes: 60,
+      }),
+    );
+
+    assert.equal(violations.length, 2);
+  });
+});
+
+describe('hallViolations', () => {
+  it('на основном зале «Енисея» замечаний нет', () => {
+    assert.deepEqual(hallViolations(hall()), []);
   });
 
   it('опция робота без цен отклоняется, и в тексте перечислено чего не хватает', () => {
-    const violations = settingsViolations(settings({ hasRobotOption: true }));
+    const violations = hallViolations(hall({ hasRobotOption: true }));
 
     assert.equal(violations.length, 1);
     assert.match(violations[0]!, /30 минут/);
@@ -57,8 +101,8 @@ describe('settingsViolations', () => {
   });
 
   it('названа именно недостающая цена, а не весь набор', () => {
-    const violations = settingsViolations(
-      settings({
+    const violations = hallViolations(
+      hall({
         hasRobotOption: true,
         robot30MinPrice: 30_000,
         robot60MinPrice: 50_000,
@@ -72,15 +116,15 @@ describe('settingsViolations', () => {
   });
 
   it('выключенная опция робота цен не требует', () => {
-    assert.deepEqual(settingsViolations(settings({ hasRobotOption: false })), []);
+    assert.deepEqual(hallViolations(hall({ hasRobotOption: false })), []);
   });
 
   it('нулевая цена робота — это заданная цена, а не отсутствующая', () => {
     // Бесплатный робот в акции — законная настройка. Проверка смотрит на null,
     // а не на «ложное» значение, и 0 её проходить обязан.
     assert.deepEqual(
-      settingsViolations(
-        settings({
+      hallViolations(
+        hall({
           hasRobotOption: true,
           robot30MinPrice: 0,
           robot60MinPrice: 0,
@@ -91,33 +135,7 @@ describe('settingsViolations', () => {
     );
   });
 
-  it('неявка, зафиксированная раньше напоминания, отклоняется', () => {
-    const violations = settingsViolations(
-      settings({ attendanceReminderAfterMinutes: 120, attendanceAutoNoShowAfterMinutes: 60 }),
-    );
-
-    assert.equal(violations.length, 1);
-    assert.match(violations[0]!, /позже напоминания/);
-  });
-
-  it('совпадение сроков тоже отклоняется — эскалация теряет смысл', () => {
-    const violations = settingsViolations(
-      settings({ attendanceReminderAfterMinutes: 60, attendanceAutoNoShowAfterMinutes: 60 }),
-    );
-
-    assert.equal(violations.length, 1);
-  });
-
-  it('нарушения возвращаются все разом, а не по одному', () => {
-    const violations = settingsViolations(
-      settings({
-        timezone: 'Asia/Krasnayarsk',
-        hasRobotOption: true,
-        attendanceReminderAfterMinutes: 120,
-        attendanceAutoNoShowAfterMinutes: 60,
-      }),
-    );
-
-    assert.equal(violations.length, 3);
+  it('зал без названия отклоняется', () => {
+    assert.equal(hallViolations(hall({ name: '   ' })).length, 1);
   });
 });

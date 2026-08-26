@@ -91,6 +91,18 @@ enum BookingStatus {
 
 /// Минимальный шаг бронирования стола — клуб выбирает один из вариантов при
 /// настройке профиля.
+/// Почему стол недоступен для самостоятельной онлайн-брони.
+///
+/// Администратор выбирает это, закрывая время в сетке. Клиент видит только
+/// то, что время занято, — расшифровка нужна персоналу клуба и статистике.
+enum ClosurePurpose {
+  RENT // аренда, оформленная мимо сайта
+  SPARRING // спарринг с тренером
+  TRAINING // групповая или индивидуальная тренировка
+  ROBOT // занятие с роботом
+  OTHER // всё остальное: турнир, ремонт, техническая уборка
+}
+
 enum BookingStep {
   MIN_10
   MIN_15
@@ -223,19 +235,10 @@ model Tenant {
   // штатная ситуация, а не экзотика.
   timezone String @default("Asia/Krasnoyarsk")
 
-  // --- Профиль клуба: то, что владелец/админ клуба настраивает сам, без
-  // --- участия разработчика (см. ТЗ → «Профиль клуба»). Цены — в копейках.
-  // Количество столов отдельным полем не хранится: столы — это строки в
-  // Table, и счётчик рядом с ними неизбежно разошёлся бы с реальностью
-  // (добавили стол, забыли обновить число). «Настройка количества столов»
-  // из ТЗ — это добавление и удаление записей Table в админке.
-  hasRobotOption       Boolean     @default(false) // есть ли аренда «стол + робот»
-  bookingStep          BookingStep @default(MIN_30) // минимальный шаг брони стола
-  tableHourPrice       Int // цена 1 часа аренды стола без робота
-  tableExtra30MinPrice Int // доплата за каждые следующие 30 минут без робота
-  robot30MinPrice      Int? // цена 30 минут с роботом (своя сетка цен)
-  robot60MinPrice      Int? // цена 60 минут с роботом
-  robotExtra30MinPrice Int? // доплата за каждые следующие 30 минут с роботом
+  // Цены и шаг бронирования здесь НЕ лежат: они у зала (см. Hall). У клуба
+  // может быть несколько залов с разным оборудованием и разной ценой, а вот
+  // политика отмены и правила присутствия ниже — общие: это условия договора
+  // клуба с клиентом, и различаться внутри одного клуба они не должны.
 
   // --- Политика отмены: настройка клуба, а не константа в коде.
   //
@@ -271,10 +274,12 @@ model Tenant {
   tournamentTypes         TournamentType[]
   tournaments             Tournament[]
   tournamentRegistrations TournamentRegistration[]
+  halls                   Hall[]
   tables                  Table[]
   tableBookings           TableBooking[]
   tableClosureRules       TableClosureRule[]
-  tableClosures           TableClosure[]
+  hallDaySchedules        HallDaySchedule[]
+  dayClosures             DayClosure[]
   subscriptionPlans       SubscriptionPlan[]
   planTrainingTypes       SubscriptionPlanTrainingType[]
   planTournamentTypes     SubscriptionPlanTournamentType[]
@@ -479,6 +484,8 @@ model CoachProfile {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  closureRules     TableClosureRule[]
+  dayClosures      DayClosure[]
   trainingSessions TrainingSession[] // сессии, которые ведёт этот тренер
   tableBookings    TableBooking[]    @relation("CoachTableBookings") // брони стола, инициированные тренером (спарринги)
   visitLogs        VisitLog[] // визиты его учеников — для статистики посещаемости
@@ -674,20 +681,63 @@ model TournamentRegistration {
 
 /// Один физический стол клуба (просто идентифицируемый ресурс — цены и
 /// доступность робота настраиваются на уровне Tenant, не по каждому столу).
+/// Зал клуба: помещение со своим набором столов и своей ценой.
+///
+/// У клуба их может быть несколько, и различаются они именно тем, что стоит
+/// денег: оборудованием, размером, наличием роботов. Поэтому цены и
+/// минимальный шаг брони живут здесь, а не на клубе.
+///
+/// Политика отмены, правила присутствия и абонементы сюда НЕ переезжают: это
+/// условия договора клуба с клиентом, и разные правила отмены в двух залах
+/// одного клуба пришлось бы отдельно оговаривать в оферте.
+model Hall {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  name     String // «Основной зал», «Малый зал»
+
+  // Цены — в копейках. Количество столов отдельным полем не хранится: столы —
+  // это строки в Table, и счётчик рядом с ними неизбежно разошёлся бы с
+  // реальностью (добавили стол, забыли обновить число).
+  bookingStep          BookingStep @default(MIN_30) // минимальный шаг брони стола
+  tableHourPrice       Int // цена 1 часа аренды стола без робота
+  tableExtra30MinPrice Int // доплата за каждые следующие 30 минут без робота
+  hasRobotOption       Boolean     @default(false) // есть ли аренда «стол + робот»
+  robot30MinPrice      Int? // цена 30 минут с роботом (своя сетка цен)
+  robot60MinPrice      Int? // цена 60 минут с роботом
+  robotExtra30MinPrice Int? // доплата за каждые следующие 30 минут с роботом
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tables       Table[]
+  daySchedules HallDaySchedule[]
+
+  // Мишень для составных FK: стол не может попасть в зал чужого клуба.
+  @@unique([id, tenantId])
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
 model Table {
   id        String   @id @default(cuid())
   tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  hallId    String
+  hall      Hall     @relation(fields: [hallId, tenantId], references: [id, tenantId], onDelete: Restrict)
   label     String // например «Стол 1»
   createdAt DateTime @default(now())
 
   bookings     TableBooking[]
   closureRules TableClosureRule[]
-  closures     TableClosure[]
+  dayClosures  DayClosure[]
 
   @@unique([id, tenantId])
-  @@unique([tenantId, label])
+  // Название уникально В ПРЕДЕЛАХ ЗАЛА, а не клуба: «Стол 1» законно есть и
+  // в основном зале, и в малом.
+  @@unique([hallId, label])
   @@index([tenantId])
+  @@index([hallId])
 }
 
 /// Регулярно закрытое время стола: постоянное недельное правило.
@@ -714,6 +764,17 @@ model TableClosureRule {
   /// День недели по ISO-8601: 1 — понедельник, 7 — воскресенье.
   weekday Int
 
+  /// Чем занят стол. Обязательно: «просто закрыто» ничего не говорит ни
+  /// администратору через месяц, ни статистике.
+  purpose ClosurePurpose @default(OTHER)
+
+  /// Тренер, ведущий занятие. Обязателен при purpose = TRAINING — иначе
+  /// проведённая тренировка не попадёт в статистику тренера и разбираться,
+  /// кто её вёл, придётся по памяти. Для аренды и робота бессмыслен и
+  /// запрещён (см. constraints.sql).
+  coachId String?
+  coach   CoachProfile? @relation(fields: [coachId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
   /// Границы окна в минутах от полуночи ПО ВРЕМЕНИ КЛУБА (Tenant.timezone),
   /// а не в UTC. Правило «каждый вторник с 15:00» должно оставаться в силе
   /// вне зависимости от того, какому мгновению UTC это соответствует.
@@ -726,31 +787,66 @@ model TableClosureRule {
 
   @@index([tenantId, weekday])
   @@index([tableId])
+  @@index([coachId])
 }
 
-/// Разово закрытое время стола: турнир, ремонт, аренда зала целиком.
+/// Расписание зала на конкретную дату.
 ///
-/// В отличие от недельного правила, привязано к конкретным мгновениям, а не к
-/// дню недели, и живёт в UTC, как и брони.
-model TableClosure {
+/// Шаблон недели (TableClosureRule) описывает, как зал живёт обычно. Эта
+/// таблица говорит «а вот двенадцатого марта было иначе»: строка-заголовок
+/// на пару «зал + дата» означает, что на эту дату шаблон НЕ применяется, а
+/// действует то, что лежит в её DayClosure.
+///
+/// Заголовок нужен отдельной строкой, потому что пустое расписание дня — это
+/// осмысленное состояние: «в эту субботу тренировок нет, все столы свободны».
+/// Без заголовка отсутствие записей нельзя было бы отличить от «день не
+/// правили», и суббота молча вернулась бы к шаблону.
+model HallDaySchedule {
   id       String @id @default(cuid())
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tableId  String
-  table    Table  @relation(fields: [tableId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  hallId   String
+  hall     Hall   @relation(fields: [hallId, tenantId], references: [id, tenantId], onDelete: Cascade)
 
-  startsAt DateTime @db.Timestamptz(3)
-  endsAt   DateTime @db.Timestamptz(3)
-
-  /// Зачем закрыто. Видит только персонал клуба — клиенту это время просто не
-  /// показывается в сетке.
-  reason String?
+  /// Календарная дата ПО ВРЕМЕНИ КЛУБА, без часов. Именно дата, а не
+  /// мгновение: «двенадцатое марта» в зале начинается в местную полночь.
+  date DateTime @db.Date
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([tenantId, startsAt])
+  closures DayClosure[]
+
+  @@unique([hallId, date])
+  @@index([tenantId, date])
+}
+
+/// Занятое время стола на конкретную дату — то же, что окно шаблона, но
+/// внутри расписания одного дня.
+model DayClosure {
+  id         String          @id @default(cuid())
+  tenantId   String
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  scheduleId String
+  schedule   HallDaySchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  tableId    String
+  table      Table           @relation(fields: [tableId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  /// Границы в минутах от местной полуночи, как и в шаблоне. Полночь как
+  /// конец окна — 1440, а не 0.
+  startMinute Int
+  endMinute   Int
+
+  purpose ClosurePurpose @default(OTHER)
+  coachId String?
+  coach   CoachProfile?  @relation(fields: [coachId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([scheduleId])
   @@index([tableId])
+  @@index([coachId])
 }
 
 /// Бронь стола: самостоятельная онлайн-аренда клиента (без подтверждения

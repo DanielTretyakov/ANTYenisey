@@ -1,26 +1,35 @@
-import type { ClosureRule, ClosureRuleDraft, Weekday } from '@yenisey/types';
+import type { ClosurePurpose, ClosureSlot, Weekday } from '@yenisey/types';
 
 /**
  * Перевод между сеткой на экране и окнами расписания.
  *
  * На экране администратор закрашивает клетки «стол × полчаса», а в базе лежат
- * интервалы. Склейка соседних клеток в интервал и обратный разбор собраны
- * здесь: это чистая арифметика, и ошибка в ней стоит стола, отданного клиенту
- * под групповой тренировкой.
+ * интервалы с назначением и тренером. Склейка соседних клеток в интервал и
+ * обратный разбор собраны здесь: это чистая арифметика, и ошибка в ней стоит
+ * стола, отданного клиенту прямо под групповой тренировкой.
  */
 
 /**
- * Шаг сетки — полчаса, независимо от минимального шага брони клуба.
+ * Шаг сетки — полчаса, независимо от минимального шага брони зала.
  *
- * Совпадение с шагом брони не требуется: закрытым считается любое окно,
+ * Совпадение с шагом брони не требуется: занятым считается любое окно,
  * ПЕРЕСЕКАЮЩЕЕСЯ с бронью, а не совпадающее с ней. Полчаса — компромисс между
  * подробностью и высотой таблицы: при шаге в 10 минут в сутках было бы 144
  * строки, и попасть мышью в нужную стало бы отдельной задачей.
  */
 export const SLOT_MINUTES = 30;
 
-/** Сутки целиком: правило, заведённое на ночь, тоже должно быть видно и правимо. */
-export const SLOTS_PER_DAY = (24 * 60) / SLOT_MINUTES;
+/**
+ * Границы сетки: с 06:00 до полуночи.
+ *
+ * Ночь из таблицы убрана — зал в это время закрыт, и двенадцать пустых строк
+ * только мешали искать нужный час. Окна, попадающие в ночь, при этом не
+ * теряются: см. `splitByGrid`.
+ */
+export const GRID_START_MINUTE = 6 * 60;
+export const GRID_END_MINUTE = 24 * 60;
+
+export const SLOTS_PER_DAY = (GRID_END_MINUTE - GRID_START_MINUTE) / SLOT_MINUTES;
 
 export const WEEKDAYS: { value: Weekday; short: string; full: string }[] = [
   { value: 1, short: 'Пн', full: 'Понедельник' },
@@ -35,36 +44,105 @@ export const WEEKDAYS: { value: Weekday; short: string; full: string }[] = [
 /** Будни — для кнопки «скопировать на все будни». */
 export const WORKDAYS: Weekday[] = [1, 2, 3, 4, 5];
 
-/** Ключ клетки. Строка, а не объект: клетки живут в Set, а объекты в нём не сравниваются. */
-export function cellKey(weekday: Weekday, tableId: string, slot: number): string {
-  return `${weekday}|${tableId}|${slot}`;
+/** Чем занят стол в клетке. `null` в карте не хранится — клетка просто отсутствует. */
+export interface CellValue {
+  purpose: ClosurePurpose;
+  coachId: string | null;
+}
+
+/**
+ * Закрашенные клетки.
+ *
+ * Map, а не Set: клетка теперь несёт назначение и тренера, а не только
+ * признак «занято».
+ */
+export type Cells = Map<string, CellValue>;
+
+/**
+ * Ключ клетки. Строка, а не объект: клетки живут в Map, а объекты в ней
+ * сравниваются по ссылке.
+ *
+ * `lane` — дорожка расписания: день недели в шаблоне («2») или единственная
+ * дорожка в расписании даты («day»). Так одна и та же сетка обслуживает оба
+ * режима, не заводя двух почти одинаковых компонентов.
+ */
+export function cellKey(lane: string, tableId: string, slot: number): string {
+  return `${lane}|${tableId}|${slot}`;
+}
+
+/** Минута начала слота от полуночи. */
+export function slotMinute(slot: number): number {
+  return GRID_START_MINUTE + slot * SLOT_MINUTES;
 }
 
 /** Время начала слота в виде «15:00». */
 export function slotLabel(slot: number): string {
-  const minutes = slot * SLOT_MINUTES;
+  const minutes = slotMinute(slot);
   const hours = Math.floor(minutes / 60);
 
   return `${String(hours).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
 /**
- * Окна расписания → закрашенные клетки.
+ * Разделение окна по нижней границе сетки.
+ *
+ * Ночная часть в таблице не показывается, но и не пропадает: она возвращается
+ * отдельно и уезжает обратно на сервер нетронутой. Иначе сохранение сетки
+ * тихо стирало бы всё, что заведено до шести утра.
+ *
+ * Стык границы пересечением не считается, поэтому сохранённая ночная часть и
+ * клетки сетки никогда не наложатся друг на друга.
+ */
+export function splitByGrid<T extends ClosureSlot>(slots: readonly T[]): {
+  inGrid: T[];
+  night: T[];
+} {
+  const inGrid: T[] = [];
+  const night: T[] = [];
+
+  for (const slot of slots) {
+    if (slot.endMinute <= GRID_START_MINUTE) {
+      night.push(slot);
+      continue;
+    }
+
+    if (slot.startMinute >= GRID_START_MINUTE) {
+      inGrid.push(slot);
+      continue;
+    }
+
+    // Окно пересекает шесть утра: ночной хвост сохраняем как есть, дневную
+    // часть отдаём сетке.
+    night.push({ ...slot, endMinute: GRID_START_MINUTE });
+    inGrid.push({ ...slot, startMinute: GRID_START_MINUTE });
+  }
+
+  return { inGrid, night };
+}
+
+/**
+ * Окна → закрашенные клетки.
  *
  * Границы окна округляются наружу: окно 15:10–15:50 не совпадает с сеткой, но
- * закрытое время терять нельзя, поэтому клетка 15:00–15:30 считается
- * закрытой целиком. Такое окно может появиться, если расписание завели не из
- * этой сетки — например, через API.
+ * занятое время терять нельзя, поэтому клетка 15:00–15:30 считается занятой
+ * целиком. Такое окно может появиться, если расписание завели не из этой
+ * сетки — например, через API.
  */
-export function rulesToCells(rules: readonly ClosureRule[]): Set<string> {
-  const cells = new Set<string>();
+export function slotsToCells(
+  slots: readonly ClosureSlot[],
+  lane: (slot: ClosureSlot) => string,
+): Cells {
+  const cells: Cells = new Map();
 
-  for (const rule of rules) {
-    const first = Math.floor(rule.startMinute / SLOT_MINUTES);
-    const last = Math.ceil(rule.endMinute / SLOT_MINUTES);
+  for (const slot of slots) {
+    const first = Math.floor((slot.startMinute - GRID_START_MINUTE) / SLOT_MINUTES);
+    const last = Math.ceil((slot.endMinute - GRID_START_MINUTE) / SLOT_MINUTES);
 
-    for (let slot = first; slot < last && slot < SLOTS_PER_DAY; slot += 1) {
-      cells.add(cellKey(rule.weekday, rule.tableId, slot));
+    for (let index = Math.max(0, first); index < Math.min(last, SLOTS_PER_DAY); index += 1) {
+      cells.set(cellKey(lane(slot), slot.tableId, index), {
+        purpose: slot.purpose,
+        coachId: slot.coachId,
+      });
     }
   }
 
@@ -72,68 +150,80 @@ export function rulesToCells(rules: readonly ClosureRule[]): Set<string> {
 }
 
 /**
- * Закрашенные клетки → окна расписания.
+ * Закрашенные клетки → окна.
  *
- * Соседние клетки склеиваются в одно окно: восемь получасовых строк подряд —
- * это «с 15:00 до 19:00», а не восемь отдельных записей. Иначе список окон
- * распухал бы, а exclusion-констрейнт в базе всё равно требует, чтобы окна
- * одного стола не соприкасались внахлёст.
+ * Соседние клетки склеиваются в одно окно, но только если у них совпадают и
+ * назначение, и тренер: тренировка Иванова, идущая встык с тренировкой
+ * Петрова, — это два занятия, и слить их в одно значило бы приписать часы
+ * одному из них.
  */
-export function cellsToRules(
-  cells: ReadonlySet<string>,
+export function cellsToSlots(
+  cells: Cells,
+  lanes: readonly string[],
   tableIds: readonly string[],
-): ClosureRuleDraft[] {
-  const rules: ClosureRuleDraft[] = [];
+): (ClosureSlot & { lane: string })[] {
+  const slots: (ClosureSlot & { lane: string })[] = [];
 
-  for (const { value: weekday } of WEEKDAYS) {
+  for (const lane of lanes) {
     for (const tableId of tableIds) {
       let runStart: number | null = null;
+      let runValue: CellValue | null = null;
 
-      // Проходим на слот дальше конца суток, чтобы окно, упирающееся в
+      // Проходим на слот дальше конца сетки, чтобы окно, упирающееся в
       // полночь, закрылось той же веткой, что и все остальные.
       for (let slot = 0; slot <= SLOTS_PER_DAY; slot += 1) {
-        const closed = slot < SLOTS_PER_DAY && cells.has(cellKey(weekday, tableId, slot));
+        const value = slot < SLOTS_PER_DAY ? cells.get(cellKey(lane, tableId, slot)) : undefined;
+        const continues =
+          value !== undefined &&
+          runValue !== null &&
+          value.purpose === runValue.purpose &&
+          value.coachId === runValue.coachId;
 
-        if (closed && runStart === null) {
-          runStart = slot;
-        }
-
-        if (!closed && runStart !== null) {
-          rules.push({
+        if (!continues && runStart !== null && runValue !== null) {
+          slots.push({
+            lane,
             tableId,
-            weekday,
-            startMinute: runStart * SLOT_MINUTES,
-            endMinute: slot * SLOT_MINUTES,
+            startMinute: slotMinute(runStart),
+            endMinute: slotMinute(slot),
+            purpose: runValue.purpose,
+            coachId: runValue.coachId,
           });
           runStart = null;
+          runValue = null;
+        }
+
+        if (value !== undefined && runStart === null) {
+          runStart = slot;
+          runValue = value;
         }
       }
     }
   }
 
-  return rules;
+  return slots;
 }
 
-/** Копия одного дня в другие. Клетки дней-получателей заменяются целиком. */
-export function copyDay(
-  cells: ReadonlySet<string>,
-  from: Weekday,
-  to: readonly Weekday[],
+/** Копия одной дорожки в другие. Клетки дорожек-получателей заменяются целиком. */
+export function copyLane(
+  cells: Cells,
+  from: string,
+  to: readonly string[],
   tableIds: readonly string[],
-): Set<string> {
-  const next = new Set(cells);
+): Cells {
+  const next = new Map(cells);
 
-  for (const weekday of to) {
-    if (weekday === from) {
+  for (const lane of to) {
+    if (lane === from) {
       continue;
     }
 
     for (const tableId of tableIds) {
       for (let slot = 0; slot < SLOTS_PER_DAY; slot += 1) {
-        const key = cellKey(weekday, tableId, slot);
+        const source = cells.get(cellKey(from, tableId, slot));
+        const key = cellKey(lane, tableId, slot);
 
-        if (cells.has(cellKey(from, tableId, slot))) {
-          next.add(key);
+        if (source) {
+          next.set(key, source);
         } else {
           next.delete(key);
         }
@@ -144,15 +234,32 @@ export function copyDay(
   return next;
 }
 
-/** Сколько окон закрыто в дне — для подписи на вкладке. */
-export function countClosedSlots(cells: ReadonlySet<string>, weekday: Weekday): number {
+/** Сколько клеток занято на дорожке — для подписи на вкладке. */
+export function countOnLane(cells: Cells, lane: string): number {
   let count = 0;
 
-  for (const key of cells) {
-    if (key.startsWith(`${weekday}|`)) {
+  for (const key of cells.keys()) {
+    if (key.startsWith(`${lane}|`)) {
       count += 1;
     }
   }
 
   return count;
+}
+
+/** Совпадают ли две сетки — чтобы не предлагать сохранить неизменённое. */
+export function sameCells(a: Cells, b: Cells): boolean {
+  if (a.size !== b.size) {
+    return false;
+  }
+
+  for (const [key, value] of a) {
+    const other = b.get(key);
+
+    if (!other || other.purpose !== value.purpose || other.coachId !== value.coachId) {
+      return false;
+    }
+  }
+
+  return true;
 }

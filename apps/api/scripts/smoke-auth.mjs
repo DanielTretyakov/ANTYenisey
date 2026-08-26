@@ -321,18 +321,18 @@ async function main() {
   check('без токена', 401, r.status);
   r = await call('/club/settings', { headers: { Authorization: `Bearer ${access}` } });
   check('клиенту закрыто', 403, r.status);
-  r = await call('/club/tables', { headers: { Authorization: `Bearer ${access}` } });
-  check('список столов клиенту закрыт', 403, r.status);
+  r = await call('/club/halls', { headers: { Authorization: `Bearer ${access}` } });
+  check('залы клиенту закрыты', 403, r.status);
 
   const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
   const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
 
   if (!adminEmail || !adminPassword) {
-    console.log('=== 18. Правка настроек — ПРОПУЩЕНА');
+    console.log('=== 18-21. Настройки, залы и расписание — ПРОПУЩЕНЫ');
     console.log('     нужна учётка админа: SMOKE_ADMIN_EMAIL и SMOKE_ADMIN_PASSWORD');
     console.log('     завести: pnpm db:create-admin -- --email ... --password ... --name "..."');
   } else {
-    console.log('=== 18. Правка настроек администратором');
+    console.log('=== 18. Настройки клуба');
     r = await post('/auth/login', {
       tenantSlug: 'yenisey',
       email: adminEmail,
@@ -343,29 +343,75 @@ async function main() {
     const adminAuth = { Authorization: `Bearer ${r.body?.accessToken ?? ''}` };
     const asAdmin = (path, options = {}) =>
       call(path, { ...options, headers: { ...adminAuth, ...options.headers } });
-    const patchSettings = (json) =>
-      asAdmin('/club/settings', { method: 'PATCH', json });
+    const patchSettings = (json) => asAdmin('/club/settings', { method: 'PATCH', json });
 
     r = await asAdmin('/club/settings');
     check('настройки прочитаны', 200, r.status);
-    const original = r.body;
-    assert('цена аренды пришла целым числом копеек', Number.isInteger(original?.tableHourPrice));
+    const originalSettings = r.body;
+    assert(
+      'цен в настройках клуба больше нет — они у зала',
+      originalSettings !== null && !('tableHourPrice' in originalSettings),
+    );
     assert(
       'служебные поля наружу не утекают',
-      original !== null && !('id' in original) && !('slug' in original),
+      originalSettings !== null && !('id' in originalSettings) && !('slug' in originalSettings),
     );
 
-    r = await patchSettings({ bookingStep: 'MIN_15' });
-    check('шаг бронирования изменён', 200, r.status);
-    assert('ответ отдал новое значение', r.body?.bookingStep === 'MIN_15');
-
-    // Цены гасятся тем же запросом: у «Енисея» они заданы сидом, и одна лишь
-    // установка флага была бы проверкой, которая всегда проходит.
+    r = await patchSettings({ timezone: 'Asia/Krasnayarsk' });
+    check('опечатка в часовом поясе отклонена', 400, r.status);
     r = await patchSettings({
-      hasRobotOption: true,
-      robot30MinPrice: null,
-      robot60MinPrice: null,
-      robotExtra30MinPrice: null,
+      attendanceReminderAfterMinutes: 120,
+      attendanceAutoNoShowAfterMinutes: 60,
+    });
+    check('неявка раньше напоминания отклонена', 400, r.status);
+    r = await patchSettings({ noShowChargePercent: 101 });
+    check('процент больше ста отклонён', 400, r.status);
+    r = await patchSettings({ tableHourPrice: 40000 });
+    check('цена в настройках клуба больше не принимается', 400, r.status);
+
+    console.log('=== 19. Залы');
+    r = await asAdmin('/club/halls');
+    check('залы прочитаны', 200, r.status);
+    const mainHall = r.body?.[0];
+    assert('у зала есть цена аренды целым числом копеек', Number.isInteger(mainHall?.tableHourPrice));
+    assert('у зала есть шаг бронирования', typeof mainHall?.bookingStep === 'string');
+
+    const hallName = `Зал проверки ${RUN}`;
+    r = await asAdmin('/club/halls', {
+      method: 'POST',
+      json: {
+        name: hallName,
+        bookingStep: 'HOUR_1',
+        tableHourPrice: 30000,
+        tableExtra30MinPrice: 15000,
+        hasRobotOption: false,
+        robot30MinPrice: null,
+        robot60MinPrice: null,
+        robotExtra30MinPrice: null,
+      },
+    });
+    check('зал заведён', 201, r.status);
+    const hallId = r.body?.id;
+    assert('у нового зала свои цены, а не общие клубные', r.body?.tableHourPrice === 30000);
+
+    r = await asAdmin('/club/halls', {
+      method: 'POST',
+      json: {
+        name: hallName,
+        bookingStep: 'MIN_30',
+        tableHourPrice: 1,
+        tableExtra30MinPrice: 1,
+        hasRobotOption: false,
+        robot30MinPrice: null,
+        robot60MinPrice: null,
+        robotExtra30MinPrice: null,
+      },
+    });
+    check('повторное название зала отклонено', 409, r.status);
+
+    r = await asAdmin(`/club/halls/${hallId}`, {
+      method: 'PATCH',
+      json: { hasRobotOption: true },
     });
     check('опция робота без цен отклонена', 400, r.status);
     assert(
@@ -373,100 +419,67 @@ async function main() {
       JSON.stringify(r.body?.message ?? '').includes('30 минут'),
     );
 
-    r = await patchSettings({ timezone: 'Asia/Krasnayarsk' });
-    check('опечатка в часовом поясе отклонена', 400, r.status);
+    r = await asAdmin(`/club/halls/${hallId}`, { method: 'PATCH', json: { bookingStep: 'MIN_15' } });
+    check('шаг бронирования зала изменён', 200, r.status);
+    assert('ответ отдал новое значение', r.body?.bookingStep === 'MIN_15');
 
-    r = await patchSettings({
-      attendanceReminderAfterMinutes: 120,
-      attendanceAutoNoShowAfterMinutes: 60,
-    });
-    check('неявка раньше напоминания отклонена', 400, r.status);
-
-    r = await patchSettings({ tableHourPrice: 400.5 });
-    check('цена дробью отклонена', 400, r.status);
-    r = await patchSettings({ tableHourPrice: -1 });
-    check('отрицательная цена отклонена', 400, r.status);
-    r = await patchSettings({ noShowChargePercent: 101 });
-    check('процент больше ста отклонён', 400, r.status);
-    r = await patchSettings({ tenantId: 'chuzhoy-klub' });
-    check('лишнее поле отрезано', 400, r.status);
-
-    // Настройки клуба разработчика возвращаются как были: скрипт гоняется по
-    // рабочей базе, и оставлять её со сдвинутым шагом бронирования нельзя.
-    r = await patchSettings(original);
-    check('настройки возвращены в исходное состояние', 200, r.status);
-    assert(
-      'вернулось всё, а не только шаг брони',
-      JSON.stringify(r.body) === JSON.stringify(original),
-    );
-
-    console.log('=== 19. Столы клуба');
+    console.log('=== 20. Столы в залах');
     const label = `Стол проверки ${RUN}`;
-    r = await asAdmin('/club/tables', { method: 'POST', json: { label } });
-    check('стол добавлен', 201, r.status);
+    r = await asAdmin('/club/tables', { method: 'POST', json: { hallId, label } });
+    check('стол заведён в зале', 201, r.status);
     const tableId = r.body?.id;
-    assert('у нового стола нет броней', r.body?.hasBookings === false);
+    assert('стол знает свой зал', r.body?.hallId === hallId);
+    assert('у нового стола нет расписания', r.body?.closureCount === 0);
 
-    r = await asAdmin('/club/tables', { method: 'POST', json: { label } });
-    check('повторное название отклонено', 409, r.status);
+    r = await asAdmin('/club/tables', { method: 'POST', json: { hallId, label } });
+    check('повторное название в одном зале отклонено', 409, r.status);
 
-    r = await asAdmin('/club/tables', { method: 'POST', json: { label: '   ' } });
-    check('пустое название отклонено', 400, r.status);
-
-    r = await asAdmin(`/club/tables/${tableId}`, {
-      method: 'PATCH',
-      json: { label: `  ${label}  переименован  ` },
+    r = await asAdmin('/club/tables', {
+      method: 'POST',
+      json: { hallId: mainHall?.id, label },
     });
-    check('стол переименован', 200, r.status);
-    assert(
-      `лишние пробелы схлопнуты (получено «${r.body?.label}»)`,
-      r.body?.label === `${label} переименован`,
-    );
+    check('то же название в СОСЕДНЕМ зале принято', 201, r.status);
+    const twinId = r.body?.id;
 
-    r = await asAdmin('/club/tables');
-    check('список столов прочитан', 200, r.status);
-    assert(
-      'переименованный стол в списке',
-      Array.isArray(r.body) && r.body.some((table) => table.id === tableId),
-    );
+    r = await asAdmin('/club/tables', { method: 'POST', json: { hallId: 'chuzhoy-zal', label: 'X' } });
+    check('стол в несуществующий зал отклонён', 404, r.status);
 
-    r = await asAdmin(`/club/tables/${tableId}`, { method: 'DELETE' });
-    check('стол удалён', 204, r.status);
-    r = await asAdmin(`/club/tables/${tableId}`, { method: 'DELETE' });
-    check('повторное удаление — не найден', 404, r.status);
+    r = await asAdmin(`/club/halls/${hallId}`, { method: 'DELETE' });
+    check('зал со столами удалить нельзя', 409, r.status);
 
-    console.log('=== 20. Закрытое время столов');
-    r = await asAdmin('/club/tables', { method: 'POST', json: { label: `Стол закрытий ${RUN}` } });
-    const closureTable = r.body?.id;
+    console.log('=== 21. Шаблон недели');
+    const coaches = (await asAdmin('/club/coaches')).body ?? [];
+    const coachId = coaches[0]?.id ?? null;
 
-    r = await asAdmin('/club/closures');
-    check('расписание прочитано', 200, r.status);
-    const originalRules = (r.body?.rules ?? []).map(({ id, ...rule }) => rule);
-    assert('разовые окна пришли отдельным списком', Array.isArray(r.body?.exceptions));
+    if (!coachId) {
+      console.log('     тренеров в клубе нет — проверки тренировок пропущены');
+      console.log('     завести: pnpm db:create-admin -- --role COACH --email ... --name "..."');
+    }
 
-    // «Вторник, 15:00–19:00» — ровно тот случай из ТЗ, когда столы заняты
-    // групповой тренировкой.
-    const schedule = [
-      ...originalRules,
-      { tableId: closureTable, weekday: 2, startMinute: 900, endMinute: 1140 },
-      { tableId: closureTable, weekday: 2, startMinute: 1140, endMinute: 1200 },
-    ];
+    r = await asAdmin(`/club/halls/${hallId}/template`);
+    check('шаблон прочитан', 200, r.status);
+    assert('у нового зала шаблон пуст', Array.isArray(r.body) && r.body.length === 0);
 
-    r = await asAdmin('/club/closures/rules', { method: 'PUT', json: { rules: schedule } });
-    check('расписание сохранено', 200, r.status);
-    assert(
-      'окна встык приняты — стык пересечением не считается',
-      Array.isArray(r.body) && r.body.length === schedule.length,
-    );
+    const window = (extra) => ({
+      tableId,
+      weekday: 2,
+      startMinute: 900,
+      endMinute: 1140,
+      purpose: 'RENT',
+      coachId: null,
+      ...extra,
+    });
 
-    r = await asAdmin('/club/closures/rules', {
+    r = await asAdmin(`/club/halls/${hallId}/template`, {
       method: 'PUT',
-      json: {
-        rules: [
-          { tableId: closureTable, weekday: 2, startMinute: 900, endMinute: 1140 },
-          { tableId: closureTable, weekday: 2, startMinute: 1080, endMinute: 1200 },
-        ],
-      },
+      json: { rules: [window(), window({ startMinute: 1140, endMinute: 1200 })] },
+    });
+    check('шаблон сохранён', 200, r.status);
+    assert('окна встык приняты — стык пересечением не считается', r.body?.length === 2);
+
+    r = await asAdmin(`/club/halls/${hallId}/template`, {
+      method: 'PUT',
+      json: { rules: [window(), window({ startMinute: 1080, endMinute: 1200 })] },
     });
     check('наложение окон отклонено', 400, r.status);
     assert(
@@ -474,88 +487,115 @@ async function main() {
       JSON.stringify(r.body?.message ?? '').includes('15:00'),
     );
 
-    r = await asAdmin('/club/closures/rules', {
+    r = await asAdmin(`/club/halls/${hallId}/template`, {
       method: 'PUT',
-      json: { rules: [{ tableId: closureTable, weekday: 0, startMinute: 0, endMinute: 60 }] },
+      json: { rules: [window({ weekday: 0 })] },
     });
     check('нулевой день недели отклонён', 400, r.status);
 
-    r = await asAdmin('/club/closures/rules', {
+    r = await asAdmin(`/club/halls/${hallId}/template`, {
       method: 'PUT',
-      json: { rules: [{ tableId: closureTable, weekday: 2, startMinute: 0, endMinute: 1441 }] },
+      json: { rules: [window({ endMinute: 1441 })] },
     });
     check('конец за пределами суток отклонён', 400, r.status);
 
-    r = await asAdmin('/club/closures/rules', {
+    r = await asAdmin(`/club/halls/${hallId}/template`, {
       method: 'PUT',
-      json: { rules: [{ tableId: 'chuzhoy-stol', weekday: 2, startMinute: 0, endMinute: 60 }] },
+      json: { rules: [window({ purpose: 'TRAINING' })] },
     });
-    check('чужой стол в расписании отклонён', 400, r.status);
+    check('тренировка без тренера отклонена', 400, r.status);
+    assert(
+      'сказано, почему тренер нужен',
+      JSON.stringify(r.body?.message ?? '').includes('статистику'),
+    );
 
-    console.log('=== 21. Разовые окна');
-    r = await asAdmin('/club/closures/exceptions', {
-      method: 'POST',
-      json: {
-        tableId: closureTable,
-        startsAt: '2026-09-12T03:00:00.000Z',
-        endsAt: '2026-09-12T09:00:00.000Z',
-        reason: 'Турнир',
-      },
-    });
-    check('разовое окно заведено', 201, r.status);
-    const exceptionId = r.body?.id;
-    assert('причина сохранена', r.body?.reason === 'Турнир');
+    if (coachId) {
+      r = await asAdmin(`/club/halls/${hallId}/template`, {
+        method: 'PUT',
+        json: { rules: [window({ purpose: 'TRAINING', coachId })] },
+      });
+      check('тренировка с тренером принята', 200, r.status);
+      assert('тренер сохранён', r.body?.[0]?.coachId === coachId);
 
-    r = await asAdmin('/club/closures/exceptions', {
-      method: 'POST',
-      json: {
-        tableId: closureTable,
-        startsAt: '2026-09-12T06:00:00.000Z',
-        endsAt: '2026-09-12T12:00:00.000Z',
-      },
-    });
-    check('пересекающееся окно отклонено', 409, r.status);
+      r = await asAdmin(`/club/halls/${hallId}/template`, {
+        method: 'PUT',
+        json: { rules: [window({ purpose: 'RENT', coachId })] },
+      });
+      check('тренер у аренды отклонён', 400, r.status);
+    }
 
-    r = await asAdmin('/club/closures/exceptions', {
-      method: 'POST',
-      json: {
-        tableId: closureTable,
-        startsAt: '2026-09-12T09:00:00.000Z',
-        endsAt: '2026-09-12T12:00:00.000Z',
-      },
-    });
-    check('окно встык принято', 201, r.status);
-    const adjacentId = r.body?.id;
-
-    r = await asAdmin('/club/closures/exceptions', {
-      method: 'POST',
-      json: {
-        tableId: closureTable,
-        startsAt: '2026-09-13T09:00:00.000Z',
-        endsAt: '2026-09-13T09:00:00.000Z',
-      },
-    });
-    check('окно нулевой длины отклонено', 400, r.status);
-
-    r = await call('/club/closures', { headers: { Authorization: `Bearer ${access}` } });
-    check('клиенту расписание закрыто', 403, r.status);
-
-    r = await asAdmin(`/club/closures/exceptions/${exceptionId}`, { method: 'DELETE' });
-    check('окно убрано', 204, r.status);
-    r = await asAdmin(`/club/closures/exceptions/${exceptionId}`, { method: 'DELETE' });
-    check('повторное удаление — не найдено', 404, r.status);
-    await asAdmin(`/club/closures/exceptions/${adjacentId}`, { method: 'DELETE' });
-
-    // Расписание клуба разработчика возвращается как было: удаление стола
-    // унесёт его правила каскадом, но чужие трогать нельзя.
-    r = await asAdmin('/club/closures/rules', {
+    // Стол СОСЕДНЕГО зала в расписание этого зала попасть не должен: составной
+    // внешний ключ проверяет клуб, но не зал.
+    r = await asAdmin(`/club/halls/${hallId}/template`, {
       method: 'PUT',
-      json: { rules: originalRules },
+      json: { rules: [window({ tableId: twinId })] },
     });
-    check('расписание возвращено в исходное состояние', 200, r.status);
+    check('чужой стол в расписании зала отклонён', 400, r.status);
 
-    r = await asAdmin(`/club/tables/${closureTable}`, { method: 'DELETE' });
-    check('временный стол убран', 204, r.status);
+    console.log('=== 22. Расписание на дату');
+    const date = '2026-09-12';
+    r = await asAdmin(`/club/halls/${hallId}/days/${date}`);
+    check('день прочитан', 200, r.status);
+    assert('неправленый день помечен как неправленый', r.body?.customised === false);
+    assert('и окон у него нет', Array.isArray(r.body?.closures) && r.body.closures.length === 0);
+
+    r = await asAdmin(`/club/halls/${hallId}/days/${date}`, {
+      method: 'PUT',
+      json: {
+        closures: [
+          { tableId, startMinute: 600, endMinute: 660, purpose: 'ROBOT', coachId: null },
+        ],
+      },
+    });
+    check('день сохранён', 200, r.status);
+    assert('день отмечен как правленый', r.body?.customised === true);
+    assert('назначение сохранено', r.body?.closures?.[0]?.purpose === 'ROBOT');
+
+    r = await asAdmin(`/club/halls/${hallId}/days`);
+    check('список правленых дат прочитан', 200, r.status);
+    assert('дата в списке', Array.isArray(r.body) && r.body.includes(date));
+
+    // Пустое расписание правленого дня — осмысленное состояние: «в этот день
+    // ничего не занято», а не «вернуть шаблон».
+    r = await asAdmin(`/club/halls/${hallId}/days/${date}`, {
+      method: 'PUT',
+      json: { closures: [] },
+    });
+    check('пустой день сохранён', 200, r.status);
+    assert('и он всё ещё правленый, а не сброшенный', r.body?.customised === true);
+
+    r = await asAdmin(`/club/halls/${hallId}/days/${date}`, {
+      method: 'PUT',
+      json: {
+        closures: [
+          { tableId, startMinute: 600, endMinute: 720, purpose: 'RENT', coachId: null },
+          { tableId, startMinute: 660, endMinute: 780, purpose: 'RENT', coachId: null },
+        ],
+      },
+    });
+    check('наложение окон в дне отклонено', 400, r.status);
+
+    r = await asAdmin(`/club/halls/${hallId}/days/${date}`, { method: 'DELETE' });
+    check('день возвращён к шаблону', 200, r.status);
+    assert('признак правки снят', r.body?.customised === false);
+
+    r = await asAdmin(`/club/halls/${hallId}/days/2026-13-45`, { method: 'DELETE' });
+    check('несуществующая дата отклонена', 400, r.status);
+
+    console.log('=== 23. Уборка проверочных данных');
+    r = await asAdmin(`/club/tables/${tableId}`, { method: 'DELETE' });
+    check('стол проверки убран', 204, r.status);
+    r = await asAdmin(`/club/tables/${twinId}`, { method: 'DELETE' });
+    check('стол-двойник убран', 204, r.status);
+    r = await asAdmin(`/club/halls/${hallId}`, { method: 'DELETE' });
+    check('пустой зал удалён', 204, r.status);
+
+    r = await patchSettings(originalSettings);
+    check('настройки клуба возвращены в исходное состояние', 200, r.status);
+    assert(
+      'вернулось всё, а не часть',
+      JSON.stringify(r.body) === JSON.stringify(originalSettings),
+    );
   }
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);

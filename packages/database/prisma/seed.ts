@@ -33,13 +33,24 @@ async function main(): Promise<void> {
       name: 'АНТ «Енисей»',
       slug: 'yenisey',
       timezone: 'Asia/Krasnoyarsk',
+      noShowChargePercent: 100,
+    },
+  });
+
+  // Цены и шаг брони живут у зала, а не у клуба: залы различаются
+  // оборудованием и ценой, и «Енисей» рано или поздно откроет второй.
+  const hall = await prisma.hall.upsert({
+    where: { tenantId_name: { tenantId: tenant.id, name: 'Основной зал' } },
+    update: {},
+    create: {
+      tenantId: tenant.id,
+      name: 'Основной зал',
       hasRobotOption: true,
       tableHourPrice: 400 * RUB,
       tableExtra30MinPrice: 200 * RUB,
       robot30MinPrice: 600 * RUB,
       robot60MinPrice: 900 * RUB,
       robotExtra30MinPrice: 300 * RUB,
-      noShowChargePercent: 100,
     },
   });
 
@@ -112,9 +123,9 @@ async function main(): Promise<void> {
     const label = `Стол ${index}`;
 
     await prisma.table.upsert({
-      where: { tenantId_label: { tenantId: tenant.id, label } },
+      where: { hallId_label: { hallId: hall.id, label } },
       update: {},
-      create: { tenantId: tenant.id, label },
+      create: { tenantId: tenant.id, hallId: hall.id, label },
     });
   }
 

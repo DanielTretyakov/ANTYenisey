@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
-import { ClosuresService } from './closures.service';
 import { ClubController } from './club.controller';
 import { ClubService } from './club.service';
+import { ScheduleService } from './schedule.service';
 
 @Module({
   controllers: [ClubController],
-  providers: [ClubService, ClosuresService],
-  exports: [ClubService, ClosuresService],
+  providers: [ClubService, ScheduleService],
+  exports: [ClubService, ScheduleService],
 })
 export class ClubModule {}

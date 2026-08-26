@@ -1,17 +1,20 @@
 import type {
   AuthResponse,
-  ClosureException,
-  ClosureExceptionRequest,
   ClosureRule,
   ClosureRuleDraft,
-  ClubClosures,
+  ClubCoach,
   ClubSettings,
   ClubTable,
+  CreateHallRequest,
+  DayClosureDraft,
+  DaySchedule,
+  Hall,
   LoginRequest,
   PublicTenant,
   PublicUser,
   RegisterRequest,
   UpdateClubSettingsRequest,
+  UpdateHallRequest,
 } from '@yenisey/types';
 import { clearSession, readAccessToken, saveSession } from './session';
 
@@ -129,10 +132,23 @@ export const api = {
   updateClubSettings: (patch: UpdateClubSettingsRequest): Promise<ClubSettings> =>
     authorized('/club/settings', json('PATCH', patch)),
 
+  // --- Залы
+  halls: (): Promise<Hall[]> => authorized('/club/halls'),
+
+  createHall: (payload: CreateHallRequest): Promise<Hall> =>
+    authorized('/club/halls', json('POST', payload)),
+
+  updateHall: (id: string, patch: UpdateHallRequest): Promise<Hall> =>
+    authorized(`/club/halls/${id}`, json('PATCH', patch)),
+
+  deleteHall: (id: string): Promise<void> =>
+    authorized(`/club/halls/${id}`, { method: 'DELETE' }),
+
+  // --- Столы
   clubTables: (): Promise<ClubTable[]> => authorized('/club/tables'),
 
-  createTable: (label: string): Promise<ClubTable> =>
-    authorized('/club/tables', json('POST', { label })),
+  createTable: (hallId: string, label: string): Promise<ClubTable> =>
+    authorized('/club/tables', json('POST', { hallId, label })),
 
   renameTable: (id: string, label: string): Promise<ClubTable> =>
     authorized(`/club/tables/${id}`, json('PATCH', { label })),
@@ -140,15 +156,29 @@ export const api = {
   deleteTable: (id: string): Promise<void> =>
     authorized(`/club/tables/${id}`, { method: 'DELETE' }),
 
-  clubClosures: (): Promise<ClubClosures> => authorized('/club/closures'),
+  // --- Тренеры
+  coaches: (): Promise<ClubCoach[]> => authorized('/club/coaches'),
 
-  /** Расписание заменяется целиком — см. ClosuresService.replaceRules на сервере. */
-  replaceClosureRules: (rules: ClosureRuleDraft[]): Promise<ClosureRule[]> =>
-    authorized('/club/closures/rules', json('PUT', { rules })),
+  // --- Расписание зала
+  /** Постоянный шаблон недели: как зал живёт обычно. */
+  template: (hallId: string): Promise<ClosureRule[]> =>
+    authorized(`/club/halls/${hallId}/template`),
 
-  createClosureException: (payload: ClosureExceptionRequest): Promise<ClosureException> =>
-    authorized('/club/closures/exceptions', json('POST', payload)),
+  /** Шаблон заменяется целиком — см. ScheduleService.replaceTemplate на сервере. */
+  replaceTemplate: (hallId: string, rules: ClosureRuleDraft[]): Promise<ClosureRule[]> =>
+    authorized(`/club/halls/${hallId}/template`, json('PUT', { rules })),
 
-  deleteClosureException: (id: string): Promise<void> =>
-    authorized(`/club/closures/exceptions/${id}`, { method: 'DELETE' }),
+  /** Даты, на которых расписание отличается от шаблона. */
+  customisedDates: (hallId: string): Promise<string[]> =>
+    authorized(`/club/halls/${hallId}/days`),
+
+  daySchedule: (hallId: string, date: string): Promise<DaySchedule> =>
+    authorized(`/club/halls/${hallId}/days/${date}`),
+
+  replaceDay: (hallId: string, date: string, closures: DayClosureDraft[]): Promise<DaySchedule> =>
+    authorized(`/club/halls/${hallId}/days/${date}`, json('PUT', { closures })),
+
+  /** Возврат даты к шаблону. */
+  resetDay: (hallId: string, date: string): Promise<DaySchedule> =>
+    authorized(`/club/halls/${hallId}/days/${date}`, { method: 'DELETE' }),
 };
