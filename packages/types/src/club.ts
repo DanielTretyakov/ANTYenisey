@@ -118,7 +118,13 @@ export interface RenameTableRequest {
  * Клиент видит только то, что время занято; расшифровка нужна персоналу клуба
  * и статистике. Значения совпадают с enum `ClosurePurpose` из schema.prisma.
  */
-export type ClosurePurpose = 'RENT' | 'SPARRING' | 'TRAINING' | 'ROBOT' | 'OTHER';
+export type ClosurePurpose =
+  | 'RENT'
+  | 'SPARRING'
+  | 'TRAINING'
+  | 'ROBOT'
+  | 'TOURNAMENT'
+  | 'OTHER';
 
 /**
  * День недели по ISO-8601: 1 — понедельник, 7 — воскресенье.
@@ -153,6 +159,18 @@ export interface ClosureSlot {
    * один «закреплённый» ввёл бы в заблуждение.
    */
   clientId: string | null;
+  /**
+   * Какая это тренировка: «Общая групповая», «Первая подача». Обязателен при
+   * `purpose: 'TRAINING'` — от типа зависит цена, а «просто тренировка» в
+   * расписании не говорит клиенту ничего.
+   */
+  trainingTypeId: string | null;
+  /**
+   * Турнир, занявший это время. Обязателен при `purpose: 'TOURNAMENT'` и
+   * возможен только в расписании конкретной даты: у турнира дата и время
+   * проведения, и в постоянном шаблоне недели ему места нет.
+   */
+  tournamentId: string | null;
 }
 
 /** Окно шаблона недели: «каждый вторник с 15:00 до 19:00». */
@@ -261,4 +279,73 @@ export interface ClubPeopleQuery {
   ids?: string[];
   limit?: number;
   offset?: number;
+}
+
+/**
+ * Тип тренировки: «Общая групповая», «Первая подача».
+ *
+ * Классификация нужна и клиенту (он выбирает, на что записаться), и кассе
+ * (цена своя у каждого типа). Список ведёт администратор клуба.
+ */
+export interface TrainingType {
+  id: string;
+  name: string;
+  /** Цена участия, копейки. */
+  price: number;
+  /**
+   * Снятая с продажи не удаляется, а гасится: на неё ссылаются прошедшие
+   * занятия и расписание, и удаление упёрлось бы во внешний ключ.
+   */
+  isActive: boolean;
+  /** Сколько окон расписания на неё ссылается — показывается перед снятием. */
+  usageCount: number;
+}
+
+export interface TrainingTypeRequest {
+  name: string;
+  price: number;
+  isActive?: boolean;
+}
+
+/**
+ * Тип турнира: «Клуб 100», «Первая подача».
+ *
+ * Часть названий несёт число-ограничение по рейтингу. Это справочная
+ * информация для спортсмена — система её не проверяет и допуск не блокирует
+ * (ТЗ → «Запись на турнир»).
+ */
+export interface TournamentType {
+  id: string;
+  name: string;
+  /** Число-ограничение из названия, например «100». Ни на что не влияет. */
+  ratingLabel: string | null;
+  /** Цена участия, копейки. */
+  price: number;
+  isActive: boolean;
+  /** Сколько турниров заведено по этому типу. */
+  tournamentCount: number;
+}
+
+export interface TournamentTypeRequest {
+  name: string;
+  ratingLabel?: string | null;
+  price: number;
+  isActive?: boolean;
+}
+
+/** Турнир: конкретное проведение типа в конкретный момент. */
+export interface Tournament {
+  id: string;
+  tournamentTypeId: string;
+  /** Название типа — чтобы список читался без второго запроса. */
+  typeName: string;
+  /** Момент начала в ISO-8601 с зоной; хранится в UTC, как и брони. */
+  startsAt: string;
+  /** Сколько окон расписания уже отдано этому турниру. */
+  placedCount: number;
+}
+
+export interface TournamentRequest {
+  tournamentTypeId: string;
+  startsAt: string;
 }

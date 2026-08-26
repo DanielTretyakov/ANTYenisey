@@ -51,6 +51,10 @@ export interface CellValue {
   coachId: string | null;
   /** Клиент — у аренды и робота. Оба поля разом не заполняются никогда. */
   clientId: string | null;
+  /** Тип тренировки — только у тренировки. */
+  trainingTypeId: string | null;
+  /** Турнир — только у турнира и только в расписании даты. */
+  tournamentId: string | null;
 }
 
 /**
@@ -156,6 +160,8 @@ export function slotsToCells(
         purpose: slot.purpose,
         coachId: slot.coachId,
         clientId: slot.clientId,
+        trainingTypeId: slot.trainingTypeId,
+        tournamentId: slot.tournamentId,
       });
     }
   }
@@ -192,7 +198,9 @@ export function cellsToSlots(
           runValue !== null &&
           value.purpose === runValue.purpose &&
           value.coachId === runValue.coachId &&
-          value.clientId === runValue.clientId;
+          value.clientId === runValue.clientId &&
+          value.trainingTypeId === runValue.trainingTypeId &&
+          value.tournamentId === runValue.tournamentId;
 
         if (!continues && runStart !== null && runValue !== null) {
           slots.push({
@@ -203,6 +211,8 @@ export function cellsToSlots(
             purpose: runValue.purpose,
             coachId: runValue.coachId,
             clientId: runValue.clientId,
+            trainingTypeId: runValue.trainingTypeId,
+            tournamentId: runValue.tournamentId,
           });
           runStart = null;
           runValue = null;
@@ -276,7 +286,9 @@ export function sameCells(a: Cells, b: Cells): boolean {
       !other ||
       other.purpose !== value.purpose ||
       other.coachId !== value.coachId ||
-      other.clientId !== value.clientId
+      other.clientId !== value.clientId ||
+      other.trainingTypeId !== value.trainingTypeId ||
+      other.tournamentId !== value.tournamentId
     ) {
       return false;
     }

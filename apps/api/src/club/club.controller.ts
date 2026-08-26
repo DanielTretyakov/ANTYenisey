@@ -21,7 +21,11 @@ import type {
   ClubTable,
   DaySchedule,
   Hall,
+  Tournament,
+  TournamentType,
+  TrainingType,
 } from '@yenisey/types';
+import { CatalogService } from './catalog.service';
 import { ClubService } from './club.service';
 import { ScheduleService } from './schedule.service';
 import {
@@ -32,6 +36,11 @@ import {
   ReplaceTemplateDto,
   UpdateHallDto,
 } from './dto/schedule.dto';
+import {
+  TournamentDto,
+  TournamentTypeDto,
+  TrainingTypeDto,
+} from './dto/catalog.dto';
 import { ChangeRoleDto, ClubPeopleQueryDto } from './dto/people.dto';
 import { UpdateClubSettingsDto } from './dto/update-settings.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -54,6 +63,7 @@ export class ClubController {
   constructor(
     private readonly club: ClubService,
     private readonly schedule: ScheduleService,
+    private readonly catalog: CatalogService,
   ) {}
 
   // --- Настройки клуба -----------------------------------------------------
@@ -168,6 +178,96 @@ export class ClubController {
     @Body() dto: ChangeRoleDto,
   ): Promise<ClubPerson> {
     return this.club.changeRole(user.tenantId, user.sub, userId, dto.role);
+  }
+
+  // --- Типы тренировок -----------------------------------------------------
+
+  @Get('training-types')
+  listTrainingTypes(@CurrentUser() user: AccessTokenPayload): Promise<TrainingType[]> {
+    return this.catalog.listTrainingTypes(user.tenantId);
+  }
+
+  @Post('training-types')
+  createTrainingType(
+    @CurrentUser() user: AccessTokenPayload,
+    @Body() dto: TrainingTypeDto,
+  ): Promise<TrainingType> {
+    return this.catalog.createTrainingType(user.tenantId, dto);
+  }
+
+  @Patch('training-types/:id')
+  updateTrainingType(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id') id: string,
+    @Body() dto: TrainingTypeDto,
+  ): Promise<TrainingType> {
+    return this.catalog.updateTrainingType(user.tenantId, id, dto);
+  }
+
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete('training-types/:id')
+  deleteTrainingType(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id') id: string,
+  ): Promise<void> {
+    return this.catalog.deleteTrainingType(user.tenantId, id);
+  }
+
+  // --- Типы турниров -------------------------------------------------------
+
+  @Get('tournament-types')
+  listTournamentTypes(@CurrentUser() user: AccessTokenPayload): Promise<TournamentType[]> {
+    return this.catalog.listTournamentTypes(user.tenantId);
+  }
+
+  @Post('tournament-types')
+  createTournamentType(
+    @CurrentUser() user: AccessTokenPayload,
+    @Body() dto: TournamentTypeDto,
+  ): Promise<TournamentType> {
+    return this.catalog.createTournamentType(user.tenantId, dto);
+  }
+
+  @Patch('tournament-types/:id')
+  updateTournamentType(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id') id: string,
+    @Body() dto: TournamentTypeDto,
+  ): Promise<TournamentType> {
+    return this.catalog.updateTournamentType(user.tenantId, id, dto);
+  }
+
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete('tournament-types/:id')
+  deleteTournamentType(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id') id: string,
+  ): Promise<void> {
+    return this.catalog.deleteTournamentType(user.tenantId, id);
+  }
+
+  // --- Турниры -------------------------------------------------------------
+
+  @Get('tournaments')
+  listTournaments(@CurrentUser() user: AccessTokenPayload): Promise<Tournament[]> {
+    return this.catalog.listTournaments(user.tenantId);
+  }
+
+  @Post('tournaments')
+  createTournament(
+    @CurrentUser() user: AccessTokenPayload,
+    @Body() dto: TournamentDto,
+  ): Promise<Tournament> {
+    return this.catalog.createTournament(user.tenantId, dto);
+  }
+
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete('tournaments/:id')
+  deleteTournament(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id') id: string,
+  ): Promise<void> {
+    return this.catalog.deleteTournament(user.tenantId, id);
   }
 
   // --- Расписание зала -----------------------------------------------------

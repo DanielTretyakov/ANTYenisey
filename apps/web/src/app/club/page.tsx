@@ -2,7 +2,15 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { ClubCoach, ClubSettings, ClubTable, Hall, Role } from '@yenisey/types';
+import type {
+  ClubCoach,
+  ClubSettings,
+  ClubTable,
+  Hall,
+  Role,
+  Tournament,
+  TrainingType,
+} from '@yenisey/types';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -23,6 +31,8 @@ type Loaded = {
   halls: Hall[];
   tables: ClubTable[];
   coaches: ClubCoach[];
+  trainingTypes: TrainingType[];
+  tournaments: Tournament[];
 };
 
 /**
@@ -59,11 +69,27 @@ export default function ClubPage() {
 
     // Всё грузится разом: это один экран, и ждать части по очереди означало бы
     // умножить ожидание на ровном месте.
-    Promise.all([api.clubSettings(), api.halls(), api.clubTables(), api.coaches()])
-      .then(([settings, halls, tables, coaches]) => {
+    Promise.all([
+      api.clubSettings(),
+      api.halls(),
+      api.clubTables(),
+      api.coaches(),
+      api.trainingTypes(),
+      api.tournaments(),
+    ])
+      .then(([settings, halls, tables, coaches, trainingTypes, tournaments]) => {
         if (cancelled) return;
 
-        setData({ settings, halls, tables, coaches });
+        // В сетку предлагаются только действующие типы: снятый с продажи не
+        // должен появляться в новых окнах, хотя в старых он остаётся.
+        setData({
+          settings,
+          halls,
+          tables,
+          coaches,
+          trainingTypes: trainingTypes.filter((type) => type.isActive),
+          tournaments,
+        });
         setHallId((previous) => previous ?? halls[0]?.id ?? null);
       })
       .catch((cause: unknown) => {
@@ -198,6 +224,8 @@ export default function ClubPage() {
                   hallId={hall.id}
                   tables={data.tables}
                   coaches={data.coaches}
+                  trainingTypes={data.trainingTypes}
+                  tournaments={data.tournaments}
                   timezone={data.settings.timezone}
                 />
               </div>

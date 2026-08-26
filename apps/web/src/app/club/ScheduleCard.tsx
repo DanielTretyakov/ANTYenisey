@@ -7,6 +7,8 @@ import type {
   ClubPerson,
   ClubTable,
   DayClosure,
+  Tournament,
+  TrainingType,
   Weekday,
 } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
@@ -64,11 +66,15 @@ export function ScheduleCard({
   hallId,
   tables,
   coaches,
+  trainingTypes,
+  tournaments,
   timezone,
 }: {
   hallId: string;
   tables: ClubTable[];
   coaches: ClubCoach[];
+  trainingTypes: TrainingType[];
+  tournaments: Tournament[];
   timezone: string;
 }) {
   const [mode, setMode] = useState<Mode>('template');
@@ -85,6 +91,10 @@ export function ScheduleCard({
   const [brush, setBrush] = useState<Brush>('TRAINING');
   const [coachId, setCoachId] = useState<string | null>(coaches[0]?.id ?? null);
   const [client, setClient] = useState<ClubPerson | null>(null);
+  const [trainingTypeId, setTrainingTypeId] = useState<string | null>(
+    trainingTypes[0]?.id ?? null,
+  );
+  const [tournamentId, setTournamentId] = useState<string | null>(tournaments[0]?.id ?? null);
   /**
    * Имена людей, встречающихся в расписании.
    *
@@ -205,6 +215,14 @@ export function ScheduleCard({
     void load();
   }, [load]);
 
+  // Кисть «турнир» в шаблоне недели невозможна: переключаясь туда, оставлять
+  // её выбранной значит предлагать нарисовать то, что не сохранится.
+  useEffect(() => {
+    if (mode === 'template' && brush === 'TOURNAMENT') {
+      setBrush('TRAINING');
+    }
+  }, [mode, brush]);
+
   /**
    * Что делает перетаскивание — закрашивает или стирает.
    *
@@ -243,6 +261,8 @@ export function ScheduleCard({
       purpose: brush,
       coachId: attachment === 'coach' ? coachId : null,
       clientId: attachment === 'client' ? (client?.id ?? null) : null,
+      trainingTypeId: brush === 'TRAINING' ? trainingTypeId : null,
+      tournamentId: brush === 'TOURNAMENT' ? tournamentId : null,
     };
   }
 
@@ -427,6 +447,15 @@ export function ScheduleCard({
           client={client}
           onClient={setClient}
           colors={colors}
+          trainingTypes={trainingTypes}
+          trainingTypeId={trainingTypeId}
+          onTrainingType={setTrainingTypeId}
+          tournaments={tournaments}
+          tournamentId={tournamentId}
+          onTournament={setTournamentId}
+          // Турнир привязан к конкретной дате, поэтому в шаблоне недели его
+          // кисти нет вовсе — не только запрещено сервером, но и не предложено.
+          allowTournament={mode === 'day'}
         />
 
         {loading ? (

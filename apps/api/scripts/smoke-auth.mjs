@@ -479,6 +479,8 @@ async function main() {
       purpose: 'RENT',
       coachId: null,
       clientId: null,
+      trainingTypeId: null,
+      tournamentId: null,
       ...extra,
     });
 
@@ -521,13 +523,81 @@ async function main() {
       JSON.stringify(r.body?.message ?? '').includes('статистику'),
     );
 
+    console.log('=== 21а. Справочники занятий и турниров');
+    const trainingName = `Проверочная тренировка ${RUN}`;
+    r = await asAdmin('/club/training-types', {
+      method: 'POST',
+      json: { name: trainingName, price: 70000 },
+    });
+    check('тип тренировки заведён', 201, r.status);
+    const trainingTypeId = r.body?.id;
+    assert('цена целым числом копеек', r.body?.price === 70000);
+
+    r = await asAdmin('/club/training-types', {
+      method: 'POST',
+      json: { name: trainingName, price: 1 },
+    });
+    check('повторное название типа отклонено', 409, r.status);
+
+    r = await asAdmin('/club/training-types', { method: 'POST', json: { name: '  ', price: 1 } });
+    check('пустое название отклонено', 400, r.status);
+
+    r = await asAdmin('/club/training-types', {
+      method: 'POST',
+      json: { name: `Дробная ${RUN}`, price: 700.5 },
+    });
+    check('дробная цена отклонена', 400, r.status);
+
+    const tournamentTypeName = `Проверочный турнир ${RUN}`;
+    r = await asAdmin('/club/tournament-types', {
+      method: 'POST',
+      json: { name: tournamentTypeName, ratingLabel: '100', price: 50000 },
+    });
+    check('тип турнира заведён', 201, r.status);
+    const tournamentTypeId = r.body?.id;
+    assert('ограничение по рейтингу сохранено как справочная строка', r.body?.ratingLabel === '100');
+
+    r = await asAdmin('/club/tournaments', {
+      method: 'POST',
+      json: { tournamentTypeId, startsAt: '2026-10-03T04:00:00.000Z' },
+    });
+    check('турнир заведён', 201, r.status);
+    const tournamentId = r.body?.id;
+    assert('название типа приехало вместе с турниром', r.body?.typeName === tournamentTypeName);
+
+    r = await asAdmin('/club/tournaments', {
+      method: 'POST',
+      json: { tournamentTypeId: 'chuzhoy-tip', startsAt: '2026-10-03T04:00:00.000Z' },
+    });
+    check('турнир по несуществующему типу отклонён', 404, r.status);
+
+    r = await asAdmin(`/club/tournament-types/${tournamentTypeId}`, { method: 'DELETE' });
+    check('тип с заведёнными турнирами удалить нельзя', 409, r.status);
+
     if (coachId) {
       r = await asAdmin(`/club/halls/${hallId}/template`, {
         method: 'PUT',
         json: { rules: [window({ purpose: 'TRAINING', coachId })] },
       });
-      check('тренировка с тренером принята', 200, r.status);
+      check('тренировка без типа отклонена', 400, r.status);
+      assert(
+        'сказано, что нужен тип',
+        JSON.stringify(r.body?.message ?? '').includes('выберите тип'),
+      );
+
+      r = await asAdmin(`/club/halls/${hallId}/template`, {
+        method: 'PUT',
+        json: { rules: [window({ purpose: 'TRAINING', coachId, trainingTypeId })] },
+      });
+      check('тренировка с тренером и типом принята', 200, r.status);
       assert('тренер сохранён', r.body?.[0]?.coachId === coachId);
+      assert('тип сохранён', r.body?.[0]?.trainingTypeId === trainingTypeId);
+
+      r = await asAdmin(`/club/halls/${hallId}/template`, {
+        method: 'PUT',
+        json: { rules: [window({ purpose: 'TOURNAMENT', tournamentId })] },
+      });
+      check('турнир в шаблоне недели отклонён', 400, r.status);
 
       r = await asAdmin(`/club/halls/${hallId}/template`, {
         method: 'PUT',
@@ -535,6 +605,54 @@ async function main() {
       });
       check('тренер у аренды отклонён', 400, r.status);
     }
+
+    console.log('=== 21д. Турнир в расписании дня');
+    const cupDate = '2026-10-03';
+    r = await asAdmin(`/club/halls/${hallId}/days/${cupDate}`, {
+      method: 'PUT',
+      json: {
+        closures: [
+          {
+            tableId,
+            startMinute: 600,
+            endMinute: 720,
+            purpose: 'TOURNAMENT',
+            coachId: null,
+            clientId: null,
+            trainingTypeId: null,
+            tournamentId,
+          },
+        ],
+      },
+    });
+    check('турнир поставлен в сетку дня', 200, r.status);
+    assert('турнир сохранён у окна', r.body?.closures?.[0]?.tournamentId === tournamentId);
+
+    r = await asAdmin('/club/tournaments');
+    const placed = (r.body ?? []).find((item) => item.id === tournamentId);
+    assert('турнир знает, что стоит в сетке', placed?.placedCount === 1);
+
+    r = await asAdmin(`/club/tournaments/${tournamentId}`, { method: 'DELETE' });
+    check('турнир из сетки удалить нельзя', 409, r.status);
+
+    r = await asAdmin(`/club/halls/${hallId}/days/${cupDate}`, {
+      method: 'PUT',
+      json: {
+        closures: [
+          {
+            tableId,
+            startMinute: 600,
+            endMinute: 720,
+            purpose: 'TOURNAMENT',
+            coachId: null,
+            clientId: null,
+            trainingTypeId: null,
+            tournamentId: null,
+          },
+        ],
+      },
+    });
+    check('турнир без указания какой — отклонён', 400, r.status);
 
     console.log('=== 21б. Клиент, закреплённый за арендой');
     const clients = (await asAdmin('/club/people?role=CLIENT&limit=1')).body?.items ?? [];
@@ -689,6 +807,14 @@ async function main() {
     check('несуществующая дата отклонена', 400, r.status);
 
     console.log('=== 23. Уборка проверочных данных');
+    await asAdmin(`/club/halls/${hallId}/days/${cupDate}`, { method: 'DELETE' });
+    r = await asAdmin(`/club/tournaments/${tournamentId}`, { method: 'DELETE' });
+    check('турнир убран', 204, r.status);
+    r = await asAdmin(`/club/tournament-types/${tournamentTypeId}`, { method: 'DELETE' });
+    check('тип турнира убран', 204, r.status);
+    await asAdmin(`/club/halls/${hallId}/template`, { method: 'PUT', json: { rules: [] } });
+    r = await asAdmin(`/club/training-types/${trainingTypeId}`, { method: 'DELETE' });
+    check('тип тренировки убран', 204, r.status);
     r = await asAdmin(`/club/tables/${tableId}`, { method: 'DELETE' });
     check('стол проверки убран', 204, r.status);
     r = await asAdmin(`/club/tables/${twinId}`, { method: 'DELETE' });

@@ -30,7 +30,14 @@ import type {
 import { MINUTES_IN_DAY } from '../closures';
 
 const BOOKING_STEPS: BookingStep[] = ['MIN_10', 'MIN_15', 'MIN_20', 'MIN_30', 'HOUR_1'];
-const PURPOSES: ClosurePurpose[] = ['RENT', 'SPARRING', 'TRAINING', 'ROBOT', 'OTHER'];
+const PURPOSES: ClosurePurpose[] = [
+  'RENT',
+  'SPARRING',
+  'TRAINING',
+  'ROBOT',
+  'TOURNAMENT',
+  'OTHER',
+];
 
 /**
  * Верхняя граница цены — 10 000 000 копеек (100 000 ₽ за час).
@@ -209,9 +216,29 @@ class ClosureSlotDto {
   @IsString()
   @MaxLength(64)
   clientId: string | null;
+
+  /** Тип тренировки. Согласованность с назначением — там же, в slotViolations. */
+  @IsOptional()
+  @ValidateIfNotNull()
+  @IsString()
+  @MaxLength(64)
+  trainingTypeId: string | null;
 }
 
 export class ClosureRuleDto extends ClosureSlotDto implements ClosureRuleDraft {
+  /**
+   * В шаблоне недели турниров не бывает: у турнира конкретная дата.
+   *
+   * Поле всё равно объявлено — общий тип окна его содержит, и без декоратора
+   * `forbidNonWhitelisted` отвергал бы весь запрос, где клиент честно прислал
+   * null. Значение при этом принимается только пустое.
+   */
+  @IsOptional()
+  @IsIn([null], {
+    message: 'Турнир ставится в расписание конкретного дня, а не в шаблон недели',
+  })
+  tournamentId: null = null;
+
   /** ISO-8601: 1 — понедельник, 7 — воскресенье. Ноль запрещён намеренно. */
   @IsInt()
   @Min(1, { message: 'День недели: 1 — понедельник, 7 — воскресенье' })
@@ -219,7 +246,17 @@ export class ClosureRuleDto extends ClosureSlotDto implements ClosureRuleDraft {
   weekday: Weekday;
 }
 
-export class DayClosureDto extends ClosureSlotDto implements DayClosureDraft {}
+export class DayClosureDto extends ClosureSlotDto implements DayClosureDraft {
+  /**
+   * Турнир, занявший это время. Только здесь: у турнира конкретная дата, и в
+   * постоянном шаблоне недели ему места нет.
+   */
+  @IsOptional()
+  @ValidateIfNotNull()
+  @IsString()
+  @MaxLength(64)
+  tournamentId: string | null;
+}
 
 /**
  * Потолок в тысячу окон — не паранойя: сетка на восемь столов и семь дней даёт

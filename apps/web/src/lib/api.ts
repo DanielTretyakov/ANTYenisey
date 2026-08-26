@@ -16,6 +16,12 @@ import type {
   PublicTenant,
   PublicUser,
   RegisterRequest,
+  Tournament,
+  TournamentRequest,
+  TournamentType,
+  TournamentTypeRequest,
+  TrainingType,
+  TrainingTypeRequest,
   UpdateClubSettingsRequest,
   UpdateHallRequest,
 } from '@yenisey/types';
@@ -180,6 +186,37 @@ export const api = {
   /** Повышение клиента до тренера и обратно. */
   changeRole: (userId: string, role: ClubPerson['role']): Promise<ClubPerson> =>
     authorized(`/club/people/${userId}/role`, json('PATCH', { role })),
+
+  // --- Справочники: типы тренировок, типы турниров, турниры
+  trainingTypes: (): Promise<TrainingType[]> => authorized('/club/training-types'),
+
+  createTrainingType: (payload: TrainingTypeRequest): Promise<TrainingType> =>
+    authorized('/club/training-types', json('POST', payload)),
+
+  updateTrainingType: (id: string, payload: TrainingTypeRequest): Promise<TrainingType> =>
+    authorized(`/club/training-types/${id}`, json('PATCH', payload)),
+
+  deleteTrainingType: (id: string): Promise<void> =>
+    authorized(`/club/training-types/${id}`, { method: 'DELETE' }),
+
+  tournamentTypes: (): Promise<TournamentType[]> => authorized('/club/tournament-types'),
+
+  createTournamentType: (payload: TournamentTypeRequest): Promise<TournamentType> =>
+    authorized('/club/tournament-types', json('POST', payload)),
+
+  updateTournamentType: (id: string, payload: TournamentTypeRequest): Promise<TournamentType> =>
+    authorized(`/club/tournament-types/${id}`, json('PATCH', payload)),
+
+  deleteTournamentType: (id: string): Promise<void> =>
+    authorized(`/club/tournament-types/${id}`, { method: 'DELETE' }),
+
+  tournaments: (): Promise<Tournament[]> => authorized('/club/tournaments'),
+
+  createTournament: (payload: TournamentRequest): Promise<Tournament> =>
+    authorized('/club/tournaments', json('POST', payload)),
+
+  deleteTournament: (id: string): Promise<void> =>
+    authorized(`/club/tournaments/${id}`, { method: 'DELETE' }),
 
   // --- Расписание зала
   /** Постоянный шаблон недели: как зал живёт обычно. */

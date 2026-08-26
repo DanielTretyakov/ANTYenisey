@@ -253,55 +253,58 @@ ALTER TABLE "TableClosureRule"
     int4range("startMinute", "endMinute", '[)') WITH &&
   );
 
--- Кто может быть прикреплён к окну, зависит от назначения.
+-- Кто и что прикрепляется к окну, зависит от назначения.
 --
 -- Тренировка без тренера не попадёт в его статистику, и через месяц выяснить,
--- кто её вёл, будет неоткуда, — там тренер обязателен. Спарринг всегда с
--- тренером, но заводить его может и администратор, ещё не зная, кто проведёт,
--- поэтому там тренер необязателен.
+-- кто её вёл, будет неоткуда, — там тренер обязателен. Обязателен и тип
+-- тренировки: от него зависит цена, а «просто тренировка» в расписании не
+-- говорит клиенту ничего. Спарринг всегда с тренером, но заводить его может и
+-- администратор, ещё не зная, кто проведёт, поэтому там тренер необязателен.
 --
 -- Аренда и робот закрепляются за КЛИЕНТОМ, а не за тренером: это он занял
 -- стол. Клиент необязателен — стол можно занять под аренду до того, как
 -- известно, кто придёт.
 --
+-- Турнир возможен только в расписании конкретной даты: у него дата и время
+-- проведения, а «каждую субботу один и тот же турнир» — это не турнир, а
+-- серия разных.
+--
 -- Перекрёстные поля запрещены, а не просто необязательны: тренер у аренды
 -- набрал бы в статистику чужие часы, а «закреплённый клиент» у тренировки, где
 -- участников десяток, ввёл бы в заблуждение.
 ALTER TABLE "TableClosureRule"
-  ADD CONSTRAINT "TableClosureRule_people_match_purpose"
+  ADD CONSTRAINT "TableClosureRule_no_tournament"
+  CHECK ("purpose" <> 'TOURNAMENT'::"ClosurePurpose");
+
+ALTER TABLE "TableClosureRule"
+  ADD CONSTRAINT "TableClosureRule_attachments_match_purpose"
   CHECK (
     ("purpose" = 'TRAINING'::"ClosurePurpose"
-       AND "coachId" IS NOT NULL AND "clientId" IS NULL)
-    OR ("purpose" = 'SPARRING'::"ClosurePurpose" AND "clientId" IS NULL)
+       AND "coachId" IS NOT NULL AND "clientId" IS NULL AND "trainingTypeId" IS NOT NULL)
+    OR ("purpose" = 'SPARRING'::"ClosurePurpose"
+       AND "clientId" IS NULL AND "trainingTypeId" IS NULL)
     OR ("purpose" IN ('RENT'::"ClosurePurpose", 'ROBOT'::"ClosurePurpose")
-       AND "coachId" IS NULL)
+       AND "coachId" IS NULL AND "trainingTypeId" IS NULL)
     OR ("purpose" = 'OTHER'::"ClosurePurpose"
-       AND "coachId" IS NULL AND "clientId" IS NULL)
-  );
-
--- Те же правила для расписания на конкретную дату.
-ALTER TABLE "DayClosure"
-  ADD CONSTRAINT "DayClosure_minutes_range"
-  CHECK ("startMinute" >= 0 AND "endMinute" <= 1440 AND "endMinute" > "startMinute");
-
-ALTER TABLE "DayClosure"
-  ADD CONSTRAINT "DayClosure_no_overlap"
-  EXCLUDE USING gist (
-    "tableId" WITH =,
-    "scheduleId" WITH =,
-    int4range("startMinute", "endMinute", '[)') WITH &&
+       AND "coachId" IS NULL AND "clientId" IS NULL AND "trainingTypeId" IS NULL)
   );
 
 ALTER TABLE "DayClosure"
-  ADD CONSTRAINT "DayClosure_people_match_purpose"
+  ADD CONSTRAINT "DayClosure_attachments_match_purpose"
   CHECK (
     ("purpose" = 'TRAINING'::"ClosurePurpose"
-       AND "coachId" IS NOT NULL AND "clientId" IS NULL)
-    OR ("purpose" = 'SPARRING'::"ClosurePurpose" AND "clientId" IS NULL)
+       AND "coachId" IS NOT NULL AND "clientId" IS NULL
+       AND "trainingTypeId" IS NOT NULL AND "tournamentId" IS NULL)
+    OR ("purpose" = 'SPARRING'::"ClosurePurpose"
+       AND "clientId" IS NULL AND "trainingTypeId" IS NULL AND "tournamentId" IS NULL)
     OR ("purpose" IN ('RENT'::"ClosurePurpose", 'ROBOT'::"ClosurePurpose")
-       AND "coachId" IS NULL)
+       AND "coachId" IS NULL AND "trainingTypeId" IS NULL AND "tournamentId" IS NULL)
+    OR ("purpose" = 'TOURNAMENT'::"ClosurePurpose"
+       AND "coachId" IS NULL AND "clientId" IS NULL
+       AND "trainingTypeId" IS NULL AND "tournamentId" IS NOT NULL)
     OR ("purpose" = 'OTHER'::"ClosurePurpose"
-       AND "coachId" IS NULL AND "clientId" IS NULL)
+       AND "coachId" IS NULL AND "clientId" IS NULL
+       AND "trainingTypeId" IS NULL AND "tournamentId" IS NULL)
   );
 
 -- ---------------------------------------------------------------------------

@@ -169,6 +169,24 @@ export function findOverlap<T extends ClosureSlot>(
   return null;
 }
 
+/**
+ * Турнир возможен только в расписании конкретной даты.
+ *
+ * У турнира дата и время проведения, а «каждую субботу один и тот же турнир» —
+ * это не турнир, а серия разных.
+ */
+export function templateViolations(slot: ClosureSlot): string[] {
+  const violations = slotViolations(slot);
+
+  if (slot.purpose === 'TOURNAMENT') {
+    violations.push(
+      'Турнир ставится в расписание конкретного дня, а не в постоянный шаблон недели',
+    );
+  }
+
+  return violations;
+}
+
 /** Ключ группировки для шаблона недели: стол вместе с днём недели. */
 export const ruleGroupKey = (rule: { tableId: string; weekday: Weekday }): string =>
   `${rule.tableId} ${rule.weekday}`;
@@ -179,7 +197,7 @@ export const ruleGroupKey = (rule: { tableId: string; weekday: Weekday }): strin
  * Поле там не просто необязательно, а запрещено: иначе в него сложат «просто
  * кого-нибудь», и статистика тренера наберёт чужие часы.
  */
-const PURPOSES_WITHOUT_COACH: ClosurePurpose[] = ['RENT', 'ROBOT', 'OTHER'];
+const PURPOSES_WITHOUT_COACH: ClosurePurpose[] = ['RENT', 'ROBOT', 'TOURNAMENT', 'OTHER'];
 
 /**
  * Назначения, за которыми закрепляется клиент: он занял стол.
@@ -213,6 +231,8 @@ export function slotViolations(slot: ClosureSlot): string[] {
   // поле просто опустили.
   const coachId = slot.coachId ?? null;
   const clientId = slot.clientId ?? null;
+  const trainingTypeId = slot.trainingTypeId ?? null;
+  const tournamentId = slot.tournamentId ?? null;
 
   if (slot.startMinute < 0 || slot.endMinute > MINUTES_IN_DAY) {
     violations.push(`Окно ${when} выходит за пределы суток`);
@@ -232,6 +252,24 @@ export function slotViolations(slot: ClosureSlot): string[] {
 
   if (!PURPOSES_WITH_CLIENT.includes(slot.purpose) && clientId !== null) {
     violations.push(`Окно ${when}: клиент закрепляется только за арендой и роботом`);
+  }
+
+  // От типа зависит цена, а «просто тренировка» в расписании не говорит
+  // клиенту ничего — на что он записывается, должно быть названо.
+  if (slot.purpose === 'TRAINING' && trainingTypeId === null) {
+    violations.push(`Тренировка ${when}: выберите тип — от него зависит цена`);
+  }
+
+  if (slot.purpose !== 'TRAINING' && trainingTypeId !== null) {
+    violations.push(`Окно ${when}: тип тренировки указывается только у тренировки`);
+  }
+
+  if (slot.purpose === 'TOURNAMENT' && tournamentId === null) {
+    violations.push(`Турнир ${when}: выберите, какой именно турнир занимает это время`);
+  }
+
+  if (slot.purpose !== 'TOURNAMENT' && tournamentId !== null) {
+    violations.push(`Окно ${when}: турнир указывается только у назначения «турнир»`);
   }
 
   return violations;

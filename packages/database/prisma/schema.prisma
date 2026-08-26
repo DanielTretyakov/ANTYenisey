@@ -100,7 +100,8 @@ enum ClosurePurpose {
   SPARRING // спарринг с тренером
   TRAINING // групповая или индивидуальная тренировка
   ROBOT // занятие с роботом
-  OTHER // всё остальное: турнир, ремонт, техническая уборка
+  TOURNAMENT // турнир клуба
+  OTHER // всё остальное: ремонт, техническая уборка, аренда зала целиком
 }
 
 enum BookingStep {
@@ -524,6 +525,8 @@ model TrainingType {
   updatedAt DateTime @updatedAt
 
   sessions          TrainingSession[]
+  closureRules      TableClosureRule[]
+  dayClosures       DayClosure[]
   subscriptionPlans SubscriptionPlanTrainingType[]
 
   @@unique([id, tenantId])
@@ -644,6 +647,7 @@ model Tournament {
   updatedAt DateTime @updatedAt
 
   registrations TournamentRegistration[]
+  dayClosures   DayClosure[]
 
   @@unique([id, tenantId])
   @@index([tenantId, startsAt])
@@ -793,6 +797,12 @@ model TableClosureRule {
   clientId String?
   client   ClientProfile? @relation(fields: [clientId, tenantId], references: [userId, tenantId], onDelete: Restrict)
 
+  /// Какая это тренировка: «Общая групповая», «Первая подача». Обязателен при
+  /// purpose = TRAINING — от типа зависит цена, а «просто тренировка» в
+  /// расписании не говорит клиенту ничего.
+  trainingTypeId String?
+  trainingType   TrainingType? @relation(fields: [trainingTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
   /// Границы окна в минутах от полуночи ПО ВРЕМЕНИ КЛУБА (Tenant.timezone),
   /// а не в UTC. Правило «каждый вторник с 15:00» должно оставаться в силе
   /// вне зависимости от того, какому мгновению UTC это соответствует.
@@ -807,6 +817,7 @@ model TableClosureRule {
   @@index([tableId])
   @@index([coachId])
   @@index([clientId])
+  @@index([trainingTypeId])
 }
 
 /// Расписание зала на конкретную дату.
@@ -856,13 +867,21 @@ model DayClosure {
   startMinute Int
   endMinute   Int
 
-  /// Назначение, тренер и закреплённый клиент — те же правила, что в шаблоне
-  /// недели (см. TableClosureRule).
-  purpose  ClosurePurpose @default(OTHER)
-  coachId  String?
-  coach    CoachProfile?  @relation(fields: [coachId, tenantId], references: [userId, tenantId], onDelete: Restrict)
-  clientId String?
-  client   ClientProfile? @relation(fields: [clientId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+  /// Назначение, тренер, клиент и тип тренировки — те же правила, что в
+  /// шаблоне недели (см. TableClosureRule).
+  purpose        ClosurePurpose @default(OTHER)
+  coachId        String?
+  coach          CoachProfile?  @relation(fields: [coachId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+  clientId       String?
+  client         ClientProfile? @relation(fields: [clientId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+  trainingTypeId String?
+  trainingType   TrainingType?  @relation(fields: [trainingTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  /// Турнир, занявший это время. Обязателен при purpose = TOURNAMENT и
+  /// возможен только здесь: у турнира конкретная дата, и в постоянном
+  /// расписании недели ему места нет.
+  tournamentId String?
+  tournament   Tournament? @relation(fields: [tournamentId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -871,6 +890,8 @@ model DayClosure {
   @@index([tableId])
   @@index([coachId])
   @@index([clientId])
+  @@index([trainingTypeId])
+  @@index([tournamentId])
 }
 
 /// Бронь стола: самостоятельная онлайн-аренда клиента (без подтверждения

@@ -12,6 +12,7 @@ import {
   ruleGroupKey,
   slotsForDate,
   slotViolations,
+  templateViolations,
 } from './closures.ts';
 
 const KRSK = 'Asia/Krasnoyarsk';
@@ -27,6 +28,8 @@ function rule(overrides: Partial<ClosureRule> = {}): ClosureRule {
     purpose: 'TRAINING',
     coachId: 'coach-1',
     clientId: null,
+    trainingTypeId: 'type-1',
+    tournamentId: null,
     ...overrides,
   };
 }
@@ -40,6 +43,8 @@ function dayClosure(overrides: Partial<DayClosure> = {}): DayClosure {
     purpose: 'RENT',
     coachId: null,
     clientId: null,
+    trainingTypeId: null,
+    tournamentId: null,
     ...overrides,
   };
 }
@@ -248,26 +253,90 @@ describe('slotViolations', () => {
   it('у аренды тренера быть не должно', () => {
     // Не «необязателен», а запрещён: иначе туда сложат «просто кого-нибудь»,
     // и статистика тренера наберёт чужие часы.
-    const violations = slotViolations(rule({ purpose: 'RENT', coachId: 'coach-1' }));
+    const violations = slotViolations(
+      rule({ purpose: 'RENT', coachId: 'coach-1', trainingTypeId: null }),
+    );
 
     assert.equal(violations.length, 1);
     assert.match(violations[0]!, /только для тренировки и спарринга/);
   });
 
   it('спарринг допускается и с тренером, и без него', () => {
-    assert.deepEqual(slotViolations(rule({ purpose: 'SPARRING', coachId: 'coach-1' })), []);
-    assert.deepEqual(slotViolations(rule({ purpose: 'SPARRING', coachId: null })), []);
+    const sparring = { purpose: 'SPARRING', trainingTypeId: null } as const;
+
+    assert.deepEqual(slotViolations(rule({ ...sparring, coachId: 'coach-1' })), []);
+    assert.deepEqual(slotViolations(rule({ ...sparring, coachId: null })), []);
+  });
+
+  it('тренировка без типа отклоняется', () => {
+    // От типа зависит цена, а «просто тренировка» в расписании не говорит
+    // клиенту, на что он записывается.
+    const violations = slotViolations(rule({ trainingTypeId: null }));
+
+    assert.equal(violations.length, 1);
+    assert.match(violations[0]!, /выберите тип/);
+  });
+
+  it('тип тренировки у аренды отклоняется', () => {
+    assert.equal(
+      slotViolations(rule({ purpose: 'RENT', coachId: null, trainingTypeId: 'type-1' })).length,
+      1,
+    );
+  });
+
+  it('турнир требует указания, какой именно', () => {
+    const violations = slotViolations(
+      rule({ purpose: 'TOURNAMENT', coachId: null, trainingTypeId: null }),
+    );
+
+    assert.equal(violations.length, 1);
+    assert.match(violations[0]!, /какой именно турнир/);
+  });
+
+  it('турнир с указанием замечаний не вызывает', () => {
+    assert.deepEqual(
+      slotViolations(
+        rule({
+          purpose: 'TOURNAMENT',
+          coachId: null,
+          trainingTypeId: null,
+          tournamentId: 'cup-1',
+        }),
+      ),
+      [],
+    );
+  });
+
+  it('в шаблоне недели турнира быть не может', () => {
+    // У турнира конкретная дата, а «каждую субботу один и тот же турнир» — это
+    // не турнир, а серия разных.
+    const violations = templateViolations(
+      rule({
+        purpose: 'TOURNAMENT',
+        coachId: null,
+        trainingTypeId: null,
+        tournamentId: 'cup-1',
+      }),
+    );
+
+    assert.equal(violations.length, 1);
+    assert.match(violations[0]!, /шаблон недели/);
   });
 
   it('аренда закрепляется за клиентом', () => {
     assert.deepEqual(
-      slotViolations(rule({ purpose: 'RENT', coachId: null, clientId: 'client-1' })),
+      slotViolations(
+        rule({ purpose: 'RENT', coachId: null, clientId: 'client-1', trainingTypeId: null }),
+      ),
       [],
     );
   });
 
   it('аренда без клиента тоже законна — стол занимают до того, как знают кто', () => {
-    assert.deepEqual(slotViolations(rule({ purpose: 'RENT', coachId: null })), []);
+    assert.deepEqual(
+      slotViolations(rule({ purpose: 'RENT', coachId: null, trainingTypeId: null })),
+      [],
+    );
   });
 
   it('клиент у тренировки отклоняется', () => {

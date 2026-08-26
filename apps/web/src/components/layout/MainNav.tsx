@@ -20,6 +20,7 @@ import { useSession } from '@/lib/useSession';
 const SECTIONS: { href: string; label: string; roles: Role[] }[] = [
   { href: '/cabinet', label: 'Кабинет', roles: ['CLIENT', 'COACH', 'ADMIN', 'OWNER'] },
   { href: '/people', label: 'Состав клуба', roles: ['ADMIN', 'OWNER'] },
+  { href: '/catalog', label: 'Занятия и турниры', roles: ['ADMIN', 'OWNER'] },
   { href: '/club', label: 'Настройки клуба', roles: ['ADMIN', 'OWNER'] },
 ];
 

@@ -9,7 +9,13 @@ import type {
   Weekday,
 } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
-import { findOverlap, formatMinutes, ruleGroupKey, slotViolations } from './closures';
+import {
+  findOverlap,
+  formatMinutes,
+  ruleGroupKey,
+  slotViolations,
+  templateViolations,
+} from './closures';
 
 const WEEKDAY_NAMES = [
   '',
@@ -30,6 +36,7 @@ const SLOT_SELECT = {
   purpose: true,
   coachId: true,
   clientId: true,
+  trainingTypeId: true,
 } as const;
 
 /**
@@ -55,7 +62,12 @@ export class ScheduleService {
       orderBy: [{ weekday: 'asc' }, { startMinute: 'asc' }],
     });
 
-    return rules.map((rule) => ({ ...rule, weekday: rule.weekday as Weekday }));
+    // Турнира в шаблоне не бывает — поле отдаём пустым ради общего типа окна.
+    return rules.map((rule) => ({
+      ...rule,
+      weekday: rule.weekday as Weekday,
+      tournamentId: null,
+    }));
   }
 
   /**
@@ -77,10 +89,11 @@ export class ScheduleService {
 
     // Незаполненные поля приходят как undefined; в базу должен уехать явный
     // null, иначе Prisma просто не тронет колонку при обновлении.
-    rules = rules.map(normalisePeople);
+    rules = rules.map(normalisePeople).map((rule) => ({ ...rule, tournamentId: null }));
 
     await this.assertTablesInHall(tenantId, hallId, rules);
-    this.assertSlotsValid(rules);
+    await this.assertCatalogExists(tenantId, rules);
+    this.assertSlotsValid(rules, templateViolations);
     this.assertNoOverlap(rules, ruleGroupKey, (rule) => ` в ${WEEKDAY_NAMES[rule.weekday]}`);
 
     const tableIds = await this.hallTableIds(tenantId, hallId);
@@ -90,7 +103,9 @@ export class ScheduleService {
       // правка одного зала не должна.
       this.prisma.tableClosureRule.deleteMany({ where: { tenantId, tableId: { in: tableIds } } }),
       this.prisma.tableClosureRule.createMany({
-        data: rules.map((rule) => ({ ...rule, tenantId })),
+        // tournamentId в шаблоне не хранится вовсе — колонки такой нет. Поле
+        // есть в общем типе окна, поэтому его надо снять явно.
+        data: rules.map(({ tournamentId: _tournament, ...rule }) => ({ ...rule, tenantId })),
       }),
     ]);
 
@@ -111,7 +126,12 @@ export class ScheduleService {
 
     const schedule = await this.prisma.hallDaySchedule.findFirst({
       where: { tenantId, hallId, date: parseDate(date) },
-      select: { closures: { select: SLOT_SELECT, orderBy: { startMinute: 'asc' } } },
+      select: {
+        closures: {
+          select: { ...SLOT_SELECT, tournamentId: true },
+          orderBy: { startMinute: 'asc' },
+        },
+      },
     });
 
     return {
@@ -143,6 +163,7 @@ export class ScheduleService {
     closures = closures.map(normalisePeople);
 
     await this.assertTablesInHall(tenantId, hallId, closures);
+    await this.assertCatalogExists(tenantId, closures);
     this.assertSlotsValid(closures);
     this.assertNoOverlap(closures, (slot) => slot.tableId, () => '');
 
@@ -227,8 +248,49 @@ export class ScheduleService {
     }
   }
 
-  private assertSlotsValid(slots: readonly ClosureSlot[]): void {
-    const violations = slots.flatMap((slot) => slotViolations(slot));
+  /**
+   * Типы тренировок и турниры из расписания существуют в этом клубе.
+   *
+   * Составной внешний ключ не дал бы записать чужой справочник и сам, но отдал
+   * бы это ошибкой базы. Проверка здесь — ради внятного ответа.
+   */
+  private async assertCatalogExists(
+    tenantId: string,
+    slots: readonly ClosureSlot[],
+  ): Promise<void> {
+    const trainingTypeIds = [
+      ...new Set(slots.map((slot) => slot.trainingTypeId).filter((id): id is string => id !== null)),
+    ];
+    const tournamentIds = [
+      ...new Set(slots.map((slot) => slot.tournamentId).filter((id): id is string => id !== null)),
+    ];
+
+    if (trainingTypeIds.length > 0) {
+      const found = await this.prisma.trainingType.count({
+        where: { tenantId, id: { in: trainingTypeIds } },
+      });
+
+      if (found !== trainingTypeIds.length) {
+        throw new BadRequestException('В расписании указан неизвестный тип тренировки');
+      }
+    }
+
+    if (tournamentIds.length > 0) {
+      const found = await this.prisma.tournament.count({
+        where: { tenantId, id: { in: tournamentIds } },
+      });
+
+      if (found !== tournamentIds.length) {
+        throw new BadRequestException('В расписании указан неизвестный турнир');
+      }
+    }
+  }
+
+  private assertSlotsValid(
+    slots: readonly ClosureSlot[],
+    check: (slot: ClosureSlot) => string[] = slotViolations,
+  ): void {
+    const violations = slots.flatMap((slot) => check(slot));
 
     if (violations.length > 0) {
       // Дубли убираем: одна и та же ошибка в десяти окнах подряд — это одно
@@ -263,7 +325,13 @@ export class ScheduleService {
 
 /** Приведение необязательных полей к явному null. */
 function normalisePeople<T extends ClosureSlot>(slot: T): T {
-  return { ...slot, coachId: slot.coachId ?? null, clientId: slot.clientId ?? null };
+  return {
+    ...slot,
+    coachId: slot.coachId ?? null,
+    clientId: slot.clientId ?? null,
+    trainingTypeId: slot.trainingTypeId ?? null,
+    tournamentId: slot.tournamentId ?? null,
+  };
 }
 
 /**

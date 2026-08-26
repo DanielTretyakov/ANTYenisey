@@ -1,7 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { ClosurePurpose, ClubCoach, ClubPerson } from '@yenisey/types';
+import type {
+  ClosurePurpose,
+  ClubCoach,
+  ClubPerson,
+  Tournament,
+  TrainingType,
+} from '@yenisey/types';
 import { inputClassName } from '@/components/ui/Field';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
@@ -18,6 +24,7 @@ export const PURPOSES: { value: ClosurePurpose; label: string; cell: string; chi
   { value: 'SPARRING', label: 'Спарринг', cell: 'bg-violet-500/55', chip: 'bg-violet-500/70' },
   { value: 'TRAINING', label: 'Тренировка', cell: 'bg-accent/65', chip: 'bg-accent/80' },
   { value: 'ROBOT', label: 'Робот', cell: 'bg-amber-500/55', chip: 'bg-amber-500/70' },
+  { value: 'TOURNAMENT', label: 'Турнир', cell: 'bg-rose-500/55', chip: 'bg-rose-500/70' },
   { value: 'OTHER', label: 'Другое', cell: 'bg-zinc-500/55', chip: 'bg-zinc-500/70' },
 ];
 
@@ -35,6 +42,7 @@ export const PURPOSE_MARK = new Map<ClosurePurpose, string>([
   ['SPARRING', 'С'],
   ['TRAINING', 'Т'],
   ['ROBOT', 'Р'],
+  ['TOURNAMENT', 'К'],
   ['OTHER', '·'],
 ]);
 export const PURPOSE_CELL = new Map(PURPOSES.map((item) => [item.value, item.cell]));
@@ -63,6 +71,13 @@ export function SchedulePalette({
   client,
   onClient,
   colors,
+  trainingTypes,
+  trainingTypeId,
+  onTrainingType,
+  tournaments,
+  tournamentId,
+  onTournament,
+  allowTournament,
 }: {
   brush: Brush;
   onBrush: (brush: Brush) => void;
@@ -72,6 +87,14 @@ export function SchedulePalette({
   client: ClubPerson | null;
   onClient: (person: ClubPerson | null) => void;
   colors: Map<string, PersonColor>;
+  trainingTypes: TrainingType[];
+  trainingTypeId: string | null;
+  onTrainingType: (id: string | null) => void;
+  tournaments: Tournament[];
+  tournamentId: string | null;
+  onTournament: (id: string | null) => void;
+  /** В шаблоне недели турниров не бывает — кисть там не показывается. */
+  allowTournament: boolean;
 }) {
   const attachment = attachmentOf(brush);
   const currentCoach = coaches.find((coach) => coach.id === coachId);
@@ -80,7 +103,7 @@ export function SchedulePalette({
 
   return (
     <div className="mb-3 flex flex-wrap items-center gap-1.5">
-      {PURPOSES.map((purpose) => (
+      {PURPOSES.filter((purpose) => allowTournament || purpose.value !== 'TOURNAMENT').map((purpose) => (
         <button
           key={purpose.value}
           type="button"
@@ -135,6 +158,45 @@ export function SchedulePalette({
 
       {attachment === 'client' && (
         <ClientPicker value={client} onChange={onClient} />
+      )}
+
+      {brush === 'TRAINING' && (
+        <label className="flex items-center gap-2 text-[0.875rem] text-text-muted">
+          Занятие
+          <select
+            value={trainingTypeId ?? ''}
+            onChange={(event) => onTrainingType(event.target.value || null)}
+            className={cn(inputClassName, 'w-auto py-1.5 text-[0.875rem]')}
+          >
+            {trainingTypes.length === 0 && <option value="">типов нет</option>}
+            {trainingTypes.map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {brush === 'TOURNAMENT' && (
+        <label className="flex items-center gap-2 text-[0.875rem] text-text-muted">
+          Турнир
+          <select
+            value={tournamentId ?? ''}
+            onChange={(event) => onTournament(event.target.value || null)}
+            className={cn(inputClassName, 'w-auto py-1.5 text-[0.875rem]')}
+          >
+            {tournaments.length === 0 && <option value="">турниров нет</option>}
+            {tournaments.map((tournament) => (
+              <option key={tournament.id} value={tournament.id}>
+                {tournament.typeName} —{' '}
+                {new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short' }).format(
+                  new Date(tournament.startsAt),
+                )}
+              </option>
+            ))}
+          </select>
+        </label>
       )}
 
       {attachment !== 'none' && (
