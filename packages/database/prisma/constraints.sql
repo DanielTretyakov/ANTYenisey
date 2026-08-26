@@ -265,28 +265,29 @@ ALTER TABLE "TableClosureRule"
 -- стол. Клиент необязателен — стол можно занять под аренду до того, как
 -- известно, кто придёт.
 --
--- Турнир возможен только в расписании конкретной даты: у него дата и время
--- проведения, а «каждую субботу один и тот же турнир» — это не турнир, а
--- серия разных.
+-- Турнир в шаблоне недели хранится ТИПОМ, а не конкретным проведением: у
+-- турнира дата, и из повторяющегося шаблона её не взять. Конкретный турнир
+-- заводится, когда администратор открывает дату и сохраняет её расписание.
 --
 -- Перекрёстные поля запрещены, а не просто необязательны: тренер у аренды
 -- набрал бы в статистику чужие часы, а «закреплённый клиент» у тренировки, где
 -- участников десяток, ввёл бы в заблуждение.
 ALTER TABLE "TableClosureRule"
-  ADD CONSTRAINT "TableClosureRule_no_tournament"
-  CHECK ("purpose" <> 'TOURNAMENT'::"ClosurePurpose");
-
-ALTER TABLE "TableClosureRule"
   ADD CONSTRAINT "TableClosureRule_attachments_match_purpose"
   CHECK (
     ("purpose" = 'TRAINING'::"ClosurePurpose"
-       AND "coachId" IS NOT NULL AND "clientId" IS NULL AND "trainingTypeId" IS NOT NULL)
+       AND "coachId" IS NOT NULL AND "clientId" IS NULL
+       AND "trainingTypeId" IS NOT NULL AND "tournamentTypeId" IS NULL)
     OR ("purpose" = 'SPARRING'::"ClosurePurpose"
-       AND "clientId" IS NULL AND "trainingTypeId" IS NULL)
+       AND "clientId" IS NULL AND "trainingTypeId" IS NULL AND "tournamentTypeId" IS NULL)
     OR ("purpose" IN ('RENT'::"ClosurePurpose", 'ROBOT'::"ClosurePurpose")
-       AND "coachId" IS NULL AND "trainingTypeId" IS NULL)
+       AND "coachId" IS NULL AND "trainingTypeId" IS NULL AND "tournamentTypeId" IS NULL)
+    OR ("purpose" = 'TOURNAMENT'::"ClosurePurpose"
+       AND "coachId" IS NULL AND "clientId" IS NULL
+       AND "trainingTypeId" IS NULL AND "tournamentTypeId" IS NOT NULL)
     OR ("purpose" = 'OTHER'::"ClosurePurpose"
-       AND "coachId" IS NULL AND "clientId" IS NULL AND "trainingTypeId" IS NULL)
+       AND "coachId" IS NULL AND "clientId" IS NULL
+       AND "trainingTypeId" IS NULL AND "tournamentTypeId" IS NULL)
   );
 
 ALTER TABLE "DayClosure"

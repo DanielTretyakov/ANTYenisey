@@ -26,6 +26,7 @@ const slot = (overrides: Partial<ClosureSlot> = {}): ClosureSlot => ({
   clientId: null,
   trainingTypeId: 'type-1',
   tournamentId: null,
+  tournamentTypeId: null,
   ...overrides,
 });
 
@@ -106,9 +107,6 @@ describe('slotsToCells', () => {
 
     assert.equal(value?.purpose, 'RENT');
     assert.equal(value?.coachId, null);
-    // Загруженное с сервера окно уже имеет идентификатор турнира, если он
-    // нужен, — тип турнира в клетку не переносится.
-    assert.equal(value?.tournamentTypeId, null);
   });
 
   it('окно не по сетке округляется наружу — занятое время не теряется', () => {
@@ -118,6 +116,17 @@ describe('slotsToCells', () => {
     );
 
     assert.equal(result.size, 2);
+  });
+
+  it('тип турнира доезжает до клетки — им подписано окно в шаблоне', () => {
+    // В шаблоне недели турнир хранится именно типом, и без переноса подпись
+    // окна теряла бы название сразу после сохранения.
+    const value = slotsToCells(
+      [slot({ purpose: 'TOURNAMENT', coachId: null, trainingTypeId: null, tournamentTypeId: 'cup' })],
+      oneLane,
+    ).get(cellKey('day', 't1', 18));
+
+    assert.equal(value?.tournamentTypeId, 'cup');
   });
 
   it('дорожка берётся из самого окна — так шаблон раскладывается по дням недели', () => {

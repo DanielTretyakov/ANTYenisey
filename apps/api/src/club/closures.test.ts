@@ -30,6 +30,7 @@ function rule(overrides: Partial<ClosureRule> = {}): ClosureRule {
     clientId: null,
     trainingTypeId: 'type-1',
     tournamentId: null,
+    tournamentTypeId: null,
     ...overrides,
   };
 }
@@ -45,6 +46,7 @@ function dayClosure(overrides: Partial<DayClosure> = {}): DayClosure {
     clientId: null,
     trainingTypeId: null,
     tournamentId: null,
+    tournamentTypeId: null,
     ...overrides,
   };
 }
@@ -290,7 +292,23 @@ describe('slotViolations', () => {
     );
 
     assert.equal(violations.length, 1);
-    assert.match(violations[0]!, /какой именно турнир/);
+    assert.match(violations[0]!, /выберите, какой турнир/);
+  });
+
+  it('турнир, указанный типом, замечаний не вызывает', () => {
+    // В шаблоне недели турнир записывается именно типом: даты у
+    // повторяющегося окна нет.
+    assert.deepEqual(
+      slotViolations(
+        rule({
+          purpose: 'TOURNAMENT',
+          coachId: null,
+          trainingTypeId: null,
+          tournamentTypeId: 'cup-type',
+        }),
+      ),
+      [],
+    );
   });
 
   it('турнир с указанием замечаний не вызывает', () => {
@@ -307,20 +325,43 @@ describe('slotViolations', () => {
     );
   });
 
-  it('в шаблоне недели турнира быть не может', () => {
-    // У турнира конкретная дата, а «каждую субботу один и тот же турнир» — это
-    // не турнир, а серия разных.
+  it('в шаблоне недели турнир записывается типом', () => {
+    // У конкретного проведения дата, а шаблон повторяется — из него дату не
+    // взять. Тип при этом законен: «каждую субботу с 10:00 идёт турнир».
+    assert.deepEqual(
+      templateViolations(
+        rule({
+          purpose: 'TOURNAMENT',
+          coachId: null,
+          trainingTypeId: null,
+          tournamentTypeId: 'cup-type',
+        }),
+      ),
+      [],
+    );
+  });
+
+  it('конкретное проведение в шаблон не принимается', () => {
     const violations = templateViolations(
       rule({
         purpose: 'TOURNAMENT',
         coachId: null,
         trainingTypeId: null,
         tournamentId: 'cup-1',
+        tournamentTypeId: 'cup-type',
       }),
     );
 
     assert.equal(violations.length, 1);
-    assert.match(violations[0]!, /шаблон недели/);
+    assert.match(violations[0]!, /тип турнира, а не конкретное проведение/);
+  });
+
+  it('турнир в шаблоне без типа отклоняется', () => {
+    const violations = templateViolations(
+      rule({ purpose: 'TOURNAMENT', coachId: null, trainingTypeId: null }),
+    );
+
+    assert.ok(violations.some((message) => /выбирается тип турнира/.test(message)));
   });
 
   it('аренда закрепляется за клиентом', () => {

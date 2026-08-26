@@ -481,6 +481,7 @@ async function main() {
       clientId: null,
       trainingTypeId: null,
       tournamentId: null,
+      tournamentTypeId: null,
       ...extra,
     });
 
@@ -593,11 +594,32 @@ async function main() {
       assert('тренер сохранён', r.body?.[0]?.coachId === coachId);
       assert('тип сохранён', r.body?.[0]?.trainingTypeId === trainingTypeId);
 
+      // В шаблоне недели турнир записывается ТИПОМ: у конкретного проведения
+      // есть дата, а шаблон повторяется.
       r = await asAdmin(`/club/halls/${hallId}/template`, {
         method: 'PUT',
         json: { rules: [window({ purpose: 'TOURNAMENT', tournamentId })] },
       });
-      check('турнир в шаблоне недели отклонён', 400, r.status);
+      check('конкретное проведение в шаблон не принимается', 400, r.status);
+
+      r = await asAdmin(`/club/halls/${hallId}/template`, {
+        method: 'PUT',
+        json: { rules: [window({ purpose: 'TOURNAMENT', tournamentTypeId })] },
+      });
+      check('турнир типом в шаблоне принят', 200, r.status);
+      assert('тип турнира сохранён', r.body?.[0]?.tournamentTypeId === tournamentTypeId);
+
+      r = await asAdmin(`/club/halls/${hallId}/template`, {
+        method: 'PUT',
+        json: { rules: [window({ purpose: 'TOURNAMENT' })] },
+      });
+      check('турнир в шаблоне без типа отклонён', 400, r.status);
+
+      r = await asAdmin(`/club/halls/${hallId}/template`, {
+        method: 'PUT',
+        json: { rules: [window({ purpose: 'TOURNAMENT', tournamentTypeId: 'chuzhoy-tip' })] },
+      });
+      check('неизвестный тип турнира отклонён', 400, r.status);
 
       r = await asAdmin(`/club/halls/${hallId}/template`, {
         method: 'PUT',

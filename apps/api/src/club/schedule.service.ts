@@ -39,6 +39,9 @@ const SLOT_SELECT = {
   trainingTypeId: true,
 } as const;
 
+/** Турнир в шаблоне — типом, в расписании даты — конкретным проведением. */
+const TEMPLATE_SELECT = { ...SLOT_SELECT, weekday: true, tournamentTypeId: true } as const;
+
 /**
  * Расписание зала: постоянный шаблон недели и правки на конкретные даты.
  *
@@ -58,11 +61,12 @@ export class ScheduleService {
 
     const rules = await this.prisma.tableClosureRule.findMany({
       where: { tenantId, table: { hallId } },
-      select: { ...SLOT_SELECT, weekday: true },
+      select: TEMPLATE_SELECT,
       orderBy: [{ weekday: 'asc' }, { startMinute: 'asc' }],
     });
 
-    // Турнира в шаблоне не бывает — поле отдаём пустым ради общего типа окна.
+    // Конкретного проведения в шаблоне не бывает — поле отдаём пустым ради
+    // общего типа окна.
     return rules.map((rule) => ({
       ...rule,
       weekday: rule.weekday as Weekday,
@@ -105,6 +109,7 @@ export class ScheduleService {
       this.prisma.tableClosureRule.createMany({
         // tournamentId в шаблоне не хранится вовсе — колонки такой нет. Поле
         // есть в общем типе окна, поэтому его надо снять явно.
+        // tournamentId в шаблоне не хранится вовсе — колонки такой нет.
         data: rules.map(({ tournamentId: _tournament, ...rule }) => ({ ...rule, tenantId })),
       }),
     ]);
@@ -137,7 +142,12 @@ export class ScheduleService {
     return {
       date,
       customised: schedule !== null,
-      closures: schedule?.closures ?? [],
+      // Тип турнира у окна даты не хранится: там уже есть само проведение,
+      // заведённое из этого типа.
+      closures: (schedule?.closures ?? []).map((closure) => ({
+        ...closure,
+        tournamentTypeId: null,
+      })),
     };
   }
 
@@ -181,7 +191,13 @@ export class ScheduleService {
 
       await tx.dayClosure.deleteMany({ where: { scheduleId: schedule.id } });
       await tx.dayClosure.createMany({
-        data: closures.map((closure) => ({ ...closure, tenantId, scheduleId: schedule.id })),
+        // tournamentTypeId у расписания даты не хранится: там уже есть само
+        // проведение, заведённое из этого типа.
+        data: closures.map(({ tournamentTypeId: _type, ...closure }) => ({
+          ...closure,
+          tenantId,
+          scheduleId: schedule.id,
+        })),
       });
     });
 
@@ -284,6 +300,22 @@ export class ScheduleService {
         throw new BadRequestException('В расписании указан неизвестный турнир');
       }
     }
+
+    const tournamentTypeIds = [
+      ...new Set(
+        slots.map((slot) => slot.tournamentTypeId).filter((id): id is string => id !== null),
+      ),
+    ];
+
+    if (tournamentTypeIds.length > 0) {
+      const found = await this.prisma.tournamentType.count({
+        where: { tenantId, id: { in: tournamentTypeIds } },
+      });
+
+      if (found !== tournamentTypeIds.length) {
+        throw new BadRequestException('В расписании указан неизвестный тип турнира');
+      }
+    }
   }
 
   private assertSlotsValid(
@@ -331,6 +363,7 @@ function normalisePeople<T extends ClosureSlot>(slot: T): T {
     clientId: slot.clientId ?? null,
     trainingTypeId: slot.trainingTypeId ?? null,
     tournamentId: slot.tournamentId ?? null,
+    tournamentTypeId: slot.tournamentTypeId ?? null,
   };
 }
 

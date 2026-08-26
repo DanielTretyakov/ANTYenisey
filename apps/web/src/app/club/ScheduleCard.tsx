@@ -7,6 +7,7 @@ import type {
   ClubPerson,
   ClubTable,
   DayClosure,
+  Tournament,
   TournamentType,
   TrainingType,
   Weekday,
@@ -70,6 +71,7 @@ export function ScheduleCard({
   coaches,
   trainingTypes,
   tournamentTypes,
+  tournaments,
   timezone,
   onTournamentsChanged,
 }: {
@@ -78,6 +80,8 @@ export function ScheduleCard({
   coaches: ClubCoach[];
   trainingTypes: TrainingType[];
   tournamentTypes: TournamentType[];
+  /** Уже заведённые турниры — чтобы подписать окна, поставленные раньше. */
+  tournaments: Tournament[];
   timezone: string;
   /** Постановка турнира в сетку заводит его — список в разделе устарел. */
   onTournamentsChanged: () => void;
@@ -136,6 +140,34 @@ export function ScheduleCard({
   }, [cells, coaches]);
 
   const colors = useMemo(() => personColors([...peopleInView]), [peopleInView]);
+
+  /**
+   * Чем занято окно: название занятия или турнира.
+   *
+   * Цвет клетки говорит, КТО занят, а подпись должна говорить ЧЕМ — «просто
+   * тренировка» не отличает детскую группу от «Первой подачи», и по сетке
+   * нельзя понять, что происходит в зале.
+   */
+  const captionOf = useCallback(
+    (value: CellValue): string | null => {
+      if (value.purpose === 'TRAINING' && value.trainingTypeId) {
+        return trainingTypes.find((type) => type.id === value.trainingTypeId)?.name ?? null;
+      }
+
+      if (value.purpose === 'TOURNAMENT') {
+        // В шаблоне у окна тип турнира, в расписании даты — само проведение,
+        // и название типа приезжает вместе с ним.
+        if (value.tournamentTypeId) {
+          return tournamentTypes.find((type) => type.id === value.tournamentTypeId)?.name ?? null;
+        }
+
+        return tournaments.find((item) => item.id === value.tournamentId)?.typeName ?? null;
+      }
+
+      return null;
+    },
+    [trainingTypes, tournamentTypes, tournaments],
+  );
 
   const nameOf = useCallback(
     (id: string): string =>
@@ -222,14 +254,6 @@ export function ScheduleCard({
     void load();
   }, [load]);
 
-  // Кисть «турнир» в шаблоне недели невозможна: переключаясь туда, оставлять
-  // её выбранной значит предлагать нарисовать то, что не сохранится.
-  useEffect(() => {
-    if (mode === 'template' && brush === 'TOURNAMENT') {
-      setBrush('TRAINING');
-    }
-  }, [mode, brush]);
-
   /**
    * Что делает перетаскивание — закрашивает или стирает.
    *
@@ -269,8 +293,9 @@ export function ScheduleCard({
       coachId: attachment === 'coach' ? coachId : null,
       clientId: attachment === 'client' ? (client?.id ?? null) : null,
       trainingTypeId: brush === 'TRAINING' ? trainingTypeId : null,
-      // Турнир ещё не заведён — в клетке пока только его тип. Сам турнир
-      // создастся при сохранении, из даты расписания и времени первого окна.
+      // В клетке всегда тип турнира, а не проведение. В шаблоне так и
+      // сохраняется; в расписании даты проведение заводится при сохранении, из
+      // даты и времени первого закрашенного окна.
       tournamentId: null,
       tournamentTypeId: brush === 'TOURNAMENT' ? tournamentTypeId : null,
     };
@@ -314,7 +339,9 @@ export function ScheduleCard({
       const slots = cellsToSlots(cells, lanes, tableIds);
 
       if (mode === 'template') {
-        const rules = slots.map(({ lane: laneKey, tournamentTypeId: _type, ...slot }) => ({
+        // Тип турнира в шаблоне сохраняется как есть: конкретное проведение
+        // заводится позже, когда администратор откроет эту дату.
+        const rules = slots.map(({ lane: laneKey, ...slot }) => ({
           ...slot,
           weekday: Number(laneKey) as Weekday,
         }));
@@ -468,9 +495,6 @@ export function ScheduleCard({
           tournamentTypes={tournamentTypes}
           tournamentTypeId={tournamentTypeId}
           onTournamentType={setTournamentTypeId}
-          // Турнир привязан к конкретной дате, поэтому в шаблоне недели его
-          // кисти нет вовсе — не только запрещено сервером, но и не предложено.
-          allowTournament={mode === 'day'}
         />
 
         {loading ? (
@@ -481,6 +505,7 @@ export function ScheduleCard({
             lane={lane}
             cells={cells}
             nameOf={nameOf}
+            captionOf={captionOf}
             colors={colors}
             painting={painting}
             brushValue={brushValue}
@@ -605,6 +630,7 @@ function Grid({
   lane,
   cells,
   nameOf,
+  captionOf,
   colors,
   painting,
   brushValue,
@@ -614,6 +640,8 @@ function Grid({
   lane: string;
   cells: Cells;
   nameOf: (id: string) => string;
+  /** Чем занято окно: название занятия или турнира. */
+  captionOf: (value: CellValue) => string | null;
   colors: Map<string, PersonColor>;
   painting: { current: CellValue | null | undefined };
   brushValue: () => CellValue | null;
@@ -658,6 +686,7 @@ function Grid({
                 const purposeLabel = value ? PURPOSE_LABEL.get(value.purpose) : 'свободно';
                 const personId = value ? personOf(value) : null;
                 const person = personId ? nameOf(personId) : null;
+                const caption = value ? captionOf(value) : null;
                 const color = personId ? colors.get(personId) : undefined;
 
                 // Подпись ставится только там, где окно начинается: иначе
@@ -678,8 +707,8 @@ function Grid({
                     <button
                       type="button"
                       aria-pressed={value !== undefined}
-                      aria-label={`${table.label}, ${slotLabel(slot)} — ${purposeLabel}${person ? `, ${person}` : ''}`}
-                      title={person ? `${purposeLabel}: ${person}` : purposeLabel}
+                      aria-label={`${table.label}, ${slotLabel(slot)} — ${[purposeLabel, caption, person].filter(Boolean).join(', ')}`}
+                      title={[purposeLabel, caption, person].filter(Boolean).join(' · ')}
                       onPointerDown={(event) => {
                         // Захват мешает pointerenter на соседних клетках: без
                         // снятия все события уходили бы в первую. Проверка
@@ -726,10 +755,16 @@ function Grid({
                         </span>
                       )}
 
-                      {startsHere && person && (
-                        <span className="text-accent-text/90">{shortName(person)}</span>
+                      {startsHere && (caption || person) && (
+                        // Сначала чем занято, потом кто ведёт: администратор
+                        // ищет в сетке занятие, а тренера уже уточняет.
+                        <span className="truncate text-accent-text/90">
+                          {caption}
+                          {caption && person ? ' · ' : ''}
+                          {person ? shortName(person) : ''}
+                        </span>
                       )}
-                      {startsHere && !person && value && !needsCoach && (
+                      {startsHere && !caption && !person && value && !needsCoach && (
                         <span className="text-accent-text/70">{purposeLabel}</span>
                       )}
                       {startsHere && needsCoach && (
@@ -838,8 +873,11 @@ async function resolveTournaments(
     onCreated();
   }
 
+  // Тип у окна даты не хранится — там уже есть заведённое из него проведение,
+  // — но в контракте поле обязательно, поэтому отдаём его пустым.
   return closures.map(({ tournamentTypeId, ...slot }) => ({
     ...slot,
+    tournamentTypeId: null,
     tournamentId:
       slot.tournamentId ?? (tournamentTypeId ? (created.get(tournamentTypeId) ?? null) : null),
   }));

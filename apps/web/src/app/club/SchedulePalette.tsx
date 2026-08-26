@@ -94,7 +94,6 @@ export function SchedulePalette({
   tournamentTypes,
   tournamentTypeId,
   onTournamentType,
-  allowTournament,
 }: {
   brush: Brush;
   onBrush: (brush: Brush) => void;
@@ -111,12 +110,6 @@ export function SchedulePalette({
   tournamentTypes: TournamentType[];
   tournamentTypeId: string | null;
   onTournamentType: (id: string | null) => void;
-  /**
-   * В шаблоне недели турниров не бывает: у турнира дата проведения, а «каждую
-   * субботу один и тот же турнир» — это не турнир, а серия разных. Кисть там
-   * показывается погашенной, а не пропадает: иначе непонятно, куда она делась.
-   */
-  allowTournament: boolean;
 }) {
   const attachment = attachmentOf(brush);
   const currentCoach = coaches.find((coach) => coach.id === coachId);
@@ -130,16 +123,9 @@ export function SchedulePalette({
           key={purpose.value}
           type="button"
           aria-pressed={brush === purpose.value}
-          disabled={purpose.value === 'TOURNAMENT' && !allowTournament}
-          title={
-            purpose.value === 'TOURNAMENT' && !allowTournament
-              ? 'Турнир ставится на конкретную дату — переключитесь на «Отдельный день»'
-              : undefined
-          }
           onClick={() => onBrush(purpose.value)}
           className={cn(
             'flex items-center gap-2 rounded-control border px-3 py-1.5 text-[0.875rem] transition-colors',
-            'disabled:cursor-not-allowed disabled:opacity-45',
             brush === purpose.value
               ? 'border-border-strong bg-surface-sunken text-text'
               : 'border-border text-text-muted hover:bg-surface-sunken',

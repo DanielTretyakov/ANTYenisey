@@ -627,6 +627,7 @@ model TournamentType {
   updatedAt DateTime @updatedAt
 
   tournaments       Tournament[]
+  closureRules      TableClosureRule[]
   subscriptionPlans SubscriptionPlanTournamentType[]
 
   @@unique([id, tenantId])
@@ -803,6 +804,15 @@ model TableClosureRule {
   trainingTypeId String?
   trainingType   TrainingType? @relation(fields: [trainingTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
+  /// ТИП турнира, а не сам турнир. Обязателен при purpose = TOURNAMENT.
+  ///
+  /// В шаблоне недели хранится именно тип: «каждую субботу с 10:00 идёт
+  /// турнир» — законное описание жизни клуба, а конкретное проведение с датой
+  /// заводится, когда администратор открывает эту дату и сохраняет её
+  /// расписание.
+  tournamentTypeId String?
+  tournamentType   TournamentType? @relation(fields: [tournamentTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
   /// Границы окна в минутах от полуночи ПО ВРЕМЕНИ КЛУБА (Tenant.timezone),
   /// а не в UTC. Правило «каждый вторник с 15:00» должно оставаться в силе
   /// вне зависимости от того, какому мгновению UTC это соответствует.
@@ -818,6 +828,7 @@ model TableClosureRule {
   @@index([coachId])
   @@index([clientId])
   @@index([trainingTypeId])
+  @@index([tournamentTypeId])
 }
 
 /// Расписание зала на конкретную дату.

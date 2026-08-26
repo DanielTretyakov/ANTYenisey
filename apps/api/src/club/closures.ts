@@ -170,17 +170,25 @@ export function findOverlap<T extends ClosureSlot>(
 }
 
 /**
- * Турнир возможен только в расписании конкретной даты.
+ * Правила, действующие только для шаблона недели.
  *
- * У турнира дата и время проведения, а «каждую субботу один и тот же турнир» —
- * это не турнир, а серия разных.
+ * Шаблон повторяется, поэтому конкретного турнира с датой в нём быть не может
+ * — только тип. Само проведение заводится, когда администратор открывает дату
+ * и сохраняет её расписание.
  */
 export function templateViolations(slot: ClosureSlot): string[] {
   const violations = slotViolations(slot);
+  const when = `${formatMinutes(slot.startMinute)}–${formatMinutes(slot.endMinute)}`;
 
-  if (slot.purpose === 'TOURNAMENT') {
+  // В шаблоне хранится тип турнира, а не конкретное проведение: даты у
+  // повторяющегося окна нет.
+  if (slot.purpose === 'TOURNAMENT' && (slot.tournamentTypeId ?? null) === null) {
+    violations.push(`Турнир ${when}: в шаблоне недели выбирается тип турнира`);
+  }
+
+  if ((slot.tournamentId ?? null) !== null) {
     violations.push(
-      'Турнир ставится в расписание конкретного дня, а не в постоянный шаблон недели',
+      `Окно ${when}: в шаблон недели попадает тип турнира, а не конкретное проведение`,
     );
   }
 
@@ -233,6 +241,7 @@ export function slotViolations(slot: ClosureSlot): string[] {
   const clientId = slot.clientId ?? null;
   const trainingTypeId = slot.trainingTypeId ?? null;
   const tournamentId = slot.tournamentId ?? null;
+  const tournamentTypeId = slot.tournamentTypeId ?? null;
 
   if (slot.startMinute < 0 || slot.endMinute > MINUTES_IN_DAY) {
     violations.push(`Окно ${when} выходит за пределы суток`);
@@ -264,11 +273,13 @@ export function slotViolations(slot: ClosureSlot): string[] {
     violations.push(`Окно ${when}: тип тренировки указывается только у тренировки`);
   }
 
-  if (slot.purpose === 'TOURNAMENT' && tournamentId === null) {
-    violations.push(`Турнир ${when}: выберите, какой именно турнир занимает это время`);
+  // В расписании даты нужен сам турнир, в шаблоне недели — его тип: у турнира
+  // дата проведения, и из повторяющегося шаблона её не взять.
+  if (slot.purpose === 'TOURNAMENT' && tournamentId === null && tournamentTypeId === null) {
+    violations.push(`Турнир ${when}: выберите, какой турнир занимает это время`);
   }
 
-  if (slot.purpose !== 'TOURNAMENT' && tournamentId !== null) {
+  if (slot.purpose !== 'TOURNAMENT' && (tournamentId !== null || tournamentTypeId !== null)) {
     violations.push(`Окно ${when}: турнир указывается только у назначения «турнир»`);
   }
 

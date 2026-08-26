@@ -223,11 +223,22 @@ class ClosureSlotDto {
   @IsString()
   @MaxLength(64)
   trainingTypeId: string | null;
+
+  /**
+   * ТИП турнира. Так турнир записывается в шаблон недели: у конкретного
+   * проведения есть дата, а шаблон повторяется.
+   */
+  @IsOptional()
+  @ValidateIfNotNull()
+  @IsString()
+  @MaxLength(64)
+  tournamentTypeId: string | null;
 }
 
 export class ClosureRuleDto extends ClosureSlotDto implements ClosureRuleDraft {
   /**
-   * В шаблоне недели турниров не бывает: у турнира конкретная дата.
+   * Конкретного проведения в шаблоне не бывает: у турнира дата, а шаблон
+   * повторяется. Турнир записывается сюда типом (`tournamentTypeId`).
    *
    * Поле всё равно объявлено — общий тип окна его содержит, и без декоратора
    * `forbidNonWhitelisted` отвергал бы весь запрос, где клиент честно прислал
@@ -235,7 +246,7 @@ export class ClosureRuleDto extends ClosureSlotDto implements ClosureRuleDraft {
    */
   @IsOptional()
   @IsIn([null], {
-    message: 'Турнир ставится в расписание конкретного дня, а не в шаблон недели',
+    message: 'В шаблон недели попадает тип турнира, а не конкретное проведение',
   })
   tournamentId: null = null;
 
@@ -248,8 +259,8 @@ export class ClosureRuleDto extends ClosureSlotDto implements ClosureRuleDraft {
 
 export class DayClosureDto extends ClosureSlotDto implements DayClosureDraft {
   /**
-   * Турнир, занявший это время. Только здесь: у турнира конкретная дата, и в
-   * постоянном шаблоне недели ему места нет.
+   * Конкретное проведение турнира. Только здесь: у него дата, а шаблон недели
+   * повторяется и хранит только тип.
    */
   @IsOptional()
   @ValidateIfNotNull()
