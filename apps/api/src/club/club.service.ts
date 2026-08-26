@@ -7,6 +7,9 @@ import {
 import { Prisma, Role } from '@yenisey/database';
 import type {
   ClubCoach,
+  ClubPeoplePage,
+  ClubPeopleQuery,
+  ClubPerson,
   ClubSettings,
   ClubTable,
   CreateHallRequest,
@@ -317,6 +320,76 @@ export class ClubService {
     });
 
     return coaches.map((coach) => ({ id: coach.id, fullName: coach.fullName }));
+  }
+
+  // --- Состав клуба --------------------------------------------------------
+
+  /**
+   * Люди клуба: сотрудники и клиенты одним списком.
+   *
+   * Список неограничен — у клуба может быть несколько тысяч клиентов, — поэтому
+   * ходит порциями и умеет искать. Отключённые не выпадают из него, а
+   * помечаются: удаления в продукте нет, и человек остаётся нужен бухгалтерии
+   * и истории визитов.
+   */
+  async listPeople(tenantId: string, query: ClubPeopleQuery): Promise<ClubPeoplePage> {
+    const search = query.search?.trim();
+    const where: Prisma.UserWhereInput = {
+      tenantId,
+      // Анонимизированные скрыты: у них персональные данные затёрты по 152-ФЗ,
+      // и показывать «Удалённый пользователь» в списке незачем.
+      anonymizedAt: null,
+      ...(query.role ? { role: query.role } : {}),
+      ...(query.ids && query.ids.length > 0 ? { id: { in: query.ids } } : {}),
+      ...(search
+        ? {
+            OR: [
+              { fullName: { contains: search, mode: 'insensitive' } },
+              { email: { contains: search, mode: 'insensitive' } },
+              { phone: { contains: search } },
+            ],
+          }
+        : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          phone: true,
+          role: true,
+          createdAt: true,
+          deactivatedAt: true,
+        },
+        // Сотрудники первыми, клиенты последними, внутри — по имени.
+        //
+        // Порядок ролей в Postgres — это порядок их объявления в enum
+        // (CLIENT, ADMIN, COACH, OWNER), поэтому «сотрудники сверху» даёт
+        // именно `desc`. Взаимный порядок админов и тренеров при этом
+        // произволен, и выбирать между ними незачем: на вкладке «Все»
+        // администратор ищет поиском, а роль целиком открывает вкладкой.
+        orderBy: [{ role: 'desc' }, { fullName: 'asc' }],
+        take: Math.min(query.limit ?? 50, 200),
+        skip: query.offset ?? 0,
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return {
+      items: items.map((person) => ({
+        id: person.id,
+        fullName: person.fullName,
+        email: person.email,
+        phone: person.phone,
+        role: person.role,
+        createdAt: person.createdAt.toISOString(),
+        deactivated: person.deactivatedAt !== null,
+      })),
+      total,
+    };
   }
 
   // --- Разбор ошибок базы --------------------------------------------------

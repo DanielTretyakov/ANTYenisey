@@ -29,6 +29,7 @@ const SLOT_SELECT = {
   endMinute: true,
   purpose: true,
   coachId: true,
+  clientId: true,
 } as const;
 
 /**
@@ -73,6 +74,11 @@ export class ScheduleService {
     rules: ClosureRuleDraft[],
   ): Promise<ClosureRule[]> {
     await this.assertHall(tenantId, hallId);
+
+    // Незаполненные поля приходят как undefined; в базу должен уехать явный
+    // null, иначе Prisma просто не тронет колонку при обновлении.
+    rules = rules.map(normalisePeople);
+
     await this.assertTablesInHall(tenantId, hallId, rules);
     this.assertSlotsValid(rules);
     this.assertNoOverlap(rules, ruleGroupKey, (rule) => ` в ${WEEKDAY_NAMES[rule.weekday]}`);
@@ -133,6 +139,9 @@ export class ScheduleService {
     closures: DayClosureDraft[],
   ): Promise<DaySchedule> {
     await this.assertHall(tenantId, hallId);
+
+    closures = closures.map(normalisePeople);
+
     await this.assertTablesInHall(tenantId, hallId, closures);
     this.assertSlotsValid(closures);
     this.assertNoOverlap(closures, (slot) => slot.tableId, () => '');
@@ -250,6 +259,11 @@ export class ScheduleService {
         `${formatMinutes(second.startMinute)}–${formatMinutes(second.endMinute)}`,
     );
   }
+}
+
+/** Приведение необязательных полей к явному null. */
+function normalisePeople<T extends ClosureSlot>(slot: T): T {
+  return { ...slot, coachId: slot.coachId ?? null, clientId: slot.clientId ?? null };
 }
 
 /**

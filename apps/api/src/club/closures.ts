@@ -182,16 +182,37 @@ export const ruleGroupKey = (rule: { tableId: string; weekday: Weekday }): strin
 const PURPOSES_WITHOUT_COACH: ClosurePurpose[] = ['RENT', 'ROBOT', 'OTHER'];
 
 /**
+ * Назначения, за которыми закрепляется клиент: он занял стол.
+ *
+ * У тренировки и спарринга участников много, и один «закреплённый» ввёл бы в
+ * заблуждение, поэтому там поле запрещено.
+ */
+const PURPOSES_WITH_CLIENT: ClosurePurpose[] = ['RENT', 'ROBOT'];
+
+/** Человек, закреплённый за окном, — тренер или клиент, смотря по назначению. */
+export function attachedPersonId(slot: ClosureSlot): string | null {
+  return (PURPOSES_WITH_CLIENT.includes(slot.purpose) ? slot.clientId : slot.coachId) ?? null;
+}
+
+/**
  * Нарушения в одном окне: границы, назначение и тренер.
  *
  * Тренировка без тренера не попадёт в его статистику, и через месяц выяснить,
  * кто её вёл, будет неоткуда. Спарринг — промежуточный случай: он всегда с
  * тренером, но заводить его может и администратор, ещё не зная, кто именно
  * проведёт, поэтому тренер там необязателен.
+ *
+ * Аренда и робот закрепляются за клиентом — тоже необязательно: стол можно
+ * занять до того, как известно, кто придёт.
  */
 export function slotViolations(slot: ClosureSlot): string[] {
   const violations: string[] = [];
   const when = `${formatMinutes(slot.startMinute)}–${formatMinutes(slot.endMinute)}`;
+  // Клиент, не присланный вовсе, приходит как undefined, а не null. Без
+  // приведения «тренер у аренды запрещён» срабатывало бы на каждом окне, где
+  // поле просто опустили.
+  const coachId = slot.coachId ?? null;
+  const clientId = slot.clientId ?? null;
 
   if (slot.startMinute < 0 || slot.endMinute > MINUTES_IN_DAY) {
     violations.push(`Окно ${when} выходит за пределы суток`);
@@ -201,12 +222,16 @@ export function slotViolations(slot: ClosureSlot): string[] {
     violations.push(`Окно ${when} кончается не позже, чем начинается`);
   }
 
-  if (slot.purpose === 'TRAINING' && slot.coachId === null) {
+  if (slot.purpose === 'TRAINING' && coachId === null) {
     violations.push(`Тренировка ${when}: назначьте тренера, иначе она не попадёт в его статистику`);
   }
 
-  if (PURPOSES_WITHOUT_COACH.includes(slot.purpose) && slot.coachId !== null) {
+  if (PURPOSES_WITHOUT_COACH.includes(slot.purpose) && coachId !== null) {
     violations.push(`Окно ${when}: тренер указывается только для тренировки и спарринга`);
+  }
+
+  if (!PURPOSES_WITH_CLIENT.includes(slot.purpose) && clientId !== null) {
+    violations.push(`Окно ${when}: клиент закрепляется только за арендой и роботом`);
   }
 
   return violations;

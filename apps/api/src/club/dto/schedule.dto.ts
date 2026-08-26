@@ -202,6 +202,13 @@ class ClosureSlotDto {
   @IsString()
   @MaxLength(64)
   coachId: string | null;
+
+  /** Клиент, за которым закреплено время. Согласованность — там же. */
+  @IsOptional()
+  @ValidateIfNotNull()
+  @IsString()
+  @MaxLength(64)
+  clientId: string | null;
 }
 
 export class ClosureRuleDto extends ClosureSlotDto implements ClosureRuleDraft {

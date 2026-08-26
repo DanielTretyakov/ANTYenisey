@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { ClosureRule, ClosureSlot, DayClosure, Weekday } from '@yenisey/types';
 import {
+  attachedPersonId,
   closedBySlots,
   findOverlap,
   formatMinutes,
@@ -25,6 +26,7 @@ function rule(overrides: Partial<ClosureRule> = {}): ClosureRule {
     endMinute: 19 * 60,
     purpose: 'TRAINING',
     coachId: 'coach-1',
+    clientId: null,
     ...overrides,
   };
 }
@@ -37,6 +39,7 @@ function dayClosure(overrides: Partial<DayClosure> = {}): DayClosure {
     endMinute: 11 * 60,
     purpose: 'RENT',
     coachId: null,
+    clientId: null,
     ...overrides,
   };
 }
@@ -256,9 +259,60 @@ describe('slotViolations', () => {
     assert.deepEqual(slotViolations(rule({ purpose: 'SPARRING', coachId: null })), []);
   });
 
+  it('аренда закрепляется за клиентом', () => {
+    assert.deepEqual(
+      slotViolations(rule({ purpose: 'RENT', coachId: null, clientId: 'client-1' })),
+      [],
+    );
+  });
+
+  it('аренда без клиента тоже законна — стол занимают до того, как знают кто', () => {
+    assert.deepEqual(slotViolations(rule({ purpose: 'RENT', coachId: null })), []);
+  });
+
+  it('клиент у тренировки отклоняется', () => {
+    // Участников на тренировке десяток, и один «закреплённый» ввёл бы в
+    // заблуждение.
+    const violations = slotViolations(rule({ clientId: 'client-1' }));
+
+    assert.equal(violations.length, 1);
+    assert.match(violations[0]!, /только за арендой и роботом/);
+  });
+
+  it('незаполненные поля приходят как undefined и замечаний не вызывают', () => {
+    // Клиент, не присланный вовсе, — это undefined, а не null. Без приведения
+    // «клиент только у аренды» срабатывало бы на каждой тренировке.
+    const partial = { ...rule() } as Partial<ClosureRule> & ClosureRule;
+    delete (partial as { clientId?: unknown }).clientId;
+
+    assert.deepEqual(slotViolations(partial), []);
+  });
+
   it('вывернутое и вышедшее за сутки окно отклоняются', () => {
     assert.equal(slotViolations(rule({ startMinute: 600, endMinute: 600 })).length, 1);
     assert.equal(slotViolations(rule({ startMinute: 600, endMinute: 1441 })).length, 1);
+  });
+});
+
+describe('attachedPersonId', () => {
+  it('у тренировки и спарринга это тренер', () => {
+    assert.equal(attachedPersonId(rule()), 'coach-1');
+    assert.equal(attachedPersonId(rule({ purpose: 'SPARRING' })), 'coach-1');
+  });
+
+  it('у аренды и робота — клиент', () => {
+    assert.equal(
+      attachedPersonId(rule({ purpose: 'RENT', coachId: null, clientId: 'client-1' })),
+      'client-1',
+    );
+    assert.equal(
+      attachedPersonId(rule({ purpose: 'ROBOT', coachId: null, clientId: 'client-1' })),
+      'client-1',
+    );
+  });
+
+  it('у прочего никого', () => {
+    assert.equal(attachedPersonId(rule({ purpose: 'OTHER', coachId: null })), null);
   });
 });
 

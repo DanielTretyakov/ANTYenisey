@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
-  ClosurePurpose,
   ClosureRule,
   ClubCoach,
+  ClubPerson,
   ClubTable,
   DayClosure,
   Weekday,
@@ -16,11 +16,22 @@ import { inputClassName } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { shortName } from '@/lib/names';
+import { personColors, type PersonColor } from '@/lib/personColor';
+import {
+  attachmentOf,
+  ERASER,
+  PURPOSE_CELL,
+  PURPOSE_MARK,
+  PURPOSE_LABEL,
+  SchedulePalette,
+  type Brush,
+} from './SchedulePalette';
 import {
   cellKey,
   cellsToSlots,
   copyLane,
   countOnLane,
+  personOf,
   sameCells,
   slotLabel,
   slotsToCells,
@@ -34,47 +45,6 @@ import {
 
 /** Дорожка расписания даты — она одна, в отличие от семи дорожек шаблона. */
 const DAY_LANE = 'day';
-
-/** Кисть «стереть»: отдельное значение, потому что назначением она не является. */
-const ERASER = 'ERASE';
-
-type Brush = ClosurePurpose | typeof ERASER;
-
-const PURPOSES: { value: ClosurePurpose; label: string; cell: string; chip: string }[] = [
-  {
-    value: 'RENT',
-    label: 'Аренда',
-    cell: 'bg-sky-500/60 hover:bg-sky-500/75',
-    chip: 'bg-sky-500/60',
-  },
-  {
-    value: 'SPARRING',
-    label: 'Спарринг',
-    cell: 'bg-violet-500/60 hover:bg-violet-500/75',
-    chip: 'bg-violet-500/60',
-  },
-  {
-    value: 'TRAINING',
-    label: 'Тренировка',
-    cell: 'bg-accent/70 hover:bg-accent/85',
-    chip: 'bg-accent/70',
-  },
-  {
-    value: 'ROBOT',
-    label: 'Робот',
-    cell: 'bg-amber-500/60 hover:bg-amber-500/75',
-    chip: 'bg-amber-500/60',
-  },
-  {
-    value: 'OTHER',
-    label: 'Другое',
-    cell: 'bg-zinc-500/60 hover:bg-zinc-500/75',
-    chip: 'bg-zinc-500/60',
-  },
-];
-
-const PURPOSE_LABEL = new Map(PURPOSES.map((item) => [item.value, item.label]));
-const PURPOSE_CELL = new Map(PURPOSES.map((item) => [item.value, item.cell]));
 
 type Mode = 'template' | 'day';
 
@@ -114,6 +84,14 @@ export function ScheduleCard({
 
   const [brush, setBrush] = useState<Brush>('TRAINING');
   const [coachId, setCoachId] = useState<string | null>(coaches[0]?.id ?? null);
+  const [client, setClient] = useState<ClubPerson | null>(null);
+  /**
+   * Имена людей, встречающихся в расписании.
+   *
+   * Тренеры приходят готовым списком, а клиентов у клуба тысячи — их имена
+   * подтягиваются точечно, по идентификаторам из уже загруженных окон.
+   */
+  const [names, setNames] = useState<Map<string, string>>(new Map());
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -127,6 +105,56 @@ export function ScheduleCard({
   );
   const lane = mode === 'template' ? String(weekday) : DAY_LANE;
   const dirty = !sameCells(cells, saved);
+
+  /** Все, кто встречается в загруженном расписании, плюс тренеры клуба. */
+  const peopleInView = useMemo(() => {
+    const ids = new Set<string>(coaches.map((coach) => coach.id));
+
+    for (const value of cells.values()) {
+      const person = personOf(value);
+      if (person) ids.add(person);
+    }
+
+    return ids;
+  }, [cells, coaches]);
+
+  const colors = useMemo(() => personColors([...peopleInView]), [peopleInView]);
+
+  const nameOf = useCallback(
+    (id: string): string =>
+      coaches.find((coach) => coach.id === id)?.fullName ?? names.get(id) ?? 'без имени',
+    [coaches, names],
+  );
+
+  // Имена клиентов, закреплённых за окнами, подтягиваются точечно: тянуть
+  // ради них весь список клиентов клуба нельзя — их тысячи.
+  useEffect(() => {
+    const missing = [...peopleInView].filter(
+      (id) => !coaches.some((coach) => coach.id === id) && !names.has(id),
+    );
+
+    if (missing.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    api
+      .people({ ids: missing, limit: missing.length })
+      .then((page) => {
+        if (cancelled) return;
+        setNames((previous) => {
+          const next = new Map(previous);
+          for (const person of page.items) next.set(person.id, person.fullName);
+          return next;
+        });
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [peopleInView, coaches, names]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -206,12 +234,15 @@ export function ScheduleCard({
       return null;
     }
 
-    // Тренер запоминается только там, где он осмыслен: у аренды и робота поле
-    // не просто необязательно, а запрещено — иначе в статистику тренера
-    // попадут чужие часы.
+    // Человек кладётся только туда, где он осмыслен: тренер у занятия, клиент
+    // у аренды. Перекрёстные поля не просто необязательны, а запрещены —
+    // иначе в статистику тренера попадут чужие часы.
+    const attachment = attachmentOf(brush);
+
     return {
       purpose: brush,
-      coachId: brush === 'TRAINING' || brush === 'SPARRING' ? coachId : null,
+      coachId: attachment === 'coach' ? coachId : null,
+      clientId: attachment === 'client' ? (client?.id ?? null) : null,
     };
   }
 
@@ -387,12 +418,15 @@ export function ScheduleCard({
           </div>
         )}
 
-        <Palette
+        <SchedulePalette
           brush={brush}
           onBrush={setBrush}
           coaches={coaches}
           coachId={coachId}
           onCoach={setCoachId}
+          client={client}
+          onClient={setClient}
+          colors={colors}
         />
 
         {loading ? (
@@ -402,12 +436,15 @@ export function ScheduleCard({
             tables={own}
             lane={lane}
             cells={cells}
-            coaches={coaches}
+            nameOf={nameOf}
+            colors={colors}
             painting={painting}
             brushValue={brushValue}
             onPaint={paint}
           />
         )}
+
+        {!loading && <Legend cells={cells} lane={lane} nameOf={nameOf} colors={colors} />}
 
         {night.length > 0 && (
           <p className="mt-3 text-[0.8125rem] text-text-subtle">
@@ -511,99 +548,20 @@ function ModeTab({
     </button>
   );
 }
-
-/** Выбор кисти: чем закрашивать и, для занятий, кто их ведёт. */
-function Palette({
-  brush,
-  onBrush,
-  coaches,
-  coachId,
-  onCoach,
-}: {
-  brush: Brush;
-  onBrush: (brush: Brush) => void;
-  coaches: ClubCoach[];
-  coachId: string | null;
-  onCoach: (id: string | null) => void;
-}) {
-  const needsCoach = brush === 'TRAINING' || brush === 'SPARRING';
-  const current = coaches.find((coach) => coach.id === coachId);
-
-  return (
-    <div className="mb-3 flex flex-wrap items-center gap-1.5">
-      {PURPOSES.map((purpose) => (
-        <button
-          key={purpose.value}
-          type="button"
-          aria-pressed={brush === purpose.value}
-          onClick={() => onBrush(purpose.value)}
-          className={cn(
-            'flex items-center gap-2 rounded-control border px-3 py-1.5 text-[0.875rem] transition-colors',
-            brush === purpose.value
-              ? 'border-border-strong bg-surface-sunken text-text'
-              : 'border-border text-text-muted hover:bg-surface-sunken',
-          )}
-        >
-          <span className={cn('h-3 w-3 rounded-sm', purpose.chip)} aria-hidden="true" />
-          {purpose.label}
-        </button>
-      ))}
-
-      <button
-        type="button"
-        aria-pressed={brush === ERASER}
-        onClick={() => onBrush(ERASER)}
-        className={cn(
-          'rounded-control border px-3 py-1.5 text-[0.875rem] transition-colors',
-          brush === ERASER
-            ? 'border-border-strong bg-surface-sunken text-text'
-            : 'border-border text-text-muted hover:bg-surface-sunken',
-        )}
-      >
-        Освободить
-      </button>
-
-      {needsCoach && (
-        <label className="ml-2 flex items-center gap-2 text-[0.875rem] text-text-muted">
-          Тренер
-          <select
-            value={coachId ?? ''}
-            onChange={(event) => onCoach(event.target.value || null)}
-            className={cn(inputClassName, 'w-auto py-1.5 text-[0.875rem]')}
-          >
-            {/* У тренировки тренер обязателен, у спарринга — нет: спарринг
-                заводят заранее, ещё не зная, кто его проведёт. */}
-            {brush === 'SPARRING' && <option value="">не назначен</option>}
-            {coaches.length === 0 && <option value="">тренеров нет</option>}
-            {coaches.map((coach) => (
-              <option key={coach.id} value={coach.id}>
-                {coach.fullName}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-
-      {needsCoach && (
-        <p className="w-full text-[0.8125rem] text-text-subtle">
-          {/* Тренер — часть кисти, а не настройка дня: чтобы поставить другого,
-              выберите его здесь и закрасьте нужное время. Уже закрашенное
-              перекрашивается поверх. */}
-          Закрашиваете: {brush === 'TRAINING' ? 'тренировка' : 'спарринг'}
-          {current ? `, ${shortName(current.fullName)}` : ''} Чтобы поставить другого тренера,
-          выберите его и закрасьте нужные часы — поверх уже закрашенного тоже можно.
-        </p>
-      )}
-    </div>
-  );
-}
-
-/** Таблица «время × столы» одной дорожки. */
+/**
+ * Таблица «время × столы» одной дорожки.
+ *
+ * Цвет клетки — это ЧЕЛОВЕК, а не назначение: тренеров и арендаторов в
+ * расписании десятки, и различать их по подписи в клетке высотой в 28
+ * пикселей тяжело, а назначений всего пять и они подписаны словом. Назначение
+ * при этом не теряется — оно в полоске слева и в подписи окна.
+ */
 function Grid({
   tables,
   lane,
   cells,
-  coaches,
+  nameOf,
+  colors,
   painting,
   brushValue,
   onPaint,
@@ -611,13 +569,12 @@ function Grid({
   tables: ClubTable[];
   lane: string;
   cells: Cells;
-  coaches: ClubCoach[];
+  nameOf: (id: string) => string;
+  colors: Map<string, PersonColor>;
   painting: { current: CellValue | null | undefined };
   brushValue: () => CellValue | null;
   onPaint: (tableId: string, slot: number, value: CellValue | null) => void;
 }) {
-  const coachName = new Map(coaches.map((coach) => [coach.id, coach.fullName]));
-
   return (
     <div className="max-h-[26rem] touch-pan-y overflow-auto rounded-control border border-border">
       <table className="w-full border-collapse text-[0.8125rem] select-none">
@@ -654,8 +611,10 @@ function Grid({
 
               {tables.map((table) => {
                 const value = cells.get(cellKey(lane, table.id, slot));
-                const label = value ? PURPOSE_LABEL.get(value.purpose) : 'свободно';
-                const coach = value?.coachId ? coachName.get(value.coachId) : undefined;
+                const purposeLabel = value ? PURPOSE_LABEL.get(value.purpose) : 'свободно';
+                const personId = value ? personOf(value) : null;
+                const person = personId ? nameOf(personId) : null;
+                const color = personId ? colors.get(personId) : undefined;
 
                 // Подпись ставится только там, где окно начинается: иначе
                 // четырёхчасовая тренировка повторила бы фамилию восемь раз
@@ -665,15 +624,18 @@ function Grid({
                   value !== undefined &&
                   (above === undefined ||
                     above.purpose !== value.purpose ||
-                    above.coachId !== value.coachId);
+                    above.coachId !== value.coachId ||
+                    above.clientId !== value.clientId);
+
+                const needsCoach = value?.purpose === 'TRAINING' && !personId;
 
                 return (
                   <td key={table.id} className="border-b border-l border-border p-0">
                     <button
                       type="button"
                       aria-pressed={value !== undefined}
-                      aria-label={`${table.label}, ${slotLabel(slot)} — ${label}${coach ? `, ${coach}` : ''}`}
-                      title={coach ? `${label}: ${coach}` : label}
+                      aria-label={`${table.label}, ${slotLabel(slot)} — ${purposeLabel}${person ? `, ${person}` : ''}`}
+                      title={person ? `${purposeLabel}: ${person}` : purposeLabel}
                       onPointerDown={(event) => {
                         // Захват мешает pointerenter на соседних клетках: без
                         // снятия все события уходили бы в первую. Проверка
@@ -688,7 +650,8 @@ function Grid({
                           value !== undefined &&
                           next !== null &&
                           value.purpose === next.purpose &&
-                          value.coachId === next.coachId;
+                          value.coachId === next.coachId &&
+                          value.clientId === next.clientId;
 
                         painting.current = same ? null : next;
                         onPaint(table.id, slot, painting.current);
@@ -699,16 +662,33 @@ function Grid({
                         }
                       }}
                       className={cn(
-                        'block h-7 w-full overflow-hidden px-1 text-left text-[0.6875rem] leading-none whitespace-nowrap transition-colors',
-                        value
-                          ? PURPOSE_CELL.get(value.purpose)
-                          : 'hover:bg-surface-sunken',
+                        'relative flex h-7 w-full items-center overflow-hidden pr-1 pl-5 text-left text-[0.6875rem] leading-none whitespace-nowrap transition-colors',
+                        // Цвет человека, если он закреплён; иначе — назначения.
+                        // Оттенок назначения остаётся в полоске слева, поэтому
+                        // одно другое не вытесняет.
+                        color ? color.cell : value ? PURPOSE_CELL.get(value.purpose) : 'hover:bg-surface-sunken',
+                        value ? 'hover:brightness-110' : '',
                       )}
                     >
-                      {startsHere && coach && (
-                        <span className="text-accent-text/90">{shortName(coach)}</span>
+                      {value && (
+                        // Буква назначения, а не цветная полоска: цвет клетки
+                        // занят человеком, и второй цвет рядом с ним местами
+                        // сливается.
+                        <span
+                          className="absolute inset-y-0 left-0 flex w-3.5 items-center justify-center bg-black/25 text-[0.625rem] font-medium text-white/85"
+                          aria-hidden="true"
+                        >
+                          {PURPOSE_MARK.get(value.purpose)}
+                        </span>
                       )}
-                      {startsHere && value?.purpose === 'TRAINING' && !coach && (
+
+                      {startsHere && person && (
+                        <span className="text-accent-text/90">{shortName(person)}</span>
+                      )}
+                      {startsHere && !person && value && !needsCoach && (
+                        <span className="text-accent-text/70">{purposeLabel}</span>
+                      )}
+                      {startsHere && needsCoach && (
                         // Тренировка без тренера не сохранится: сервер её
                         // отклонит. Лучше сказать об этом сразу в клетке, чем
                         // сообщением после нажатия «Сохранить».
@@ -722,6 +702,48 @@ function Grid({
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/** Кто занят в этой дорожке — с цветами, которыми они закрашены. */
+function Legend({
+  cells,
+  lane,
+  nameOf,
+  colors,
+}: {
+  cells: Cells;
+  lane: string;
+  nameOf: (id: string) => string;
+  colors: Map<string, PersonColor>;
+}) {
+  const ids = new Set<string>();
+
+  for (const [key, value] of cells) {
+    if (!key.startsWith(`${lane}|`)) continue;
+    const person = personOf(value);
+    if (person) ids.add(person);
+  }
+
+  if (ids.size === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.8125rem] text-text-muted">
+      {[...ids]
+        .map((id) => ({ id, name: nameOf(id) }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+        .map((person) => (
+          <span key={person.id} className="flex items-center gap-1.5">
+            <span
+              className={cn('h-3 w-3 rounded-sm', colors.get(person.id)?.dot)}
+              aria-hidden="true"
+            />
+            {person.name}
+          </span>
+        ))}
     </div>
   );
 }

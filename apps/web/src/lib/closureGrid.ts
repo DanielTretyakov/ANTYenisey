@@ -47,7 +47,20 @@ export const WORKDAYS: Weekday[] = [1, 2, 3, 4, 5];
 /** Чем занят стол в клетке. `null` в карте не хранится — клетка просто отсутствует. */
 export interface CellValue {
   purpose: ClosurePurpose;
+  /** Тренер — у тренировки и спарринга. */
   coachId: string | null;
+  /** Клиент — у аренды и робота. Оба поля разом не заполняются никогда. */
+  clientId: string | null;
+}
+
+/**
+ * Кто закреплён за клеткой, независимо от назначения.
+ *
+ * Сетке всё равно, тренер это или клиент: ей нужно знать, менялся ли человек
+ * между соседними клетками и каким цветом красить.
+ */
+export function personOf(value: CellValue): string | null {
+  return value.coachId ?? value.clientId;
 }
 
 /**
@@ -142,6 +155,7 @@ export function slotsToCells(
       cells.set(cellKey(lane(slot), slot.tableId, index), {
         purpose: slot.purpose,
         coachId: slot.coachId,
+        clientId: slot.clientId,
       });
     }
   }
@@ -152,10 +166,10 @@ export function slotsToCells(
 /**
  * Закрашенные клетки → окна.
  *
- * Соседние клетки склеиваются в одно окно, но только если у них совпадают и
- * назначение, и тренер: тренировка Иванова, идущая встык с тренировкой
- * Петрова, — это два занятия, и слить их в одно значило бы приписать часы
- * одному из них.
+ * Соседние клетки склеиваются в одно окно, но только если совпадают и
+ * назначение, и закреплённый человек: тренировка Иванова, идущая встык с
+ * тренировкой Петрова, — это два занятия, и слить их в одно значило бы
+ * приписать часы одному из них. То же с арендой двух разных клиентов подряд.
  */
 export function cellsToSlots(
   cells: Cells,
@@ -177,7 +191,8 @@ export function cellsToSlots(
           value !== undefined &&
           runValue !== null &&
           value.purpose === runValue.purpose &&
-          value.coachId === runValue.coachId;
+          value.coachId === runValue.coachId &&
+          value.clientId === runValue.clientId;
 
         if (!continues && runStart !== null && runValue !== null) {
           slots.push({
@@ -187,6 +202,7 @@ export function cellsToSlots(
             endMinute: slotMinute(slot),
             purpose: runValue.purpose,
             coachId: runValue.coachId,
+            clientId: runValue.clientId,
           });
           runStart = null;
           runValue = null;
@@ -256,7 +272,12 @@ export function sameCells(a: Cells, b: Cells): boolean {
   for (const [key, value] of a) {
     const other = b.get(key);
 
-    if (!other || other.purpose !== value.purpose || other.coachId !== value.coachId) {
+    if (
+      !other ||
+      other.purpose !== value.purpose ||
+      other.coachId !== value.coachId ||
+      other.clientId !== value.clientId
+    ) {
       return false;
     }
   }

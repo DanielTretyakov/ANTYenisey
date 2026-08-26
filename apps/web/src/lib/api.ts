@@ -3,6 +3,8 @@ import type {
   ClosureRule,
   ClosureRuleDraft,
   ClubCoach,
+  ClubPeoplePage,
+  ClubPeopleQuery,
   ClubSettings,
   ClubTable,
   CreateHallRequest,
@@ -158,6 +160,21 @@ export const api = {
 
   // --- Тренеры
   coaches: (): Promise<ClubCoach[]> => authorized('/club/coaches'),
+
+  // --- Состав клуба
+  people: (query: ClubPeopleQuery = {}): Promise<ClubPeoplePage> => {
+    const params = new URLSearchParams();
+
+    if (query.role) params.set('role', query.role);
+    if (query.search) params.set('search', query.search);
+    if (query.ids?.length) params.set('ids', query.ids.join(','));
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    if (query.offset !== undefined) params.set('offset', String(query.offset));
+
+    const search = params.toString();
+
+    return authorized(`/club/people${search ? `?${search}` : ''}`);
+  },
 
   // --- Расписание зала
   /** Постоянный шаблон недели: как зал живёт обычно. */

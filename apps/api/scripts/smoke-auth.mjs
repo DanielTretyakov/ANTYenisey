@@ -467,6 +467,7 @@ async function main() {
       endMinute: 1140,
       purpose: 'RENT',
       coachId: null,
+      clientId: null,
       ...extra,
     });
 
@@ -523,6 +524,71 @@ async function main() {
       });
       check('тренер у аренды отклонён', 400, r.status);
     }
+
+    console.log('=== 21б. Клиент, закреплённый за арендой');
+    const clients = (await asAdmin('/club/people?role=CLIENT&limit=1')).body?.items ?? [];
+    const clientId = clients[0]?.id ?? null;
+
+    if (!clientId) {
+      console.log('     клиентов в клубе нет — проверки аренды пропущены');
+    } else {
+      r = await asAdmin(`/club/halls/${hallId}/template`, {
+        method: 'PUT',
+        json: { rules: [window({ purpose: 'RENT', clientId })] },
+      });
+      check('аренда с клиентом принята', 200, r.status);
+      assert('клиент сохранён', r.body?.[0]?.clientId === clientId);
+
+      r = await asAdmin(`/club/halls/${hallId}/template`, {
+        method: 'PUT',
+        json: { rules: [window({ purpose: 'RENT', clientId: null })] },
+      });
+      check('аренда без клиента тоже принята', 200, r.status);
+
+      r = await asAdmin(`/club/halls/${hallId}/template`, {
+        method: 'PUT',
+        json: { rules: [window({ purpose: 'TRAINING', coachId, clientId })] },
+      });
+      check('клиент у тренировки отклонён', 400, r.status);
+
+      // Поле, не присланное вовсе, — это undefined, а не null: проверки не
+      // должны принимать его за заполненное.
+      r = await asAdmin(`/club/halls/${hallId}/template`, {
+        method: 'PUT',
+        json: {
+          rules: [
+            { tableId, weekday: 2, startMinute: 900, endMinute: 1140, purpose: 'OTHER' },
+          ],
+        },
+      });
+      check('окно без полей тренера и клиента принято', 200, r.status);
+    }
+
+    console.log('=== 21в. Состав клуба');
+    r = await call('/club/people', { headers: { Authorization: `Bearer ${access}` } });
+    check('состав клуба клиенту закрыт', 403, r.status);
+
+    r = await asAdmin('/club/people?limit=5');
+    check('состав прочитан', 200, r.status);
+    assert('пришли и список, и общее число', Array.isArray(r.body?.items) && typeof r.body?.total === 'number');
+    assert('страница не длиннее запрошенного', (r.body?.items?.length ?? 0) <= 5);
+
+    r = await asAdmin('/club/people?role=COACH');
+    check('фильтр по роли', 200, r.status);
+    assert(
+      'в выборке только тренеры',
+      Array.isArray(r.body?.items) && r.body.items.every((p) => p.role === 'COACH'),
+    );
+
+    r = await asAdmin('/club/people?role=NEIZVESTNAYA');
+    check('неизвестная роль отклонена', 400, r.status);
+
+    r = await asAdmin('/club/people?limit=999');
+    check('запрос всего списка разом отклонён', 400, r.status);
+
+    r = await asAdmin(`/club/people?search=${encodeURIComponent(first.email)}`);
+    check('поиск по почте', 200, r.status);
+    assert('нашёлся ровно один', r.body?.total === 1);
 
     // Стол СОСЕДНЕГО зала в расписание этого зала попасть не должен: составной
     // внешний ключ проверяет клуб, но не зал.

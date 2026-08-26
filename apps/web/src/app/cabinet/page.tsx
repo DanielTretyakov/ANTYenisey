@@ -49,11 +49,18 @@ export default function CabinetPage() {
         user ? (
           <>
             {CLUB_MANAGERS.includes(user.role) && (
-              <Link href="/club">
-                <Button variant="ghost" size="sm">
-                  Настройки клуба
-                </Button>
-              </Link>
+              <>
+                <Link href="/people">
+                  <Button variant="ghost" size="sm">
+                    Состав клуба
+                  </Button>
+                </Link>
+                <Link href="/club">
+                  <Button variant="ghost" size="sm">
+                    Настройки клуба
+                  </Button>
+                </Link>
+              </>
             )}
             <Button variant="ghost" size="sm" onClick={() => void handleLogout()}>
               Выйти

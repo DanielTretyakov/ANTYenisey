@@ -9,11 +9,13 @@ import {
   Patch,
   Post,
   Put,
+  Query,
 } from '@nestjs/common';
 import type {
   AccessTokenPayload,
   ClosureRule,
   ClubCoach,
+  ClubPeoplePage,
   ClubSettings,
   ClubTable,
   DaySchedule,
@@ -29,6 +31,7 @@ import {
   ReplaceTemplateDto,
   UpdateHallDto,
 } from './dto/schedule.dto';
+import { ClubPeopleQueryDto } from './dto/people.dto';
 import { UpdateClubSettingsDto } from './dto/update-settings.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -138,6 +141,17 @@ export class ClubController {
   @Get('coaches')
   listCoaches(@CurrentUser() user: AccessTokenPayload): Promise<ClubCoach[]> {
     return this.club.listCoaches(user.tenantId);
+  }
+
+  // --- Состав клуба --------------------------------------------------------
+
+  /** Сотрудники и клиенты одним списком, с поиском и постраничной выдачей. */
+  @Get('people')
+  listPeople(
+    @CurrentUser() user: AccessTokenPayload,
+    @Query() query: ClubPeopleQueryDto,
+  ): Promise<ClubPeoplePage> {
+    return this.club.listPeople(user.tenantId, query);
   }
 
   // --- Расписание зала -----------------------------------------------------

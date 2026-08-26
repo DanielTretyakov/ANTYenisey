@@ -21,7 +21,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 pnpm dev            # apps/api и apps/web в watch-режиме
 pnpm typecheck      # по всем пакетам
 pnpm test           # node --test
-pnpm smoke          # 110 сценариев против поднятого API и живого Postgres
+pnpm smoke          # 125 сценариев против поднятого API и живого Postgres
 pnpm db:migrate     # prisma migrate dev
 pnpm db:studio
 pnpm db:create-admin -- --email a@club.ru --password "..." --name "Иванов Иван"

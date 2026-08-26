@@ -113,11 +113,18 @@ export default function ClubPage() {
   return (
     <AppShell
       actions={
-        <Link href="/cabinet">
-          <Button variant="ghost" size="sm">
-            В кабинет
-          </Button>
-        </Link>
+        <>
+          <Link href="/people">
+            <Button variant="ghost" size="sm">
+              Состав клуба
+            </Button>
+          </Link>
+          <Link href="/cabinet">
+            <Button variant="ghost" size="sm">
+              В кабинет
+            </Button>
+          </Link>
+        </>
       }
     >
       <h1 className="mb-2 text-[1.75rem]">Настройки клуба</h1>
