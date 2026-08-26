@@ -1,5 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import { ConflictException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import type { JwtSignOptions } from '@nestjs/jwt';
@@ -13,6 +20,7 @@ import type {
   RegisterRequest,
 } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
+import { AttemptLimiter, attemptKey } from './attempt-limiter';
 import { joinFullName } from './full-name';
 import { hashToken, parseDuration } from './tokens';
 import type { Env } from '../config/env';
@@ -48,9 +56,10 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService<Env, true>,
+    private readonly attempts: AttemptLimiter,
   ) {}
 
-  async register(dto: RegisterRequest, context: SessionContext): Promise<AuthResponse> {
+  async register(dto: RegisterRequest, context: SessionContext): Promise<IssuedSession> {
     const tenant = await this.prisma.tenant.findUnique({
       where: { slug: dto.tenantSlug },
       select: { id: true },
@@ -111,7 +120,19 @@ export class AuthService {
     }
   }
 
-  async login(dto: LoginRequest, context: SessionContext): Promise<AuthResponse> {
+  async login(dto: LoginRequest, context: SessionContext): Promise<IssuedSession> {
+    const key = attemptKey(dto.tenantSlug, dto.email);
+    const retryAfterMs = this.attempts.retryAfterMs(key);
+
+    if (retryAfterMs !== null) {
+      // 429, а не 401: подбирающему всё равно, а честному владельцу учётки
+      // важно понять, что дело не в пароле и войти можно будет позже.
+      throw new HttpException(
+        `Слишком много неудачных попыток входа. Повторите через ${minutesFrom(retryAfterMs)} мин.`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     const user = await this.prisma.user.findFirst({
       where: { email: dto.email, tenant: { slug: dto.tenantSlug } },
       select: {
@@ -136,8 +157,14 @@ export class AuthService {
     // неотличимо от неверного пароля — уволенному тренеру незачем узнавать,
     // что учётка ещё существует.
     if (!user || !passwordMatches || user.deactivatedAt || user.anonymizedAt) {
+      this.attempts.registerFailure(key);
       throw new UnauthorizedException('Неверный адрес почты или пароль');
     }
+
+    // Счётчик обнуляется только после удачного входа: серия ошибок,
+    // закончившаяся правильным паролем, — это забывчивый человек, а не
+    // перебор, и держать его у порога блокировки незачем.
+    this.attempts.reset(key);
 
     return this.issueSession(
       {
@@ -159,7 +186,7 @@ export class AuthService {
    * означает, что копия токена утекла, — тогда гасим все сессии пользователя,
    * потому что неизвестно, кто из двоих законный владелец.
    */
-  async refresh(rawToken: string, context: SessionContext): Promise<AuthResponse> {
+  async refresh(rawToken: string, context: SessionContext): Promise<IssuedSession> {
     const stored = await this.prisma.refreshToken.findUnique({
       where: { tokenHash: hashToken(rawToken) },
       select: {
@@ -244,7 +271,7 @@ export class AuthService {
   }
 
   /** Выдача пары токенов и сохранение refresh-сессии. */
-  private async issueSession(user: PublicUser, context: SessionContext): Promise<AuthResponse> {
+  private async issueSession(user: PublicUser, context: SessionContext): Promise<IssuedSession> {
     const payload: AccessTokenPayload = {
       sub: user.id,
       tenantId: user.tenantId,
@@ -286,6 +313,18 @@ export class AuthService {
       user,
     };
   }
+}
+
+/**
+ * Свежевыданная пара токенов. Отличается от `AuthResponse` тем, что
+ * refresh-токен здесь есть всегда: решение, отдавать его клиенту в теле или
+ * только в куке, принимает контроллер.
+ */
+export type IssuedSession = AuthResponse & { refreshToken: string };
+
+/** Округление вверх до минут для сообщения о блокировке. */
+function minutesFrom(milliseconds: number): number {
+  return Math.max(1, Math.ceil(milliseconds / 60_000));
 }
 
 /** Обстоятельства выдачи сессии — для списка активных входов в кабинете. */

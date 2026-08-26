@@ -13,6 +13,9 @@
  * UTF-8 — фамилия «Иванов» доезжала до API мусором и не проходила проверку
  * допустимых символов. Здесь кодировку задаёт сам Node.
  *
+ * Проверяются оба транспорта refresh-токена: браузерный (httpOnly-кука)
+ * и мобильный (тело ответа по заголовку `X-Auth-Transport: body`).
+ *
  * ВНИМАНИЕ: заводит в базе тестовых пользователей probe-*@example.com и
  * НЕ убирает их за собой — доступа к базе у него нет, только HTTP. Уборка
  * отдельной командой: pnpm db:clean-probes. Направлять только на базу
@@ -45,11 +48,19 @@ function assert(title, condition) {
   }
 }
 
+/**
+ * Заголовок мобильного клиента: просит отдать refresh-токен в теле ответа.
+ * Браузер его не шлёт и получает токен только в httpOnly-куке, поэтому
+ * сценарии ниже делятся на два транспорта — `post` (мобильный) и `browser`.
+ */
+const MOBILE = { 'X-Auth-Transport': 'body' };
+
 async function call(path, options = {}) {
   const response = await fetch(`${API}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
+      ...(options.cookie ? { Cookie: options.cookie } : {}),
       ...options.headers,
     },
     body: options.json === undefined ? undefined : JSON.stringify(options.json),
@@ -63,10 +74,37 @@ async function call(path, options = {}) {
     body = text;
   }
 
-  return { status: response.status, body };
+  return { status: response.status, body, setCookie: response.headers.getSetCookie() };
 }
 
-const post = (path, json) => call(path, { method: 'POST', json });
+/** Мобильный клиент: токен приезжает в теле. */
+const post = (path, json) => call(path, { method: 'POST', json, headers: MOBILE });
+
+/** Браузерный клиент: без заголовка транспорта, с ручной передачей куки. */
+const browser = (path, json, cookie) =>
+  call(path, { method: 'POST', json, cookie });
+
+/** Разбор Set-Cookie: значение и список атрибутов. */
+function cookieFrom(setCookie, name) {
+  const raw = (setCookie ?? []).find((item) => item.startsWith(`${name}=`));
+
+  if (!raw) return null;
+
+  const [pair, ...attrs] = raw.split(';').map((part) => part.trim());
+
+  return {
+    value: pair.slice(name.length + 1),
+    attrs,
+    header: `${name}=${pair.slice(name.length + 1)}`,
+    has: (attr) => attrs.some((item) => item.toLowerCase() === attr.toLowerCase()),
+    get: (key) => {
+      const found = attrs.find((item) => item.toLowerCase().startsWith(`${key.toLowerCase()}=`));
+      return found ? found.slice(key.length + 1) : null;
+    },
+  };
+}
+
+const REFRESH_COOKIE = 'yenisey_refresh';
 
 /** Полный набор полей регистрации; отдельные поля перекрываются точечно. */
 const registration = (overrides = {}) => ({
@@ -206,6 +244,77 @@ async function main() {
   });
   check('мусор в форме отклонён', 400, r.status);
   console.log(`     нарушений: ${r.body?.message?.length ?? 0}`);
+
+  console.log('=== 14. Транспорт refresh-токена: браузер получает куку, а не тело');
+  const cookieUser = registration();
+  r = await browser('/auth/register', cookieUser);
+  check('регистрация браузерным клиентом', 201, r.status);
+  assert('refresh-токен НЕ отдан в теле ответа', r.body?.refreshToken === undefined);
+  assert('access-токен в теле остался', typeof r.body?.accessToken === 'string');
+
+  let jar = cookieFrom(r.setCookie, REFRESH_COOKIE);
+  assert('выдана кука с refresh-токеном', jar !== null);
+  assert('кука httpOnly — скрипт на странице её не прочитает', jar?.has('HttpOnly'));
+  assert('SameSite=Lax — чужой сайт не дёрнет /auth/refresh', jar?.get('SameSite') === 'Lax');
+  assert('путь куки сужен до ветви авторизации', jar?.get('Path') === '/api/auth');
+
+  console.log('=== 15. Обновление и выход по куке, без тела запроса');
+  r = await browser('/auth/refresh', undefined, jar.header);
+  check('обмен по куке', 200, r.status);
+  const rotatedJar = cookieFrom(r.setCookie, REFRESH_COOKIE);
+  assert('выдана новая кука, не та же самая', rotatedJar && rotatedJar.value !== jar.value);
+  assert('и здесь тело без refresh-токена', r.body?.refreshToken === undefined);
+
+  r = await browser('/auth/refresh', undefined, jar.header);
+  check('старая кука отвергнута (ротация работает)', 401, r.status);
+
+  r = await browser('/auth/refresh', undefined);
+  check('без куки и без тела — отказ', 401, r.status);
+
+  // Предъявление погашенной куки выше сочтено утечкой и погасило все сессии,
+  // поэтому для проверки выхода нужен свежий вход.
+  r = await browser('/auth/login', {
+    tenantSlug: 'yenisey',
+    email: cookieUser.email,
+    password: PASSWORD,
+  });
+  jar = cookieFrom(r.setCookie, REFRESH_COOKIE);
+  r = await browser('/auth/logout', undefined, jar.header);
+  check('выход по куке', 204, r.status);
+  const cleared = cookieFrom(r.setCookie, REFRESH_COOKIE);
+  assert('сервер погасил куку в браузере', cleared !== null && cleared.value === '');
+  r = await browser('/auth/refresh', undefined, jar.header);
+  check('погашенный выходом токен не работает', 401, r.status);
+
+  console.log('=== 16. Ограничение подбора пароля');
+  const victim = registration();
+  await post('/auth/register', victim);
+
+  const limit = Number(process.env.SMOKE_MAX_FAILED_ATTEMPTS ?? 10);
+  let last = null;
+  for (let attempt = 0; attempt < limit; attempt += 1) {
+    last = await post('/auth/login', {
+      tenantSlug: 'yenisey',
+      email: victim.email,
+      password: `nevernyi-parol-${attempt}`,
+    });
+  }
+  check(`попытка №${limit} — ещё 401, лимит не превышен`, 401, last.status);
+
+  r = await post('/auth/login', {
+    tenantSlug: 'yenisey',
+    email: victim.email,
+    password: `nevernyi-parol-${limit}`,
+  });
+  check(`попытка №${limit + 1} — перебор остановлен`, 429, r.status);
+
+  // Ключ окна — «клуб + почта», поэтому заперта ровно одна учётка.
+  r = await post('/auth/login', {
+    tenantSlug: 'yenisey',
+    email: first.email,
+    password: PASSWORD,
+  });
+  check('вход в другую учётку не задет', 200, r.status);
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;

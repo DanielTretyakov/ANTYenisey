@@ -22,6 +22,10 @@ export class ApiError extends Error {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_URL}/api${path}`, {
     ...init,
+    // Без этого браузер не приложит httpOnly-куку с refresh-токеном: веб и API
+    // живут на разных портах, а значит запрос кросс-доменный. Ответная кука по
+    // той же причине не сохранилась бы, и обновление сессии молча ломается.
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...init.headers,
@@ -55,11 +59,14 @@ export const api = {
   login: (payload: LoginRequest): Promise<AuthResponse> =>
     request('/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
 
-  refresh: (refreshToken: string): Promise<AuthResponse> =>
-    request('/auth/refresh', { method: 'POST', body: JSON.stringify({ refreshToken }) }),
+  /**
+   * Обмен refresh-токена на новую пару. Токен не передаётся: он лежит в
+   * httpOnly-куке, недоступной этому коду, и браузер прикладывает её сам.
+   */
+  refresh: (): Promise<AuthResponse> => request('/auth/refresh', { method: 'POST' }),
 
-  logout: (refreshToken: string): Promise<void> =>
-    request('/auth/logout', { method: 'POST', body: JSON.stringify({ refreshToken }) }),
+  /** Гасит сессию на сервере и стирает куку. Токен, опять же, берётся из куки. */
+  logout: (): Promise<void> => request('/auth/logout', { method: 'POST' }),
 
   me: (accessToken: string): Promise<PublicUser> =>
     request('/auth/me', { headers: { Authorization: `Bearer ${accessToken}` } }),

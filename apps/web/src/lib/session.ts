@@ -3,34 +3,30 @@
 import type { AuthResponse } from '@yenisey/types';
 
 /**
- * Хранение токенов на клиенте.
+ * Сессия на клиенте.
  *
- * Пока — localStorage, и это временное решение каркаса: localStorage читается
- * любым скриптом на странице, то есть XSS сразу отдаёт злоумышленнику
- * refresh-токен на 30 дней. Штатный вариант для веба — httpOnly-кука на
- * refresh и access только в памяти; переезд запланирован до подключения
- * платежей, когда у сессии появится реальная денежная цена.
+ * Access-токен живёт только в памяти вкладки — ни в localStorage, ни в куке,
+ * доступной скриптам. Любой скрипт на странице читает localStorage целиком,
+ * поэтому одна XSS означала бы кражу токена; из замыкания модуля его так
+ * просто не достать, а перезагрузка страницы всё равно его стирает.
  *
- * Здесь же причина, по которой API отдаёт refresh-токен в теле ответа, а не
- * только в куке: тот же бэкенд будет обслуживать мобильное приложение.
+ * Refresh-токен сюда не попадает вовсе: он приезжает в httpOnly-куке, которую
+ * JavaScript не видит, и уходит обратно автоматически — браузер прикладывает
+ * её к запросам на /api/auth сам (см. `credentials: 'include'` в lib/api.ts).
+ *
+ * Отсюда следствие: после перезагрузки страницы access-токена нет, и его надо
+ * восстановить обменом refresh-куки — этим занимается `restoreSession`.
  */
-const ACCESS_KEY = 'yenisey.accessToken';
-const REFRESH_KEY = 'yenisey.refreshToken';
+let accessToken: string | null = null;
 
 export function saveSession(auth: AuthResponse): void {
-  localStorage.setItem(ACCESS_KEY, auth.accessToken);
-  localStorage.setItem(REFRESH_KEY, auth.refreshToken);
+  accessToken = auth.accessToken;
 }
 
 export function readAccessToken(): string | null {
-  return localStorage.getItem(ACCESS_KEY);
-}
-
-export function readRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_KEY);
+  return accessToken;
 }
 
 export function clearSession(): void {
-  localStorage.removeItem(ACCESS_KEY);
-  localStorage.removeItem(REFRESH_KEY);
+  accessToken = null;
 }

@@ -3,6 +3,7 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { parseCorsOrigins, type Env } from './config/env';
 
@@ -11,6 +12,10 @@ async function bootstrap(): Promise<void> {
   const config = app.get(ConfigService<Env, true>);
 
   app.setGlobalPrefix('api');
+
+  // Refresh-токен приезжает в httpOnly-куке, и без разбора заголовка Cookie
+  // request.cookies остаётся undefined — обновление сессии молча ломается.
+  app.use(cookieParser());
 
   app.useGlobalPipes(
     new ValidationPipe({

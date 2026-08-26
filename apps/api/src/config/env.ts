@@ -18,6 +18,15 @@ const envSchema = z
     JWT_REFRESH_TTL: z.string().default('30d'),
     API_PORT: z.coerce.number().int().positive().default(3001),
     CORS_ORIGINS: z.string().default('http://localhost:3000'),
+    // Сколько неудачных попыток входа подряд допускается для одной учётки и за
+    // какое время счётчик забывается. Считаются только провалы, ключ — «клуб +
+    // почта», см. auth/attempt-limiter.ts.
+    AUTH_MAX_FAILED_ATTEMPTS: z.coerce.number().int().positive().default(10),
+    AUTH_ATTEMPT_WINDOW: z.string().default('15m'),
+    // Грубое ограничение частоты на весь API — защита от заваливания
+    // запросами, а не от подбора пароля.
+    RATE_LIMIT: z.coerce.number().int().positive().default(120),
+    RATE_LIMIT_WINDOW: z.string().default('1m'),
   })
   .refine((env) => env.JWT_ACCESS_SECRET !== env.JWT_REFRESH_SECRET, {
     // Совпадение секретов означает, что refresh-токен примут как access:

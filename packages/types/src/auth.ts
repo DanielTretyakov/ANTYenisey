@@ -43,7 +43,12 @@ export interface LoginRequest {
 }
 
 export interface RefreshRequest {
-  refreshToken: string;
+  /**
+   * Не обязателен: браузер присылает refresh-токен в httpOnly-куке и тела
+   * запроса не заполняет. Поле остаётся для клиентов без кук — мобильного
+   * приложения на Capacitor.
+   */
+  refreshToken?: string;
 }
 
 /** Пользователь в том виде, в каком его отдаёт API — без секретов. */
@@ -58,12 +63,18 @@ export interface PublicUser {
 }
 
 export interface AuthTokens {
+  /**
+   * Живёт 15 минут и хранится клиентом только в памяти. В localStorage его
+   * класть нельзя: оттуда его читает любой скрипт на странице.
+   */
   accessToken: string;
   /**
-   * Отдаётся в теле ответа, а не только в httpOnly-куке: тот же API обслуживает
-   * будущее мобильное приложение (Capacitor), где кук нет.
+   * Присутствует, только если клиент явно попросил его в теле — заголовком
+   * `X-Auth-Transport: body`. Так делает мобильное приложение (Capacitor), где
+   * кук нет. Браузеру токен приходит исключительно в httpOnly-куке, и здесь
+   * поле остаётся пустым.
    */
-  refreshToken: string;
+  refreshToken?: string;
   /** Срок жизни access-токена в секундах — фронтенд обновляет его заранее. */
   expiresIn: number;
 }

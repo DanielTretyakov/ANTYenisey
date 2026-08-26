@@ -8,7 +8,7 @@ import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { api, ApiError } from '@/lib/api';
-import { clearSession, readAccessToken, readRefreshToken, saveSession } from '@/lib/session';
+import { clearSession, readAccessToken, saveSession } from '@/lib/session';
 
 const ROLE_LABELS: Record<Role, string> = {
   CLIENT: 'Клиент',
@@ -28,8 +28,17 @@ export default function CabinetPage() {
     async function load(): Promise<void> {
       const accessToken = readAccessToken();
 
+      // Access-токен живёт только в памяти вкладки, поэтому после
+      // перезагрузки страницы его нет — это норма, а не выход из системы.
+      // Сессию восстанавливаем обменом httpOnly-куки с refresh-токеном.
       if (!accessToken) {
-        router.replace('/login');
+        const restored = await tryRefresh();
+        if (cancelled) return;
+        if (restored) {
+          setUser(restored);
+        } else {
+          router.replace('/login');
+        }
         return;
       }
 
@@ -63,13 +72,10 @@ export default function CabinetPage() {
   }, [router]);
 
   async function handleLogout(): Promise<void> {
-    const refreshToken = readRefreshToken();
-
-    // Токен гасится на сервере, а не только стирается локально: иначе украденная
-    // копия осталась бы рабочей все 30 дней после «выхода».
-    if (refreshToken) {
-      await api.logout(refreshToken).catch(() => undefined);
-    }
+    // Токен гасится на сервере, а не только стирается локально: иначе
+    // украденная копия осталась бы рабочей все 30 дней после «выхода». Сервер
+    // же стирает и куку — из браузера её этому коду не достать.
+    await api.logout().catch(() => undefined);
 
     clearSession();
     router.replace('/login');
@@ -141,16 +147,15 @@ function ProfileSkeleton() {
   );
 }
 
-/** Обновление пары токенов. Возвращает профиль или null, если сессия мертва. */
+/**
+ * Обновление пары токенов. Возвращает профиль или null, если сессия мертва.
+ *
+ * Refresh-токен не передаётся: он в httpOnly-куке, и браузер приложит её сам.
+ * Поэтому проверить наличие сессии заранее нельзя — остаётся спросить сервер.
+ */
 async function tryRefresh(): Promise<PublicUser | null> {
-  const refreshToken = readRefreshToken();
-
-  if (!refreshToken) {
-    return null;
-  }
-
   try {
-    const auth = await api.refresh(refreshToken);
+    const auth = await api.refresh();
     saveSession(auth);
     return auth.user;
   } catch {
