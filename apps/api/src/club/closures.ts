@@ -64,6 +64,38 @@ export function localParts(instant: Date, timezone: string): {
   };
 }
 
+/**
+ * Местное время клуба → мгновение UTC. Обратная операция к `localParts`.
+ *
+ * Прямой подстановки нет ни в `Date`, ни в `Intl`: перевести мгновение в зону
+ * легко, а собрать мгновение из местных даты и часа — только подбором
+ * смещения. Движку бронирования это нужно на каждый показ свободного времени:
+ * клиент выбирает «вторник, 15:00» по часам зала, а в базу уезжает UTC.
+ *
+ * Второй проход нужен ради перехода на летнее время: в России его нет, но
+ * платформа тиражируемая, и клуб в зоне с переводом часов — вопрос времени.
+ * На таком переходе первая поправка промахивается ровно на час, вторая
+ * доводит.
+ */
+export function instantAt(date: string, minute: number, timezone: string): Date {
+  const target = Date.parse(`${date}T00:00:00Z`) + minute * 60_000;
+  let instant = new Date(target);
+
+  for (let pass = 0; pass < 2; pass += 1) {
+    const parts = localParts(instant, timezone);
+    const actual = Date.parse(`${parts.date}T00:00:00Z`) + parts.minutes * 60_000;
+    const drift = actual - target;
+
+    if (drift === 0) {
+      break;
+    }
+
+    instant = new Date(instant.getTime() - drift);
+  }
+
+  return instant;
+}
+
 /** Отрезок в пределах одних местных суток. */
 interface LocalSegment {
   weekday: Weekday;

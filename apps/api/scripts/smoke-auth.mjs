@@ -106,6 +106,54 @@ function cookieFrom(setCookie, name) {
 
 const REFRESH_COOKIE = 'yenisey_refresh';
 
+/**
+ * Местное время клуба -> мгновение ISO-8601, подбором смещения.
+ *
+ * Та же арифметика, что в `instantAt` на сервере: сетка доступности отдаётся
+ * в минутах от местной полуночи, а бронь заводится мгновением.
+ */
+function instantAt(date, minute, timezone) {
+  const target = Date.parse(`${date}T00:00:00Z`) + minute * 60_000;
+  let instant = new Date(target);
+
+  for (let pass = 0; pass < 2; pass += 1) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(instant);
+
+    const value = (type) => parts.find((part) => part.type === type)?.value ?? '';
+    const actual =
+      Date.parse(`${value('year')}-${value('month')}-${value('day')}T00:00:00Z`) +
+      (Number(value('hour')) * 60 + Number(value('minute'))) * 60_000;
+
+    if (actual === target) break;
+
+    instant = new Date(instant.getTime() - (actual - target));
+  }
+
+  return instant.toISOString();
+}
+
+/** Дата через `offset` суток от сегодняшней по времени клуба. */
+function dateIn(timezone, offset) {
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+
+  return new Date(Date.parse(`${today}T00:00:00Z`) + offset * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+}
+
 /** Полный набор полей регистрации; отдельные поля перекрываются точечно. */
 const registration = (overrides = {}) => ({
   tenantSlug: 'yenisey',
@@ -237,8 +285,12 @@ async function main() {
     typeof r.body?.name === 'string' && r.body.name.length > 0,
   );
   assert(
-    'настройки клуба наружу не утекают',
-    Object.keys(r.body ?? {}).join(',') === 'slug,name',
+    'наружу отдан только код, название и часовой пояс',
+    Object.keys(r.body ?? {}).join(',') === 'slug,name,timezone',
+  );
+  assert(
+    'ни цен, ни политики отмены, ни статуса подписки в открытом ответе нет',
+    !['noShowChargePercent', 'tableHourPrice', 'id'].some((key) => key in (r.body ?? {})),
   );
   r = await call('/tenants/net-takogo-kluba');
   check('несуществующий клуб', 404, r.status);
@@ -827,6 +879,173 @@ async function main() {
 
     r = await asAdmin(`/club/halls/${hallId}/days/2026-13-45`, { method: 'DELETE' });
     check('несуществующая дата отклонена', 400, r.status);
+
+    console.log('=== 24. Бронирование стола клиентом');
+    // Бронь заводится в ОСНОВНОМ зале клуба, а не в зале проверки: за бронью
+    // стоит платёж, внешний ключ стоит на Restrict, и стол с историей уже не
+    // удалить — а зал проверки в конце убирается. Оставшиеся брони уносит
+    // pnpm db:clean-probes вместе с probe-учётками.
+    r = await call('/tenants/yenisey');
+    const timezone = r.body?.timezone;
+    assert('публичные сведения о клубе несут часовой пояс', typeof timezone === 'string');
+
+    r = await post('/auth/register', registration());
+    check('клиент для брони заведён', 201, r.status);
+    const bookerAuth = { Authorization: `Bearer ${r.body?.accessToken ?? ''}` };
+    const asBooker = (path, options = {}) =>
+      call(path, { ...options, headers: { ...bookerAuth, ...(options.headers ?? {}) } });
+
+    r = await asBooker('/booking/halls');
+    check('клиент видит залы с ценами', 200, r.status);
+    const bookingHall = r.body?.find((item) => item.id === mainHall?.id) ?? r.body?.[0];
+
+    if (!bookingHall || !timezone) {
+      console.log('     залов у клуба нет — бронирование пропущено');
+    } else {
+      const bookDate = dateIn(timezone, 1);
+
+      r = await asBooker(`/booking/halls/${bookingHall.id}/days/${bookDate}`);
+      check('сетка доступности прочитана', 200, r.status);
+      const bookingDay = r.body;
+      assert('сетка знает шаг брони зала', Number.isInteger(bookingDay?.stepMinutes));
+      assert(
+        'сетка идёт с 06:00 до полуночи',
+        bookingDay?.openMinute === 360 && bookingDay?.closeMinute === 1440,
+      );
+      assert('у столов сетки есть список занятого', Array.isArray(bookingDay?.tables?.[0]?.busy));
+
+      r = await asBooker(`/booking/halls/${bookingHall.id}/days/${dateIn(timezone, 60)}`);
+      check('дата за горизонтом отклонена', 400, r.status);
+
+      r = await asBooker(`/booking/halls/${bookingHall.id}/days/${dateIn(timezone, -1)}`);
+      check('вчерашняя дата отклонена', 400, r.status);
+
+      r = await asBooker(
+        `/booking/quote?hallId=${bookingHall.id}&durationMinutes=60&withRobot=false`,
+      );
+      check('цена часа посчитана', 200, r.status);
+      assert(
+        `час стоит цену часа (${r.body?.price} против ${bookingHall.tableHourPrice})`,
+        r.body?.price === bookingHall.tableHourPrice,
+      );
+
+      r = await asBooker(
+        `/booking/quote?hallId=${bookingHall.id}&durationMinutes=80&withRobot=false`,
+      );
+      check('цена неполного получаса посчитана', 200, r.status);
+      assert(
+        '80 минут оплачиваются как 90: начатые полчаса считаются полными',
+        r.body?.billedMinutes === 90,
+      );
+      assert(
+        'и стоят как час с доплатой',
+        r.body?.price === bookingHall.tableHourPrice + bookingHall.tableExtra30MinPrice,
+      );
+
+      // Свободный час ищется по самой сетке, а не угадывается: расписание
+      // клуба на завтра заранее неизвестно.
+      const step = bookingDay.stepMinutes;
+      let freeTable = null;
+      let freeMinute = null;
+
+      for (const table of bookingDay.tables ?? []) {
+        for (let minute = bookingDay.earliestMinute; minute + 60 <= 1440; minute += step) {
+          if (minute % step !== 0) continue;
+
+          const busy = table.busy.some(
+            (slot) => minute < slot.endMinute && slot.startMinute < minute + 60,
+          );
+
+          if (!busy) {
+            freeTable = table;
+            freeMinute = minute;
+            break;
+          }
+        }
+
+        if (freeTable) break;
+      }
+
+      if (!freeTable) {
+        console.log('     свободного часа завтра нет — проверки самой брони пропущены');
+      } else {
+        const startsAt = instantAt(bookDate, freeMinute, timezone);
+
+        if (step !== 45 && 45 % step !== 0) {
+          r = await asBooker('/booking/bookings', {
+            method: 'POST',
+            json: { tableId: freeTable.tableId, startsAt, durationMinutes: 45, withRobot: false },
+          });
+          check('длительность не по шагу зала отклонена', 400, r.status);
+        }
+
+        r = await asBooker('/booking/bookings', {
+          method: 'POST',
+          json: {
+            tableId: freeTable.tableId,
+            startsAt: instantAt(bookDate, freeMinute + 7, timezone),
+            durationMinutes: 60,
+            withRobot: false,
+          },
+        });
+        check('начало не по шагу зала отклонено', 400, r.status);
+
+        r = await asBooker('/booking/bookings', {
+          method: 'POST',
+          json: { tableId: freeTable.tableId, startsAt, durationMinutes: 60, withRobot: false },
+        });
+        check('стол забронирован', 201, r.status);
+        const bookingId = r.body?.id;
+        assert('цена зафиксирована копией', r.body?.price === bookingHall.tableHourPrice);
+        assert('бронь активна', r.body?.status === 'BOOKED');
+        assert(
+          'видно, сколько спишется при отмене сейчас',
+          typeof r.body?.cancelChargePercentNow === 'number',
+        );
+
+        r = await asBooker('/booking/bookings', {
+          method: 'POST',
+          json: { tableId: freeTable.tableId, startsAt, durationMinutes: 60, withRobot: false },
+        });
+        check('повторная бронь того же времени отклонена', 400, r.status);
+
+        r = await asBooker(`/booking/halls/${bookingHall.id}/days/${bookDate}`);
+        const reread = r.body?.tables?.find((item) => item.tableId === freeTable.tableId);
+        assert(
+          'бронь появилась в сетке занятого времени',
+          (reread?.busy ?? []).some((slot) => slot.startMinute === freeMinute),
+        );
+
+        r = await asBooker('/booking/bookings');
+        check('список своих броней прочитан', 200, r.status);
+        assert(
+          'бронь в списке',
+          (r.body ?? []).some((item) => item.id === bookingId),
+        );
+
+        r = await asAdmin('/booking/bookings', {
+          method: 'POST',
+          json: { tableId: freeTable.tableId, startsAt, durationMinutes: 60, withRobot: false },
+        });
+        check('администратору этот маршрут закрыт: у него нет карточки клиента', 403, r.status);
+
+        r = await asBooker(`/booking/bookings/${bookingId}`, { method: 'DELETE' });
+        check('бронь отменена', 200, r.status);
+        assert('статус сменился', r.body?.status === 'CANCELLED');
+        assert('процент списания зафиксирован', Number.isInteger(r.body?.chargePercent));
+        assert('отменять больше нечего', r.body?.cancelChargePercentNow === null);
+
+        r = await asBooker(`/booking/bookings/${bookingId}`, { method: 'DELETE' });
+        check('повторная отмена отклонена', 400, r.status);
+
+        r = await asBooker(`/booking/halls/${bookingHall.id}/days/${bookDate}`);
+        const afterCancel = r.body?.tables?.find((item) => item.tableId === freeTable.tableId);
+        assert(
+          'отменённая бронь время больше не занимает',
+          !(afterCancel?.busy ?? []).some((slot) => slot.startMinute === freeMinute),
+        );
+      }
+    }
 
     console.log('=== 23. Уборка проверочных данных');
     await asAdmin(`/club/halls/${hallId}/days/${cupDate}`, { method: 'DELETE' });

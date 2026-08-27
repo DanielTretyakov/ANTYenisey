@@ -1,13 +1,17 @@
 import type {
   AuthResponse,
+  BookingDay,
+  BookingQuote,
   ClosureRule,
   ClosureRuleDraft,
+  ClientBooking,
   ClubCoach,
   ClubPeoplePage,
   ClubPeopleQuery,
   ClubPerson,
   ClubSettings,
   ClubTable,
+  CreateBookingRequest,
   CreateHallRequest,
   DayClosureDraft,
   DaySchedule,
@@ -240,4 +244,28 @@ export const api = {
   /** Возврат даты к шаблону. */
   resetDay: (hallId: string, date: string): Promise<DaySchedule> =>
     authorized(`/club/halls/${hallId}/days/${date}`, { method: 'DELETE' }),
+
+  // --- Бронирование стола клиентом
+  /** Залы с ценами и шагом брони — то же, что видит администратор в настройках. */
+  bookingHalls: (): Promise<Hall[]> => authorized('/booking/halls'),
+
+  /** Что свободно в зале на дату. Причина занятости клиенту не раскрывается. */
+  bookingDay: (hallId: string, date: string): Promise<BookingDay> =>
+    authorized(`/booking/halls/${hallId}/days/${date}`),
+
+  /** Стоимость аренды до подтверждения брони. */
+  bookingQuote: (hallId: string, durationMinutes: number, withRobot: boolean): Promise<BookingQuote> =>
+    authorized(
+      `/booking/quote?hallId=${encodeURIComponent(hallId)}` +
+        `&durationMinutes=${durationMinutes}&withRobot=${withRobot}`,
+    ),
+
+  createBooking: (payload: CreateBookingRequest): Promise<ClientBooking> =>
+    authorized('/booking/bookings', json('POST', payload)),
+
+  myBookings: (): Promise<ClientBooking[]> => authorized('/booking/bookings'),
+
+  /** Отмена возвращает саму бронь: клиент должен увидеть, сколько с него списалось. */
+  cancelBooking: (id: string): Promise<ClientBooking> =>
+    authorized(`/booking/bookings/${id}`, { method: 'DELETE' }),
 };

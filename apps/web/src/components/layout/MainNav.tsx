@@ -19,6 +19,9 @@ import { useSession } from '@/lib/useSession';
  */
 const SECTIONS: { href: string; label: string; roles: Role[] }[] = [
   { href: '/cabinet', label: 'Кабинет', roles: ['CLIENT', 'COACH', 'ADMIN', 'OWNER'] },
+  // Бронирует только клиент: бронь ссылается на его карточку, которой у
+  // сотрудника нет. Ручная бронь администратором — отдельный сценарий ТЗ.
+  { href: '/booking', label: 'Забронировать стол', roles: ['CLIENT'] },
   { href: '/people', label: 'Состав клуба', roles: ['ADMIN', 'OWNER'] },
   { href: '/catalog', label: 'Занятия и турниры', roles: ['ADMIN', 'OWNER'] },
   { href: '/club', label: 'Настройки клуба', roles: ['ADMIN', 'OWNER'] },

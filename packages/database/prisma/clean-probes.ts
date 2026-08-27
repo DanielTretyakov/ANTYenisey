@@ -32,6 +32,10 @@ async function main(): Promise<void> {
   // Порядок важен: на связях стоит onDelete: Restrict, база не даст удалить
   // пользователя, пока на него ссылаются сессии и профиль.
   await prisma.refreshToken.deleteMany({ where: { userId: { in: ids } } });
+  // Брони проверочных клиентов — раньше их профилей: на клиенте стоит
+  // Restrict, а смоук отменяет бронь, но удалить её по HTTP не может и не
+  // должен. В продукте бронь не удаляется никогда — это история платежей.
+  await prisma.tableBooking.deleteMany({ where: { clientId: { in: ids } } });
   await prisma.clientProfile.deleteMany({ where: { userId: { in: ids } } });
   const removed = await prisma.user.deleteMany({ where });
 

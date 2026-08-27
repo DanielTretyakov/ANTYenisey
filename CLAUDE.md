@@ -21,11 +21,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 pnpm dev            # apps/api и apps/web в watch-режиме
 pnpm typecheck      # по всем пакетам
 pnpm test           # node --test
-pnpm smoke          # 164 сценария против поднятого API и живого Postgres
+pnpm smoke          # 196 сценариев против поднятого API и живого Postgres
 pnpm db:migrate     # prisma migrate dev
 pnpm db:studio
 pnpm db:create-admin -- --email a@club.ru --password "..." --name "Иванов Иван"
 ```
+
+Модули, которые гоняются через `node --test`, **не могут иметь относительных
+импортов**: node требует расширение `.ts`, а сборка (`tsconfig.build.json`,
+`allowImportingTsExtensions: false`) его не принимает. Поэтому чистые модули
+вроде `club/closures.ts` и `booking/availability.ts` самодостаточны, а всё
+внешнее приходит в них аргументами.
 
 Один тест — напрямую, минуя turbo:
 
@@ -51,7 +57,7 @@ uv run python scripts/lint.py
 
 ## Архитектура продукта
 
-`apps/api` — NestJS. Модули `auth`, `tenants`, `users`, `prisma`, `config`. `apps/web` — Next.js (app router). `packages/database` — Prisma, единственный владелец схемы. `packages/types` — общие типы, собирается через `tsc -p tsconfig.build.json`.
+`apps/api` — NestJS. Модули `auth`, `tenants`, `users`, `club`, `booking`, `prisma`, `config`. `apps/web` — Next.js (app router). `packages/database` — Prisma, единственный владелец схемы. `packages/types` — общие типы, собирается через `tsc -p tsconfig.build.json`.
 
 Клиент Prisma генерируется в `packages/database/generated/` и **в git не попадает** — после свежего клона и после правки схемы нужен `pnpm db:generate`, иначе типы не сойдутся.
 
@@ -60,6 +66,8 @@ uv run python scripts/lint.py
 Изоляция клубов держится на составных ключах и проверяется на уровне БД, а не только в коде. Правила схемы, которые нельзя нарушать:
 
 - **Деньги — целые числа в копейках.** Не рубли с дробной частью. Конвертация только на границе представления.
+- **Цену услуги считает сервер, и только он.** Форма показывает то, что вернул `GET /api/booking/quote`. Второй расчёт на клиенте разойдётся с первым молча.
+- **Аренда тарифицируется начатыми получасами**, минимум — час без робота и полчаса с роботом. Логика — `apps/api/src/booking/pricing.ts`, там же тесты на прайс «Енисея».
 - **Удаления нет.** Клиент деактивируется через `deactivatedAt`/`anonymizedAt`; на внешних ключах `onDelete: Restrict`.
 - **Часть ограничений живёт в raw SQL.** `packages/database/prisma/constraints.sql` — 32 CHECK, 2 частичных уникальных индекса и 3 EXCLUDE (пересечение броней, шаблона недели и расписания дня). Prisma такое не выражает, поэтому при изменении схемы этот файл правится руками отдельно от миграции.
 - **Цены и шаг брони — у зала (`Hall`), а не у клуба.** У клуба остаётся то, что составляет договор с клиентом: часовой пояс, политика неявки, правила абонемента.

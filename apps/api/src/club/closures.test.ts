@@ -6,6 +6,7 @@ import {
   closedBySlots,
   findOverlap,
   formatMinutes,
+  instantAt,
   localParts,
   localSegments,
   overlaps,
@@ -463,5 +464,33 @@ describe('formatMinutes', () => {
 
   it('конец суток показывает как 24:00, а не 00:00', () => {
     assert.equal(formatMinutes(1440), '24:00');
+  });
+});
+
+describe('instantAt', () => {
+  /** Зона с переводом часов — ради второго прохода поправки. */
+  const BERLIN = 'Europe/Berlin';
+
+  it('собирает мгновение из местных даты и минуты', () => {
+    // Красноярск — UTC+7 круглый год.
+    assert.equal(instantAt('2026-03-12', 15 * 60, KRSK).toISOString(), '2026-03-12T08:00:00.000Z');
+  });
+
+  it('обратен localParts', () => {
+    const parts = localParts(instantAt('2026-08-27', 9 * 60 + 30, KRSK), KRSK);
+
+    assert.equal(parts.date, '2026-08-27');
+    assert.equal(parts.minutes, 9 * 60 + 30);
+  });
+
+  it('попадает в местную полночь, а не в полночь UTC', () => {
+    assert.equal(instantAt('2026-03-12', 0, KRSK).toISOString(), '2026-03-11T17:00:00.000Z');
+  });
+
+  it('переживает переход на летнее время', () => {
+    // 29 марта 2026 Берлин переводит стрелки: накануне зона UTC+1, после —
+    // UTC+2. Одной поправки на такой границе не хватает.
+    assert.equal(instantAt('2026-03-28', 12 * 60, BERLIN).toISOString(), '2026-03-28T11:00:00.000Z');
+    assert.equal(instantAt('2026-03-30', 12 * 60, BERLIN).toISOString(), '2026-03-30T10:00:00.000Z');
   });
 });
