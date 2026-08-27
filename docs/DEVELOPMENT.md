@@ -85,6 +85,17 @@ pnpm --filter @yenisey/database verify        # прогон схемы на о�
 поломка кода, хотя код цел. Лечение: остановить dev, `rm -rf apps/web/.next`,
 запустить dev заново.
 
+Если нужно собрать или поднять второй экземпляр, не трогая работающий dev,
+каталог сборки переопределяется переменной `NEXT_DIST_DIR`:
+
+```bash
+NEXT_DIST_DIR=.next-diag npx next dev -p 3010   # из apps/web
+```
+
+Учтите, что Next при старте правит под себя `next-env.d.ts` и `include` в
+`tsconfig.json`, подставляя туда этот каталог, — после диагностики оба файла
+надо вернуть (`git checkout -- apps/web/next-env.d.ts apps/web/tsconfig.json`).
+
 Проверить работающий API целиком, включая guard'ы и живой Postgres:
 
 ```bash
