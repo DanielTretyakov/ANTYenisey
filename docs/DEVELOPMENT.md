@@ -71,13 +71,19 @@ pnpm dev                                     # api :3001, web :3000
 
 ```bash
 pnpm dev                                     # оба приложения в watch-режиме
-pnpm build                                   # сборка всего
+pnpm build                                   # сборка всего — НЕ на работающем pnpm dev
 pnpm typecheck                               # проверка типов по всем пакетам
 pnpm test                                    # тесты
 pnpm db:studio                               # веб-интерфейс к базе
 
 pnpm --filter @yenisey/database verify        # прогон схемы на одноразовой базе
 ```
+
+`pnpm build` и `pnpm dev` пишут в один и тот же каталог `apps/web/.next`, и
+сборка затирает чанки работающего dev-сервера. Тот продолжает искать их в
+памяти и валится сотнями `Cannot find module './855.js'` — выглядит как
+поломка кода, хотя код цел. Лечение: остановить dev, `rm -rf apps/web/.next`,
+запустить dev заново.
 
 Проверить работающий API целиком, включая guard'ы и живой Postgres:
 
