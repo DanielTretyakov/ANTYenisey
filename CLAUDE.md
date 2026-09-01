@@ -2,16 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## В репозитории живут две несвязанные системы
+## Что это за репозиторий
 
-Это не монорепозиторий одного продукта. Под одним корнем соседствуют:
+«Енисей» — SaaS-платформа для клубов настольного тенниса. Один продукт, один язык: TypeScript под pnpm 10 + Turborepo, Postgres 18. Документация — в `docs/`, обзор и быстрый старт — в `README.md`.
 
-1. **«Енисей»** — SaaS-платформа для клубов настольного тенниса: `apps/`, `packages/`, `docs/`. Это собственно продукт.
-2. **Компилятор памяти** — `scripts/`, `hooks/`, `daily/`, `knowledge/`, `AGENTS.md`, `README.md`, `pyproject.toml`. Внешний проект ([claude-memory-compiler](https://github.com/coleam00/claude-memory-compiler)), который превращает транскрипты сессий в базу знаний.
-
-Отсюда две ловушки. **`README.md` в корне описывает компилятор памяти, а не «Енисей»** — за документацией продукта иди в `docs/`. И `knowledge/concepts/` — это выжимки из разговоров, а не проектная документация: они могут устареть относительно кода.
-
-Языки не пересекаются: продукт — TypeScript под pnpm, память — Python под uv.
+До 01.09.2026 под этим же корнем жил внешний проект — компилятор памяти на Python (`scripts/`, `hooks/`, `daily/`, `knowledge/`, `AGENTS.md`, `pyproject.toml`). Он снят: долгую память ведёт claude-mem, хранящий базу вне репозитория, в `~/.claude-mem/`. Если в старом коммите или в чужой ссылке встретится `uv run python scripts/compile.py` — этого больше нет, искать в истории git.
 
 ## Команды
 
@@ -46,14 +41,6 @@ pnpm --filter @yenisey/database verify
 ```
 
 `verify` разворачивает схему с нуля и намеренно пишет некорректные данные, проверяя, что база физически не даёт смешать данные двух клубов. **Направлять только на пустую одноразовую базу.** После `pnpm smoke` остаются учётки `probe-*@example.com` — убираются через `pnpm db:clean-probes`.
-
-Память (uv, Python):
-
-```bash
-uv run python scripts/compile.py            # дневные логи -> статьи
-uv run python scripts/query.py "вопрос"
-uv run python scripts/lint.py
-```
 
 ## Архитектура продукта
 
@@ -110,8 +97,8 @@ uv run python scripts/lint.py
 
 ## Особенности этой машины (Windows)
 
-- **git-bash обязателен для Agent SDK.** Скрипты памяти запускают Claude Code CLI, а он без git-bash не стартует и сообщает лишь `exit code 1`. `ensure_git_bash()` в `scripts/config.py` находит путь сам; переменную окружения держать не нужно. Если SDK падает непонятно — первым делом передай `stderr=` в `ClaudeAgentOptions`, настоящая ошибка только там.
-- **Консоль в cp1251.** `print` с `₽`, эмодзи или длинным тире падает с `UnicodeEncodeError`, а `logging` молча теряет строку. Отсюда `force_utf8_io()` в `scripts/config.py` и `encoding="utf-8"` у всех `basicConfig`. В новых Python-скриптах проекта вызывай `force_utf8_io()` первой строкой `main()`.
+- **Claude Code CLI без git-bash не стартует** и сообщает наружу только `exit code 1`. Настоящая ошибка уходит в stderr дочернего процесса, поэтому всё, что запускает CLI программно, должно этот stderr перехватывать — иначе диагностировать нечего. Путь: `X:\Git\bin\bash.exe` (не `System32\bash.exe` — это launcher WSL, и он не подходит).
+- **Консоль в cp1251.** `print` с `₽`, эмодзи или длинным тире падает с `UnicodeEncodeError`, а `logging` молча теряет строку — скрипт успевает сделать работу и потерять результат на выводе. В Python-скриптах проекта ставь `PYTHONIOENCODING=utf-8` или перенастраивай `sys.stdout` первой строкой, а всем `basicConfig` задавай `encoding="utf-8"`.
 - **`core.autocrlf=true`.** Контрольные суммы вендоренных скиллов в `.claude/skills/` считаются по LF-байтам, поэтому в `.gitattributes` для них стоит `text eol=lf`. Без этого свежий чекаут даёт «stale snapshot» и скилл молча не грузится.
 - **TLS нестабилен.** `git push` периодически падает с `schannel: failed to receive handshake` — повторить. Проверяй код возврата именно `git`: `git push | tail -3` всегда вернёт 0.
 - Образы с Docker Hub не тянутся (TLS-таймаут), Postgres установлен нативно.
