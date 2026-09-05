@@ -29,7 +29,10 @@ import { clubSettingsViolations, hallViolations } from './settings-rules';
  */
 const SETTINGS_SELECT = {
   name: true,
-  timezone: true,
+  cityId: true,
+  logoUrl: true,
+  accentColor: true,
+  // Часового пояса здесь нет: он переехал на зал (см. HALL_SELECT).
   noShowChargePercent: true,
   attendanceReminderAfterMinutes: true,
   attendanceAutoNoShowAfterMinutes: true,
@@ -39,6 +42,9 @@ const SETTINGS_SELECT = {
 const HALL_SELECT = {
   id: true,
   name: true,
+  timezone: true,
+  cityId: true,
+  address: true,
   bookingStep: true,
   tableHourPrice: true,
   tableExtra30MinPrice: true,
@@ -309,19 +315,21 @@ export class ClubService {
    * внешний ключ стоит на `Restrict`, и история не переписывается.
    */
   async listCoaches(tenantId: string): Promise<ClubCoach[]> {
-    const coaches = await this.prisma.user.findMany({
+    const coaches = await this.prisma.tenantMembership.findMany({
       where: {
         tenantId,
         role: Role.COACH,
+        // Отключён в ЭТОМ клубе — и отдельно отключён на платформе: после
+        // перехода на единый аккаунт это два разных события, и проверять надо оба.
         deactivatedAt: null,
-        anonymizedAt: null,
+        user: { deactivatedAt: null, anonymizedAt: null },
         coachProfile: { isNot: null },
       },
-      select: { id: true, fullName: true },
-      orderBy: { fullName: 'asc' },
+      select: { userId: true, user: { select: { fullName: true } } },
+      orderBy: { user: { fullName: 'asc' } },
     });
 
-    return coaches.map((coach) => ({ id: coach.id, fullName: coach.fullName }));
+    return coaches.map((coach) => ({ id: coach.userId, fullName: coach.user.fullName }));
   }
 
   // --- Состав клуба --------------------------------------------------------
@@ -336,36 +344,45 @@ export class ClubService {
    */
   async listPeople(tenantId: string, query: ClubPeopleQuery): Promise<ClubPeoplePage> {
     const search = query.search?.trim();
-    const where: Prisma.UserWhereInput = {
+    // Список строится по привязкам к клубу, а не по учётным записям: у User
+    // клуба больше нет, и «люди клуба» — это ровно те, у кого есть
+    // TenantMembership в нём.
+    const where: Prisma.TenantMembershipWhereInput = {
       tenantId,
       // Анонимизированные скрыты: у них персональные данные затёрты по 152-ФЗ,
       // и показывать «Удалённый пользователь» в списке незачем.
-      anonymizedAt: null,
+      user: {
+        anonymizedAt: null,
+        ...(query.ids && query.ids.length > 0 ? { id: { in: query.ids } } : {}),
+        ...(search
+          ? {
+              OR: [
+                { fullName: { contains: search, mode: 'insensitive' as const } },
+                { email: { contains: search, mode: 'insensitive' as const } },
+                { phone: { contains: search } },
+              ],
+            }
+          : {}),
+      },
       ...(query.role ? { role: query.role } : {}),
-      ...(query.ids && query.ids.length > 0 ? { id: { in: query.ids } } : {}),
-      ...(search
-        ? {
-            OR: [
-              { fullName: { contains: search, mode: 'insensitive' } },
-              { email: { contains: search, mode: 'insensitive' } },
-              { phone: { contains: search } },
-            ],
-          }
-        : {}),
     };
 
     const [items, total] = await Promise.all([
-      this.prisma.user.findMany({
+      this.prisma.tenantMembership.findMany({
         where,
         select: {
-          id: true,
-          fullName: true,
-          email: true,
-          phone: true,
-          birthDate: true,
+          userId: true,
           role: true,
           createdAt: true,
           deactivatedAt: true,
+          user: {
+            select: {
+              fullName: true,
+              email: true,
+              phone: true,
+              birthDate: true,
+            },
+          },
         },
         // Сотрудники первыми, клиенты последними, внутри — по имени.
         //
@@ -374,20 +391,20 @@ export class ClubService {
         // именно `desc`. Взаимный порядок админов и тренеров при этом
         // произволен, и выбирать между ними незачем: на вкладке «Все»
         // администратор ищет поиском, а роль целиком открывает вкладкой.
-        orderBy: [{ role: 'desc' }, { fullName: 'asc' }],
+        orderBy: [{ role: 'desc' }, { user: { fullName: 'asc' } }],
         take: Math.min(query.limit ?? 50, 200),
         skip: query.offset ?? 0,
       }),
-      this.prisma.user.count({ where }),
+      this.prisma.tenantMembership.count({ where }),
     ]);
 
     return {
       items: items.map((person) => ({
-        id: person.id,
-        fullName: person.fullName,
-        email: person.email,
-        phone: person.phone,
-        birthDate: formatBirthDate(person.birthDate),
+        id: person.userId,
+        fullName: person.user.fullName,
+        email: person.user.email,
+        phone: person.user.phone,
+        birthDate: formatBirthDate(person.user.birthDate),
         role: person.role,
         createdAt: person.createdAt.toISOString(),
         deactivated: person.deactivatedAt !== null,
@@ -419,9 +436,12 @@ export class ClubService {
       throw new ConflictException('Свою собственную роль изменить нельзя');
     }
 
-    const person = await this.prisma.user.findFirst({
-      where: { id: userId, tenantId, anonymizedAt: null },
-      select: { id: true, role: true },
+    // Роль меняется у ПРИВЯЗКИ, а не у человека: тот же аккаунт остаётся
+    // клиентом в соседнем клубе, и трогать его администратор этого клуба
+    // не вправе.
+    const person = await this.prisma.tenantMembership.findFirst({
+      where: { userId, tenantId, user: { anonymizedAt: null } },
+      select: { role: true },
     });
 
     if (!person) {
@@ -435,8 +455,13 @@ export class ClubService {
     // Последнего владельца не разжаловать: клуб без владельца остаётся без
     // того, кто может назначить нового.
     if (person.role === Role.OWNER) {
-      const owners = await this.prisma.user.count({
-        where: { tenantId, role: Role.OWNER, deactivatedAt: null, anonymizedAt: null },
+      const owners = await this.prisma.tenantMembership.count({
+        where: {
+          tenantId,
+          role: Role.OWNER,
+          deactivatedAt: null,
+          user: { deactivatedAt: null, anonymizedAt: null },
+        },
       });
 
       if (owners <= 1) {
@@ -445,11 +470,14 @@ export class ClubService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.user.update({ where: { id: userId }, data: { role } });
+      await tx.tenantMembership.update({
+        where: { userId_tenantId: { userId, tenantId } },
+        data: { role },
+      });
 
       if (role === Role.COACH) {
         await tx.coachProfile.upsert({
-          where: { userId },
+          where: { userId_tenantId: { userId, tenantId } },
           update: {},
           create: { userId, tenantId },
         });
@@ -457,7 +485,7 @@ export class ClubService {
 
       if (role === Role.CLIENT) {
         await tx.clientProfile.upsert({
-          where: { userId },
+          where: { userId_tenantId: { userId, tenantId } },
           update: {},
           create: { userId, tenantId },
         });

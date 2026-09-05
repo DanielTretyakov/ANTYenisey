@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useState, type FormEvent } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useState, type FormEvent } from 'react';
 import { ClubField } from '@/components/ClubField';
 import { PhoneField } from '@/components/PhoneField';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -10,10 +10,43 @@ import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Field } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
-import { TENANT_SLUG } from '@/lib/config';
 import { saveSession } from '@/lib/session';
 
+/**
+ * Регистрация.
+ *
+ * Аккаунт заводится НА ПЛАТФОРМЕ, а не в клубе: почта уникальна по всей
+ * платформе, и вступать куда-либо, чтобы пользоваться учёткой, не нужно.
+ * Поэтому клуб здесь не спрашивается и по умолчанию не подставляется.
+ *
+ * Исключение — приход со страницы клуба: тогда его код лежит в адресе
+ * (`?club=yenisey`), показывается человеку и уходит в запрос, и человек сразу
+ * становится клиентом этого клуба. Без кода привязка появится сама, первой же
+ * записью.
+ */
+/**
+ * Обёртка с Suspense.
+ *
+ * Форма читает код клуба из строки запроса через useSearchParams, а он на
+ * сервере неизвестен: Next требует границу Suspense, иначе сборка падает на
+ * пререндере. Запасной вид — та же разметка без формы, чтобы полоса шапки и
+ * разворот входа не мигали.
+ */
 export default function RegisterPage() {
+  return (
+    <Suspense fallback={<RegisterForm clubSlug={null} />}>
+      <RegisterFormFromQuery />
+    </Suspense>
+  );
+}
+
+function RegisterFormFromQuery() {
+  const params = useSearchParams();
+
+  return <RegisterForm clubSlug={params.get('club')} />;
+}
+
+function RegisterForm({ clubSlug }: { clubSlug: string | null }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -37,7 +70,7 @@ export default function RegisterPage() {
 
     try {
       const auth = await api.register({
-        tenantSlug: TENANT_SLUG,
+        ...(clubSlug ? { tenantSlug: clubSlug } : {}),
         email: String(form.get('email')),
         password: String(form.get('password')),
         lastName: String(form.get('lastName')),
@@ -48,7 +81,7 @@ export default function RegisterPage() {
       });
 
       saveSession(auth);
-      router.push('/cabinet');
+      router.push(clubSlug ? `/clubs/${clubSlug}` : '/');
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен, попробуйте позже');
       setPending(false);
@@ -71,7 +104,7 @@ export default function RegisterPage() {
       {error && <Alert>{error}</Alert>}
 
       <form onSubmit={handleSubmit}>
-        <ClubField />
+        {clubSlug && <ClubField slug={clubSlug} />}
 
         <Field label="Фамилия" name="lastName" autoComplete="family-name" required />
         <Field label="Имя" name="firstName" autoComplete="given-name" required />

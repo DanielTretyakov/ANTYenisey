@@ -1,4 +1,4 @@
-import { IsEmail, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import type { RegisterRequest } from '@yenisey/types';
 
@@ -16,11 +16,17 @@ const trimName = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : value;
 
 export class RegisterDto implements RegisterRequest {
+  /**
+   * Код клуба — необязательный: аккаунт заводится на платформе. Когда
+   * он всё же передан, человек пришёл со страницы клуба и сразу становится
+   * его клиентом.
+   */
+  @IsOptional()
   @IsString()
   @Matches(/^[a-z0-9-]{2,64}$/, {
     message: 'tenantSlug: только строчные латинские буквы, цифры и дефис',
   })
-  tenantSlug: string;
+  tenantSlug?: string;
 
   // Приводим к нижнему регистру до валидации и до запроса в базу: иначе
   // Ivan@club.ru и ivan@club.ru пройдут @@unique([tenantId, email]) как

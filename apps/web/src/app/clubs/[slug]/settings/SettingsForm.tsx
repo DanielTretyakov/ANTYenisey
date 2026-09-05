@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
-import type { ClubSettings } from '@yenisey/types';
+import { useEffect, useState, type FormEvent } from 'react';
+import type { City, ClubSettings } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -9,23 +9,30 @@ import { Field } from '@/components/ui/Field';
 import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
 import { api, ApiError } from '@/lib/api';
+import { useClubApi } from '@/lib/useClubApi';
 import { cn } from '@/lib/cn';
-import { timezoneOptions } from '@/lib/timezones';
 
 /**
  * Настройки клуба: общие для всех его залов.
  *
- * Цен и шага бронирования здесь нет — они у зала. Здесь остаётся то, что
- * составляет договор клуба с клиентом: как его зовут, по какому времени он
- * живёт, что бывает при неявке и как ведут себя абонементы. Разные правила
- * отмены в двух залах одного клуба пришлось бы отдельно оговаривать в оферте.
+ * Цен, шага бронирования и ЧАСОВОГО ПОЯСА здесь нет — всё это у зала. Пояс
+ * переехал туда потому, что залы одной организации бывают в разных регионах:
+ * общий на клуб он сдвинул бы в одном из них границы операционного дня и
+ * порог «за час до начала», от которого считаются деньги.
+ *
+ * Здесь остаётся то, что составляет договор клуба с клиентом: как его зовут,
+ * в каком городе он числится, как выглядит его страница, что бывает при
+ * неявке и как ведут себя абонементы. Разные правила отмены в двух залах
+ * одного клуба пришлось бы отдельно оговаривать в оферте.
  *
  * Сроки держатся строками, а не числами: пока человек стирает старое значение,
  * поле законно пусто, и хранить это как число можно только через NaN.
  */
 type FormState = {
   name: string;
-  timezone: string;
+  cityId: string;
+  logoUrl: string;
+  accentColor: string;
   noShowChargePercent: string;
   attendanceReminderAfterMinutes: string;
   attendanceAutoNoShowAfterMinutes: string;
@@ -35,7 +42,9 @@ type FormState = {
 function toForm(settings: ClubSettings): FormState {
   return {
     name: settings.name,
-    timezone: settings.timezone,
+    cityId: settings.cityId ?? '',
+    logoUrl: settings.logoUrl ?? '',
+    accentColor: settings.accentColor ?? '',
     noShowChargePercent: String(settings.noShowChargePercent),
     attendanceReminderAfterMinutes: String(settings.attendanceReminderAfterMinutes),
     attendanceAutoNoShowAfterMinutes: String(settings.attendanceAutoNoShowAfterMinutes),
@@ -54,7 +63,7 @@ export function SettingsForm({
   onSaved,
 }: {
   initial: ClubSettings;
-  /** Часовой пояс нужен расписанию — сообщаем наверх, когда он изменился. */
+  /** Название и оформление нужны шапке страницы — сообщаем наверх об изменении. */
   onSaved: (settings: ClubSettings) => void;
 }) {
   const [form, setForm] = useState<FormState>(() => toForm(initial));
@@ -62,10 +71,24 @@ export function SettingsForm({
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
 
+  // Справочник городов: свободного ввода нет намеренно — «Красноярск» и «г.
+  // Красноярск» стали бы двумя разными городами, и поиск по городу перестал
+  // бы работать.
+  const [cities, setCities] = useState<City[]>([]);
+
+  useEffect(() => {
+    api
+      .cities()
+      .then(setCities)
+      .catch(() => setCities([]));
+  }, []);
+
   function set<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((previous) => ({ ...previous, [key]: value }));
     setSaved(false);
   }
+
+  const club = useClubApi();
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -87,9 +110,13 @@ export function SettingsForm({
     setPending(true);
 
     try {
-      const updated = await api.updateClubSettings({
+      const updated = await club.updateClubSettings({
         name: form.name.trim(),
-        timezone: form.timezone,
+        // Пустое поле означает «не задано», а не пустую строку: базе нужен
+        // либо настоящий идентификатор города, либо NULL.
+        cityId: form.cityId || null,
+        logoUrl: form.logoUrl.trim() || null,
+        accentColor: form.accentColor.trim() || null,
         noShowChargePercent,
         attendanceReminderAfterMinutes,
         attendanceAutoNoShowAfterMinutes,
@@ -131,23 +158,58 @@ export function SettingsForm({
       <Card>
         <CardHeader
           title="Клуб"
-          description="Общее для всех залов: как клуб называется и по какому времени живёт."
+          description="Как клуб называется и в каком городе его ищут. Часовой пояс задаётся у каждого зала отдельно — залы бывают в разных регионах."
         />
         <CardBody>
           <Field
             label="Название"
-            hint="Его видит клиент в формах входа и регистрации."
+            hint="Его видит человек в поиске клубов и на странице клуба."
             value={form.name}
             onChange={(event) => set('name', event.target.value)}
             required
           />
           <Select
-            label="Часовой пояс"
-            hint="От него считаются пороги отмены, напоминания и то, какой дате принадлежит расписание."
-            options={timezoneOptions(initial.timezone)}
-            value={form.timezone}
-            onChange={(event) => set('timezone', event.target.value)}
+            label="Основной город"
+            hint="По нему клуб находят на стартовой странице. Города залов указываются отдельно, и поиск учитывает их тоже."
+            options={[{ value: '', label: 'Не указан' }, ...cityOptions(cities)]}
+            value={form.cityId}
+            onChange={(event) => set('cityId', event.target.value)}
           />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Оформление"
+          description="Как выглядит страница клуба. Пустые поля оставляют её в цветах платформы."
+        />
+        <CardBody>
+          <Field
+            label="Ссылка на логотип"
+            hint="Показывается рядом с названием на странице клуба."
+            value={form.logoUrl}
+            onChange={(event) => set('logoUrl', event.target.value)}
+            placeholder="https://..."
+          />
+          <div className="grid items-end gap-x-6 sm:grid-cols-[1fr_auto]">
+            <Field
+              label="Фирменный цвет"
+              hint="Шестизначный HEX, например #126b54."
+              value={form.accentColor}
+              onChange={(event) => set('accentColor', event.target.value)}
+              placeholder="#126b54"
+            />
+            {/* Образец рядом с полем: цвет проверяют глазами, а не по коду. */}
+            <span
+              aria-hidden="true"
+              className="mb-5 h-10 w-10 rounded-control border border-border"
+              style={{
+                background: /^#[0-9a-fA-F]{6}$/.test(form.accentColor.trim())
+                  ? form.accentColor.trim()
+                  : 'var(--surface-sunken)',
+              }}
+            />
+          </div>
         </CardBody>
       </Card>
 
@@ -262,4 +324,12 @@ function SubscriptionRules({ soft }: { soft: boolean }) {
       </p>
     </>
   );
+}
+
+/** Города для выпадающего списка. Регион в подписи различает одноимённые. */
+function cityOptions(cities: City[]): { value: string; label: string }[] {
+  return cities.map((city) => ({
+    value: city.id,
+    label: city.region ? `${city.name} (${city.region})` : city.name,
+  }));
 }

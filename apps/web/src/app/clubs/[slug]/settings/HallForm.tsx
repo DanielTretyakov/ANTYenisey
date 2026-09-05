@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
-import type { BookingStep, Hall } from '@yenisey/types';
+import type { BookingStep, City, Hall } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -10,7 +10,9 @@ import { MoneyField } from '@/components/ui/MoneyField';
 import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
 import { api, ApiError } from '@/lib/api';
+import { useClubApi } from '@/lib/useClubApi';
 import { inputToKopecks, kopecksToInput } from '@/lib/money';
+import { timezoneOptions } from '@/lib/timezones';
 
 const BOOKING_STEPS: { value: BookingStep; label: string }[] = [
   { value: 'MIN_10', label: '10 минут' },
@@ -22,6 +24,9 @@ const BOOKING_STEPS: { value: BookingStep; label: string }[] = [
 
 type FormState = {
   name: string;
+  timezone: string;
+  cityId: string;
+  address: string;
   bookingStep: BookingStep;
   tableHourPrice: string;
   tableExtra30MinPrice: string;
@@ -39,6 +44,9 @@ function priceToInput(kopecks: number | null): string {
 function toForm(hall: Hall): FormState {
   return {
     name: hall.name,
+    timezone: hall.timezone,
+    cityId: hall.cityId ?? '',
+    address: hall.address ?? '',
     bookingStep: hall.bookingStep,
     tableHourPrice: kopecksToInput(hall.tableHourPrice),
     tableExtra30MinPrice: kopecksToInput(hall.tableExtra30MinPrice),
@@ -52,10 +60,14 @@ function toForm(hall: Hall): FormState {
 }
 
 /**
- * Настройки одного зала: цены и шаг бронирования.
+ * Настройки одного зала: где он находится, по какому времени живёт, сколько
+ * стоит и каким шагом бронируется.
  *
  * Живут у зала, а не у клуба, потому что залы различаются именно тем, что
- * стоит денег: оборудованием, размером, наличием роботов.
+ * стоит денег: оборудованием, размером, наличием роботов. Часовой пояс здесь
+ * по той же причине: залы одной организации бывают в разных регионах, и общий
+ * на клуб пояс сдвинул бы в одном из них границы операционного дня и порог
+ * «за час до начала», от которого считаются деньги.
  */
 export function HallForm({
   hall,
@@ -74,6 +86,17 @@ export function HallForm({
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const club = useClubApi();
+
+  const [cities, setCities] = useState<City[]>([]);
+
+  useEffect(() => {
+    api
+      .cities()
+      .then(setCities)
+      .catch(() => setCities([]));
+  }, []);
 
   // Переключение зала вкладками не размонтирует форму — состояние надо
   // перезалить руками, иначе в новом зале окажутся цены предыдущего.
@@ -121,8 +144,12 @@ export function HallForm({
     setPending(true);
 
     try {
-      const updated = await api.updateHall(hall.id, {
+      const updated = await club.updateHall(hall.id, {
         name: form.name.trim(),
+        timezone: form.timezone,
+        // Пустое поле означает «не задано», а не пустую строку.
+        cityId: form.cityId || null,
+        address: form.address.trim() || null,
         bookingStep: form.bookingStep,
         tableHourPrice,
         tableExtra30MinPrice,
@@ -151,7 +178,7 @@ export function HallForm({
     setPending(true);
 
     try {
-      await api.deleteHall(hall.id);
+      await club.deleteHall(hall.id);
       onDeleted(hall.id);
     } catch (cause) {
       setErrors([cause instanceof ApiError ? cause.message : 'Сервис недоступен']);
@@ -200,6 +227,30 @@ export function HallForm({
               onChange={(event) => set('bookingStep', event.target.value as BookingStep)}
             />
           </div>
+
+          <div className="grid gap-x-6 sm:grid-cols-2">
+            <Select
+              label="Часовой пояс зала"
+              hint="От него считаются пороги отмены, напоминания и то, какой дате принадлежит расписание. У каждого зала свой."
+              options={timezoneOptions(hall.timezone)}
+              value={form.timezone}
+              onChange={(event) => set('timezone', event.target.value)}
+            />
+            <Select
+              label="Город зала"
+              hint="Поиск на стартовой странице находит клуб и по городу зала, а не только по городу клуба."
+              options={[{ value: '', label: 'Не указан' }, ...cityOptions(cities)]}
+              value={form.cityId}
+              onChange={(event) => set('cityId', event.target.value)}
+            />
+          </div>
+
+          <Field
+            label="Адрес"
+            hint="Показывается клиенту. В поиске не участвует — для него есть город."
+            value={form.address}
+            onChange={(event) => set('address', event.target.value)}
+          />
 
           <div className="grid gap-x-6 sm:grid-cols-2">
             <MoneyField
@@ -289,4 +340,12 @@ export function HallForm({
       </Card>
     </form>
   );
+}
+
+/** Города для выпадающего списка. Регион в подписи различает одноимённые. */
+function cityOptions(cities: City[]): { value: string; label: string }[] {
+  return cities.map((city) => ({
+    value: city.id,
+    label: city.region ? `${city.name} (${city.region})` : city.name,
+  }));
 }

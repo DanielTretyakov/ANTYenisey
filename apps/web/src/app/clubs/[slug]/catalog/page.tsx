@@ -9,7 +9,9 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { inputClassName } from '@/components/ui/Field';
 import { MoneyField } from '@/components/ui/MoneyField';
-import { api, ApiError } from '@/lib/api';
+import { roleInClub } from '@/lib/membership';
+import { ApiError } from '@/lib/api';
+import { useClubApi } from '@/lib/useClubApi';
 import { cn } from '@/lib/cn';
 import { formatKopecks, inputToKopecks } from '@/lib/money';
 import { useSession } from '@/lib/useSession';
@@ -34,7 +36,10 @@ export default function CatalogPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const allowed = session.status === 'ready' && MANAGERS.includes(session.user.role);
+  // Роль берётся из привязки к клубу, а не из профиля: аккаунт один на
+  // платформу, и в разных клубах она разная.
+  const role = session.status === 'ready' ? roleInClub(session.user) : null;
+  const allowed = role !== null && MANAGERS.includes(role);
 
   useEffect(() => {
     if (session.status === 'anonymous') {
@@ -42,12 +47,14 @@ export default function CatalogPage() {
     }
   }, [session.status, router]);
 
+  const club = useClubApi();
+
   useEffect(() => {
     if (!allowed) return;
 
     let cancelled = false;
 
-    Promise.all([api.trainingTypes(), api.tournamentTypes(), api.tournaments()])
+    Promise.all([club.trainingTypes(), club.tournamentTypes(), club.tournaments()])
       .then(([training, types, events]) => {
         if (cancelled) return;
         setTrainingTypes(training);
@@ -106,6 +113,7 @@ function TrainingTypesCard({
   onChange: (types: TrainingType[]) => void;
   onError: (message: string | null) => void;
 }) {
+  const club = useClubApi();
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [pending, setPending] = useState(false);
@@ -134,7 +142,7 @@ function TrainingTypesCard({
     }
 
     await run(async () => {
-      const created = await api.createTrainingType({ name, price: kopecks });
+      const created = await club.createTrainingType({ name, price: kopecks });
       setName('');
       setPrice('');
       return [...types, created].sort(byActiveThenName);
@@ -172,7 +180,7 @@ function TrainingTypesCard({
                   disabled={pending}
                   onClick={() =>
                     void run(async () => {
-                      const updated = await api.updateTrainingType(type.id, {
+                      const updated = await club.updateTrainingType(type.id, {
                         name: type.name,
                         price: type.price,
                         isActive: !type.isActive,
@@ -193,7 +201,7 @@ function TrainingTypesCard({
                   title={type.usageCount > 0 ? 'Тип стоит в расписании — его можно только снять с продажи' : undefined}
                   onClick={() =>
                     void run(async () => {
-                      await api.deleteTrainingType(type.id);
+                      await club.deleteTrainingType(type.id);
                       return types.filter((item) => item.id !== type.id);
                     })
                   }
@@ -234,6 +242,7 @@ function TournamentTypesCard({
   onChange: (types: TournamentType[]) => void;
   onError: (message: string | null) => void;
 }) {
+  const club = useClubApi();
   const [name, setName] = useState('');
   const [rating, setRating] = useState('');
   const [price, setPrice] = useState('');
@@ -253,7 +262,7 @@ function TournamentTypesCard({
     setPending(true);
 
     try {
-      const created = await api.createTournamentType({
+      const created = await club.createTournamentType({
         name,
         ratingLabel: rating.trim() || null,
         price: kopecks,
@@ -338,6 +347,7 @@ function TournamentsCard({
   onChange: (tournaments: Tournament[]) => void;
   onError: (message: string | null) => void;
 }) {
+  const club = useClubApi();
   const [pending, setPending] = useState(false);
 
   return (
@@ -378,7 +388,7 @@ function TournamentsCard({
                   onClick={() => {
                     onError(null);
                     setPending(true);
-                    api
+                    club
                       .deleteTournament(tournament.id)
                       .then(() => onChange(tournaments.filter((item) => item.id !== tournament.id)))
                       .catch((cause: unknown) =>

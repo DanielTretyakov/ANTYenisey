@@ -11,6 +11,7 @@ import type {
 import { inputClassName } from '@/components/ui/Field';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
+import { useClubApi } from '@/lib/useClubApi';
 import { shortName } from '@/lib/names';
 import type { PersonColor } from '@/lib/personColor';
 
@@ -242,6 +243,8 @@ function ClientPicker({
   value: ClubPerson | null;
   onChange: (person: ClubPerson | null) => void;
 }) {
+  const club = useClubApi();
+
   const [query, setQuery] = useState('');
   const [found, setFound] = useState<ClubPerson[]>([]);
   const [open, setOpen] = useState(false);
@@ -257,7 +260,7 @@ function ClientPicker({
     // Пауза перед запросом: без неё каждая буква фамилии — отдельный поход в
     // базу, и ответы возвращаются вперемешку.
     const timer = setTimeout(() => {
-      api
+      club
         .people({ role: 'CLIENT', search: query.trim(), limit: 8 })
         .then((page) => {
           if (!cancelled) setFound(page.items);

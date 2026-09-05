@@ -1,7 +1,7 @@
 // Prisma-схема платформы «Енисей» (Этап 1).
 // Реализует раздел docs/TZ.md → «Модель данных».
 //
-// Схема развёрнута на PostgreSQL 18 (28 таблиц), ограничения из
+// Схема развёрнута на PostgreSQL 18 (29 таблиц), ограничения из
 // prisma/constraints.sql накатываются миграцией, сценарии
 // prisma/tests/schema-tests.sql проходят — включая проверку, что база
 // физически не даёт смешать данные двух клубов.
@@ -28,12 +28,19 @@
 //    превращается в утечку между клубами — целостность гарантирует Postgres,
 //    а не аккуратность разработчика.
 //
+//    Человек в эту схему входит НЕ через User: учётная запись глобальная и
+//    клубу не принадлежит (ТЗ → «Платформа и клубы: единый аккаунт»). Точка
+//    входа — TenantMembership, пара «человек + клуб»: всё клубное ссылается
+//    на неё по (userId, tenantId), и именно она держит роль. Тот же приём,
+//    та же гарантия — просто мишень составного ключа на одну таблицу дальше.
+//
 // 3. УДАЛЕНИЕ ПО УМОЛЧАНИЮ ЗАПРЕЩЕНО (onDelete: Restrict).
 //    Почти все связи объявляют Restrict явно, и это осознанный выбор: за
 //    каждой строкой здесь стоят деньги или обязательства перед клиентом.
 //    Каскадное удаление клиента унесло бы его платежи и историю визитов —
 //    ровно то, что требуется для бухгалтерии. Поэтому «удаление» клиента и
-//    сотрудника — это deactivatedAt/anonymizedAt на User, а не DELETE.
+//    сотрудника — это deactivatedAt на TenantMembership (ушёл из этого клуба)
+//    или deactivatedAt/anonymizedAt на User (ушёл с платформы), а не DELETE.
 //    Cascade оставлен только там, где дочерняя строка бессмысленна без
 //    родителя и не содержит финансовых следов: профили при удалении учётки,
 //    уведомления, настройки клуба.
@@ -228,13 +235,32 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Часовой пояс клуба в формате IANA (напр. «Asia/Krasnoyarsk»).
-  // Не косметика: от него зависят деньги и отчётность. Все моменты времени
-  // хранятся в UTC (timestamptz), но «за час до начала», «сутки на отметку
-  // присутствия» и границы операционного дня считаются в местном времени
-  // клуба. Клуб во Владивостоке и клуб в Калининграде на одной платформе —
-  // штатная ситуация, а не экзотика.
-  timezone String @default("Asia/Krasnoyarsk")
+  // ЧАСОВОГО ПОЯСА ЗДЕСЬ НЕТ. Он живёт на зале (Hall.timezone): залы одной
+  // организации бывают в разных регионах, и общий на клуб пояс сдвинул бы в
+  // одном из них и границы операционного дня, и порог «за час до начала», от
+  // которого считаются деньги (ТЗ → «Профиль клуба»). Все моменты времени
+  // хранятся в UTC (timestamptz); местное время — это время того зала, где
+  // проходит мероприятие.
+
+  // Основной город клуба — для карточки и поиска на стартовой странице.
+  // Фактический город каждого зала указывается отдельно, на самом зале.
+  // Поиск по городу находит клуб, если совпал город клуба ИЛИ город хотя бы
+  // одного его зала: иначе клуб с залами в Красноярске и Абакане нашёлся бы
+  // только по одному из них.
+  cityId String?
+  city   City?  @relation(fields: [cityId], references: [id], onDelete: Restrict)
+
+  // --- Оформление страницы клуба.
+  //
+  // ВНИМАНИЕ: в ТЗ брендинга клуба нет вовсе — это расширение, добавленное по
+  // прямой просьбе владельца продукта. Логотип хранится ссылкой, а не файлом:
+  // загрузка файлов тянет за собой валидацию, лимиты размера и раздачу
+  // статики, а страница клуба работает и без них.
+  logoUrl String?
+  /// Фирменный цвет в виде «#126b54». Формат проверяется CHECK'ом в
+  /// constraints.sql: значение уезжает прямо в CSS-переменную, и мусор в нём
+  /// означал бы сломанную вёрстку страницы клуба, а не пустое поле.
+  accentColor String?
 
   // Цены и шаг бронирования здесь НЕ лежат: они у зала (см. Hall). У клуба
   // может быть несколько залов с разным оборудованием и разной ценой, а вот
@@ -261,11 +287,11 @@ model Tenant {
   // Через сколько минут после мероприятия напоминать администратору, что
   // присутствие не отмечено, и через сколько — фиксировать неявку
   // автоматически. У «Енисея»: час и сутки.
-  attendanceReminderAfterMinutes Int @default(60)
+  attendanceReminderAfterMinutes   Int @default(60)
   attendanceAutoNoShowAfterMinutes Int @default(1440)
 
   // --- Обратные связи: всё, что принадлежит этому клубу.
-  users                   User[]
+  memberships             TenantMembership[]
   clientProfiles          ClientProfile[]
   coachProfiles           CoachProfile[]
   cancellationTiers       CancellationTier[]
@@ -286,7 +312,6 @@ model Tenant {
   planTournamentTypes     SubscriptionPlanTournamentType[]
   subscriptions           Subscription[]
   subscriptionLedger      SubscriptionLedger[]
-  refreshTokens           RefreshToken[]
   payments                Payment[]
   visitLogs               VisitLog[]
   notifications           Notification[]
@@ -294,6 +319,7 @@ model Tenant {
   legalDocuments          LegalDocument[]
   legalAcceptances        LegalAcceptance[]
   platformSubscription    TenantSubscription?
+  favouritedBy            UserClub[]
 }
 
 /// Ступень политики отмены клуба: «если клиент отменил не позднее чем за
@@ -383,26 +409,35 @@ model TenantSubscription {
 // Пользователи
 // ---------------------------------------------------------------------------
 
-/// Учётная запись для входа. Хранит общие для всех ролей поля, включая ФИО;
-/// специфика роли живёт в ClientProfile/CoachProfile (связь 1:1, опционально).
+/// Учётная запись платформы. ОДНА на человека, а не по одной на каждый клуб:
+/// клубу не принадлежит, роли не несёт и часового пояса не знает
+/// (ТЗ → «Платформа и клубы: единый аккаунт»).
+///
+/// Здесь лежит только то, что не зависит от клуба: чем человек входит (почта,
+/// пароль) и кто он такой (ФИО, телефон, дата рождения). Всё клубное — роль,
+/// анкета, брони, платежи — висит на TenantMembership ниже.
+///
+/// Почему так, а не «учётка на клуб»: человек числится в «Енисее», иногда
+/// играет в соседнем клубе и записывается в третий. С учёткой на клуб у него
+/// три пароля и три истории, и ни один клуб не видит, что это один человек.
 model User {
   id           String   @id @default(cuid())
-  tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  email        String
+  /// Почта уникальна ПО ВСЕЙ ПЛАТФОРМЕ, а не внутри клуба: второго аккаунта с
+  /// тем же адресом завести нельзя. На этом стоит флоу «клиент с порога» —
+  /// администратор не заводит человека заново, а привязывает существующий
+  /// аккаунт к своему клубу (ТЗ → «Первый визит»).
+  email        String   @unique
   /// Телефон в E.164: +79991234567. Обязателен для всех ролей — это основной
   /// канал связи клуба и с клиентом, и с сотрудником.
   phone        String
   /**
    * Дата рождения. Обязательна для всех: она нужна и клиенту (детские группы,
    * возрастные турниры), и сотруднику (кадровый учёт).
-   *
    * Тип DATE, а не отметка времени: у дня рождения нет часа, и хранить его
    * мгновением значит однажды сдвинуть на сутки в другом часовом поясе.
    */
   birthDate    DateTime @db.Date
   passwordHash String
-  role         Role
   /// ФИО одной строкой, склеенное из трёх полей формы на сервере.
   ///
   /// Живёт здесь, а не в профиле роли: имя есть у любого пользователя —
@@ -426,38 +461,147 @@ model User {
   //   anonymizedAt  — персданные затёрты необратимо, финансовая история
   //                   сохранена в обезличенном виде.
   //
-  // Анонимизация ОБЯЗАНА затирать и email: он входит в уникальный ключ
-  // ниже, и оставленный адрес не даст человеку зарегистрироваться заново.
-  // Штатный приём — заменить на «deleted-<id>@invalid». Вместе с ним
-  // затираются fullName и phone — это тоже персональные данные.
+  // Здесь это ПЛАТФОРМЕННОЕ отключение: человек не входит вовсе. Отключение
+  // в отдельно взятом клубе — другое состояние и живёт на
+  // TenantMembership.deactivatedAt: уволенный тренер «Енисея» продолжает
+  // играть в соседнем клубе, и его аккаунт трогать нельзя.
+  //
+  // Анонимизация ОБЯЗАНА затирать и email: он уникален по платформе, и
+  // оставленный адрес не даст человеку зарегистрироваться заново. Штатный
+  // приём — заменить на «deleted-<id>@invalid». Вместе с ним затираются
+  // fullName и phone — это тоже персональные данные.
   deactivatedAt DateTime?
   anonymizedAt  DateTime?
+
+  memberships   TenantMembership[]
+  // Сессии входа висят на аккаунте, а не на клубе: человек входит на
+  // платформу один раз и дальше сам выбирает, в какой клуб идёт.
+  refreshTokens RefreshToken[]
+  // «Мои клубы» — отметка человека, а не клуба, поэтому висит на аккаунте.
+  favouriteClubs UserClub[]
+}
+
+/// «Мои клубы»: избранное и заявленная принадлежность одновременно.
+///
+/// Одна сущность, а не две. Разделять «избранный клуб» и «мой клуб» значило бы
+/// объяснять человеку разницу, которой в его голове нет (ТЗ → «Мои клубы»).
+/// Отмечает он сам: ни заявки, ни подтверждения администратором нет.
+///
+/// Отдельно от TenantMembership: привязка появляется САМА, первой же записью
+/// человека в клуб, а своим клуб отмечают осознанно. Клуб видит своих отдельно
+/// от тех, кто записался разово.
+///
+/// На Этапе 1 принадлежность не даёт ничего, кроме видимости: цены, доступ к
+/// записи и правила отмены одинаковы для всех.
+///
+/// ПРЕДЕЛ В ТРИ КЛУБА ВЫРАЖЕН СТРУКТУРОЙ, А НЕ ТРИГГЕРОМ. `slot` — занятое
+/// место, 1..3, уникальное в пределах человека (см. constraints.sql). Поэтому
+/// четвёртый клуб физически некуда положить, и правило проверяет база, а не
+/// код: проверка «а сколько уже есть?» в сервисе не спасает от гонки двух
+/// параллельных запросов. Человеку слоты не показываются — сервер занимает
+/// наименьший свободный.
+model UserClub {
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  slot Int
+
+  createdAt DateTime @default(now())
+
+  @@id([userId, tenantId])
+  @@unique([userId, slot])
+  @@index([tenantId])
+}
+
+/// Город из справочника платформы.
+///
+/// Справочник, а не строка в карточке клуба: свободный ввод даёт «Красноярск»,
+/// «г. Красноярск» и «краснярск» тремя разными городами, и поиск по городу
+/// перестаёт работать (ТЗ → «Профиль клуба»).
+///
+/// Наполняется сидом и правится вместе с ним. Заведение города силами
+/// администратора клуба вернуло бы ровно ту проблему, ради которой справочник
+/// и появился.
+model City {
+  id   String  @id @default(cuid())
+  name String
+  /// Регион — чтобы различить одноимённые города («Железногорск» есть и в
+  /// Красноярском крае, и в Курской области).
+  region String?
+
+  createdAt DateTime @default(now())
+
+  tenants Tenant[]
+  halls   Hall[]
+
+  /// Уникальна пара, а не одно название: одноимённые города в разных регионах
+  /// законны, а два «Красноярска» в одном — нет.
+  @@unique([name, region])
+}
+
+/// Пара «человек + клуб»: чем этот аккаунт является в этом клубе.
+///
+/// Несущий элемент изоляции. Всё клубное — анкеты, брони, платежи, визиты,
+/// уведомления, согласия — ссылается СЮДА по (userId, tenantId), а не на
+/// User: у User клуба нет, и без этой таблицы составные ключи не на что
+/// опереть. База по-прежнему не примет бронь, где стол одного клуба, а клиент
+/// другого, — просто цепочка стала на звено длиннее.
+///
+/// Заводится первым же действием человека в клубе (ТЗ → «Один аккаунт на все
+/// клубы»): вступать в клуб, чтобы забронировать стол, не требуется. Клуб
+/// видит такого человека в своём составе как обычного клиента.
+///
+/// Своего id нет намеренно: у привязки нет собственной сущности сверх пары
+/// «кто + где», а лишний суррогатный ключ пришлось бы держать уникальным
+/// вместе с tenantId ровно для того же, что уже делает первичный ключ.
+model TenantMembership {
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  /// Роль В ЭТОМ клубе. Один аккаунт бывает клиентом в одном клубе, тренером
+  /// во втором и владельцем в третьем — «прав вообще на платформе» нет ни у
+  /// кого (ТЗ → «Роли и права доступа»).
+  role Role @default(CLIENT)
+
+  /// Отключение человека В ЭТОМ клубе: уволенный тренер, ушедший клиент.
+  /// Аккаунт при этом жив и работает в других клубах. Строка не удаляется —
+  /// за ней стоят платежи и история визитов.
+  deactivatedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   clientProfile    ClientProfile? // заполнен, если role = CLIENT
   coachProfile     CoachProfile? // заполнен, если role = COACH
   notifications    Notification[]
   visitsRecorded   VisitLog[]        @relation("VisitRecordedBy")
   legalAcceptances LegalAcceptance[]
-  refreshTokens    RefreshToken[]
   auditEntries     AuditLog[]        @relation("AuditActor")
 
-  // Email уникален в рамках клуба, а не глобально по всей платформе: один
-  // человек в будущем сможет быть клиентом/сотрудником в разных клубах под
-  // одним и тем же email.
-  @@unique([tenantId, email])
-  // Мишень для составных FK из профилей: гарантирует, что профиль не может
-  // ссылаться на пользователя другого клуба.
-  @@unique([id, tenantId])
+  // Первичный ключ и одновременно мишень всех составных FK клубных таблиц.
+  @@id([userId, tenantId])
   @@index([tenantId, role])
 }
 
 /// Данные клиента: анкета + всё, что с ним связано (брони, абонементы,
 /// платежи, история визитов).
+///
+/// Анкета РОЛИ В КЛУБЕ, а не человека: ключ — та же пара (userId, tenantId),
+/// что у TenantMembership, и рейтинг клиента в «Енисее» ничего не говорит о
+/// нём же в соседнем клубе.
 model ClientProfile {
-  userId               String    @id
-  tenantId             String // продублирован из User ради составных FK
-  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  user                 User      @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  // Ключ составной, а не один userId: аккаунт глобальный, и один человек
+  // законно является клиентом в трёх клубах сразу — это три анкеты, а не
+  // одна. Пока User принадлежал клубу, разницы не было, и userId в одиночку
+  // за первичный ключ сходил.
+  userId               String
+  tenantId             String // вторая половина ключа привязки к клубу
+  tenant               Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  membership           TenantMembership @relation(fields: [userId, tenantId], references: [userId, tenantId], onDelete: Cascade)
   // Персональные данные по 152-ФЗ. При анонимизации затираются на
   // плейсхолдеры (null), а строки Payment и VisitLog остаются — они
   // обезличены и нужны для бухгалтерии. ФИО, телефон и дата рождения живут в
@@ -477,16 +621,18 @@ model ClientProfile {
   payments                Payment[]
   visitLogs               VisitLog[]
 
-  @@unique([userId, tenantId])
+  @@id([userId, tenantId])
 }
 
 /// Публичная карточка тренера + служебные связи (какие сессии ведёт, чью
 /// статистику считать). Редактирует сам тренер (свою) или admin/owner (любую).
 model CoachProfile {
-  userId       String  @id
-  tenantId     String // продублирован из User ради составных FK
-  tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  user         User    @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  // Составной ключ по той же причине, что у ClientProfile: тренер одного
+  // клуба и клиент другого — это один аккаунт с двумя анкетами.
+  userId       String
+  tenantId     String // вторая половина ключа привязки к клубу
+  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  membership   TenantMembership @relation(fields: [userId, tenantId], references: [userId, tenantId], onDelete: Cascade)
   photoUrl     String?
   achievements String?
   inventory    String?
@@ -499,10 +645,10 @@ model CoachProfile {
   closureRules     TableClosureRule[]
   dayClosures      DayClosure[]
   trainingSessions TrainingSession[] // сессии, которые ведёт этот тренер
-  tableBookings    TableBooking[]    @relation("CoachTableBookings") // брони стола, инициированные тренером (спарринги)
+  tableBookings    TableBooking[]     @relation("CoachTableBookings") // брони стола, инициированные тренером (спарринги)
   visitLogs        VisitLog[] // визиты его учеников — для статистики посещаемости
 
-  @@unique([userId, tenantId])
+  @@id([userId, tenantId])
 }
 
 // ---------------------------------------------------------------------------
@@ -595,8 +741,8 @@ model TrainingBooking {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  visitLogs      VisitLog[]
-  ledgerEntries  SubscriptionLedger[]
+  visitLogs     VisitLog[]
+  ledgerEntries SubscriptionLedger[]
 
   // Повторную запись того же клиента на ту же сессию запрещает частичный
   // уникальный индекс (только для status = BOOKED) — см. schema-constraints.sql.
@@ -712,6 +858,22 @@ model Hall {
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   name     String // «Основной зал», «Малый зал»
 
+  /// Часовой пояс зала в формате IANA (напр. «Asia/Krasnoyarsk»).
+  ///
+  /// Именно зала, а не клуба: залы одной организации бывают в разных
+  /// регионах. Не косметика — от пояса зависят деньги и отчётность. Все
+  /// моменты времени хранятся в UTC (timestamptz), но «за час до начала»,
+  /// «сутки на отметку присутствия» и границы операционного дня считаются в
+  /// местном времени ЗАЛА, где мероприятие и проходит.
+  timezone String @default("Asia/Krasnoyarsk")
+
+  /// Фактический город зала. У клуба свой, «основной», — поиск по городу
+  /// находит клуб по совпадению любого из них.
+  cityId  String?
+  city    City?   @relation(fields: [cityId], references: [id], onDelete: Restrict)
+  /// Адрес зала для клиента. Поиском не используется — для него есть город.
+  address String?
+
   // Цены — в копейках. Количество столов отдельным полем не хранится: столы —
   // это строки в Table, и счётчик рядом с ними неизбежно разошёлся бы с
   // реальностью (добавили стол, забыли обновить число).
@@ -733,6 +895,7 @@ model Hall {
   @@unique([id, tenantId])
   @@unique([tenantId, name])
   @@index([tenantId])
+  @@index([cityId])
 }
 
 model Table {
@@ -1212,8 +1375,8 @@ model VisitLog {
   // строка: за этой отметкой стоит списание денег, и она должна указывать на
   // реально существующего пользователя того же клуба.
   recordedByUserId String
-  recordedBy       User     @relation("VisitRecordedBy", fields: [recordedByUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  recordedAt       DateTime @default(now())
+  recordedBy       TenantMembership @relation("VisitRecordedBy", fields: [recordedByUserId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+  recordedAt       DateTime         @default(now())
 
   @@index([tenantId, clientId])
   @@index([tenantId, coachId])
@@ -1231,12 +1394,13 @@ model VisitLog {
 /// Хранится ХЭШ токена, а не сам токен. Утечка дампа базы не должна давать
 /// возможность войти под чужой учёткой — по той же причине, по которой
 /// рядом лежит passwordHash, а не пароль.
+/// Клуба у сессии нет: вход — действие платформенное, и один и тот же токен
+/// обслуживает человека во всех его клубах. Раньше здесь был tenantId, и он
+/// означал бы, что смена клуба требует нового входа.
 model RefreshToken {
-  id       String @id @default(cuid())
-  tenantId String
-  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  userId   String
-  user     User   @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   tokenHash String   @unique
   expiresAt DateTime @db.Timestamptz(3)
@@ -1251,7 +1415,7 @@ model RefreshToken {
 
   createdAt DateTime @default(now())
 
-  @@index([tenantId, userId])
+  @@index([userId])
   @@index([expiresAt])
 }
 
@@ -1278,9 +1442,9 @@ model AuditLog {
   // Автор действия. actorUserId пуст, когда действовал не человек: джоба
   // автонеявки или вебхук ЮKassa. Тип автора хранится отдельно, чтобы
   // «система» не выглядела как потерянная ссылка.
-  actorType   ActorType @default(USER)
+  actorType   ActorType         @default(USER)
   actorUserId String?
-  actor       User?     @relation("AuditActor", fields: [actorUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  actor       TenantMembership? @relation("AuditActor", fields: [actorUserId, tenantId], references: [userId, tenantId], onDelete: Restrict)
 
   // На что подействовали: имя модели и её id. Полиморфная пара, как в
   // VisitLog, — жёсткой связи нет, потому что целей больше десятка.
@@ -1352,8 +1516,8 @@ model LegalAcceptance {
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
-  userId String
-  user   User   @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  userId     String
+  membership TenantMembership @relation(fields: [userId, tenantId], references: [userId, tenantId], onDelete: Restrict)
 
   documentId String
   document   LegalDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
@@ -1375,11 +1539,11 @@ model LegalAcceptance {
 /// Уведомление пользователю по одному из каналов (Telegram-бот, Web Push),
 /// включая служебные эскалации по неотмеченному присутствию.
 model Notification {
-  id       String @id @default(cuid())
-  tenantId String
-  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  userId   String
-  user     User   @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  id         String           @id @default(cuid())
+  tenantId   String
+  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId     String
+  membership TenantMembership @relation(fields: [userId, tenantId], references: [userId, tenantId], onDelete: Cascade)
 
   channel NotificationChannel
   type    NotificationType

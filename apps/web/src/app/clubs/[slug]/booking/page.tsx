@@ -15,7 +15,8 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
-import { api, ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/api';
+import { useClubApi } from '@/lib/useClubApi';
 import {
   bookableDates,
   durationsFrom,
@@ -27,7 +28,6 @@ import {
   todayIn,
 } from '@/lib/bookingGrid';
 import { cn } from '@/lib/cn';
-import { TENANT_SLUG } from '@/lib/config';
 import { formatKopecks } from '@/lib/money';
 import { useSession } from '@/lib/useSession';
 
@@ -51,7 +51,8 @@ export default function BookingPage() {
   const router = useRouter();
   const session = useSession();
 
-  const [timezone, setTimezone] = useState<string | null>(null);
+  const club = useClubApi();
+
   const [halls, setHalls] = useState<Hall[] | null>(null);
   const [hallId, setHallId] = useState('');
   const [date, setDate] = useState('');
@@ -70,29 +71,31 @@ export default function BookingPage() {
     }
   }, [session.status, router]);
 
-  // Часовой пояс клуба — до всего остального: «сегодня» у зала своё, и
-  // считать его по часам браузера значит открыть клиенту из другого пояса не
-  // тот день.
-  useEffect(() => {
-    api
-      .tenant(TENANT_SLUG)
-      .then((tenant) => setTimezone(tenant.timezone))
-      .catch(() => setTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone));
-  }, []);
-
   useEffect(() => {
     if (session.status !== 'ready') {
       return;
     }
 
-    api
+    club
       .bookingHalls()
       .then((loaded) => {
         setHalls(loaded);
         setHallId((current) => current || (loaded[0]?.id ?? ''));
       })
       .catch((cause: unknown) => setError(messageOf(cause)));
-  }, [session.status]);
+  }, [session.status, club]);
+
+  /**
+   * Часовой пояс ВЫБРАННОГО ЗАЛА.
+   *
+   * Раньше он приходил из карточки клуба одним запросом на всю страницу.
+   * Теперь пояс — свойство зала: залы одной организации бывают в разных
+   * регионах, и «сегодня» у зала в Абакане своё. Пока залы не загружены,
+   * берётся пояс браузера — сетка всё равно пустая.
+   */
+  const timezone =
+    halls?.find((hall) => hall.id === hallId)?.timezone ??
+    (halls === null ? null : Intl.DateTimeFormat().resolvedOptions().timeZone);
 
   const dates = useMemo(
     () => (timezone ? bookableDates(todayIn(timezone), BOOKING_HORIZON_DAYS) : []),
@@ -108,7 +111,7 @@ export default function BookingPage() {
       return;
     }
 
-    api
+    club
       .bookingDay(hallId, date)
       .then((loaded) => {
         setDay(loaded);
@@ -118,7 +121,7 @@ export default function BookingPage() {
         setDay(null);
         setError(messageOf(cause));
       });
-  }, [hallId, date]);
+  }, [hallId, date, club]);
 
   useEffect(() => {
     // Выбор сбрасывается вместе с сеткой: отрезок, выбранный во вторник, во
@@ -157,7 +160,7 @@ export default function BookingPage() {
 
     let cancelled = false;
 
-    api
+    club
       .bookingQuote(hallId, chosenDuration, withRobot && (hall?.hasRobotOption ?? false))
       .then((loaded) => {
         if (!cancelled) setQuote(loaded);
@@ -169,7 +172,7 @@ export default function BookingPage() {
     return () => {
       cancelled = true;
     };
-  }, [hallId, chosenDuration, withRobot, hall?.hasRobotOption]);
+  }, [hallId, chosenDuration, withRobot, hall?.hasRobotOption, club]);
 
   async function handleBook(): Promise<void> {
     if (!day || !pick || !timezone || chosenDuration === 0) {
@@ -180,14 +183,15 @@ export default function BookingPage() {
     setError(null);
 
     try {
-      await api.createBooking({
+      await club.createBooking({
         tableId: pick.tableId,
         startsAt: instantAt(day.date, pick.startMinute, timezone),
         durationMinutes: chosenDuration,
         withRobot: withRobot && (hall?.hasRobotOption ?? false),
       });
 
-      router.push('/cabinet');
+      // Записи уехали из кабинета в «Мои записи» — там же и свежая бронь.
+      router.push('/my-bookings');
     } catch (cause: unknown) {
       setError(messageOf(cause));
       // Сетку перечитываем: «стол только что заняли» означает, что чужая бронь

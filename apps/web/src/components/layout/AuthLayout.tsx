@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { Logo } from '@/components/brand/Logo';
+import { HEADER_HEIGHT, HEADER_LOGO_HEIGHT } from '@/components/layout/metrics';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { cn } from '@/lib/cn';
 
 /**
  * Разворот для входа и регистрации: слева — обещание клуба, справа — форма.
@@ -46,9 +48,13 @@ export function AuthLayout({
       </aside>
 
       <main className="flex flex-1 flex-col">
-        <header className="flex h-20 items-center px-5 sm:h-24 sm:px-8 lg:px-12">
+        {/* Своя полоса, а не SiteHeader: разворот входа делится пополам, и
+            шапка во всю ширину разрезала бы изумрудную половину. Высота и
+            размер логотипа взяты оттуда же — полоса не должна менять рост при
+            переходе с формы входа на любую другую страницу. */}
+        <header className={cn('flex items-center px-5 sm:px-8 lg:px-12', HEADER_HEIGHT)}>
           <Link href="/" className="lg:hidden">
-            <Logo height={1.625} />
+            <Logo height={HEADER_LOGO_HEIGHT} />
           </Link>
           <div className="ml-auto">
             <ThemeToggle />

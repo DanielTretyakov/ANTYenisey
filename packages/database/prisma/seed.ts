@@ -25,26 +25,116 @@ const prisma = new PrismaClient();
 /** Все суммы — в копейках (сквозное правило схемы). 700 ₽ = 70000. */
 const RUB = 100;
 
+/**
+ * Справочник городов платформы.
+ *
+ * Свободного ввода города нет намеренно (ТЗ → «Профиль клуба»): «Красноярск»,
+ * «г. Красноярск» и «краснярск» стали бы тремя разными городами, и поиск по
+ * городу перестал бы работать. Список пополняется правкой этого файла.
+ *
+ * Регион указан там, где название неоднозначно: «Железногорск» есть и в
+ * Красноярском крае, и в Курской области.
+ */
+const CITIES: { name: string; region: string | null }[] = [
+  { name: 'Москва', region: null },
+  { name: 'Санкт-Петербург', region: null },
+  { name: 'Новосибирск', region: null },
+  { name: 'Екатеринбург', region: null },
+  { name: 'Казань', region: null },
+  { name: 'Нижний Новгород', region: null },
+  { name: 'Челябинск', region: null },
+  { name: 'Самара', region: null },
+  { name: 'Омск', region: null },
+  { name: 'Ростов-на-Дону', region: null },
+  { name: 'Уфа', region: null },
+  { name: 'Пермь', region: null },
+  { name: 'Воронеж', region: null },
+  { name: 'Волгоград', region: null },
+  { name: 'Владивосток', region: null },
+  { name: 'Иркутск', region: null },
+  { name: 'Кемерово', region: null },
+  { name: 'Томск', region: null },
+  { name: 'Барнаул', region: null },
+  { name: 'Тюмень', region: null },
+  { name: 'Хабаровск', region: null },
+  { name: 'Калининград', region: null },
+  // Красноярский край и соседи: домашний регион «Енисея».
+  { name: 'Красноярск', region: 'Красноярский край' },
+  { name: 'Ачинск', region: 'Красноярский край' },
+  { name: 'Канск', region: 'Красноярский край' },
+  { name: 'Минусинск', region: 'Красноярский край' },
+  { name: 'Норильск', region: 'Красноярский край' },
+  { name: 'Дивногорск', region: 'Красноярский край' },
+  { name: 'Сосновоборск', region: 'Красноярский край' },
+  { name: 'Зеленогорск', region: 'Красноярский край' },
+  { name: 'Железногорск', region: 'Красноярский край' },
+  { name: 'Абакан', region: 'Республика Хакасия' },
+  { name: 'Кызыл', region: 'Республика Тыва' },
+];
+
 async function main(): Promise<void> {
+  // Города заводятся первыми: на них ссылаются и клуб, и залы.
+  const cities = new Map<string, string>();
+
+  for (const city of CITIES) {
+    // findFirst + create, а не upsert: Prisma не принимает поле, допускающее
+    // NULL, в составном уникальном ключе — а регион у большинства городов
+    // пуст. Уникальность при этом никуда не делась: её держит частичный
+    // индекс с NULLS NOT DISTINCT из миграции, и повторный сид упрётся в него,
+    // а не создаст дубль.
+    const existing = await prisma.city.findFirst({
+      where: { name: city.name, region: city.region },
+      select: { id: true },
+    });
+
+    const row = existing ?? (await prisma.city.create({ data: city, select: { id: true } }));
+
+    cities.set(city.name, row.id);
+  }
+
   const tenant = await prisma.tenant.upsert({
     where: { slug: 'yenisey' },
     update: {},
     create: {
       name: 'АНТ «Енисей»',
       slug: 'yenisey',
-      timezone: 'Asia/Krasnoyarsk',
+      // Часового пояса у клуба больше нет: он у каждого зала свой.
+      cityId: cities.get('Красноярск')!,
+      accentColor: '#126b54',
       noShowChargePercent: 100,
     },
   });
 
-  // Цены и шаг брони живут у зала, а не у клуба: залы различаются
-  // оборудованием и ценой, и «Енисей» рано или поздно откроет второй.
+  // Долив новых полей в уже заведённый клуб.
+  //
+  // `update: {}` выше их не проставит: он для того и пуст, чтобы сид не
+  // откатывал цены, изменённые администратором. Но город и фирменный цвет —
+  // поля, которых у старых строк не было вовсе, и оставить их пустыми значит
+  // не найти «Енисей» в поиске по Красноярску на своей же машине.
+  //
+  // Долив только там, где пусто: заполненное администратором значение сид не
+  // трогает.
+  await prisma.tenant.updateMany({
+    where: { slug: 'yenisey', cityId: null },
+    data: { cityId: cities.get('Красноярск')! },
+  });
+
+  await prisma.tenant.updateMany({
+    where: { slug: 'yenisey', accentColor: null },
+    data: { accentColor: '#126b54' },
+  });
+
+  // Цены, шаг брони и ЧАСОВОЙ ПОЯС живут у зала, а не у клуба: залы
+  // различаются оборудованием, ценой и регионом.
   const hall = await prisma.hall.upsert({
     where: { tenantId_name: { tenantId: tenant.id, name: 'Основной зал' } },
     update: {},
     create: {
       tenantId: tenant.id,
       name: 'Основной зал',
+      timezone: 'Asia/Krasnoyarsk',
+      cityId: cities.get('Красноярск')!,
+      address: 'Красноярск, ул. Партизана Железняка, 25',
       hasRobotOption: true,
       tableHourPrice: 400 * RUB,
       tableExtra30MinPrice: 200 * RUB,
@@ -52,6 +142,13 @@ async function main(): Promise<void> {
       robot60MinPrice: 900 * RUB,
       robotExtra30MinPrice: 300 * RUB,
     },
+  });
+
+  // Тот же долив для залов: город у старых строк пуст, а без него клуб не
+  // находится по городу зала — правило, которое ломается тише всего.
+  await prisma.hall.updateMany({
+    where: { tenantId: tenant.id, cityId: null },
+    data: { cityId: cities.get('Красноярск')! },
   });
 
   // Политика отмены «как в такси» из ТЗ: отменил не позже чем за час — не
@@ -129,17 +226,111 @@ async function main(): Promise<void> {
     });
   }
 
-  const admin = await prisma.user.findFirst({
+  // Администратор ищется по привязке к клубу, а не по учётной записи: роль теперь
+  // свойство пары «человек + клуб», а не человека.
+  const admin = await prisma.tenantMembership.findFirst({
     where: { tenantId: tenant.id, role: Role.ADMIN },
-    select: { email: true },
+    select: { user: { select: { email: true } } },
   });
 
+  await seedNeighbour(cities);
+
   console.log(`Клуб «${tenant.name}» (slug: ${tenant.slug}) готов.`);
+  console.log(`Городов в справочнике: ${cities.size}.`);
   console.log(
     admin
-      ? `Администратор уже заведён: ${admin.email}`
+      ? `Администратор уже заведён: ${admin.user.email}`
       : 'Администратор не заведён: создайте его отдельной командой — пароль не должен попадать в репозиторий.',
   );
+}
+
+/**
+ * Второй клуб, в другом городе и с залом в третьем.
+ *
+ * Нужен не для красоты: без него нечем проверить ни поиск по городу, ни «мои
+ * клубы», ни раздел «Мои записи» по нескольким клубам, ни правило «клуб
+ * находится по городу ЗАЛА, а не только по городу клуба» — а именно оно
+ * ломается тише всего.
+ *
+ * Зал в Минусинске при этом живёт в том же поясе, что головной: Хакасия и
+ * Красноярский край в одном. Разные пояса между залами проверяются отдельно,
+ * когда у клуба появится филиал за Уралом.
+ */
+async function seedNeighbour(cities: Map<string, string>): Promise<void> {
+  const tenant = await prisma.tenant.upsert({
+    where: { slug: 'sayany' },
+    update: {},
+    create: {
+      name: 'КНТ «Саяны»',
+      slug: 'sayany',
+      cityId: cities.get('Абакан')!,
+      accentColor: '#b5541f',
+      noShowChargePercent: 100,
+    },
+  });
+
+  for (const tier of [
+    { minMinutesBeforeStart: 60, chargePercent: 0 },
+    { minMinutesBeforeStart: 0, chargePercent: 50 },
+  ]) {
+    await prisma.cancellationTier.upsert({
+      where: {
+        tenantId_minMinutesBeforeStart: {
+          tenantId: tenant.id,
+          minMinutesBeforeStart: tier.minMinutesBeforeStart,
+        },
+      },
+      update: {},
+      create: { tenantId: tenant.id, ...tier },
+    });
+  }
+
+  const halls = [
+    { name: 'Зал на Щетинкина', city: 'Абакан', address: 'Абакан, ул. Щетинкина, 12' },
+    // Второй зал в другом городе: по нему клуб обязан находиться в поиске
+    // Минусинска, хотя сам клуб числится в Абакане.
+    { name: 'Филиал в Минусинске', city: 'Минусинск', address: 'Минусинск, ул. Гоголя, 7' },
+  ];
+
+  for (const item of halls) {
+    const hall = await prisma.hall.upsert({
+      where: { tenantId_name: { tenantId: tenant.id, name: item.name } },
+      update: {},
+      create: {
+        tenantId: tenant.id,
+        name: item.name,
+        timezone: 'Asia/Krasnoyarsk',
+        cityId: cities.get(item.city)!,
+        address: item.address,
+        hasRobotOption: false,
+        tableHourPrice: 350 * RUB,
+        tableExtra30MinPrice: 175 * RUB,
+      },
+    });
+
+    for (let index = 1; index <= 4; index += 1) {
+      const label = `Стол ${index}`;
+
+      await prisma.table.upsert({
+        where: { hallId_label: { hallId: hall.id, label } },
+        update: {},
+        create: { tenantId: tenant.id, hallId: hall.id, label },
+      });
+    }
+  }
+
+  const existing = await prisma.tournamentType.findFirst({
+    where: { tenantId: tenant.id, name: 'Открытый турнир' },
+    select: { id: true },
+  });
+
+  if (!existing) {
+    await prisma.tournamentType.create({
+      data: { tenantId: tenant.id, name: 'Открытый турнир', price: 500 * RUB },
+    });
+  }
+
+  console.log(`Клуб «${tenant.name}» (slug: ${tenant.slug}) готов.`);
 }
 
 main()

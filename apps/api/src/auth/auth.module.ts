@@ -5,6 +5,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { AttemptLimiter } from './attempt-limiter';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { ClubContextGuard } from './guards/club-context.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { parseDuration } from './tokens';
@@ -30,10 +31,13 @@ import type { Env } from '../config/env';
           windowMs: parseDuration(config.get('AUTH_ATTEMPT_WINDOW', { infer: true })),
         }),
     },
-    // Оба guard'а глобальные, и порядок регистрации = порядок выполнения:
-    // сначала проверяется токен, только потом роль. Обратный порядок дал бы
-    // RolesGuard пустой request.user и «Недостаточно прав» вместо 401.
+    // Все три guard'а глобальные, и порядок регистрации = порядок выполнения.
+    // Он здесь единственно возможный: сначала проверяется токен, потом по
+    // адресу определяется клуб и роль человека в нём, и только потом эта роль
+    // сверяется с требованиями маршрута. Любая перестановка даёт следующему
+    // guard'у пустоту — и «Недостаточно прав» там, где на деле нет входа.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: ClubContextGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
   exports: [AuthService],

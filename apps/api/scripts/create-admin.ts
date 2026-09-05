@@ -105,42 +105,52 @@ async function main(): Promise<void> {
 
   const passwordHash = await hashPassword(password);
 
-  const existing = await prisma.user.findFirst({
-    where: { tenantId: tenant.id, email },
-    select: { id: true },
+  // Почта ищется по ВСЕЙ платформе, а не внутри клуба: аккаунт один, и
+  // человек, уже играющий в соседнем клубе, не заводится заново — его
+  // учётка привязывается к этому клубу с нужной ролью.
+  const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+
+  const userId = existing
+    ? (
+        await prisma.user.update({
+          where: { id: existing.id },
+          // Отметки деактивации снимаются намеренно: команда используется в том
+          // числе чтобы вернуть доступ, и оставленный deactivatedAt тихо не пустил
+          // бы человека войти со свежим паролем.
+          data: {
+            passwordHash,
+            fullName,
+            phone,
+            birthDate,
+            deactivatedAt: null,
+            anonymizedAt: null,
+          },
+          select: { id: true },
+        })
+      ).id
+    : (
+        await prisma.user.create({
+          data: { email, passwordHash, fullName, phone, birthDate },
+          select: { id: true },
+        })
+      ).id;
+
+  // Роль — у привязки к клубу. Здесь же снимается клубное отключение: без
+  // этого команда меняла бы пароль человеку, которого ClubContextGuard всё
+  // равно не пустит в клуб.
+  await prisma.tenantMembership.upsert({
+    where: { userId_tenantId: { userId, tenantId: tenant.id } },
+    update: { role, deactivatedAt: null },
+    create: { userId, tenantId: tenant.id, role },
   });
 
-  if (existing) {
-    await prisma.user.update({
-      where: { id: existing.id },
-      // Отметки деактивации снимаются намеренно: команда используется в том
-      // числе чтобы вернуть доступ, и оставленный deactivatedAt тихо не пустил
-      // бы человека войти со свежим паролем.
-      data: {
-        passwordHash,
-        role,
-        fullName,
-        phone,
-        birthDate,
-        deactivatedAt: null,
-        anonymizedAt: null,
-      },
-    });
+  await ensureCoachProfile(userId, tenant.id, role);
 
-    await ensureCoachProfile(existing.id, tenant.id, role);
-
-    console.log(`Учётка ${email} обновлена: роль ${role}, пароль заменён.`);
-    return;
-  }
-
-  const created = await prisma.user.create({
-    data: { tenantId: tenant.id, email, passwordHash, role, fullName, phone, birthDate },
-    select: { id: true },
-  });
-
-  await ensureCoachProfile(created.id, tenant.id, role);
-
-  console.log(`Заведена учётка ${email} (${role}) в клубе «${tenant.name}».`);
+  console.log(
+    existing
+      ? `Учётка ${email} привязана к клубу «${tenant.name}»: роль ${role}, пароль заменён.`
+      : `Заведена учётка ${email} (${role}) в клубе «${tenant.name}».`,
+  );
 }
 
 /** Телефон в E.164 или пустая строка, если из аргумента его не собрать. */
@@ -167,7 +177,7 @@ async function ensureCoachProfile(userId: string, tenantId: string, role: string
   }
 
   await prisma.coachProfile.upsert({
-    where: { userId },
+    where: { userId_tenantId: { userId, tenantId } },
     update: {},
     create: { userId, tenantId },
   });

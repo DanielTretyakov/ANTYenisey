@@ -1,6 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import type {
-  AccessTokenPayload,
   BookingDay,
   BookingQuote,
   ClientBooking,
@@ -9,23 +8,28 @@ import type {
 import { BookingService } from './booking.service';
 import { CreateBookingDto, QuoteQueryDto } from './dto/booking.dto';
 import { ClubService } from '../club/club.service';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
+import type { ClubContext } from '../auth/club-context';
 
 /**
  * Самостоятельная онлайн-бронь стола.
  *
- * Клуб берётся из access-токена, а не из адреса: подставить туда чужой
- * идентификатор клиенту неоткуда, и обратиться к соседнему клубу он физически
- * не может.
+ * Клуб берётся из адреса и сверяется с привязкой человека к клубу в
+ * ClubContextGuard. Подставить в адрес чужой клуб можно — и именно поэтому
+ * роль читается из базы на каждый запрос, а не из токена.
  *
  * Сами брони закрыты ролью `CLIENT`. Это не формальность: бронь ссылается на
  * `ClientProfile`, которого у администратора и тренера просто нет, и без
  * проверки запрос упал бы ошибкой внешнего ключа вместо внятного ответа.
  * Ручная бронь администратором и спарринг тренером — отдельные сценарии ТЗ со
  * своими правилами, и подпирать ими этот маршрут нельзя.
+ *
+ * Записаться может ЛЮБОЙ пользователь платформы, вступать в клуб для
+ * этого не требуется (ТЗ → «Один аккаунт на все клубы»): человек без
+ * привязки проходит сюда как клиент, а сама привязка заводится первой бронью.
  */
-@Controller('booking')
+@Controller('clubs/:slug/booking')
 export class BookingController {
   constructor(
     private readonly booking: BookingService,
@@ -39,28 +43,28 @@ export class BookingController {
    * так показывает на стене, и прятать его от собственного тренера незачем.
    */
   @Get('halls')
-  listHalls(@CurrentUser() user: AccessTokenPayload): Promise<Hall[]> {
-    return this.club.listHalls(user.tenantId);
+  listHalls(@CurrentClub() club: ClubContext): Promise<Hall[]> {
+    return this.club.listHalls(club.tenantId);
   }
 
   /** Что свободно в зале на дату. Причина занятости клиенту не раскрывается. */
   @Get('halls/:hallId/days/:date')
   findDay(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('hallId') hallId: string,
     @Param('date') date: string,
   ): Promise<BookingDay> {
-    return this.booking.findDay(user.tenantId, hallId, date);
+    return this.booking.findDay(club.tenantId, hallId, date);
   }
 
   /** Стоимость аренды до подтверждения: сумму клиент должен видеть заранее. */
   @Get('quote')
   quote(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Query() query: QuoteQueryDto,
   ): Promise<BookingQuote> {
     return this.booking.quote(
-      user.tenantId,
+      club.tenantId,
       query.hallId,
       query.durationMinutes,
       query.withRobot,
@@ -70,16 +74,16 @@ export class BookingController {
   @Roles('CLIENT')
   @Post('bookings')
   create(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Body() dto: CreateBookingDto,
   ): Promise<ClientBooking> {
-    return this.booking.create(user.tenantId, user.sub, dto);
+    return this.booking.create(club.tenantId, club.userId, dto);
   }
 
   @Roles('CLIENT')
   @Get('bookings')
-  listMine(@CurrentUser() user: AccessTokenPayload): Promise<ClientBooking[]> {
-    return this.booking.listMine(user.tenantId, user.sub);
+  listMine(@CurrentClub() club: ClubContext): Promise<ClientBooking[]> {
+    return this.booking.listMine(club.tenantId, club.userId);
   }
 
   /**
@@ -92,9 +96,9 @@ export class BookingController {
   @Roles('CLIENT')
   @Delete('bookings/:id')
   cancel(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('id') bookingId: string,
   ): Promise<ClientBooking> {
-    return this.booking.cancel(user.tenantId, user.sub, bookingId);
+    return this.booking.cancel(club.tenantId, club.userId, bookingId);
   }
 }

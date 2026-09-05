@@ -99,10 +99,14 @@ export class AuthController {
     }
   }
 
-  /** Сквозной срез замыкается здесь: защищённый маршрут, читающий данные по токену. */
+  /**
+   * Сквозной срез замыкается здесь: защищённый маршрут, читающий данные по
+   * токену. Отдаёт и список клубов человека с ролью в каждом — интерфейсу
+   * иначе неоткуда узнать, куда его пускать.
+   */
   @Get('me')
   me(@CurrentUser() user: AccessTokenPayload): Promise<PublicUser> {
-    return this.users.findPublicById(user.sub, user.tenantId);
+    return this.users.findPublicById(user.sub);
   }
 
   /**

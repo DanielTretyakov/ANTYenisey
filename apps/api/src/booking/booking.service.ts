@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BookingStatus } from '@yenisey/database';
+import { BookingStatus, Role } from '@yenisey/database';
 import {
   BOOKING_HORIZON_DAYS,
   type BookingDay,
@@ -32,6 +32,11 @@ const ACTIVE: BookingStatus[] = [BookingStatus.BOOKED, BookingStatus.ATTENDED];
 const HALL_PRICING = {
   id: true,
   name: true,
+  // Часовой пояс едет вместе с ценами намеренно: и то, и другое — свойство
+  // ЗАЛА, и оба нужны в одних и тех же местах. Раньше пояс приходил отдельным
+  // запросом к клубу, и зал в другом регионе тарифицировался бы по чужим
+  // границам суток.
+  timezone: true,
   bookingStep: true,
   tableHourPrice: true,
   tableExtra30MinPrice: true,
@@ -119,8 +124,11 @@ export class BookingService {
   async findDay(tenantId: string, hallId: string, date: string): Promise<BookingDay> {
     assertDateFormat(date);
 
-    const { timezone } = await this.tenant(tenantId);
     const hall = await this.hall(tenantId, hallId);
+    // Пояс ЗАЛА, а не клуба: «сегодня» и границы суток у зала в другом
+    // регионе свои, и считать их по часам головного клуба значит показать
+    // клиенту не тот день.
+    const timezone = hall.timezone;
 
     this.assertWithinHorizon(date, timezone);
 
@@ -184,8 +192,6 @@ export class BookingService {
     clientId: string,
     dto: CreateBookingRequest,
   ): Promise<ClientBooking> {
-    const { timezone } = await this.tenant(tenantId);
-
     const table = await this.prisma.table.findFirst({
       where: { id: dto.tableId, tenantId },
       select: { id: true, hallId: true, hall: { select: HALL_PRICING } },
@@ -194,6 +200,10 @@ export class BookingService {
     if (!table) {
       throw new NotFoundException('Стол не найден');
     }
+
+    // Пояс зала, в котором стоит стол. Он приезжает вместе с ценами одним
+    // запросом — отдельного похода к клубу больше нет.
+    const timezone = table.hall.timezone;
 
     const startsAt = parseInstant(dto.startsAt);
     const start = localParts(startsAt, timezone);
@@ -220,6 +230,12 @@ export class BookingService {
 
     const endsAt = new Date(startsAt.getTime() + dto.durationMinutes * 60_000);
     const price = quote(table.hall, dto.durationMinutes, dto.withRobot).price;
+
+    // Привязка к клубу заводится здесь, перед первой бронью. По ТЗ
+    // записаться может любой пользователь платформы, вступать в клуб не нужно, —
+    // но бронь ссылается на ClientProfile, а тот — на TenantMembership. Без
+    // этого шага первая же бронь новичка падала бы ошибкой внешнего ключа.
+    await this.ensureClientMembership(tenantId, clientId);
 
     let created: BookingRow;
 
@@ -407,24 +423,36 @@ export class BookingService {
     };
   }
 
+  /**
+   * Заводит привязку человека к клубу и анкету клиента, если их ещё нет.
+   *
+   * Оба upsert'а идут одной транзакцией: привязка без анкеты — это членство,
+   * которое не может ничего забронировать, и чинить его пришлось бы руками.
+   *
+   * Роль существующей привязки не трогаем: тренер, бронирующий стол себе,
+   * не должен от этого стать клиентом.
+   */
+  private async ensureClientMembership(tenantId: string, userId: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.tenantMembership.upsert({
+        where: { userId_tenantId: { userId, tenantId } },
+        update: {},
+        create: { userId, tenantId, role: Role.CLIENT },
+      });
+
+      await tx.clientProfile.upsert({
+        where: { userId_tenantId: { userId, tenantId } },
+        update: {},
+        create: { userId, tenantId },
+      });
+    });
+  }
+
   private tiers(tenantId: string): Promise<Tier[]> {
     return this.prisma.cancellationTier.findMany({
       where: { tenantId },
       select: { minMinutesBeforeStart: true, chargePercent: true },
     });
-  }
-
-  private async tenant(tenantId: string): Promise<{ timezone: string }> {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { timezone: true },
-    });
-
-    if (!tenant) {
-      throw new NotFoundException('Клуб не найден');
-    }
-
-    return tenant;
   }
 
   private async hall(tenantId: string, hallId: string) {

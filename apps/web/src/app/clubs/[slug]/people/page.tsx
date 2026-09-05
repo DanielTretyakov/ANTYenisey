@@ -8,7 +8,9 @@ import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { inputClassName } from '@/components/ui/Field';
-import { api, ApiError } from '@/lib/api';
+import { roleInClub } from '@/lib/membership';
+import { ApiError } from '@/lib/api';
+import { useClubApi } from '@/lib/useClubApi';
 import { cn } from '@/lib/cn';
 import { useSession } from '@/lib/useSession';
 
@@ -52,7 +54,10 @@ export default function PeoplePage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const allowed = session.status === 'ready' && MANAGERS.includes(session.user.role);
+  // Роль берётся из привязки к клубу, а не из профиля: аккаунт один на
+  // платформу, и в разных клубах она разная.
+  const role = session.status === 'ready' ? roleInClub(session.user) : null;
+  const allowed = role !== null && MANAGERS.includes(role);
 
   useEffect(() => {
     if (session.status === 'anonymous') {
@@ -66,6 +71,8 @@ export default function PeoplePage() {
     setOffset(0);
   }, [tab, search]);
 
+  const club = useClubApi();
+
   const load = useCallback(async () => {
     if (!allowed) return;
 
@@ -74,7 +81,7 @@ export default function PeoplePage() {
 
     try {
       setPage(
-        await api.people({
+        await club.people({
           role: tab === 'ALL' ? undefined : tab,
           search: search.trim() || undefined,
           limit: PAGE_SIZE,
@@ -244,6 +251,7 @@ function PersonRow({
   onChanged: (person: ClubPerson) => void;
   onError: (message: string) => void;
 }) {
+  const club = useClubApi();
   const [pending, setPending] = useState(false);
 
   async function change(role: Role): Promise<void> {
@@ -252,7 +260,7 @@ function PersonRow({
     setPending(true);
 
     try {
-      onChanged(await api.changeRole(person.id, role));
+      onChanged(await club.changeRole(person.id, role));
     } catch (cause) {
       onError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
     } finally {

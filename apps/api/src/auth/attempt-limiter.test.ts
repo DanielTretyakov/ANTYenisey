@@ -79,8 +79,8 @@ test('счётчики разных учёток не смешиваются', (
   assert.equal(instance.retryAfterMs('b'), null);
 });
 
-test('ключ учитывает клуб: один адрес почты может принадлежать разным людям', () => {
-  assert.notEqual(attemptKey('yenisey', 'i@example.com'), attemptKey('other', 'i@example.com'));
+test('ключ — это почта: клуб в нём больше не участвует', () => {
   // Регистр и пробелы не должны давать перебирающему новый счётчик.
-  assert.equal(attemptKey('yenisey', ' I@Example.com '), attemptKey('yenisey', 'i@example.com'));
+  assert.equal(attemptKey(' I@Example.com '), attemptKey('i@example.com'));
+  assert.notEqual(attemptKey('i@example.com'), attemptKey('other@example.com'));
 });

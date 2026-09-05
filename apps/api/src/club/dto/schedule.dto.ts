@@ -69,6 +69,26 @@ export class CreateHallDto implements CreateHallRequest {
   @MaxLength(120)
   name: string;
 
+  /**
+   * Часовой пояс ЗАЛА (IANA). Не клуба: залы одной организации бывают в разных
+   * регионах. Что зона существует, проверяет `hallViolations` — формат строки
+   * тут ничего не гарантирует.
+   */
+  @IsString()
+  @MaxLength(64)
+  timezone: string;
+
+  /** Фактический город зала: идентификатор из справочника платформы. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  cityId: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  address: string | null;
+
   @IsIn(BOOKING_STEPS, { message: 'bookingStep: недопустимый шаг бронирования' })
   bookingStep: BookingStep;
 
@@ -107,6 +127,21 @@ export class UpdateHallDto implements UpdateHallRequest {
   @MinLength(1, { message: 'У зала должно быть название' })
   @MaxLength(120)
   name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  timezone?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  cityId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  address?: string | null;
 
   @IsOptional()
   @IsIn(BOOKING_STEPS, { message: 'bookingStep: недопустимый шаг бронирования' })

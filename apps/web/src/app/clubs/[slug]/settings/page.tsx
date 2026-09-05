@@ -16,7 +16,9 @@ import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
-import { api, ApiError } from '@/lib/api';
+import { roleInClub } from '@/lib/membership';
+import { ApiError } from '@/lib/api';
+import { useClubApi } from '@/lib/useClubApi';
 import { cn } from '@/lib/cn';
 import { useSession } from '@/lib/useSession';
 import { HallForm } from './HallForm';
@@ -54,13 +56,18 @@ export default function ClubPage() {
   const [error, setError] = useState<string | null>(null);
   const [addingHall, setAddingHall] = useState(false);
 
-  const allowed = session.status === 'ready' && CLUB_MANAGERS.includes(session.user.role);
+  // Роль берётся из привязки к клубу, а не из профиля: аккаунт один на
+  // платформу, и в разных клубах она разная.
+  const role = session.status === 'ready' ? roleInClub(session.user) : null;
+  const allowed = role !== null && CLUB_MANAGERS.includes(role);
 
   useEffect(() => {
     if (session.status === 'anonymous') {
       router.replace('/login');
     }
   }, [session.status, router]);
+
+  const club = useClubApi();
 
   useEffect(() => {
     if (!allowed) {
@@ -72,13 +79,13 @@ export default function ClubPage() {
     // Всё грузится разом: это один экран, и ждать части по очереди означало бы
     // умножить ожидание на ровном месте.
     Promise.all([
-      api.clubSettings(),
-      api.halls(),
-      api.clubTables(),
-      api.coaches(),
-      api.trainingTypes(),
-      api.tournamentTypes(),
-      api.tournaments(),
+      club.clubSettings(),
+      club.halls(),
+      club.clubTables(),
+      club.coaches(),
+      club.trainingTypes(),
+      club.tournamentTypes(),
+      club.tournaments(),
     ])
       .then(([settings, halls, tables, coaches, trainingTypes, tournamentTypes, tournaments]) => {
         if (cancelled) return;
@@ -119,8 +126,15 @@ export default function ClubPage() {
       // Новый зал заводится с настройками текущего: второй зал клуба обычно
       // похож на первый, и переписывать цены с нуля незачем.
       const source = hall ?? data.halls[0];
-      const created = await api.createHall({
+      const created = await club.createHall({
         name: nextHallName(data.halls),
+        // Пояс и город тоже наследуются от соседнего зала: второй зал обычно
+        // в том же городе, а если нет — это ровно то, что администратор
+        // придёт и поправит. Пустой пояс здесь означал бы зал, живущий по
+        // времени сервера.
+        timezone: source?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+        cityId: source?.cityId ?? null,
+        address: null,
         bookingStep: source?.bookingStep ?? 'MIN_30',
         tableHourPrice: source?.tableHourPrice ?? 0,
         tableExtra30MinPrice: source?.tableExtra30MinPrice ?? 0,
@@ -231,11 +245,13 @@ export default function ClubPage() {
                   trainingTypes={data.trainingTypes}
                   tournamentTypes={data.tournamentTypes}
                   tournaments={data.tournaments}
-                  timezone={data.settings.timezone}
+                  // Пояс ЗАЛА, а не клуба: расписание этого зала живёт по
+                  // его собственному времени.
+                  timezone={hall.timezone}
                   // Постановка турнира в сетку заводит его: список в разделе
                   // «Занятия и турниры» после этого устарел.
                   onTournamentsChanged={() => {
-                    void api.tournaments().then((tournaments) =>
+                    void club.tournaments().then((tournaments) =>
                       setData((previous) => (previous ? { ...previous, tournaments } : previous)),
                     );
                   }}

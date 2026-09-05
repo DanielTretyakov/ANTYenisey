@@ -50,15 +50,25 @@ export class AuthService {
     private readonly attempts: AttemptLimiter,
   ) {}
 
+  /**
+   * Регистрация на ПЛАТФОРМЕ, а не в клубе.
+   *
+   * Клуб необязателен: аккаунт один на всю платформу, и вступать куда-либо,
+   * чтобы им пользоваться, не нужно. Если код клуба всё же передан — человек
+   * пришёл со страницы конкретного клуба, — он заодно сразу становится его
+   * клиентом; иначе привязка появится сама при первой записи.
+   */
   async register(dto: RegisterRequest, context: SessionContext): Promise<IssuedSession> {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { slug: dto.tenantSlug },
-      select: { id: true },
-    });
+    const tenant = dto.tenantSlug
+      ? await this.prisma.tenant.findUnique({
+          where: { slug: dto.tenantSlug },
+          select: { id: true },
+        })
+      : null;
 
     // Несуществующий клуб и занятый email отдают одну и ту же ошибку:
     // перечислять клубы платформы и её клиентов посторонним незачем.
-    if (!tenant) {
+    if (dto.tenantSlug && !tenant) {
       throw new ConflictException('Регистрация невозможна: проверьте клуб и адрес почты');
     }
 
@@ -73,47 +83,38 @@ export class AuthService {
     const passwordHash = await hashPassword(dto.password);
 
     try {
-      // Транзакция обязательна: клиент без ClientProfile — это учётка, которая
-      // не может ничего забронировать, и чинить её пришлось бы руками.
+      // Транзакция обязательна: привязка без ClientProfile — это членство,
+      // которое не может ничего забронировать, и чинить его пришлось бы
+      // руками.
       const user = await this.prisma.$transaction(async (tx) => {
         const created = await tx.user.create({
           data: {
-            tenantId: tenant.id,
             email: dto.email,
             phone: dto.phone,
             passwordHash,
-            role: Role.CLIENT,
             fullName: joinFullName(dto),
             birthDate,
           },
         });
 
-        await tx.clientProfile.create({
-          data: {
-            userId: created.id,
-            tenantId: tenant.id,
-          },
-        });
+        if (tenant) {
+          await tx.tenantMembership.create({
+            data: { userId: created.id, tenantId: tenant.id, role: Role.CLIENT },
+          });
+
+          await tx.clientProfile.create({
+            data: { userId: created.id, tenantId: tenant.id },
+          });
+        }
 
         return created;
       });
 
-      return this.issueSession(
-        {
-          id: user.id,
-          tenantId: user.tenantId,
-          email: user.email,
-          phone: user.phone,
-          role: user.role,
-          fullName: user.fullName,
-          birthDate: formatBirthDate(user.birthDate),
-        },
-        context,
-      );
+      return this.issueSession(await this.publicUser(user.id), context);
     } catch (error) {
-      // P2002 — нарушение @@unique([tenantId, email]): в этом клубе адрес уже
-      // занят. Ловим и гонку, которую проверка «есть ли такой email» перед
-      // вставкой не закрывает.
+      // P2002 — нарушение @unique на почте: адрес уже занят НА ПЛАТФОРМЕ.
+      // Ловим и гонку, которую проверка «есть ли такой email» перед вставкой
+      // не закрывает.
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ConflictException('Регистрация невозможна: проверьте клуб и адрес почты');
       }
@@ -121,8 +122,13 @@ export class AuthService {
     }
   }
 
+  /**
+   * Вход на платформу. Клуб не спрашивается: почта уникальна по всей
+   * платформе, и уточнять, «куда именно человек идёт», нечем — клуб он
+   * выберет уже внутри.
+   */
   async login(dto: LoginRequest, context: SessionContext): Promise<IssuedSession> {
-    const key = attemptKey(dto.tenantSlug, dto.email);
+    const key = attemptKey(dto.email);
     const retryAfterMs = this.attempts.retryAfterMs(key);
 
     if (retryAfterMs !== null) {
@@ -134,16 +140,10 @@ export class AuthService {
       );
     }
 
-    const user = await this.prisma.user.findFirst({
-      where: { email: dto.email, tenant: { slug: dto.tenantSlug } },
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
       select: {
         id: true,
-        tenantId: true,
-        email: true,
-        phone: true,
-        role: true,
-        fullName: true,
-        birthDate: true,
         passwordHash: true,
         deactivatedAt: true,
         anonymizedAt: true,
@@ -168,18 +168,7 @@ export class AuthService {
     // перебор, и держать его у порога блокировки незачем.
     this.attempts.reset(key);
 
-    return this.issueSession(
-      {
-        id: user.id,
-        tenantId: user.tenantId,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        fullName: user.fullName,
-        birthDate: formatBirthDate(user.birthDate),
-      },
-      context,
-    );
+    return this.issueSession(await this.publicUser(user.id), context);
   }
 
   /**
@@ -195,7 +184,6 @@ export class AuthService {
       select: {
         id: true,
         userId: true,
-        tenantId: true,
         expiresAt: true,
         revokedAt: true,
       },
@@ -210,7 +198,7 @@ export class AuthService {
         `Повторное предъявление отозванного refresh-токена (пользователь ${stored.userId}): гашу все его сессии`,
       );
       await this.prisma.refreshToken.updateMany({
-        where: { userId: stored.userId, tenantId: stored.tenantId, revokedAt: null },
+        where: { userId: stored.userId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
       throw new UnauthorizedException('Сессия недействительна, войдите заново');
@@ -236,35 +224,14 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: stored.userId },
-      select: {
-        id: true,
-        tenantId: true,
-        email: true,
-        phone: true,
-        role: true,
-        fullName: true,
-        birthDate: true,
-        deactivatedAt: true,
-        anonymizedAt: true,
-      },
+      select: { id: true, deactivatedAt: true, anonymizedAt: true },
     });
 
     if (!user || user.deactivatedAt || user.anonymizedAt) {
       throw new UnauthorizedException('Сессия недействительна, войдите заново');
     }
 
-    return this.issueSession(
-      {
-        id: user.id,
-        tenantId: user.tenantId,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        fullName: user.fullName,
-        birthDate: formatBirthDate(user.birthDate),
-      },
-      context,
-    );
+    return this.issueSession(await this.publicUser(user.id), context);
   }
 
   /** Выход: гасим предъявленный токен. Чужой или несуществующий молча игнорируем. */
@@ -275,13 +242,57 @@ export class AuthService {
     });
   }
 
+  /**
+   * Аккаунт вместе со списком клубов и ролью в каждом.
+   *
+   * Собирается одним запросом на каждый вход и обновление: раньше всё нужное
+   * лежало в самой строке User, а теперь роль — свойство пары «человек +
+   * клуб», и без второй таблицы её взять неоткуда.
+   */
+  private async publicUser(userId: string): Promise<PublicUser> {
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        fullName: true,
+        birthDate: true,
+        memberships: {
+          // Отключённые в клубе не показываются: человек этим клубом больше
+          // не пользуется, и держать его в шапке незачем.
+          where: { deactivatedAt: null },
+          select: {
+            role: true,
+            tenantId: true,
+            tenant: { select: { slug: true, name: true } },
+          },
+          orderBy: { tenant: { name: 'asc' } },
+        },
+      },
+    });
+
+    return {
+      id: user.id,
+      email: user.email,
+      phone: user.phone,
+      fullName: user.fullName,
+      birthDate: formatBirthDate(user.birthDate),
+      memberships: user.memberships.map((membership) => ({
+        tenantId: membership.tenantId,
+        slug: membership.tenant.slug,
+        name: membership.tenant.name,
+        role: membership.role,
+      })),
+    };
+  }
+
   /** Выдача пары токенов и сохранение refresh-сессии. */
   private async issueSession(user: PublicUser, context: SessionContext): Promise<IssuedSession> {
-    const payload: AccessTokenPayload = {
-      sub: user.id,
-      tenantId: user.tenantId,
-      role: user.role,
-    };
+    // В токене только «кто». Клуб и роль в него не кладутся: аккаунт один на
+    // платформу, и зашитый клуб заставил бы человека перевходить, чтобы
+    // открыть соседний.
+    const payload: AccessTokenPayload = { sub: user.id };
 
     const accessTtl = this.config.get('JWT_ACCESS_TTL', { infer: true });
     const refreshTtl = this.config.get('JWT_REFRESH_TTL', { infer: true });
@@ -301,7 +312,6 @@ export class AuthService {
 
     await this.prisma.refreshToken.create({
       data: {
-        tenantId: user.tenantId,
         userId: user.id,
         // В базе лежит только SHA-256: дамп таблицы не даёт войти ни за кого.
         tokenHash: hashToken(refreshToken),

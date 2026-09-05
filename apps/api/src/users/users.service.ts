@@ -8,23 +8,31 @@ export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Пользователь без секретных полей.
+   * Аккаунт без секретных полей, вместе с клубами и ролью в каждом.
    *
-   * tenantId в условии обязателен, хотя id и так уникален: это второй рубеж
-   * поверх составных внешних ключей — запрос физически не может вернуть
-   * человека из чужого клуба, даже если id подставили из другого tenant.
+   * Клуб в условии больше не нужен и не имеет смысла: учётная запись
+   * глобальная, а изоляцию клубов держат составные ключи и ClubContextGuard —
+   * то есть проверка идёт на каждом клубном маршруте, а не в момент чтения
+   * профиля.
    */
-  async findPublicById(userId: string, tenantId: string): Promise<PublicUser> {
+  async findPublicById(userId: string): Promise<PublicUser> {
     const user = await this.prisma.user.findFirst({
-      where: { id: userId, tenantId, deactivatedAt: null, anonymizedAt: null },
+      where: { id: userId, deactivatedAt: null, anonymizedAt: null },
       select: {
         id: true,
-        tenantId: true,
         email: true,
         phone: true,
         birthDate: true,
-        role: true,
         fullName: true,
+        memberships: {
+          where: { deactivatedAt: null },
+          select: {
+            role: true,
+            tenantId: true,
+            tenant: { select: { slug: true, name: true } },
+          },
+          orderBy: { tenant: { name: 'asc' } },
+        },
       },
     });
 
@@ -34,12 +42,16 @@ export class UsersService {
 
     return {
       id: user.id,
-      tenantId: user.tenantId,
       email: user.email,
       phone: user.phone,
       birthDate: formatBirthDate(user.birthDate),
-      role: user.role,
       fullName: user.fullName,
+      memberships: user.memberships.map((membership) => ({
+        tenantId: membership.tenantId,
+        slug: membership.tenant.slug,
+        name: membership.tenant.name,
+        role: membership.role,
+      })),
     };
   }
 }

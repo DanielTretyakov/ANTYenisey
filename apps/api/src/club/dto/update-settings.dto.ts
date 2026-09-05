@@ -1,5 +1,14 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import type { UpdateClubSettingsRequest } from '@yenisey/types';
 
 /**
@@ -18,10 +27,31 @@ export class UpdateClubSettingsDto implements UpdateClubSettingsRequest {
   )
   name?: string;
 
+  // Часового пояса здесь нет: он переехал на зал. Залы одной организации
+  // бывают в разных регионах, и общий на клуб пояс сдвинул бы в одном из них
+  // границы операционного дня и порог «за час до начала».
+
+  /** Основной город клуба: идентификатор из справочника платформы, не строка. */
   @IsOptional()
   @IsString()
-  @MaxLength(64)
-  timezone?: string;
+  @MaxLength(40)
+  cityId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  logoUrl?: string | null;
+
+  /**
+   * Фирменный цвет. Формат проверяется и здесь, и CHECK'ом в базе: значение
+   * уезжает прямо в CSS-переменную страницы клуба, и мусор в нём означал бы
+   * сломанную вёрстку, а не пустое поле.
+   */
+  @IsOptional()
+  @Matches(/^#[0-9a-fA-F]{6}$/, {
+    message: 'accentColor: ожидается цвет вида «#126b54»',
+  })
+  accentColor?: string | null;
 
   @IsOptional()
   @IsInt()

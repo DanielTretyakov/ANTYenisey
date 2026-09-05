@@ -36,6 +36,9 @@ async function main(): Promise<void> {
   // Restrict, а смоук отменяет бронь, но удалить её по HTTP не может и не
   // должен. В продукте бронь не удаляется никогда — это история платежей.
   await prisma.tableBooking.deleteMany({ where: { clientId: { in: ids } } });
+  // Записи на турниры — по той же причине и тем же порядком, что и брони
+  // столов: на клиенте стоит Restrict, а смоук запись отменяет, но не удаляет.
+  await prisma.tournamentRegistration.deleteMany({ where: { clientId: { in: ids } } });
   await prisma.clientProfile.deleteMany({ where: { userId: { in: ids } } });
   const removed = await prisma.user.deleteMany({ where });
 

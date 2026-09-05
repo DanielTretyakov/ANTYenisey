@@ -3,22 +3,27 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { BookingStatus, ClientBooking, PublicUser, Role } from '@yenisey/types';
+import type { FavouriteClub, PublicUser } from '@yenisey/types';
+import { MAX_FAVOURITE_CLUBS } from '@yenisey/types';
+import { ClubMark } from '@/components/club/ClubMark';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { api, ApiError } from '@/lib/api';
-import { formatKopecks } from '@/lib/money';
 import { useSession } from '@/lib/useSession';
 
-const ROLE_LABELS: Record<Role, string> = {
-  CLIENT: 'Клиент',
-  COACH: 'Тренер',
-  ADMIN: 'Администратор',
-  OWNER: 'Руководство клуба',
-};
-
+/**
+ * Личный кабинет: профиль и мои клубы.
+ *
+ * Списка записей здесь БОЛЬШЕ НЕТ — он уехал в раздел «Мои записи» целиком,
+ * вместе с прошедшими и турнирами (ТЗ → «Мои записи»). Два списка записей в
+ * двух местах разошлись бы в поведении отмены и в том, что каждый из них
+ * показывает.
+ *
+ * Роли в профиле тоже нет: она свойство пары «человек + клуб», а не человека.
+ * Кем он в каком клубе является, видно в списке клубов ниже.
+ */
 export default function CabinetPage() {
   const router = useRouter();
   const session = useSession();
@@ -37,7 +42,7 @@ export default function CabinetPage() {
 
       {user ? <Profile user={user} /> : <ProfileSkeleton />}
 
-      {user?.role === 'CLIENT' && <Bookings />}
+      {user && <MyClubs user={user} />}
     </AppShell>
   );
 }
@@ -51,11 +56,122 @@ function Profile({ user }: { user: PublicUser }) {
           <Row label="ФИО" value={user.fullName} />
           <Row label="Электронная почта" value={user.email} />
           <Row label="Телефон" value={user.phone ?? '—'} />
-          <Row label="Роль" value={ROLE_LABELS[user.role]} />
+          <Row label="Дата рождения" value={formatBirthDate(user.birthDate)} />
         </dl>
       </CardBody>
     </Card>
   );
+}
+
+/**
+ * Мои клубы.
+ *
+ * Избранное и заявленная принадлежность — одна сущность, а не две. Отсюда
+ * можно только снять отметку: отмечают клуб своим на его странице, там, где
+ * человек и решает, что играет здесь.
+ */
+function MyClubs({ user }: { user: PublicUser }) {
+  const [clubs, setClubs] = useState<FavouriteClub[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .myClubs()
+      .then(setClubs)
+      .catch((cause: unknown) =>
+        setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен'),
+      );
+  }, []);
+
+  async function remove(slug: string): Promise<void> {
+    setPending(slug);
+    setError(null);
+
+    try {
+      setClubs(await api.removeClub(slug));
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <Card className="mt-6 max-w-2xl">
+      <CardHeader
+        title="Мои клубы"
+        description={`Клубы, которые вы отметили своими. Не больше ${MAX_FAVOURITE_CLUBS}.`}
+      />
+      <CardBody>
+        {error && <Alert>{error}</Alert>}
+
+        {clubs === null && <p className="text-[0.875rem] text-text-muted">Загружаю…</p>}
+
+        {clubs?.length === 0 && (
+          <p className="text-[0.875rem] text-text-muted">
+            Пока ни одного.{' '}
+            <Link href="/" className="text-text-accent underline-offset-2 hover:underline">
+              Найдите клуб
+            </Link>{' '}
+            и отметьте его своим — он появится здесь и в ленте на стартовой странице.
+          </p>
+        )}
+
+        {clubs && clubs.length > 0 && (
+          <ul className="divide-y divide-border">
+            {clubs.map((club) => (
+              <li key={club.slug} className="flex items-center gap-4 py-3.5">
+                <ClubMark club={club} size="sm" />
+
+                <div className="min-w-0 grow">
+                  <Link
+                    href={`/clubs/${club.slug}`}
+                    className="block truncate text-[0.9375rem] text-text underline-offset-2 hover:underline"
+                  >
+                    {club.name}
+                  </Link>
+                  <p className="mt-0.5 truncate text-[0.8125rem] text-text-muted">
+                    {[club.city, ...club.otherCities].filter(Boolean).join(', ') ||
+                      'Город не указан'}
+                    {roleLabel(user, club.slug)}
+                  </p>
+                </div>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  pending={pending === club.slug}
+                  onClick={() => void remove(club.slug)}
+                >
+                  Убрать
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  CLIENT: 'клиент',
+  COACH: 'тренер',
+  ADMIN: 'администратор',
+  OWNER: 'руководство клуба',
+};
+
+/**
+ * Кем человек является в этом клубе.
+ *
+ * Пусто, если привязки нет: отметить клуб своим можно, ни разу в нём не
+ * записавшись, и «клиент» в этом случае было бы неправдой.
+ */
+function roleLabel(user: PublicUser, slug: string): string {
+  const role = user.memberships.find((membership) => membership.slug === slug)?.role;
+
+  return role ? ` · ${ROLE_LABELS[role] ?? role}` : '';
 }
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -91,132 +207,16 @@ function ProfileSkeleton() {
   );
 }
 
-/**
- * Брони клиента.
- *
- * Показаны все, включая отменённые и прошедшие: клиент приходит сюда и чтобы
- * вспомнить, когда идти, и чтобы понять, сколько с него списали за отмену, —
- * прятать вторую половину значило бы отвечать только на первый вопрос.
- */
-function Bookings() {
-  const [bookings, setBookings] = useState<ClientBooking[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [cancelling, setCancelling] = useState<string | null>(null);
+/** «17 мая 2001». Дата рождения приходит как «2001-05-17». */
+function formatBirthDate(value: string): string {
+  const parsed = new Date(`${value}T00:00:00Z`);
 
-  useEffect(() => {
-    api
-      .myBookings()
-      .then(setBookings)
-      .catch((cause: unknown) => setError(messageOf(cause)));
-  }, []);
-
-  async function handleCancel(booking: ClientBooking): Promise<void> {
-    setCancelling(booking.id);
-    setError(null);
-
-    try {
-      const cancelled = await api.cancelBooking(booking.id);
-
-      setBookings((current) =>
-        (current ?? []).map((item) => (item.id === cancelled.id ? cancelled : item)),
-      );
-    } catch (cause: unknown) {
-      setError(messageOf(cause));
-    } finally {
-      setCancelling(null);
-    }
-  }
-
-  return (
-    <Card className="mt-6 max-w-2xl">
-      <CardHeader title="Брони столов" description="Аренда, которую вы оформили сами." />
-      <CardBody>
-        {error && <Alert>{error}</Alert>}
-
-        {bookings === null && <p className="text-[0.875rem] text-text-muted">Загружаю…</p>}
-
-        {bookings?.length === 0 && (
-          <p className="text-[0.875rem] text-text-muted">
-            Броней пока нет.{' '}
-            <Link href="/booking" className="text-text-accent underline-offset-2 hover:underline">
-              Забронировать стол
-            </Link>
-          </p>
-        )}
-
-        {bookings && bookings.length > 0 && (
-          <ul className="divide-y divide-border">
-            {bookings.map((booking) => (
-              <li key={booking.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3.5">
-                <div className="min-w-0 grow">
-                  <p className="text-[0.9375rem] text-text">
-                    {formatSpan(booking.startsAt, booking.endsAt)}
-                  </p>
-                  <p className="mt-0.5 text-[0.8125rem] text-text-muted">
-                    {booking.hallName}, {booking.tableLabel}
-                    {booking.withRobot && ' · с роботом'} · {formatKopecks(booking.price)}
-                  </p>
-                </div>
-
-                <StatusBadge booking={booking} />
-
-                {booking.status === 'BOOKED' && (
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    pending={cancelling === booking.id}
-                    onClick={() => void handleCancel(booking)}
-                  >
-                    Отменить
-                    {booking.cancelChargePercentNow
-                      ? ` (спишется ${booking.cancelChargePercentNow}%)`
-                      : ''}
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardBody>
-    </Card>
-  );
-}
-
-const STATUS_LABELS: Record<BookingStatus, string> = {
-  BOOKED: 'Активна',
-  CANCELLED: 'Отменена',
-  ATTENDED: 'Состоялась',
-  NO_SHOW: 'Неявка',
-};
-
-function StatusBadge({ booking }: { booking: ClientBooking }) {
-  // Списанный процент дописан к статусу, а не спрятан в подсказку: это деньги,
-  // и увидеть их клиент должен там же, где видит саму отмену.
-  const charged =
-    booking.chargePercent !== null && booking.chargePercent > 0
-      ? `, списано ${booking.chargePercent}%`
-      : '';
-
-  return (
-    <span className="text-[0.8125rem] whitespace-nowrap text-text-subtle">
-      {STATUS_LABELS[booking.status]}
-      {charged}
-    </span>
-  );
-}
-
-/** «27 августа, 19:00 – 20:30» — момент показывается по часам браузера. */
-function formatSpan(startsAt: string, endsAt: string): string {
-  const start = new Date(startsAt);
-  const end = new Date(endsAt);
-
-  const date = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' }).format(start);
-  const time = (value: Date): string =>
-    new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(value);
-
-  return `${date}, ${time(start)} – ${time(end)}`;
-}
-
-function messageOf(cause: unknown): string {
-  return cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером';
+  return Number.isNaN(parsed.getTime())
+    ? value
+    : new Intl.DateTimeFormat('ru-RU', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'UTC',
+      }).format(parsed);
 }

@@ -5,8 +5,12 @@ import { ROLES_KEY } from '../decorators/roles.decorator';
 import type { AuthenticatedRequest } from './jwt-auth.guard';
 
 /**
- * Проверка роли из access-токена. Работает только после JwtAuthGuard —
- * порядок задаётся в AuthModule, где guard'ы регистрируются глобально.
+ * Проверка роли. Работает после JwtAuthGuard и ClubContextGuard — порядок
+ * задаётся в AuthModule, где guard'ы регистрируются глобально.
+ *
+ * Роль берётся из КЛУБА запроса, а не из токена: один аккаунт бывает
+ * клиентом в одном клубе и владельцем в другом, и «роль пользователя» без
+ * указания клуба ничего не значит.
  */
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -24,9 +28,16 @@ export class RolesGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    const role = request.user?.role;
+    const club = request.club;
 
-    if (!role || !required.includes(role)) {
+    // @Roles() на маршруте без клуба в адресе — ошибка программиста, а не
+    // клиента: проверять роль негде. Отдаём отказ, а не пропускаем: молчаливо
+    // открытый маршрут хуже ложного 403.
+    if (!club) {
+      throw new ForbiddenException('Недостаточно прав');
+    }
+
+    if (!required.includes(club.role)) {
       throw new ForbiddenException('Недостаточно прав');
     }
 

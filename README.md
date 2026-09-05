@@ -41,7 +41,7 @@ pnpm dev                      # api :3001, web :3000
 pnpm dev            # оба приложения в watch-режиме
 pnpm typecheck      # проверка типов по всем пакетам
 pnpm test           # модульные тесты (node --test)
-pnpm smoke          # 196 сценариев против поднятого API и живого Postgres
+pnpm smoke          # 227 сценариев против поднятого API и живого Postgres
 pnpm db:migrate
 pnpm db:studio
 ```

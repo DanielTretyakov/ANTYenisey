@@ -7,6 +7,9 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { BookingModule } from './booking/booking.module';
 import { ClubModule } from './club/club.module';
+import { EntriesModule } from './entries/entries.module';
+import { EventsModule } from './events/events.module';
+import { MeModule } from './me/me.module';
 import { parseDuration } from './auth/tokens';
 import { isLoopback } from './common/network';
 import { HealthController } from './health.controller';
@@ -55,6 +58,9 @@ import { validateEnv, type Env } from './config/env';
     ClubModule,
     BookingModule,
     TenantsModule,
+    EntriesModule,
+    EventsModule,
+    MeModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

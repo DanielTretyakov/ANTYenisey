@@ -6,7 +6,8 @@ import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { inputClassName } from '@/components/ui/Field';
-import { api, ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/api';
+import { useClubApi } from '@/lib/useClubApi';
 import { cn } from '@/lib/cn';
 
 /**
@@ -37,6 +38,7 @@ export function TablesCard({
   /** Стол, удаление которого ждёт подтверждения. Одновременно — только один. */
   const [confirming, setConfirming] = useState<string | null>(null);
 
+  const club = useClubApi();
   const own = tables.filter((table) => table.hallId === hallId);
 
   async function run(action: () => Promise<ClubTable[]>): Promise<void> {
@@ -56,7 +58,7 @@ export function TablesCard({
     event.preventDefault();
 
     await run(async () => {
-      const created = await api.createTable(hallId, label);
+      const created = await club.createTable(hallId, label);
       setLabel('');
       // Порядок тот же, что на сервере, — по названию: иначе новый стол
       // встанет в конец, а после перезагрузки прыгнет на своё место.
@@ -72,7 +74,7 @@ export function TablesCard({
     }
 
     await run(async () => {
-      const updated = await api.renameTable(table.id, next);
+      const updated = await club.renameTable(table.id, next);
       return tables.map((item) => (item.id === table.id ? updated : item)).sort(byLabel);
     });
   }
@@ -81,7 +83,7 @@ export function TablesCard({
     setConfirming(null);
 
     await run(async () => {
-      await api.deleteTable(table.id);
+      await club.deleteTable(table.id);
       return tables.filter((item) => item.id !== table.id);
     });
   }

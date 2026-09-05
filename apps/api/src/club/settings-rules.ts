@@ -38,11 +38,8 @@ export function isValidTimezone(timezone: string): boolean {
 export function clubSettingsViolations(settings: ClubSettings): string[] {
   const violations: string[] = [];
 
-  if (!isValidTimezone(settings.timezone)) {
-    violations.push(
-      `Часовой пояс «${settings.timezone}» не найден. Ожидается зона IANA, например «Asia/Krasnoyarsk»`,
-    );
-  }
+  // Часового пояса здесь больше нет: он переехал на зал, и проверяется в
+  // hallViolations. У клуба остались условия договора с клиентом.
 
   // Напоминание обязано приходить раньше, чем система сама зафиксирует
   // неявку, — иначе эскалация теряет смысл.
@@ -61,6 +58,16 @@ export function hallViolations(hall: Omit<Hall, 'id'>): string[] {
 
   if (hall.name.trim() === '') {
     violations.push('У зала должно быть название');
+  }
+
+  // Пояс проверяется здесь, а не в настройках клуба: он свойство ЗАЛА. Залы
+  // одной организации бывают в разных регионах, и опечатка в зоне тихо
+  // сломает расчёт порога отмены и границы операционного дня именно этого
+  // зала — на глаз это выглядит как работающее приложение.
+  if (!isValidTimezone(hall.timezone)) {
+    violations.push(
+      `Часовой пояс «${hall.timezone}» не найден. Ожидается зона IANA, например «Asia/Krasnoyarsk»`,
+    );
   }
 
   // Зал с включённой опцией робота, но без цен, упрётся в NULL при первом же

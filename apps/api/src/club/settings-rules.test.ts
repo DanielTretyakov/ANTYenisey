@@ -7,7 +7,9 @@ import { clubSettingsViolations, hallViolations, isValidTimezone } from './setti
 function settings(overrides: Partial<ClubSettings> = {}): ClubSettings {
   return {
     name: 'АНТ «Енисей»',
-    timezone: 'Asia/Krasnoyarsk',
+    cityId: null,
+    logoUrl: null,
+    accentColor: null,
     noShowChargePercent: 100,
     attendanceReminderAfterMinutes: 60,
     attendanceAutoNoShowAfterMinutes: 1440,
@@ -20,6 +22,9 @@ function settings(overrides: Partial<ClubSettings> = {}): ClubSettings {
 function hall(overrides: Partial<Hall> = {}): Omit<Hall, 'id'> {
   return {
     name: 'Основной зал',
+    timezone: 'Asia/Krasnoyarsk',
+    cityId: null,
+    address: null,
     bookingStep: 'MIN_30',
     tableHourPrice: 40_000,
     tableExtra30MinPrice: 20_000,
@@ -73,16 +78,10 @@ describe('clubSettingsViolations', () => {
     );
   });
 
-  it('нарушения возвращаются все разом, а не по одному', () => {
-    const violations = clubSettingsViolations(
-      settings({
-        timezone: 'Asia/Krasnayarsk',
-        attendanceReminderAfterMinutes: 120,
-        attendanceAutoNoShowAfterMinutes: 60,
-      }),
-    );
-
-    assert.equal(violations.length, 2);
+  it('часовой пояс настройкам клуба больше не принадлежит', () => {
+    // Пояс переехал на зал: залы одной организации бывают в разных регионах.
+    // Проверка живёт в hallViolations, и клубу здесь предъявлять нечего.
+    assert.equal('timezone' in settings(), false);
   });
 });
 
@@ -137,5 +136,22 @@ describe('hallViolations', () => {
 
   it('зал без названия отклоняется', () => {
     assert.equal(hallViolations(hall({ name: '   ' })).length, 1);
+  });
+
+  it('опечатка в часовом поясе зала отклоняется', () => {
+    // Ровно тот случай, ради которого проверка и заведена: строка выглядит
+    // правдоподобно и молча сдвинула бы границы суток именно этого зала.
+    const violations = hallViolations(hall({ timezone: 'Asia/Krasnayarsk' }));
+
+    assert.equal(violations.length, 1);
+    assert.match(violations[0]!, /Часовой пояс/);
+  });
+
+  it('нарушения возвращаются все разом, а не по одному', () => {
+    const violations = hallViolations(
+      hall({ name: '  ', timezone: 'Красноярск', hasRobotOption: true }),
+    );
+
+    assert.equal(violations.length, 3);
   });
 });

@@ -17,7 +17,9 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { inputClassName } from '@/components/ui/Field';
 import type { ClosureSlot } from '@yenisey/types';
-import { api, ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/api';
+import type { clubApi } from '@/lib/api';
+import { useClubApi } from '@/lib/useClubApi';
 import { zonedToInstant } from '@/lib/timezones';
 import { cn } from '@/lib/cn';
 import { shortName } from '@/lib/names';
@@ -86,6 +88,7 @@ export function ScheduleCard({
   /** Постановка турнира в сетку заводит его — список в разделе устарел. */
   onTournamentsChanged: () => void;
 }) {
+  const club = useClubApi();
   const [mode, setMode] = useState<Mode>('template');
   const [weekday, setWeekday] = useState<Weekday>(1);
   const [date, setDate] = useState(() => todayIn(timezone));
@@ -188,7 +191,7 @@ export function ScheduleCard({
 
     let cancelled = false;
 
-    api
+    club
       .people({ ids: missing, limit: missing.length })
       .then((page) => {
         if (cancelled) return;
@@ -211,7 +214,7 @@ export function ScheduleCard({
 
     try {
       if (mode === 'template') {
-        const rules = await api.template(hallId);
+        const rules = await club.template(hallId);
         const split = splitByGrid(rules);
         const next = slotsToCells(split.inGrid, (slot) => String((slot as ClosureRule).weekday));
 
@@ -221,8 +224,8 @@ export function ScheduleCard({
         setCustomised(false);
       } else {
         const [day, dates] = await Promise.all([
-          api.daySchedule(hallId, date),
-          api.customisedDates(hallId),
+          club.daySchedule(hallId, date),
+          club.customisedDates(hallId),
         ]);
 
         // Неправленый день показывается заполненным по шаблону: администратор
@@ -230,7 +233,7 @@ export function ScheduleCard({
         // сегодня вообще происходит.
         const source = day.customised
           ? day.closures
-          : (await api.template(hallId)).filter(
+          : (await club.template(hallId)).filter(
               (rule) => rule.weekday === weekdayOf(date),
             );
 
@@ -346,7 +349,7 @@ export function ScheduleCard({
           weekday: Number(laneKey) as Weekday,
         }));
 
-        const stored = await api.replaceTemplate(hallId, [
+        const stored = await club.replaceTemplate(hallId, [
           ...(night as ClosureRule[]).map(({ id: _id, ...rest }) => rest),
           ...rules,
         ]);
@@ -359,13 +362,14 @@ export function ScheduleCard({
         setSaved(next);
       } else {
         const closures = await resolveTournaments(
+          club,
           slots.map(({ lane: _lane, ...slot }) => slot),
           date,
           timezone,
           onTournamentsChanged,
         );
 
-        const stored = await api.replaceDay(hallId, date, [
+        const stored = await club.replaceDay(hallId, date, [
           ...(night as DayClosure[]).map(({ id: _id, ...rest }) => rest),
           ...closures,
         ]);
@@ -395,7 +399,7 @@ export function ScheduleCard({
     setPending(true);
 
     try {
-      await api.resetDay(hallId, date);
+      await club.resetDay(hallId, date);
       setCustomisedDates((previous) => previous.filter((item) => item !== date));
       await load();
     } catch (cause) {
@@ -839,6 +843,10 @@ function Legend({
  * администратор и разметил как начало.
  */
 async function resolveTournaments(
+  // Клиент API приходит аргументом, а не берётся хуком: это обычная функция,
+  // а не компонент, и хук в ней вызвать нельзя. Клуб она при этом знать
+  // обязана — турнир заводится в конкретном клубе.
+  club: ReturnType<typeof clubApi>,
   closures: (ClosureSlot & { tournamentTypeId: string | null })[],
   date: string,
   timezone: string,
@@ -861,7 +869,7 @@ async function resolveTournaments(
       throw new ApiError('Не удалось определить время начала турнира', 400);
     }
 
-    const tournament = await api.createTournament({
+    const tournament = await club.createTournament({
       tournamentTypeId: typeId,
       startsAt: startsAt.toISOString(),
     });

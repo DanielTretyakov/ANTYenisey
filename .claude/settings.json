@@ -1,1 +1,31 @@
-{}
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx next *)",
+      "Bash(curl -s -o /dev/null -w \"status=%{http_code} redirect=%{redirect_url}\\\\n\" http://localhost:3000/)",
+      "Bash(curl -s http://localhost:3000/login)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3001/api/clubs/yenisey)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3001/api/tenants/yenisey)",
+      "Bash(curl -s http://localhost:3000/)",
+      "Bash(curl -s -X POST http://localhost:3001/api/auth/register -H 'Content-Type: application/json' -H 'X-Auth-Transport: body' -d '{\"tenantSlug\":\"yenisey\",\"email\":\"__TRACKED_VAR__\",\"password\":\"Probe12345\",\"lastName\":\"Иванов\",\"firstName\":\"Пётр\",\"middleName\":\"Сергеевич\",\"phone\":\"+79991234567\",\"birthDate\":\"2001-05-17\"}')",
+      "Bash(python -c \"import sys,json,io; sys.stdout=io.TextIOWrapper\\(sys.stdout.buffer,encoding='utf-8'\\); d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('user'\\),ensure_ascii=False,indent=2\\)\\)\")",
+      "Bash(PYTHONIOENCODING=utf-8 python \"C:/Users/denow/AppData/Local/Temp/claude/x------------Projects-ANTYenisey/67680b9d-f466-45dc-b565-f2d53caf90ba/scratchpad/front_probe.py\")",
+      "Bash(curl -s -o /dev/null -w \"web=%{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(curl -s -o /dev/null -w \"api=%{http_code}\\\\n\" http://localhost:3001/api/health)",
+      "Bash(curl -s http://localhost:3000/register)",
+      "Bash(curl -s http://localhost:3000/cabinet)",
+      "Bash(curl -s http://localhost:3000/club)",
+      "Bash(grep -rho \"clubs/.\\\\{0,40\\\\}\" apps/web/.next/static/chunks/app/club/page.js)",
+      "Bash(PYTHONIOENCODING=utf-8 python \"C:/Users/denow/AppData/Local/Temp/claude/x------------Projects-ANTYenisey/67680b9d-f466-45dc-b565-f2d53caf90ba/scratchpad/login_probe.py\")",
+      "Bash(npx prisma *)",
+      "PowerShell(Get-NetTCPConnection -State Listen -LocalPort 3000,3001 -ErrorAction SilentlyContinue | Select-Object LocalPort, OwningProcess | ForEach-Object { $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; \"$\\($_.LocalPort\\) -> PID $\\($_.OwningProcess\\) $\\($p.ProcessName\\)\" })",
+      "PowerShell(Stop-Process -Id 4216,31748 -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-NetTCPConnection -State Listen -LocalPort 3000,3001 -ErrorAction SilentlyContinue)",
+      "Bash(pnpm --filter @yenisey/api typecheck)",
+      "Bash(node --test --experimental-strip-types src/club/settings-rules.test.ts)",
+      "Bash(pnpm --filter @yenisey/web typecheck)",
+      "Bash(python -c ' *)",
+      "Bash(python)"
+    ]
+  }
+}

@@ -12,7 +12,6 @@ import {
   Query,
 } from '@nestjs/common';
 import type {
-  AccessTokenPayload,
   ClosureRule,
   ClubCoach,
   ClubPeoplePage,
@@ -43,8 +42,9 @@ import {
 } from './dto/catalog.dto';
 import { ChangeRoleDto, ClubPeopleQueryDto } from './dto/people.dto';
 import { UpdateClubSettingsDto } from './dto/update-settings.dto';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
+import type { ClubContext } from '../auth/club-context';
 
 /**
  * Профиль клуба: настройки, залы, столы и расписание.
@@ -53,12 +53,14 @@ import { Roles } from '../auth/decorators/roles.decorator';
  * отдельных методов: маршрут, добавленный сюда завтра, окажется закрытым по
  * умолчанию, а не открытым по забывчивости.
  *
- * Клуб берётся из access-токена, а не из адреса. Администратор физически не
- * может обратиться к чужому клубу: подставить туда чужой идентификатор
- * неоткуда.
+ * Клуб берётся из адреса, а не из токена: аккаунт один на платформу, и
+ * один человек бывает администратором двух клубов сразу. Подставить в адрес
+ * чужой клуб теперь можно — и именно поэтому ClubContextGuard читает роль из
+ * TenantMembership на каждый запрос: администратор «Енисея» в чужом клубе
+ * окажется клиентом и получит 403 от строки @Roles ниже.
  */
 @Roles('ADMIN', 'OWNER')
-@Controller('club')
+@Controller('clubs/:slug')
 export class ClubController {
   constructor(
     private readonly club: ClubService,
@@ -69,89 +71,89 @@ export class ClubController {
   // --- Настройки клуба -----------------------------------------------------
 
   @Get('settings')
-  findSettings(@CurrentUser() user: AccessTokenPayload): Promise<ClubSettings> {
-    return this.club.findSettings(user.tenantId);
+  findSettings(@CurrentClub() club: ClubContext): Promise<ClubSettings> {
+    return this.club.findSettings(club.tenantId);
   }
 
   @Patch('settings')
   updateSettings(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Body() dto: UpdateClubSettingsDto,
   ): Promise<ClubSettings> {
-    return this.club.updateSettings(user.tenantId, dto);
+    return this.club.updateSettings(club.tenantId, dto);
   }
 
   // --- Залы ----------------------------------------------------------------
 
   @Get('halls')
-  listHalls(@CurrentUser() user: AccessTokenPayload): Promise<Hall[]> {
-    return this.club.listHalls(user.tenantId);
+  listHalls(@CurrentClub() club: ClubContext): Promise<Hall[]> {
+    return this.club.listHalls(club.tenantId);
   }
 
   @Post('halls')
   createHall(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Body() dto: CreateHallDto,
   ): Promise<Hall> {
-    return this.club.createHall(user.tenantId, dto);
+    return this.club.createHall(club.tenantId, dto);
   }
 
   @Patch('halls/:id')
   updateHall(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('id') hallId: string,
     @Body() dto: UpdateHallDto,
   ): Promise<Hall> {
-    return this.club.updateHall(user.tenantId, hallId, dto);
+    return this.club.updateHall(club.tenantId, hallId, dto);
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete('halls/:id')
   deleteHall(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('id') hallId: string,
   ): Promise<void> {
-    return this.club.deleteHall(user.tenantId, hallId);
+    return this.club.deleteHall(club.tenantId, hallId);
   }
 
   // --- Столы ---------------------------------------------------------------
 
   @Get('tables')
-  listTables(@CurrentUser() user: AccessTokenPayload): Promise<ClubTable[]> {
-    return this.club.listTables(user.tenantId);
+  listTables(@CurrentClub() club: ClubContext): Promise<ClubTable[]> {
+    return this.club.listTables(club.tenantId);
   }
 
   @Post('tables')
   createTable(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Body() dto: CreateTableDto,
   ): Promise<ClubTable> {
-    return this.club.createTable(user.tenantId, dto.hallId, dto.label);
+    return this.club.createTable(club.tenantId, dto.hallId, dto.label);
   }
 
   @Patch('tables/:id')
   renameTable(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('id') tableId: string,
     @Body() dto: RenameTableDto,
   ): Promise<ClubTable> {
-    return this.club.renameTable(user.tenantId, tableId, dto.label);
+    return this.club.renameTable(club.tenantId, tableId, dto.label);
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete('tables/:id')
   deleteTable(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('id') tableId: string,
   ): Promise<void> {
-    return this.club.deleteTable(user.tenantId, tableId);
+    return this.club.deleteTable(club.tenantId, tableId);
   }
 
   // --- Тренеры -------------------------------------------------------------
 
   @Get('coaches')
-  listCoaches(@CurrentUser() user: AccessTokenPayload): Promise<ClubCoach[]> {
-    return this.club.listCoaches(user.tenantId);
+  listCoaches(@CurrentClub() club: ClubContext): Promise<ClubCoach[]> {
+    return this.club.listCoaches(club.tenantId);
   }
 
   // --- Состав клуба --------------------------------------------------------
@@ -159,10 +161,10 @@ export class ClubController {
   /** Сотрудники и клиенты одним списком, с поиском и постраничной выдачей. */
   @Get('people')
   listPeople(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Query() query: ClubPeopleQueryDto,
   ): Promise<ClubPeoplePage> {
-    return this.club.listPeople(user.tenantId, query);
+    return this.club.listPeople(club.tenantId, query);
   }
 
   /**
@@ -173,101 +175,101 @@ export class ClubController {
    */
   @Patch('people/:id/role')
   changeRole(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('id') userId: string,
     @Body() dto: ChangeRoleDto,
   ): Promise<ClubPerson> {
-    return this.club.changeRole(user.tenantId, user.sub, userId, dto.role);
+    return this.club.changeRole(club.tenantId, club.userId, userId, dto.role);
   }
 
   // --- Типы тренировок -----------------------------------------------------
 
   @Get('training-types')
-  listTrainingTypes(@CurrentUser() user: AccessTokenPayload): Promise<TrainingType[]> {
-    return this.catalog.listTrainingTypes(user.tenantId);
+  listTrainingTypes(@CurrentClub() club: ClubContext): Promise<TrainingType[]> {
+    return this.catalog.listTrainingTypes(club.tenantId);
   }
 
   @Post('training-types')
   createTrainingType(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Body() dto: TrainingTypeDto,
   ): Promise<TrainingType> {
-    return this.catalog.createTrainingType(user.tenantId, dto);
+    return this.catalog.createTrainingType(club.tenantId, dto);
   }
 
   @Patch('training-types/:id')
   updateTrainingType(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('id') id: string,
     @Body() dto: TrainingTypeDto,
   ): Promise<TrainingType> {
-    return this.catalog.updateTrainingType(user.tenantId, id, dto);
+    return this.catalog.updateTrainingType(club.tenantId, id, dto);
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete('training-types/:id')
   deleteTrainingType(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('id') id: string,
   ): Promise<void> {
-    return this.catalog.deleteTrainingType(user.tenantId, id);
+    return this.catalog.deleteTrainingType(club.tenantId, id);
   }
 
   // --- Типы турниров -------------------------------------------------------
 
   @Get('tournament-types')
-  listTournamentTypes(@CurrentUser() user: AccessTokenPayload): Promise<TournamentType[]> {
-    return this.catalog.listTournamentTypes(user.tenantId);
+  listTournamentTypes(@CurrentClub() club: ClubContext): Promise<TournamentType[]> {
+    return this.catalog.listTournamentTypes(club.tenantId);
   }
 
   @Post('tournament-types')
   createTournamentType(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Body() dto: TournamentTypeDto,
   ): Promise<TournamentType> {
-    return this.catalog.createTournamentType(user.tenantId, dto);
+    return this.catalog.createTournamentType(club.tenantId, dto);
   }
 
   @Patch('tournament-types/:id')
   updateTournamentType(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('id') id: string,
     @Body() dto: TournamentTypeDto,
   ): Promise<TournamentType> {
-    return this.catalog.updateTournamentType(user.tenantId, id, dto);
+    return this.catalog.updateTournamentType(club.tenantId, id, dto);
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete('tournament-types/:id')
   deleteTournamentType(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('id') id: string,
   ): Promise<void> {
-    return this.catalog.deleteTournamentType(user.tenantId, id);
+    return this.catalog.deleteTournamentType(club.tenantId, id);
   }
 
   // --- Турниры -------------------------------------------------------------
 
   @Get('tournaments')
-  listTournaments(@CurrentUser() user: AccessTokenPayload): Promise<Tournament[]> {
-    return this.catalog.listTournaments(user.tenantId);
+  listTournaments(@CurrentClub() club: ClubContext): Promise<Tournament[]> {
+    return this.catalog.listTournaments(club.tenantId);
   }
 
   @Post('tournaments')
   createTournament(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Body() dto: TournamentDto,
   ): Promise<Tournament> {
-    return this.catalog.createTournament(user.tenantId, dto);
+    return this.catalog.createTournament(club.tenantId, dto);
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete('tournaments/:id')
   deleteTournament(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('id') id: string,
   ): Promise<void> {
-    return this.catalog.deleteTournament(user.tenantId, id);
+    return this.catalog.deleteTournament(club.tenantId, id);
   }
 
   // --- Расписание зала -----------------------------------------------------
@@ -275,56 +277,56 @@ export class ClubController {
   /** Постоянный шаблон недели: как зал живёт обычно. */
   @Get('halls/:hallId/template')
   findTemplate(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('hallId') hallId: string,
   ): Promise<ClosureRule[]> {
-    return this.schedule.findTemplate(user.tenantId, hallId);
+    return this.schedule.findTemplate(club.tenantId, hallId);
   }
 
   @Put('halls/:hallId/template')
   replaceTemplate(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('hallId') hallId: string,
     @Body() dto: ReplaceTemplateDto,
   ): Promise<ClosureRule[]> {
-    return this.schedule.replaceTemplate(user.tenantId, hallId, dto.rules);
+    return this.schedule.replaceTemplate(club.tenantId, hallId, dto.rules);
   }
 
   /** Даты, на которых расписание отличается от шаблона, — для подсветки в календаре. */
   @Get('halls/:hallId/days')
   findCustomisedDates(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('hallId') hallId: string,
   ): Promise<string[]> {
-    return this.schedule.findCustomisedDates(user.tenantId, hallId);
+    return this.schedule.findCustomisedDates(club.tenantId, hallId);
   }
 
   @Get('halls/:hallId/days/:date')
   findDay(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('hallId') hallId: string,
     @Param('date') date: string,
   ): Promise<DaySchedule> {
-    return this.schedule.findDay(user.tenantId, hallId, date);
+    return this.schedule.findDay(club.tenantId, hallId, date);
   }
 
   @Put('halls/:hallId/days/:date')
   replaceDay(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('hallId') hallId: string,
     @Param('date') date: string,
     @Body() dto: ReplaceDayDto,
   ): Promise<DaySchedule> {
-    return this.schedule.replaceDay(user.tenantId, hallId, date, dto.closures);
+    return this.schedule.replaceDay(club.tenantId, hallId, date, dto.closures);
   }
 
   /** Возврат даты к шаблону. */
   @Delete('halls/:hallId/days/:date')
   resetDay(
-    @CurrentUser() user: AccessTokenPayload,
+    @CurrentClub() club: ClubContext,
     @Param('hallId') hallId: string,
     @Param('date') date: string,
   ): Promise<DaySchedule> {
-    return this.schedule.resetDay(user.tenantId, hallId, date);
+    return this.schedule.resetDay(club.tenantId, hallId, date);
   }
 }

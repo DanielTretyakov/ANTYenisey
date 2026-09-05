@@ -1,11 +1,18 @@
 import type {
   AuthResponse,
   BookingDay,
+  BookingEntry,
   BookingQuote,
+  City,
   ClosureRule,
   ClosureRuleDraft,
   ClientBooking,
+  ClubCard,
   ClubCoach,
+  ClubEvent,
+  ClubSearchQuery,
+  FavouriteClub,
+  FeedEvent,
   ClubPeoplePage,
   ClubPeopleQuery,
   ClubPerson,
@@ -30,6 +37,7 @@ import type {
   UpdateHallRequest,
 } from '@yenisey/types';
 import { clearSession, readAccessToken, saveSession } from './session';
+import { TENANT_SLUG } from './config';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -100,18 +108,64 @@ async function authorized<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
   }
 
-  let refreshed: AuthResponse;
-
-  try {
-    refreshed = await request<AuthResponse>('/auth/refresh', { method: 'POST' });
-  } catch (cause) {
-    clearSession();
-    throw cause;
-  }
-
-  saveSession(refreshed);
+  const refreshed = await refreshOnce();
 
   return request<T>(path, withToken(init, refreshed.accessToken));
+}
+
+/**
+ * Запрос к открытому маршруту — но от своего имени, если человек вошёл.
+ *
+ * Открытый не значит анонимный. Список мероприятий клуба виден без входа, но
+ * вошедшему в нём нужна ещё одна вещь: записан ли он сам. Без токена сервер
+ * этого не знает и честно отвечает «неизвестно» — а интерфейс показывает
+ * кнопку «Записаться» тому, кто уже записан.
+ *
+ * Токена может не быть в памяти, хотя сессия жива, — сразу после перезагрузки
+ * страницы. Поэтому здесь тот же обмен куки, что и в `authorized`, но его
+ * неудача не ошибка: значит человек действительно не вошёл, и маршрут
+ * отвечает ему как анониму.
+ */
+async function optionallyAuthorized<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = readAccessToken() ?? (await refreshOnce().catch(() => null))?.accessToken;
+
+  return request<T>(path, token ? withToken(init, token) : init);
+}
+
+/**
+ * Обновление сессии, которое не наступает само себе на пятки.
+ *
+ * REFRESH-ТОКЕН РОТИРУЕТСЯ: сервер отдаёт новый и гасит предъявленный. Значит
+ * два одновременных обмена одной и той же кукой обречены — первый её отзовёт,
+ * второй получит 401 и решит, что сессия мертва.
+ *
+ * А одновременные обмены — норма, а не исключение. Сразу после перезагрузки
+ * страницы access-токена нет вовсе, и всё, что спрашивает сервер, идёт
+ * обновляться: шапка за профилем, страница за своими данными. Раньше это
+ * выглядело как «переход на главную выкидывает из аккаунта» — на самом деле
+ * два запроса просто отнимали сессию друг у друга.
+ *
+ * Поэтому обмен здесь один на всех: пока он идёт, остальные ждут его результат,
+ * а не начинают свой. Обещание снимается по завершении — следующий истёкший
+ * токен обновится заново.
+ */
+let refreshing: Promise<AuthResponse> | null = null;
+
+function refreshOnce(): Promise<AuthResponse> {
+  refreshing ??= request<AuthResponse>('/auth/refresh', { method: 'POST' })
+    .then((refreshed) => {
+      saveSession(refreshed);
+      return refreshed;
+    })
+    .catch((cause: unknown) => {
+      clearSession();
+      throw cause;
+    })
+    .finally(() => {
+      refreshing = null;
+    });
+
+  return refreshing;
 }
 
 function withToken(init: RequestInit, token: string): RequestInit {
@@ -123,9 +177,16 @@ const json = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
+/**
+ * Маршруты уровня платформы: аккаунт, поиск клубов, мои клубы, мои записи.
+ *
+ * Клуба не имеют вовсе — аккаунт один на всю платформу, и спрашивать «мои
+ * записи в каком клубе» бессмысленно: человек ходит в три и хочет расписание
+ * своей недели одним списком.
+ */
 export const api = {
-  /** Официальное название клуба по его коду. Открыто без авторизации. */
-  tenant: (slug: string): Promise<PublicTenant> => request(`/tenants/${slug}`),
+  /** Карточка клуба по его коду. Открыто без авторизации. */
+  tenant: (slug: string): Promise<PublicTenant> => request(`/clubs/${slug}`),
 
   register: (payload: RegisterRequest): Promise<AuthResponse> =>
     request('/auth/register', json('POST', payload)),
@@ -139,133 +200,215 @@ export const api = {
   /** Профиль вошедшего. Сессия восстанавливается сама, если access-токен истёк. */
   me: (): Promise<PublicUser> => authorized('/auth/me'),
 
-  // --- Профиль клуба. Доступен только ролям admin/owner.
-  clubSettings: (): Promise<ClubSettings> => authorized('/club/settings'),
+  // --- Стартовая страница: поиск клубов. Открыто без входа.
+  /** Справочник городов для выпадающего списка. */
+  cities: (): Promise<City[]> => request('/cities'),
 
-  updateClubSettings: (patch: UpdateClubSettingsRequest): Promise<ClubSettings> =>
-    authorized('/club/settings', json('PATCH', patch)),
-
-  // --- Залы
-  halls: (): Promise<Hall[]> => authorized('/club/halls'),
-
-  createHall: (payload: CreateHallRequest): Promise<Hall> =>
-    authorized('/club/halls', json('POST', payload)),
-
-  updateHall: (id: string, patch: UpdateHallRequest): Promise<Hall> =>
-    authorized(`/club/halls/${id}`, json('PATCH', patch)),
-
-  deleteHall: (id: string): Promise<void> =>
-    authorized(`/club/halls/${id}`, { method: 'DELETE' }),
-
-  // --- Столы
-  clubTables: (): Promise<ClubTable[]> => authorized('/club/tables'),
-
-  createTable: (hallId: string, label: string): Promise<ClubTable> =>
-    authorized('/club/tables', json('POST', { hallId, label })),
-
-  renameTable: (id: string, label: string): Promise<ClubTable> =>
-    authorized(`/club/tables/${id}`, json('PATCH', { label })),
-
-  deleteTable: (id: string): Promise<void> =>
-    authorized(`/club/tables/${id}`, { method: 'DELETE' }),
-
-  // --- Тренеры
-  coaches: (): Promise<ClubCoach[]> => authorized('/club/coaches'),
-
-  // --- Состав клуба
-  people: (query: ClubPeopleQuery = {}): Promise<ClubPeoplePage> => {
+  /**
+   * Поиск клубов по названию и городу.
+   *
+   * Пустой запрос — не ошибка, а «покажи всё»: человек, только что открывший
+   * страницу, ещё ничего не ввёл.
+   */
+  searchClubs: (query: ClubSearchQuery = {}): Promise<ClubCard[]> => {
     const params = new URLSearchParams();
 
-    if (query.role) params.set('role', query.role);
-    if (query.search) params.set('search', query.search);
-    if (query.ids?.length) params.set('ids', query.ids.join(','));
-    if (query.limit !== undefined) params.set('limit', String(query.limit));
-    if (query.offset !== undefined) params.set('offset', String(query.offset));
+    if (query.query) params.set('query', query.query);
+    if (query.cityId) params.set('cityId', query.cityId);
 
     const search = params.toString();
 
-    return authorized(`/club/people${search ? `?${search}` : ''}`);
+    return request(`/clubs${search ? `?${search}` : ''}`);
   },
 
-  /** Повышение клиента до тренера и обратно. */
-  changeRole: (userId: string, role: ClubPerson['role']): Promise<ClubPerson> =>
-    authorized(`/club/people/${userId}/role`, json('PATCH', { role })),
+  // --- Мои клубы. Избранное и заявленная принадлежность — одна сущность.
+  myClubs: (): Promise<FavouriteClub[]> => authorized('/me/clubs'),
 
-  // --- Справочники: типы тренировок, типы турниров, турниры
-  trainingTypes: (): Promise<TrainingType[]> => authorized('/club/training-types'),
+  /** Отметить клуб своим. Идемпотентно: второе нажатие ничего не меняет. */
+  addClub: (slug: string): Promise<FavouriteClub[]> =>
+    authorized(`/me/clubs/${slug}`, { method: 'PUT' }),
 
-  createTrainingType: (payload: TrainingTypeRequest): Promise<TrainingType> =>
-    authorized('/club/training-types', json('POST', payload)),
+  removeClub: (slug: string): Promise<FavouriteClub[]> =>
+    authorized(`/me/clubs/${slug}`, { method: 'DELETE' }),
 
-  updateTrainingType: (id: string, payload: TrainingTypeRequest): Promise<TrainingType> =>
-    authorized(`/club/training-types/${id}`, json('PATCH', payload)),
+  /** Лента ближайших мероприятий моих клубов — одним списком по времени. */
+  feed: (): Promise<FeedEvent[]> => authorized('/me/feed'),
 
-  deleteTrainingType: (id: string): Promise<void> =>
-    authorized(`/club/training-types/${id}`, { method: 'DELETE' }),
-
-  tournamentTypes: (): Promise<TournamentType[]> => authorized('/club/tournament-types'),
-
-  createTournamentType: (payload: TournamentTypeRequest): Promise<TournamentType> =>
-    authorized('/club/tournament-types', json('POST', payload)),
-
-  updateTournamentType: (id: string, payload: TournamentTypeRequest): Promise<TournamentType> =>
-    authorized(`/club/tournament-types/${id}`, json('PATCH', payload)),
-
-  deleteTournamentType: (id: string): Promise<void> =>
-    authorized(`/club/tournament-types/${id}`, { method: 'DELETE' }),
-
-  tournaments: (): Promise<Tournament[]> => authorized('/club/tournaments'),
-
-  createTournament: (payload: TournamentRequest): Promise<Tournament> =>
-    authorized('/club/tournaments', json('POST', payload)),
-
-  deleteTournament: (id: string): Promise<void> =>
-    authorized(`/club/tournaments/${id}`, { method: 'DELETE' }),
-
-  // --- Расписание зала
-  /** Постоянный шаблон недели: как зал живёт обычно. */
-  template: (hallId: string): Promise<ClosureRule[]> =>
-    authorized(`/club/halls/${hallId}/template`),
-
-  /** Шаблон заменяется целиком — см. ScheduleService.replaceTemplate на сервере. */
-  replaceTemplate: (hallId: string, rules: ClosureRuleDraft[]): Promise<ClosureRule[]> =>
-    authorized(`/club/halls/${hallId}/template`, json('PUT', { rules })),
-
-  /** Даты, на которых расписание отличается от шаблона. */
-  customisedDates: (hallId: string): Promise<string[]> =>
-    authorized(`/club/halls/${hallId}/days`),
-
-  daySchedule: (hallId: string, date: string): Promise<DaySchedule> =>
-    authorized(`/club/halls/${hallId}/days/${date}`),
-
-  replaceDay: (hallId: string, date: string, closures: DayClosureDraft[]): Promise<DaySchedule> =>
-    authorized(`/club/halls/${hallId}/days/${date}`, json('PUT', { closures })),
-
-  /** Возврат даты к шаблону. */
-  resetDay: (hallId: string, date: string): Promise<DaySchedule> =>
-    authorized(`/club/halls/${hallId}/days/${date}`, { method: 'DELETE' }),
-
-  // --- Бронирование стола клиентом
-  /** Залы с ценами и шагом брони — то же, что видит администратор в настройках. */
-  bookingHalls: (): Promise<Hall[]> => authorized('/booking/halls'),
-
-  /** Что свободно в зале на дату. Причина занятости клиенту не раскрывается. */
-  bookingDay: (hallId: string, date: string): Promise<BookingDay> =>
-    authorized(`/booking/halls/${hallId}/days/${date}`),
-
-  /** Стоимость аренды до подтверждения брони. */
-  bookingQuote: (hallId: string, durationMinutes: number, withRobot: boolean): Promise<BookingQuote> =>
-    authorized(
-      `/booking/quote?hallId=${encodeURIComponent(hallId)}` +
-        `&durationMinutes=${durationMinutes}&withRobot=${withRobot}`,
-    ),
-
-  createBooking: (payload: CreateBookingRequest): Promise<ClientBooking> =>
-    authorized('/booking/bookings', json('POST', payload)),
-
-  myBookings: (): Promise<ClientBooking[]> => authorized('/booking/bookings'),
-
-  /** Отмена возвращает саму бронь: клиент должен увидеть, сколько с него списалось. */
-  cancelBooking: (id: string): Promise<ClientBooking> =>
-    authorized(`/booking/bookings/${id}`, { method: 'DELETE' }),
+  /**
+   * Все записи по всем клубам: и турниры, и аренда столов.
+   *
+   * Отмена идёт клубным маршрутом — каждая строка несёт код своего клуба. Два
+   * пути отмены разошлись бы сначала в мелочах, потом в деньгах.
+   */
+  myBookings: (): Promise<BookingEntry[]> => authorized('/me/bookings'),
 };
+
+/**
+ * Маршруты одного клуба.
+ *
+ * Клуб едет участком адреса, а не токеном: аккаунт один на платформу, и
+ * серверу неоткуда узнать, про какой клуб спрашивают. Раньше код брался из
+ * окружения одной константой — веб обслуживал единственный клуб. Теперь он
+ * приходит из адреса страницы, и `TENANT_SLUG` остался только запасным
+ * значением для разработки.
+ *
+ * Фабрика, а не первый аргумент у каждого метода: страница знает свой клуб
+ * один раз, в начале, и повторять его в тридцати вызовах незачем.
+ */
+export function clubApi(slug: string = TENANT_SLUG) {
+  const club = `/clubs/${slug}`;
+
+  return {
+    // --- Профиль клуба. Доступен только ролям admin/owner.
+    clubSettings: (): Promise<ClubSettings> => authorized(`${club}/settings`),
+
+    updateClubSettings: (patch: UpdateClubSettingsRequest): Promise<ClubSettings> =>
+      authorized(`${club}/settings`, json('PATCH', patch)),
+
+    // --- Залы
+    halls: (): Promise<Hall[]> => authorized(`${club}/halls`),
+
+    createHall: (payload: CreateHallRequest): Promise<Hall> =>
+      authorized(`${club}/halls`, json('POST', payload)),
+
+    updateHall: (id: string, patch: UpdateHallRequest): Promise<Hall> =>
+      authorized(`${club}/halls/${id}`, json('PATCH', patch)),
+
+    deleteHall: (id: string): Promise<void> =>
+      authorized(`${club}/halls/${id}`, { method: 'DELETE' }),
+
+    // --- Столы
+    clubTables: (): Promise<ClubTable[]> => authorized(`${club}/tables`),
+
+    createTable: (hallId: string, label: string): Promise<ClubTable> =>
+      authorized(`${club}/tables`, json('POST', { hallId, label })),
+
+    renameTable: (id: string, label: string): Promise<ClubTable> =>
+      authorized(`${club}/tables/${id}`, json('PATCH', { label })),
+
+    deleteTable: (id: string): Promise<void> =>
+      authorized(`${club}/tables/${id}`, { method: 'DELETE' }),
+
+    // --- Тренеры
+    coaches: (): Promise<ClubCoach[]> => authorized(`${club}/coaches`),
+
+    // --- Состав клуба
+    people: (query: ClubPeopleQuery = {}): Promise<ClubPeoplePage> => {
+      const params = new URLSearchParams();
+
+      if (query.role) params.set('role', query.role);
+      if (query.search) params.set('search', query.search);
+      if (query.ids?.length) params.set('ids', query.ids.join(','));
+      if (query.limit !== undefined) params.set('limit', String(query.limit));
+      if (query.offset !== undefined) params.set('offset', String(query.offset));
+
+      const search = params.toString();
+
+      return authorized(`${club}/people${search ? `?${search}` : ''}`);
+    },
+
+    /** Повышение клиента до тренера и обратно. */
+    changeRole: (userId: string, role: ClubPerson['role']): Promise<ClubPerson> =>
+      authorized(`${club}/people/${userId}/role`, json('PATCH', { role })),
+
+    // --- Справочники: типы тренировок, типы турниров, турниры
+    trainingTypes: (): Promise<TrainingType[]> => authorized(`${club}/training-types`),
+
+    createTrainingType: (payload: TrainingTypeRequest): Promise<TrainingType> =>
+      authorized(`${club}/training-types`, json('POST', payload)),
+
+    updateTrainingType: (id: string, payload: TrainingTypeRequest): Promise<TrainingType> =>
+      authorized(`${club}/training-types/${id}`, json('PATCH', payload)),
+
+    deleteTrainingType: (id: string): Promise<void> =>
+      authorized(`${club}/training-types/${id}`, { method: 'DELETE' }),
+
+    tournamentTypes: (): Promise<TournamentType[]> => authorized(`${club}/tournament-types`),
+
+    createTournamentType: (payload: TournamentTypeRequest): Promise<TournamentType> =>
+      authorized(`${club}/tournament-types`, json('POST', payload)),
+
+    updateTournamentType: (id: string, payload: TournamentTypeRequest): Promise<TournamentType> =>
+      authorized(`${club}/tournament-types/${id}`, json('PATCH', payload)),
+
+    deleteTournamentType: (id: string): Promise<void> =>
+      authorized(`${club}/tournament-types/${id}`, { method: 'DELETE' }),
+
+    tournaments: (): Promise<Tournament[]> => authorized(`${club}/tournaments`),
+
+    createTournament: (payload: TournamentRequest): Promise<Tournament> =>
+      authorized(`${club}/tournaments`, json('POST', payload)),
+
+    deleteTournament: (id: string): Promise<void> =>
+      authorized(`${club}/tournaments/${id}`, { method: 'DELETE' }),
+
+    // --- Расписание зала
+    /** Постоянный шаблон недели: как зал живёт обычно. */
+    template: (hallId: string): Promise<ClosureRule[]> =>
+      authorized(`${club}/halls/${hallId}/template`),
+
+    /** Шаблон заменяется целиком — см. ScheduleService.replaceTemplate на сервере. */
+    replaceTemplate: (hallId: string, rules: ClosureRuleDraft[]): Promise<ClosureRule[]> =>
+      authorized(`${club}/halls/${hallId}/template`, json('PUT', { rules })),
+
+    /** Даты, на которых расписание отличается от шаблона. */
+    customisedDates: (hallId: string): Promise<string[]> =>
+      authorized(`${club}/halls/${hallId}/days`),
+
+    daySchedule: (hallId: string, date: string): Promise<DaySchedule> =>
+      authorized(`${club}/halls/${hallId}/days/${date}`),
+
+    replaceDay: (hallId: string, date: string, closures: DayClosureDraft[]): Promise<DaySchedule> =>
+      authorized(`${club}/halls/${hallId}/days/${date}`, json('PUT', { closures })),
+
+    /** Возврат даты к шаблону. */
+    resetDay: (hallId: string, date: string): Promise<DaySchedule> =>
+      authorized(`${club}/halls/${hallId}/days/${date}`, { method: 'DELETE' }),
+
+    // --- Мероприятия клуба
+    /**
+     * Предстоящие мероприятия клуба. Открыто без входа: клуб выбирают до
+     * регистрации. Вошедшему приезжает ещё и отметка «я уже записан» — ради
+     * неё запрос идёт от его имени, когда есть от чьего.
+     */
+    events: (): Promise<ClubEvent[]> => optionallyAuthorized(`${club}/events`),
+
+    /** Мои мероприятия в этом клубе: записи на турниры и свои брони столов. */
+    myEvents: (): Promise<BookingEntry[]> => authorized(`${club}/events/mine`),
+
+    registerForTournament: (tournamentId: string): Promise<BookingEntry> =>
+      authorized(`${club}/tournaments/${tournamentId}/registration`, { method: 'POST' }),
+
+    /** Отмена возвращает запись: человек должен увидеть, сколько с него списалось. */
+    cancelTournamentRegistration: (tournamentId: string): Promise<BookingEntry> =>
+      authorized(`${club}/tournaments/${tournamentId}/registration`, { method: 'DELETE' }),
+
+    // --- Бронирование стола клиентом
+    /** Залы с ценами и шагом брони — то же, что видит администратор в настройках. */
+    bookingHalls: (): Promise<Hall[]> => authorized(`${club}/booking/halls`),
+
+    /** Что свободно в зале на дату. Причина занятости клиенту не раскрывается. */
+    bookingDay: (hallId: string, date: string): Promise<BookingDay> =>
+      authorized(`${club}/booking/halls/${hallId}/days/${date}`),
+
+    /** Стоимость аренды до подтверждения брони. */
+    bookingQuote: (
+      hallId: string,
+      durationMinutes: number,
+      withRobot: boolean,
+    ): Promise<BookingQuote> =>
+      authorized(
+        `${club}/booking/quote?hallId=${encodeURIComponent(hallId)}` +
+          `&durationMinutes=${durationMinutes}&withRobot=${withRobot}`,
+      ),
+
+    createBooking: (payload: CreateBookingRequest): Promise<ClientBooking> =>
+      authorized(`${club}/booking/bookings`, json('POST', payload)),
+
+    myBookings: (): Promise<ClientBooking[]> => authorized(`${club}/booking/bookings`),
+
+    /** Отмена возвращает саму бронь: клиент должен увидеть, сколько с него списалось. */
+    cancelBooking: (id: string): Promise<ClientBooking> =>
+      authorized(`${club}/booking/bookings/${id}`, { method: 'DELETE' }),
+  };
+}
