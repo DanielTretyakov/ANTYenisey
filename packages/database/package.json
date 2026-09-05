@@ -18,6 +18,7 @@
     "verify": "bash scripts/verify-schema.sh",
     "typecheck": "tsc --noEmit",
     "seed": "dotenv -e ../../.env -- node --experimental-strip-types prisma/seed.ts",
+    "seed-demo": "dotenv -e ../../.env -- node --experimental-strip-types prisma/demo.ts",
     "clean-probes": "dotenv -e ../../.env -- node --experimental-strip-types prisma/clean-probes.ts"
   },
   "dependencies": {

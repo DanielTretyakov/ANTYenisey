@@ -248,7 +248,7 @@ model Tenant {
   // одного его зала: иначе клуб с залами в Красноярске и Абакане нашёлся бы
   // только по одному из них.
   cityId String?
-  city   City?  @relation(fields: [cityId], references: [id], onDelete: Restrict)
+  city   City?   @relation(fields: [cityId], references: [id], onDelete: Restrict)
 
   // --- Оформление страницы клуба.
   //
@@ -256,7 +256,7 @@ model Tenant {
   // прямой просьбе владельца продукта. Логотип хранится ссылкой, а не файлом:
   // загрузка файлов тянет за собой валидацию, лимиты размера и раздачу
   // статики, а страница клуба работает и без них.
-  logoUrl String?
+  logoUrl     String?
   /// Фирменный цвет в виде «#126b54». Формат проверяется CHECK'ом в
   /// constraints.sql: значение уезжает прямо в CSS-переменную, и мусор в нём
   /// означал бы сломанную вёрстку страницы клуба, а не пустое поле.
@@ -473,10 +473,10 @@ model User {
   deactivatedAt DateTime?
   anonymizedAt  DateTime?
 
-  memberships   TenantMembership[]
+  memberships    TenantMembership[]
   // Сессии входа висят на аккаунте, а не на клубе: человек входит на
   // платформу один раз и дальше сам выбирает, в какой клуб идёт.
-  refreshTokens RefreshToken[]
+  refreshTokens  RefreshToken[]
   // «Мои клубы» — отметка человека, а не клуба, поэтому висит на аккаунте.
   favouriteClubs UserClub[]
 }
@@ -525,8 +525,8 @@ model UserClub {
 /// администратора клуба вернуло бы ровно ту проблему, ради которой справочник
 /// и появился.
 model City {
-  id   String  @id @default(cuid())
-  name String
+  id     String  @id @default(cuid())
+  name   String
   /// Регион — чтобы различить одноимённые города («Железногорск» есть и в
   /// Красноярском крае, и в Курской области).
   region String?
@@ -702,7 +702,8 @@ model TrainingSession {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  bookings TrainingBooking[]
+  bookings    TrainingBooking[]
+  dayClosures DayClosure[]
 
   @@unique([id, tenantId])
   @@index([tenantId, startsAt])
@@ -1057,6 +1058,22 @@ model DayClosure {
   tournamentId String?
   tournament   Tournament? @relation(fields: [tournamentId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
+  /// Занятие, ради которого стол закрыт. Возможен только при purpose =
+  /// TRAINING и, в отличие от турнира, НЕ обязателен: администратор законно
+  /// закрывает стол под индивидуальное занятие, на которое никто не
+  /// записывается, — сессии с лимитом мест у такого занятия нет.
+  ///
+  /// Когда ссылка есть, занятое время стола и сессия, на которую идёт запись,
+  /// становятся одним фактом. Без неё они два независимых списка, которым
+  /// ничто не мешает разойтись: занятие отменили в расписании, а запись на
+  /// него осталась открытой.
+  ///
+  /// В шаблоне недели (TableClosureRule) такого поля нет и быть не может — по
+  /// той же причине, что и у турнира: шаблон повторяется, а у сессии
+  /// конкретная дата.
+  trainingSessionId String?
+  trainingSession   TrainingSession? @relation(fields: [trainingSessionId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1066,6 +1083,7 @@ model DayClosure {
   @@index([clientId])
   @@index([trainingTypeId])
   @@index([tournamentId])
+  @@index([trainingSessionId])
 }
 
 /// Бронь стола: самостоятельная онлайн-аренда клиента (без подтверждения

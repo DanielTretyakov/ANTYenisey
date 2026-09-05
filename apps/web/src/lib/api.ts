@@ -31,6 +31,8 @@ import type {
   TournamentRequest,
   TournamentType,
   TournamentTypeRequest,
+  TrainingSession,
+  TrainingSessionRequest,
   TrainingType,
   TrainingTypeRequest,
   UpdateClubSettingsRequest,
@@ -342,6 +344,20 @@ export function clubApi(slug: string = TENANT_SLUG) {
     deleteTournament: (id: string): Promise<void> =>
       authorized(`${club}/tournaments/${id}`, { method: 'DELETE' }),
 
+    trainingSessions: (): Promise<TrainingSession[]> => authorized(`${club}/training-sessions`),
+
+    createTrainingSession: (payload: TrainingSessionRequest): Promise<TrainingSession> =>
+      authorized(`${club}/training-sessions`, json('POST', payload)),
+
+    updateTrainingSession: (
+      id: string,
+      payload: TrainingSessionRequest,
+    ): Promise<TrainingSession> =>
+      authorized(`${club}/training-sessions/${id}`, json('PATCH', payload)),
+
+    deleteTrainingSession: (id: string): Promise<void> =>
+      authorized(`${club}/training-sessions/${id}`, { method: 'DELETE' }),
+
     // --- Расписание зала
     /** Постоянный шаблон недели: как зал живёт обычно. */
     template: (hallId: string): Promise<ClosureRule[]> =>
@@ -373,7 +389,7 @@ export function clubApi(slug: string = TENANT_SLUG) {
      */
     events: (): Promise<ClubEvent[]> => optionallyAuthorized(`${club}/events`),
 
-    /** Мои мероприятия в этом клубе: записи на турниры и свои брони столов. */
+    /** Мои мероприятия в этом клубе: занятия, турниры и свои брони столов. */
     myEvents: (): Promise<BookingEntry[]> => authorized(`${club}/events/mine`),
 
     registerForTournament: (tournamentId: string): Promise<BookingEntry> =>
@@ -382,6 +398,13 @@ export function clubApi(slug: string = TENANT_SLUG) {
     /** Отмена возвращает запись: человек должен увидеть, сколько с него списалось. */
     cancelTournamentRegistration: (tournamentId: string): Promise<BookingEntry> =>
       authorized(`${club}/tournaments/${tournamentId}/registration`, { method: 'DELETE' }),
+
+    /** Идентификатор — ЗАНЯТИЯ, а не строки записи: по нему же идёт отмена. */
+    registerForTraining: (sessionId: string): Promise<BookingEntry> =>
+      authorized(`${club}/trainings/${sessionId}/booking`, { method: 'POST' }),
+
+    cancelTrainingBooking: (sessionId: string): Promise<BookingEntry> =>
+      authorized(`${club}/trainings/${sessionId}/booking`, { method: 'DELETE' }),
 
     // --- Бронирование стола клиентом
     /** Залы с ценами и шагом брони — то же, что видит администратор в настройках. */

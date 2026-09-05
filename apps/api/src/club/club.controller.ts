@@ -22,6 +22,7 @@ import type {
   Hall,
   Tournament,
   TournamentType,
+  TrainingSession,
   TrainingType,
 } from '@yenisey/types';
 import { CatalogService } from './catalog.service';
@@ -38,6 +39,7 @@ import {
 import {
   TournamentDto,
   TournamentTypeDto,
+  TrainingSessionDto,
   TrainingTypeDto,
 } from './dto/catalog.dto';
 import { ChangeRoleDto, ClubPeopleQueryDto } from './dto/people.dto';
@@ -270,6 +272,44 @@ export class ClubController {
     @Param('id') id: string,
   ): Promise<void> {
     return this.catalog.deleteTournament(club.tenantId, id);
+  }
+
+  // --- Занятия -------------------------------------------------------------
+
+  @Get('training-sessions')
+  listTrainingSessions(@CurrentClub() club: ClubContext): Promise<TrainingSession[]> {
+    return this.catalog.listTrainingSessions(club.tenantId);
+  }
+
+  @Post('training-sessions')
+  createTrainingSession(
+    @CurrentClub() club: ClubContext,
+    @Body() dto: TrainingSessionDto,
+  ): Promise<TrainingSession> {
+    return this.catalog.createTrainingSession(club.tenantId, dto);
+  }
+
+  /**
+   * Правка занятия. У турнира такого маршрута нет: у него нечего править,
+   * кроме даты, — а у занятия есть тренер, время окончания и лимит мест, и
+   * заводить занятие заново из-за смены тренера значит потерять записи.
+   */
+  @Patch('training-sessions/:id')
+  updateTrainingSession(
+    @CurrentClub() club: ClubContext,
+    @Param('id') id: string,
+    @Body() dto: TrainingSessionDto,
+  ): Promise<TrainingSession> {
+    return this.catalog.updateTrainingSession(club.tenantId, id, dto);
+  }
+
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete('training-sessions/:id')
+  deleteTrainingSession(
+    @CurrentClub() club: ClubContext,
+    @Param('id') id: string,
+  ): Promise<void> {
+    return this.catalog.deleteTrainingSession(club.tenantId, id);
   }
 
   // --- Расписание зала -----------------------------------------------------

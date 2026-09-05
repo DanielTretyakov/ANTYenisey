@@ -353,7 +353,9 @@ export class BookingService {
       }),
       this.prisma.hallDaySchedule.findFirst({
         where: { tenantId, hallId, date: parseDate(date) },
-        select: { closures: { select: { ...SLOT_SELECT, tournamentId: true } } },
+        select: {
+          closures: { select: { ...SLOT_SELECT, tournamentId: true, trainingSessionId: true } },
+        },
       }),
     ]);
 
@@ -361,7 +363,12 @@ export class BookingService {
     // выбора живёт в slotsForDate — повторять её здесь нельзя, иначе движок
     // бронирования и профиль клуба разошлись бы в понимании расписания.
     const slots = slotsForDate(
-      template.map((rule) => ({ ...rule, weekday: rule.weekday as Weekday, tournamentId: null })),
+      template.map((rule) => ({
+        ...rule,
+        weekday: rule.weekday as Weekday,
+        tournamentId: null,
+        trainingSessionId: null,
+      })),
       day
         ? {
             customised: true,

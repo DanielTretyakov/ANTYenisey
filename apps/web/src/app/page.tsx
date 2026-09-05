@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import type { City, ClubCard, FeedEvent } from '@yenisey/types';
+import { PlatformMark } from '@/components/brand/PlatformLogo';
 import { ClubMark } from '@/components/club/ClubMark';
 import { When } from '@/components/club/When';
 import { SiteHeader } from '@/components/layout/SiteHeader';
@@ -99,8 +100,9 @@ export default function StartPage() {
       </main>
 
       <footer className="mt-20 border-t border-border">
-        <div className="mx-auto w-full max-w-6xl px-5 py-9 text-[0.8125rem] text-text-subtle sm:px-8">
-          Платформа клубов настольного тенниса
+        <div className="mx-auto flex w-full max-w-6xl items-center gap-2.5 px-5 py-9 text-[0.8125rem] text-text-subtle sm:px-8">
+          <PlatformMark className="text-[1.25rem]" />
+          КНТ — платформа клубов настольного тенниса
         </div>
       </footer>
     </div>

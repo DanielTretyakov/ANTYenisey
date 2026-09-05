@@ -36,13 +36,58 @@ async function main(): Promise<void> {
   // Restrict, а смоук отменяет бронь, но удалить её по HTTP не может и не
   // должен. В продукте бронь не удаляется никогда — это история платежей.
   await prisma.tableBooking.deleteMany({ where: { clientId: { in: ids } } });
-  // Записи на турниры — по той же причине и тем же порядком, что и брони
-  // столов: на клиенте стоит Restrict, а смоук запись отменяет, но не удаляет.
+  // Мероприятия, которых касались проверочные клиенты, запоминаются ДО
+  // удаления их записей: после удаления связь с ними теряется, и отличить
+  // заведённое смоуком занятие от живого расписания клуба будет уже нечем.
+  const touchedSessions = new Set(
+    (
+      await prisma.trainingBooking.findMany({
+        where: { clientId: { in: ids } },
+        select: { sessionId: true },
+      })
+    ).map((booking) => booking.sessionId),
+  );
+
+  const touchedTournaments = new Set(
+    (
+      await prisma.tournamentRegistration.findMany({
+        where: { clientId: { in: ids } },
+        select: { tournamentId: true },
+      })
+    ).map((registration) => registration.tournamentId),
+  );
+
+  // Записи на занятия и турниры — по той же причине и тем же порядком, что и
+  // брони столов: на клиенте стоит Restrict, а смоук запись отменяет, но не
+  // удаляет.
+  await prisma.trainingBooking.deleteMany({ where: { clientId: { in: ids } } });
   await prisma.tournamentRegistration.deleteMany({ where: { clientId: { in: ids } } });
   await prisma.clientProfile.deleteMany({ where: { userId: { in: ids } } });
   const removed = await prisma.user.deleteMany({ where });
 
+  // Сами мероприятия, ради которых смоук эти записи и заводил.
+  //
+  // Убрать их сама проверка не может: пока на занятии висит хотя бы одна
+  // запись — пусть даже отменённая, — сервер отказывает, и правильно делает.
+  //
+  // Удаляем только то, что стало ничьим: ни одной чужой записи и ни одного
+  // окна в расписании. Занятие, которое смоук взял из живого расписания клуба,
+  // под это условие не подойдёт и останется на месте.
+  const sessions = await prisma.trainingSession.deleteMany({
+    where: { id: { in: [...touchedSessions] }, bookings: { none: {} }, dayClosures: { none: {} } },
+  });
+  const tournaments = await prisma.tournament.deleteMany({
+    where: {
+      id: { in: [...touchedTournaments] },
+      registrations: { none: {} },
+      dayClosures: { none: {} },
+    },
+  });
+
   console.log(`Удалено тестовых пользователей: ${removed.count}`);
+  console.log(
+    `Убрано мероприятий смоука: занятий ${sessions.count}, турниров ${tournaments.count}`,
+  );
 }
 
 main()

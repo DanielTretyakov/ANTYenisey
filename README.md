@@ -32,6 +32,7 @@ cp .env.example .env          # заполнить пароль БД и два �
 pnpm db:generate
 pnpm --filter @yenisey/database migrate
 pnpm --filter @yenisey/database seed
+pnpm db:seed-demo             # занятия и турниры на ближайшие дни — иначе страница клуба пуста
 pnpm dev                      # api :3001, web :3000
 ```
 
@@ -41,7 +42,7 @@ pnpm dev                      # api :3001, web :3000
 pnpm dev            # оба приложения в watch-режиме
 pnpm typecheck      # проверка типов по всем пакетам
 pnpm test           # модульные тесты (node --test)
-pnpm smoke          # 227 сценариев против поднятого API и живого Postgres
+pnpm smoke          # 255 сценариев против поднятого API и живого Postgres
 pnpm db:migrate
 pnpm db:studio
 ```

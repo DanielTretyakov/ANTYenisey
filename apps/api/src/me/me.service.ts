@@ -2,7 +2,21 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { Prisma } from '@yenisey/database';
 import type { FavouriteClub, FeedEvent } from '@yenisey/types';
 import { MAX_FAVOURITE_CLUBS } from '@yenisey/types';
+import {
+  TOURNAMENT_EVENT_SELECT,
+  TRAINING_EVENT_SELECT,
+  tournamentEvent,
+  trainingEvent,
+} from '../events/event-view';
 import { PrismaService } from '../prisma/prisma.service';
+
+/**
+ * Клуб мероприятия в ленте: минимум, которого хватает, чтобы его назвать,
+ * открыть и покрасить. Тот же набор, что у записи в «Моих записях».
+ */
+const CLUB_SELECT = {
+  select: { slug: true, name: true, accentColor: true },
+} as const;
 
 /** Поля клуба для карточки «моего клуба» — те же, что в поиске. */
 const CARD_SELECT = {
@@ -128,35 +142,35 @@ export class MeService {
       return [];
     }
 
-    const tournaments = await this.prisma.tournament.findMany({
-      where: {
-        tenantId: { in: favourites.map((row) => row.tenantId) },
-        startsAt: { gte: new Date() },
-      },
-      select: {
-        id: true,
-        startsAt: true,
-        tenant: { select: { slug: true, name: true, accentColor: true } },
-        tournamentType: { select: { name: true, ratingLabel: true, price: true } },
-        registrations: {
-          where: { status: 'BOOKED' },
-          select: { clientId: true },
-        },
-      },
-      orderBy: { startsAt: 'asc' },
-      take: limit,
-    });
+    const scope = {
+      tenantId: { in: favourites.map((row) => row.tenantId) },
+      startsAt: { gte: new Date() },
+    };
 
-    return tournaments.map((tournament) => ({
-      id: tournament.id,
-      club: tournament.tenant,
-      title: tournament.tournamentType.name,
-      ratingLabel: tournament.tournamentType.ratingLabel,
-      startsAt: tournament.startsAt.toISOString(),
-      price: tournament.tournamentType.price,
-      registeredCount: tournament.registrations.length,
-      registered: tournament.registrations.some((row) => row.clientId === userId),
-    }));
+    // По `limit` каждого вида, а не по `limit` на двоих: иначе клуб с плотным
+    // расписанием занятий вытеснил бы из ленты все турниры. Лишнее срезается
+    // после общей сортировки.
+    const [tournaments, sessions] = await Promise.all([
+      this.prisma.tournament.findMany({
+        where: scope,
+        select: { ...TOURNAMENT_EVENT_SELECT, tenant: CLUB_SELECT },
+        orderBy: { startsAt: 'asc' },
+        take: limit,
+      }),
+      this.prisma.trainingSession.findMany({
+        where: scope,
+        select: { ...TRAINING_EVENT_SELECT, tenant: CLUB_SELECT },
+        orderBy: { startsAt: 'asc' },
+        take: limit,
+      }),
+    ]);
+
+    return [
+      ...tournaments.map((row) => ({ ...tournamentEvent(row, userId), club: row.tenant })),
+      ...sessions.map((row) => ({ ...trainingEvent(row, userId), club: row.tenant })),
+    ]
+      .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
+      .slice(0, limit);
   }
 }
 

@@ -180,10 +180,15 @@ function Row({
     try {
       const club = clubApi(entry.club.slug);
 
+      // Аренда стола отвечает своей формой (`BookingResult`), а мероприятия —
+      // уже готовой строкой списка: их отмену собирает тот же сервис, что и
+      // сам список.
       onChanged(
-        entry.kind === 'TOURNAMENT'
-          ? await club.cancelTournamentRegistration(entry.id)
-          : toEntry(entry, await club.cancelBooking(entry.id)),
+        entry.kind === 'TABLE'
+          ? toEntry(entry, await club.cancelBooking(entry.id))
+          : entry.kind === 'TRAINING'
+            ? await club.cancelTrainingBooking(entry.id)
+            : await club.cancelTournamentRegistration(entry.id),
       );
     } catch (cause) {
       onError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');

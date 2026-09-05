@@ -5,11 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@yenisey/database';
+import { BookingStatus } from '@yenisey/database';
 import type {
   Tournament,
   TournamentRequest,
   TournamentType,
   TournamentTypeRequest,
+  TrainingSession,
+  TrainingSessionRequest,
   TrainingType,
   TrainingTypeRequest,
 } from '@yenisey/types';
@@ -347,6 +350,218 @@ export class CatalogService {
     }
 
     await this.prisma.tournament.delete({ where: { id } });
+  }
+
+  // --- Занятия -------------------------------------------------------------
+
+  async listTrainingSessions(tenantId: string): Promise<TrainingSession[]> {
+    const sessions = await this.prisma.trainingSession.findMany({
+      where: { tenantId },
+      select: {
+        id: true,
+        trainingTypeId: true,
+        coachId: true,
+        startsAt: true,
+        endsAt: true,
+        capacity: true,
+        trainingType: { select: { name: true } },
+        coach: { select: { membership: { select: { user: { select: { fullName: true } } } } } },
+        _count: {
+          select: {
+            dayClosures: true,
+            // Отменённые места не занимают: иначе занятие, из которого все
+            // ушли, выглядело бы полным до самого начала.
+            bookings: { where: { status: BookingStatus.BOOKED } },
+          },
+        },
+      },
+      // Ближайшие сверху — как у турниров: администратор заводит занятие и тут
+      // же ставит его в сетку, а прошедшие нужны реже.
+      orderBy: { startsAt: 'desc' },
+    });
+
+    return sessions.map((session) => ({
+      id: session.id,
+      trainingTypeId: session.trainingTypeId,
+      typeName: session.trainingType.name,
+      coachId: session.coachId,
+      coachName: session.coach.membership.user.fullName,
+      startsAt: session.startsAt.toISOString(),
+      endsAt: session.endsAt.toISOString(),
+      capacity: session.capacity,
+      bookedCount: session._count.bookings,
+      placedCount: session._count.dayClosures,
+    }));
+  }
+
+  async createTrainingSession(
+    tenantId: string,
+    dto: TrainingSessionRequest,
+  ): Promise<TrainingSession> {
+    const { startsAt, endsAt } = this.sessionInterval(dto);
+
+    const type = await this.prisma.trainingType.findFirst({
+      where: { id: dto.trainingTypeId, tenantId },
+      select: { id: true, isActive: true },
+    });
+
+    if (!type) {
+      throw new NotFoundException('Тип тренировки не найден');
+    }
+
+    if (!type.isActive) {
+      throw new ConflictException('Этот тип тренировки снят с продажи');
+    }
+
+    await this.ensureCoach(tenantId, dto.coachId);
+
+    const created = await this.prisma.trainingSession.create({
+      data: {
+        tenantId,
+        trainingTypeId: type.id,
+        coachId: dto.coachId,
+        startsAt,
+        endsAt,
+        capacity: dto.capacity,
+      },
+      select: { id: true },
+    });
+
+    return this.findTrainingSession(tenantId, created.id);
+  }
+
+  /**
+   * Правка занятия.
+   *
+   * Лимит мест нельзя опустить ниже числа уже записавшихся: иначе занятие
+   * оказалось бы переполненным задним числом, и решать, кого выгнать, стало бы
+   * некому. Администратор, которому это нужно, сначала снимает записи.
+   */
+  async updateTrainingSession(
+    tenantId: string,
+    id: string,
+    dto: TrainingSessionRequest,
+  ): Promise<TrainingSession> {
+    const { startsAt, endsAt } = this.sessionInterval(dto);
+
+    const session = await this.prisma.trainingSession.findFirst({
+      where: { id, tenantId },
+      select: {
+        id: true,
+        _count: { select: { bookings: { where: { status: BookingStatus.BOOKED } } } },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Занятие не найдено');
+    }
+
+    if (dto.capacity < session._count.bookings) {
+      throw new ConflictException(
+        `На занятие уже записались ${session._count.bookings} человек — мест не может быть меньше`,
+      );
+    }
+
+    const type = await this.prisma.trainingType.findFirst({
+      where: { id: dto.trainingTypeId, tenantId },
+      select: { id: true },
+    });
+
+    if (!type) {
+      throw new NotFoundException('Тип тренировки не найден');
+    }
+
+    await this.ensureCoach(tenantId, dto.coachId);
+
+    await this.prisma.trainingSession.update({
+      where: { id: session.id },
+      data: {
+        trainingTypeId: type.id,
+        coachId: dto.coachId,
+        startsAt,
+        endsAt,
+        capacity: dto.capacity,
+      },
+    });
+
+    return this.findTrainingSession(tenantId, session.id);
+  }
+
+  /**
+   * Удаление занятия — теми же правилами, что у турнира.
+   *
+   * Занятие, стоящее в расписании, удалить нельзя: внешний ключ на `Restrict`,
+   * и молча вынести вместе с ним куски расписания хуже, чем отказать.
+   */
+  async deleteTrainingSession(tenantId: string, id: string): Promise<void> {
+    const session = await this.prisma.trainingSession.findFirst({
+      where: { id, tenantId },
+      select: { id: true, _count: { select: { dayClosures: true, bookings: true } } },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Занятие не найдено');
+    }
+
+    if (session._count.dayClosures > 0) {
+      throw new ConflictException('Занятие стоит в расписании — сначала уберите его из сетки');
+    }
+
+    if (session._count.bookings > 0) {
+      throw new ConflictException('На занятие уже записывались — удалить его нельзя');
+    }
+
+    await this.prisma.trainingSession.delete({ where: { id } });
+  }
+
+  /**
+   * Разбор интервала занятия.
+   *
+   * Порядок моментов проверяется и здесь, и в базе (`TrainingSession_time_order`):
+   * база держит правило, а сообщение об ошибке человеку даёт сервер — из
+   * констрейнта наружу вылезла бы пятисотка.
+   */
+  private sessionInterval(dto: TrainingSessionRequest): { startsAt: Date; endsAt: Date } {
+    const startsAt = new Date(dto.startsAt);
+    const endsAt = new Date(dto.endsAt);
+
+    if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
+      throw new BadRequestException('Начало и конец занятия указываются моментами в ISO-8601');
+    }
+
+    if (endsAt.getTime() <= startsAt.getTime()) {
+      throw new BadRequestException('Занятие не может кончаться раньше, чем началось');
+    }
+
+    return { startsAt, endsAt };
+  }
+
+  /**
+   * Тренер этого клуба.
+   *
+   * Проверяется отдельно от вставки, хотя составной внешний ключ не пропустил
+   * бы и чужого: ключ отдаёт 23503 без объяснения, а администратор должен
+   * понять, что выбрал человека не из своего клуба.
+   */
+  private async ensureCoach(tenantId: string, coachId: string): Promise<void> {
+    const coach = await this.prisma.coachProfile.findFirst({
+      where: { userId: coachId, tenantId },
+      select: { userId: true },
+    });
+
+    if (!coach) {
+      throw new NotFoundException('Тренер не найден в этом клубе');
+    }
+  }
+
+  private async findTrainingSession(tenantId: string, id: string): Promise<TrainingSession> {
+    const found = (await this.listTrainingSessions(tenantId)).find((item) => item.id === id);
+
+    if (!found) {
+      throw new NotFoundException('Занятие не найдено');
+    }
+
+    return found;
   }
 
   private translateDuplicate(error: unknown, message: string): unknown {

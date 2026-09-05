@@ -25,6 +25,7 @@ const slot = (overrides: Partial<ClosureSlot> = {}): ClosureSlot => ({
   coachId: 'coach-1',
   clientId: null,
   trainingTypeId: 'type-1',
+  trainingSessionId: null,
   tournamentId: null,
   tournamentTypeId: null,
   ...overrides,
@@ -155,8 +156,8 @@ describe('cellsToSlots', () => {
     // слить их значило бы приписать часы одному из них.
     const result = cellsToSlots(
       cells([
-        [cellKey('day', 't1', 18), { purpose: 'TRAINING', coachId: 'a', clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }],
-        [cellKey('day', 't1', 19), { purpose: 'TRAINING', coachId: 'b', clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }],
+        [cellKey('day', 't1', 18), { purpose: 'TRAINING', coachId: 'a', clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }],
+        [cellKey('day', 't1', 19), { purpose: 'TRAINING', coachId: 'b', clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }],
       ]),
       ['day'],
       ['t1'],
@@ -170,8 +171,8 @@ describe('cellsToSlots', () => {
   it('смена назначения тоже разрывает окно', () => {
     const result = cellsToSlots(
       cells([
-        [cellKey('day', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }],
-        [cellKey('day', 't1', 19), { purpose: 'ROBOT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }],
+        [cellKey('day', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }],
+        [cellKey('day', 't1', 19), { purpose: 'ROBOT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }],
       ]),
       ['day'],
       ['t1'],
@@ -183,10 +184,10 @@ describe('cellsToSlots', () => {
   it('разрыв в середине даёт два окна, а не одно', () => {
     const result = cellsToSlots(
       cells([
-        [cellKey('day', 't1', 10), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }],
-        [cellKey('day', 't1', 11), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }],
+        [cellKey('day', 't1', 10), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }],
+        [cellKey('day', 't1', 11), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }],
         // 12-я клетка пропущена — стол свободен
-        [cellKey('day', 't1', 13), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }],
+        [cellKey('day', 't1', 13), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }],
       ]),
       ['day'],
       ['t1'],
@@ -197,7 +198,7 @@ describe('cellsToSlots', () => {
 
   it('окно, упирающееся в полночь, закрывается на 1440', () => {
     const result = cellsToSlots(
-      cells([[cellKey('day', 't1', SLOTS_PER_DAY - 1), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }]]),
+      cells([[cellKey('day', 't1', SLOTS_PER_DAY - 1), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }]]),
       ['day'],
       ['t1'],
     );
@@ -208,9 +209,9 @@ describe('cellsToSlots', () => {
   it('столы и дорожки не смешиваются между собой', () => {
     const result = cellsToSlots(
       cells([
-        [cellKey('1', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }],
-        [cellKey('1', 't2', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }],
-        [cellKey('2', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }],
+        [cellKey('1', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }],
+        [cellKey('1', 't2', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }],
+        [cellKey('2', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }],
       ]),
       ['1', '2'],
       ['t1', 't2'],
@@ -250,7 +251,7 @@ describe('cellsToSlots', () => {
 
 describe('copyLane', () => {
   it('переносит занятое время на другую дорожку', () => {
-    const source = cells([[cellKey('1', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }]]);
+    const source = cells([[cellKey('1', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }]]);
     const next = copyLane(source, '1', ['2'], ['t1']);
 
     assert.equal(next.get(cellKey('2', 't1', 18))?.purpose, 'RENT');
@@ -261,8 +262,8 @@ describe('copyLane', () => {
     // Иначе «скопировать понедельник на вторник» оставляло бы во вторнике
     // старые окна, и результат не совпадал бы с образцом.
     const source = cells([
-      [cellKey('1', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }],
-      [cellKey('2', 't1', 10), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }],
+      [cellKey('1', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }],
+      [cellKey('2', 't1', 10), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }],
     ]);
     const next = copyLane(source, '1', ['2'], ['t1']);
 
@@ -271,7 +272,7 @@ describe('copyLane', () => {
   });
 
   it('дорожка-образец не трогается, даже если она в списке получателей', () => {
-    const source = cells([[cellKey('1', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }]]);
+    const source = cells([[cellKey('1', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }]]);
     const next = copyLane(source, '1', ['1', '2'], ['t1']);
 
     assert.equal(next.has(cellKey('1', 't1', 18)), true);
@@ -281,9 +282,9 @@ describe('copyLane', () => {
 describe('countOnLane и sameCells', () => {
   it('счётчик считает клетки только своей дорожки', () => {
     const source = cells([
-      [cellKey('1', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }],
-      [cellKey('1', 't2', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }],
-      [cellKey('2', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }],
+      [cellKey('1', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }],
+      [cellKey('1', 't2', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }],
+      [cellKey('2', 't1', 18), { purpose: 'RENT', coachId: null, clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }],
     ]);
 
     assert.equal(countOnLane(source, '1'), 2);
@@ -293,8 +294,8 @@ describe('countOnLane и sameCells', () => {
   it('смена тренера в клетке считается изменением', () => {
     // Иначе кнопка «Сохранить» оставалась бы погашенной после правки, которую
     // человек только что сделал.
-    const a = cells([[cellKey('1', 't1', 18), { purpose: 'TRAINING', coachId: 'a', clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }]]);
-    const b = cells([[cellKey('1', 't1', 18), { purpose: 'TRAINING', coachId: 'b', clientId: null, trainingTypeId: null, tournamentId: null, tournamentTypeId: null }]]);
+    const a = cells([[cellKey('1', 't1', 18), { purpose: 'TRAINING', coachId: 'a', clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }]]);
+    const b = cells([[cellKey('1', 't1', 18), { purpose: 'TRAINING', coachId: 'b', clientId: null, trainingTypeId: null, trainingSessionId: null, tournamentId: null, tournamentTypeId: null }]]);
 
     assert.equal(sameCells(a, a), true);
     assert.equal(sameCells(a, b), false);

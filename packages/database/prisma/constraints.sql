@@ -301,16 +301,28 @@ ALTER TABLE "DayClosure"
        AND "coachId" IS NOT NULL AND "clientId" IS NULL
        AND "trainingTypeId" IS NOT NULL AND "tournamentId" IS NULL)
     OR ("purpose" = 'SPARRING'::"ClosurePurpose"
-       AND "clientId" IS NULL AND "trainingTypeId" IS NULL AND "tournamentId" IS NULL)
+       AND "clientId" IS NULL AND "trainingTypeId" IS NULL AND "tournamentId" IS NULL
+       AND "trainingSessionId" IS NULL)
     OR ("purpose" IN ('RENT'::"ClosurePurpose", 'ROBOT'::"ClosurePurpose")
-       AND "coachId" IS NULL AND "trainingTypeId" IS NULL AND "tournamentId" IS NULL)
+       AND "coachId" IS NULL AND "trainingTypeId" IS NULL AND "tournamentId" IS NULL
+       AND "trainingSessionId" IS NULL)
     OR ("purpose" = 'TOURNAMENT'::"ClosurePurpose"
        AND "coachId" IS NULL AND "clientId" IS NULL
-       AND "trainingTypeId" IS NULL AND "tournamentId" IS NOT NULL)
+       AND "trainingTypeId" IS NULL AND "tournamentId" IS NOT NULL
+       AND "trainingSessionId" IS NULL)
     OR ("purpose" = 'OTHER'::"ClosurePurpose"
        AND "coachId" IS NULL AND "clientId" IS NULL
-       AND "trainingTypeId" IS NULL AND "tournamentId" IS NULL)
+       AND "trainingTypeId" IS NULL AND "tournamentId" IS NULL
+       AND "trainingSessionId" IS NULL)
   );
+
+-- Ссылка на конкретное занятие возможна только у дня и только при
+-- purpose = TRAINING (ветка TRAINING выше её не упоминает — значит, разрешает
+-- и NULL, и ссылку). Необязательна намеренно: администратор закрывает стол под
+-- индивидуальное занятие, у которого сессии с лимитом мест нет вовсе.
+--
+-- Смысл ссылки в том, что занятое время стола и запись клиента становятся
+-- одним фактом. Без неё это два списка, которым ничто не мешает разойтись.
 
 -- ---------------------------------------------------------------------------
 -- 13. Цены зала

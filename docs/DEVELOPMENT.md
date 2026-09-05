@@ -51,6 +51,7 @@ createdb -U postgres -h 127.0.0.1 yenisey_shadow
 pnpm db:generate                             # сгенерировать Prisma-клиент
 pnpm --filter @yenisey/database migrate      # накатить миграции
 pnpm --filter @yenisey/database seed         # завести клуб «Енисей» с ценами из ТЗ
+pnpm db:seed-demo                            # ближайшие занятия и турниры, чтобы страница клуба была непустой
 
 # Сотрудники клуба. Отдельной командой, а не сидом: сид лежит в репозитории,
 # и пароль из него попал бы в git вместе с историей.
@@ -99,7 +100,7 @@ NEXT_DIST_DIR=.next-diag npx next dev -p 3010   # из apps/web
 Проверить работающий API целиком, включая guard'ы и живой Postgres:
 
 ```bash
-pnpm smoke              # 227 сценариев против поднятого API
+pnpm smoke              # 255 сценариев против поднятого API
 pnpm db:clean-probes    # убрать заведённых им probe-*@example.com
 ```
 

@@ -53,6 +53,12 @@ export interface CellValue {
   clientId: string | null;
   /** Тип тренировки — только у тренировки. */
   trainingTypeId: string | null;
+  /**
+   * Конкретное занятие — только у тренировки и только в расписании даты.
+   * Необязательно даже там: индивидуальное занятие закрывает стол, но
+   * записываться на него некому.
+   */
+  trainingSessionId: string | null;
   /** Турнир — только у турнира и только в расписании даты. */
   tournamentId: string | null;
   /**
@@ -171,6 +177,7 @@ export function slotsToCells(
         coachId: slot.coachId,
         clientId: slot.clientId,
         trainingTypeId: slot.trainingTypeId,
+        trainingSessionId: slot.trainingSessionId,
         tournamentId: slot.tournamentId,
         tournamentTypeId: slot.tournamentTypeId,
       });
@@ -211,6 +218,7 @@ export function cellsToSlots(
           value.coachId === runValue.coachId &&
           value.clientId === runValue.clientId &&
           value.trainingTypeId === runValue.trainingTypeId &&
+          value.trainingSessionId === runValue.trainingSessionId &&
           value.tournamentId === runValue.tournamentId &&
           value.tournamentTypeId === runValue.tournamentTypeId;
 
@@ -224,6 +232,7 @@ export function cellsToSlots(
             coachId: runValue.coachId,
             clientId: runValue.clientId,
             trainingTypeId: runValue.trainingTypeId,
+            trainingSessionId: runValue.trainingSessionId,
             tournamentId: runValue.tournamentId,
             tournamentTypeId: runValue.tournamentTypeId,
           });

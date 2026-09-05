@@ -101,6 +101,10 @@ async function main(): Promise<void> {
       // Часового пояса у клуба больше нет: он у каждого зала свой.
       cityId: cities.get('Красноярск')!,
       accentColor: '#126b54',
+      // Знак академии больше не логотип продукта: у платформы свой,
+      // векторный. Здесь он ровно то же, что логотип любого другого клуба, —
+      // ссылка на картинку, которую клуб про себя заявил.
+      logoUrl: '/brand/clubs/yenisey.png',
       noShowChargePercent: 100,
     },
   });
@@ -122,6 +126,11 @@ async function main(): Promise<void> {
   await prisma.tenant.updateMany({
     where: { slug: 'yenisey', accentColor: null },
     data: { accentColor: '#126b54' },
+  });
+
+  await prisma.tenant.updateMany({
+    where: { slug: 'yenisey', logoUrl: null },
+    data: { logoUrl: '/brand/clubs/yenisey.png' },
   });
 
   // Цены, шаг брони и ЧАСОВОЙ ПОЯС живут у зала, а не у клуба: залы

@@ -8,11 +8,11 @@ import type {
   TournamentType,
   TrainingType,
 } from '@yenisey/types';
+import { shortName } from '@yenisey/types';
 import { inputClassName } from '@/components/ui/Field';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { useClubApi } from '@/lib/useClubApi';
-import { shortName } from '@/lib/names';
 import type { PersonColor } from '@/lib/personColor';
 
 /** Кисть «освободить»: отдельное значение, потому что назначением она не является. */
@@ -92,6 +92,9 @@ export function SchedulePalette({
   trainingTypes,
   trainingTypeId,
   onTrainingType,
+  capacity,
+  onCapacity,
+  askCapacity,
   tournamentTypes,
   tournamentTypeId,
   onTournamentType,
@@ -107,6 +110,14 @@ export function SchedulePalette({
   trainingTypes: TrainingType[];
   trainingTypeId: string | null;
   onTrainingType: (id: string | null) => void;
+  /**
+   * Мест в группе. Спрашивается только в расписании даты: занятие с лимитом
+   * мест заводится из закрашенного окна, а у повторяющегося шаблона недели
+   * конкретного занятия нет — там остаётся один тип.
+   */
+  capacity: number;
+  onCapacity: (capacity: number) => void;
+  askCapacity: boolean;
   /** Типы турниров: из них турнир и собирается прямо здесь, в сетке. */
   tournamentTypes: TournamentType[];
   tournamentTypeId: string | null;
@@ -191,6 +202,20 @@ export function SchedulePalette({
               </option>
             ))}
           </select>
+        </label>
+      )}
+
+      {brush === 'TRAINING' && askCapacity && (
+        <label className="flex items-center gap-2 text-[0.875rem] text-text-muted">
+          Мест
+          <input
+            type="number"
+            min={1}
+            max={200}
+            value={capacity}
+            onChange={(event) => onCapacity(Number(event.target.value))}
+            className={cn(inputClassName, 'w-20 py-1.5 text-[0.875rem]')}
+          />
         </label>
       )}
 

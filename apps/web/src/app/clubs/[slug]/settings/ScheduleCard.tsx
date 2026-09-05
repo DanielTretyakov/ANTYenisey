@@ -12,6 +12,7 @@ import type {
   TrainingType,
   Weekday,
 } from '@yenisey/types';
+import { shortName } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -22,7 +23,6 @@ import type { clubApi } from '@/lib/api';
 import { useClubApi } from '@/lib/useClubApi';
 import { zonedToInstant } from '@/lib/timezones';
 import { cn } from '@/lib/cn';
-import { shortName } from '@/lib/names';
 import { personColors, type PersonColor } from '@/lib/personColor';
 import {
   attachmentOf,
@@ -110,6 +110,13 @@ export function ScheduleCard({
     tournamentTypes[0]?.id ?? null,
   );
   /**
+   * Мест в группе для занятий, которые заведутся из этой правки.
+   *
+   * Десять — рабочее значение, а не правило: сколько человек влезет, знает
+   * тренер, и он же поправит число перед закрашиванием.
+   */
+  const [capacity, setCapacity] = useState(10);
+  /**
    * Имена людей, встречающихся в расписании.
    *
    * Тренеры приходят готовым списком, а клиентов у клуба тысячи — их имена
@@ -154,6 +161,8 @@ export function ScheduleCard({
   const captionOf = useCallback(
     (value: CellValue): string | null => {
       if (value.purpose === 'TRAINING' && value.trainingTypeId) {
+        // Подпись даёт ТИП, а не заведённое занятие: у занятия названия своего
+        // нет — оно и есть проведение этого типа.
         return trainingTypes.find((type) => type.id === value.trainingTypeId)?.name ?? null;
       }
 
@@ -296,6 +305,10 @@ export function ScheduleCard({
       coachId: attachment === 'coach' ? coachId : null,
       clientId: attachment === 'client' ? (client?.id ?? null) : null,
       trainingTypeId: brush === 'TRAINING' ? trainingTypeId : null,
+      // Занятие в клетке не хранится по той же причине, что и проведение
+      // турнира: оно заводится при сохранении даты — из типа, тренера и границ
+      // закрашенного окна.
+      trainingSessionId: null,
       // В клетке всегда тип турнира, а не проведение. В шаблоне так и
       // сохраняется; в расписании даты проведение заводится при сохранении, из
       // даты и времени первого закрашенного окна.
@@ -361,11 +374,10 @@ export function ScheduleCard({
         setCells(next);
         setSaved(next);
       } else {
-        const closures = await resolveTournaments(
+        const closures = await resolveEvents(
           club,
           slots.map(({ lane: _lane, ...slot }) => slot),
-          date,
-          timezone,
+          { date, timezone, capacity },
           onTournamentsChanged,
         );
 
@@ -496,6 +508,12 @@ export function ScheduleCard({
           trainingTypes={trainingTypes}
           trainingTypeId={trainingTypeId}
           onTrainingType={setTrainingTypeId}
+          capacity={capacity}
+          onCapacity={setCapacity}
+          // В шаблоне недели мест не спрашиваем: занятие с лимитом заводится из
+          // расписания даты, а шаблон повторяется и конкретного занятия не
+          // несёт.
+          askCapacity={mode === 'day'}
           tournamentTypes={tournamentTypes}
           tournamentTypeId={tournamentTypeId}
           onTournamentType={setTournamentTypeId}
@@ -842,52 +860,90 @@ function Legend({
  * Время начала берётся у самого раннего закрашенного окна: именно его
  * администратор и разметил как начало.
  */
-async function resolveTournaments(
+async function resolveEvents(
   // Клиент API приходит аргументом, а не берётся хуком: это обычная функция,
   // а не компонент, и хук в ней вызвать нельзя. Клуб она при этом знать
-  // обязана — турнир заводится в конкретном клубе.
+  // обязана — мероприятие заводится в конкретном клубе.
   club: ReturnType<typeof clubApi>,
   closures: (ClosureSlot & { tournamentTypeId: string | null })[],
-  date: string,
-  timezone: string,
+  day: { date: string; timezone: string; capacity: number },
   onCreated: () => void,
 ): Promise<ClosureSlot[]> {
-  const pending = closures.filter(
+  const { date, timezone, capacity } = day;
+
+  const instant = (minute: number, what: string): string => {
+    const at = zonedToInstant(date, formatMinute(minute), timezone);
+
+    if (!at) {
+      throw new ApiError(`Не удалось определить время начала: ${what}`, 400);
+    }
+
+    return at.toISOString();
+  };
+
+  // --- Турниры: один на тип и дату.
+  const pendingTournaments = closures.filter(
     (slot) => slot.purpose === 'TOURNAMENT' && !slot.tournamentId && slot.tournamentTypeId,
   );
 
-  const created = new Map<string, string>();
+  const tournaments = new Map<string, string>();
 
-  for (const typeId of new Set(pending.map((slot) => slot.tournamentTypeId!))) {
-    const earliest = Math.min(
-      ...pending.filter((slot) => slot.tournamentTypeId === typeId).map((slot) => slot.startMinute),
-    );
-
-    const startsAt = zonedToInstant(date, formatMinute(earliest), timezone);
-
-    if (!startsAt) {
-      throw new ApiError('Не удалось определить время начала турнира', 400);
-    }
+  for (const typeId of new Set(pendingTournaments.map((slot) => slot.tournamentTypeId!))) {
+    const own = pendingTournaments.filter((slot) => slot.tournamentTypeId === typeId);
 
     const tournament = await club.createTournament({
       tournamentTypeId: typeId,
-      startsAt: startsAt.toISOString(),
+      startsAt: instant(Math.min(...own.map((slot) => slot.startMinute)), 'турнир'),
     });
 
-    created.set(typeId, tournament.id);
+    tournaments.set(typeId, tournament.id);
   }
 
-  if (created.size > 0) {
+  // --- Занятия: одно на пару «тип + тренер».
+  //
+  // Не на каждое окно: групповое занятие идёт сразу на нескольких столах, и
+  // запись на каждый стол отдельно означала бы, что группа из десяти человек
+  // видит четыре разных занятия вместо одного.
+  //
+  // Границы берутся по всем окнам пары — от самого раннего начала до самого
+  // позднего конца: именно этот отрезок администратор и разметил.
+  const pendingSessions = closures.filter(
+    (slot) => slot.purpose === 'TRAINING' && !slot.trainingSessionId && slot.trainingTypeId,
+  );
+
+  const sessions = new Map<string, string>();
+  const sessionKey = (slot: Pick<ClosureSlot, 'trainingTypeId' | 'coachId'>): string =>
+    `${slot.trainingTypeId}|${slot.coachId}`;
+
+  for (const key of new Set(pendingSessions.map(sessionKey))) {
+    const own = pendingSessions.filter((slot) => sessionKey(slot) === key);
+    const first = own[0]!;
+
+    const session = await club.createTrainingSession({
+      trainingTypeId: first.trainingTypeId!,
+      coachId: first.coachId!,
+      startsAt: instant(Math.min(...own.map((slot) => slot.startMinute)), 'занятие'),
+      endsAt: instant(Math.max(...own.map((slot) => slot.endMinute)), 'занятие'),
+      capacity,
+    });
+
+    sessions.set(key, session.id);
+  }
+
+  if (tournaments.size > 0 || sessions.size > 0) {
     onCreated();
   }
 
-  // Тип у окна даты не хранится — там уже есть заведённое из него проведение,
-  // — но в контракте поле обязательно, поэтому отдаём его пустым.
+  // Тип турнира у окна даты не хранится — там уже есть заведённое из него
+  // проведение, — но в контракте поле обязательно, поэтому отдаём его пустым.
   return closures.map(({ tournamentTypeId, ...slot }) => ({
     ...slot,
     tournamentTypeId: null,
     tournamentId:
-      slot.tournamentId ?? (tournamentTypeId ? (created.get(tournamentTypeId) ?? null) : null),
+      slot.tournamentId ?? (tournamentTypeId ? (tournaments.get(tournamentTypeId) ?? null) : null),
+    trainingSessionId:
+      slot.trainingSessionId ??
+      (slot.purpose === 'TRAINING' ? (sessions.get(sessionKey(slot)) ?? null) : null),
   }));
 }
 

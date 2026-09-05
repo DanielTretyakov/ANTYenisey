@@ -3,7 +3,7 @@
 -- ради чего заведены.
 -- ---------------------------------------------------------------------------
 --
--- СТАТУС: прогнано на PostgreSQL 18 (02.09.2026) — 27 из 27 сценариев прошли.
+-- СТАТУС: прогнано на PostgreSQL 18 (05.09.2026) — 39 из 39 сценариев прошли.
 -- Дополнительно проверено, что отказы приходят именно от нужных ограничений,
 -- а не по случайной причине: exclusion-констрейнт даёт 23P01, составные
 -- внешние ключи — 23503, частичный уникальный индекс — 23505, check'и — 23514.
@@ -456,3 +456,64 @@ BEGIN
     RAISE NOTICE 'AH. ПРОВАЛ: пояс у клуба %, у зала %', on_tenant, on_hall;
   END IF;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- Занятие в расписании дня
+-- ---------------------------------------------------------------------------
+
+-- Расписание дня в обоих клубах и второй стол — фикстуры, а не проверки.
+-- Заводятся ОТДЕЛЬНЫМИ операторами, а не внутри блоков ниже: блок DO
+-- откатывается целиком, и вставка, сделанная в нём перед ожидаемым отказом,
+-- пропадает вместе с ним — контрольный сценарий потом падает на пустоте.
+INSERT INTO "HallDaySchedule" (id,"tenantId","hallId",date,"updatedAt")
+VALUES ('ds1','t1','h1',DATE '2026-09-01',now()),
+       ('ds2','t2','h2',DATE '2026-09-01',now());
+
+INSERT INTO "Table" (id,"tenantId","hallId",label,"createdAt")
+VALUES ('tb2','t2','h2','Стол 1',now());
+
+-- AI. Ссылка на занятие возможна только у окна с purpose = TRAINING. Без этого
+--     правила аренда стола могла бы «принадлежать» тренировочной сессии, и
+--     расписание перестало бы отвечать на вопрос, чем стол занят на самом деле.
+DO $$
+DECLARE code text;
+BEGIN
+  INSERT INTO "DayClosure" (id,"tenantId","scheduleId","tableId","startMinute","endMinute",purpose,"trainingSessionId","updatedAt")
+  VALUES ('dc1','t1','ds1','tb1',1080,1170,'RENT','ts1',now());
+
+  RAISE NOTICE 'AI. ПРОВАЛ: аренда стола сослалась на занятие!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+  IF code = '23514' THEN
+    RAISE NOTICE 'AI. Занятие у аренды отклонено............ OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'AI. ПРОВАЛ: отказ пришёл не от CHECK, а от %', code;
+  END IF;
+END $$;
+
+-- AJ. Занятие ЧУЖОГО клуба в расписании — то же ключевое правило изоляции, что
+--     у брони: ссылка составная, и одним лишь идентификатором сессии клуб не
+--     обойти. Клуб t2 подставляет сессию клуба t1.
+DO $$
+DECLARE code text;
+BEGIN
+  INSERT INTO "DayClosure" (id,"tenantId","scheduleId","tableId","startMinute","endMinute",purpose,"coachId","trainingTypeId","trainingSessionId","updatedAt")
+  VALUES ('dc2','t2','ds2','tb2',1080,1170,'TRAINING','c1','tt1','ts1',now());
+
+  RAISE NOTICE 'AJ. ПРОВАЛ: чужое занятие попало в расписание!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+  IF code = '23503' THEN
+    RAISE NOTICE 'AJ. Занятие чужого клуба отклонено........ OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'AJ. ПРОВАЛ: отказ пришёл не от внешнего ключа, а от %', code;
+  END IF;
+END $$;
+
+-- AK. Своё занятие в своём расписании — проходит. Сценарий-контроль к двум
+--     предыдущим: без него отказ мог бы приходить по любой причине.
+DO $$ BEGIN
+  INSERT INTO "DayClosure" (id,"tenantId","scheduleId","tableId","startMinute","endMinute",purpose,"coachId","trainingTypeId","trainingSessionId","updatedAt")
+  VALUES ('dc3','t1','ds1','tb1',1080,1170,'TRAINING','c1','tt1','ts1',now());
+  RAISE NOTICE 'AK. Занятие в своём расписании............. OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'AK. ПРОВАЛ: %', SQLERRM; END $$;

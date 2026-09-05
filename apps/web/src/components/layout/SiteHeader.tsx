@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
-import { Logo } from '@/components/brand/Logo';
+import { PlatformLogo } from '@/components/brand/PlatformLogo';
 import { HEADER_HEIGHT, HEADER_LOGO_HEIGHT } from '@/components/layout/metrics';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Button } from '@/components/ui/Button';
@@ -60,7 +60,7 @@ export function SiteHeader({
         )}
       >
         <Link href="/" className="shrink-0" aria-label="На стартовую страницу">
-          <Logo height={HEADER_LOGO_HEIGHT} />
+          <PlatformLogo height={HEADER_LOGO_HEIGHT} />
         </Link>
 
         <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">

@@ -6,10 +6,11 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: {
-    default: 'Енисей — академия настольного тенниса',
-    template: '%s · Енисей',
+    default: 'КНТ — клубы настольного тенниса',
+    template: '%s · КНТ',
   },
-  description: 'Запись на тренировки, турниры и аренда столов',
+  description:
+    'Найдите клуб настольного тенниса в своём городе: запись на занятия и турниры, аренда стола и робота',
 };
 
 export const viewport: Viewport = {

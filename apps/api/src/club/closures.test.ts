@@ -30,6 +30,7 @@ function rule(overrides: Partial<ClosureRule> = {}): ClosureRule {
     coachId: 'coach-1',
     clientId: null,
     trainingTypeId: 'type-1',
+    trainingSessionId: null,
     tournamentId: null,
     tournamentTypeId: null,
     ...overrides,
@@ -46,6 +47,7 @@ function dayClosure(overrides: Partial<DayClosure> = {}): DayClosure {
     coachId: null,
     clientId: null,
     trainingTypeId: null,
+    trainingSessionId: null,
     tournamentId: null,
     tournamentTypeId: null,
     ...overrides,
@@ -287,6 +289,29 @@ describe('slotViolations', () => {
     );
   });
 
+  it('занятие у тренировки замечаний не вызывает', () => {
+    // Ссылка на конкретное занятие — то, ради чего окно и запись становятся
+    // одним фактом.
+    assert.deepEqual(slotViolations(rule({ trainingSessionId: 'session-1' })), []);
+  });
+
+  it('тренировка без занятия замечаний не вызывает', () => {
+    // Индивидуальное занятие закрывает стол, но записываться на него некому —
+    // сессии с лимитом мест у него нет вовсе.
+    assert.deepEqual(slotViolations(rule({ trainingSessionId: null })), []);
+  });
+
+  it('занятие у аренды отклоняется', () => {
+    // Иначе расписание врало бы о том, чем занят стол: аренда, «принадлежащая»
+    // тренировочной группе.
+    const violations = slotViolations(
+      rule({ purpose: 'RENT', coachId: null, trainingTypeId: null, trainingSessionId: 'session-1' }),
+    );
+
+    assert.equal(violations.length, 1);
+    assert.match(violations[0]!, /занятие указывается только у тренировки/i);
+  });
+
   it('турнир требует указания, какой именно', () => {
     const violations = slotViolations(
       rule({ purpose: 'TOURNAMENT', coachId: null, trainingTypeId: null }),
@@ -355,6 +380,15 @@ describe('slotViolations', () => {
 
     assert.equal(violations.length, 1);
     assert.match(violations[0]!, /тип турнира, а не конкретное проведение/);
+  });
+
+  it('конкретное занятие в шаблон не принимается', () => {
+    // Ровно та же причина, что у турнира: у занятия дата, а шаблон
+    // повторяется. В шаблоне остаётся тип тренировки, который даты не несёт.
+    const violations = templateViolations(rule({ trainingSessionId: 'session-1' }));
+
+    assert.equal(violations.length, 1);
+    assert.match(violations[0]!, /тип тренировки, а не конкретное занятие/);
   });
 
   it('турнир в шаблоне без типа отклоняется', () => {

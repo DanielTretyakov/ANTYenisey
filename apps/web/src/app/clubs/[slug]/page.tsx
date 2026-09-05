@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import type { BookingEntry, ClubEvent, PublicTenant } from '@yenisey/types';
 import { ClubMark } from '@/components/club/ClubMark';
-import { When, WhenSpan } from '@/components/club/When';
+import { WhenSpan } from '@/components/club/When';
 import { ClubNav } from '@/components/layout/ClubNav';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { Alert } from '@/components/ui/Alert';
@@ -289,21 +289,24 @@ function Upcoming({
 
       {events?.length === 0 && (
         <p className="border-t border-border py-8 text-[0.9375rem] text-text-muted">
-          Клуб пока не объявил ни одного турнира.
+          Клуб пока не объявил ни одного занятия и ни одного турнира.
         </p>
       )}
 
       {viewer === 'staff' && events && events.length > 0 && (
         <p className="mb-4 text-[0.8125rem] text-text-subtle">
-          Вы сотрудник этого клуба: записаться на его турнир нельзя. Список
-          записавшихся и проведение турнира — в разделе «Занятия и турниры».
+          Вы сотрудник этого клуба: записаться на его мероприятие нельзя.
+          Расписание занятий и проведение турниров — в разделе «Занятия и турниры».
         </p>
       )}
 
       {events && events.length > 0 && (
         <ul className="border-t border-border">
+          {/* Ключ из вида и идентификатора: занятия и турниры лежат в разных
+              таблицах, и совпадение идентификаторов между ними ничем не
+              запрещено. */}
           {events.map((event) => (
-            <li key={event.id}>
+            <li key={`${event.kind}-${event.id}`}>
               <EventRow event={event} viewer={viewer} onChanged={onChanged} />
             </li>
           ))}
@@ -325,16 +328,24 @@ function EventRow({
   const club = useClubApi();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showParticipants, setShowParticipants] = useState(false);
+
+  // Мест нет — но записанному кнопка отмены нужна и на переполненном занятии.
+  const full = event.freeSeats === 0 && !event.registered;
 
   async function toggle(): Promise<void> {
     setPending(true);
     setError(null);
 
     try {
-      if (event.registered) {
-        await club.cancelTournamentRegistration(event.id);
+      if (event.kind === 'TRAINING') {
+        await (event.registered
+          ? club.cancelTrainingBooking(event.id)
+          : club.registerForTraining(event.id));
       } else {
-        await club.registerForTournament(event.id);
+        await (event.registered
+          ? club.cancelTournamentRegistration(event.id)
+          : club.registerForTournament(event.id));
       }
 
       onChanged();
@@ -346,49 +357,81 @@ function EventRow({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-b border-border py-5">
-      <When instant={event.startsAt} />
+    <div className="border-b border-border py-5">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+        {/* У занятия известно окончание, у турнира нет: WhenSpan сам сводится к
+            одной строке времени, когда конца не задано. */}
+        <WhenSpan startsAt={event.startsAt} endsAt={event.endsAt} />
 
-      <span className="min-w-0 grow">
-        <span className="block text-[1rem] text-text">
-          {event.title}
-          {/* Ограничение по рейтингу дописывается, только если его нет в самом
-              названии: типы «Енисея» называются «Клуб 100», и приписка давала
-              бы «Клуб 100 рейтинг до 100». */}
-          {event.ratingLabel && !event.title.includes(event.ratingLabel) && (
-            <span className="ml-2 text-[0.8125rem] text-text-subtle">
-              рейтинг до {event.ratingLabel}
+        <span className="min-w-0 grow">
+          <span className="block text-[1rem] text-text">
+            {event.title}
+            {/* Ограничение по рейтингу дописывается, только если его нет в самом
+                названии: типы «Енисея» называются «Клуб 100», и приписка давала
+                бы «Клуб 100 рейтинг до 100». */}
+            {event.ratingLabel && !event.title.includes(event.ratingLabel) && (
+              <span className="ml-2 text-[0.8125rem] text-text-subtle">
+                рейтинг до {event.ratingLabel}
+              </span>
+            )}
+          </span>
+
+          {event.subtitle && (
+            <span className="mt-0.5 block text-[0.8125rem] text-text-muted">{event.subtitle}</span>
+          )}
+
+          <span className="mt-0.5 block text-[0.8125rem] text-text-muted">
+            {formatKopecks(event.price)} · {seatsLabel(event)}
+            {event.registeredCount > 0 && (
+              <>
+                {' · '}
+                {/* Состав раскрывается по требованию, а не висит списком: ТЗ
+                    требует его показывать, но десяток фамилий в каждой строке
+                    расписания превратил бы список мероприятий в простыню. */}
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-text"
+                  aria-expanded={showParticipants}
+                  onClick={() => setShowParticipants((shown) => !shown)}
+                >
+                  {showParticipants ? 'скрыть состав' : 'кто записан'}
+                </button>
+              </>
+            )}
+          </span>
+
+          {error && (
+            <span className="mt-1.5 block text-[0.8125rem] text-danger" role="alert">
+              {error}
             </span>
           )}
         </span>
-        <span className="mt-0.5 block text-[0.8125rem] text-text-muted">
-          {formatKopecks(event.price)} · {registeredLabel(event.registeredCount)}
-        </span>
 
-        {error && (
-          <span className="mt-1.5 block text-[0.8125rem] text-danger" role="alert">
-            {error}
-          </span>
-        )}
-      </span>
-
-      {viewer === 'client' && (
-        <Button
-          variant={event.registered ? 'secondary' : 'primary'}
-          size="sm"
-          pending={pending}
-          onClick={() => void toggle()}
-        >
-          {event.registered ? 'Отменить запись' : 'Записаться'}
-        </Button>
-      )}
-
-      {viewer === 'anonymous' && (
-        <Link href="/login">
-          <Button variant="secondary" size="sm">
-            Войти и записаться
+        {viewer === 'client' && (
+          <Button
+            variant={event.registered ? 'secondary' : 'primary'}
+            size="sm"
+            pending={pending}
+            disabled={full}
+            onClick={() => void toggle()}
+          >
+            {event.registered ? 'Отменить запись' : full ? 'Мест нет' : 'Записаться'}
           </Button>
-        </Link>
+        )}
+
+        {viewer === 'anonymous' && (
+          <Link href="/login">
+            <Button variant="secondary" size="sm">
+              Войти и записаться
+            </Button>
+          </Link>
+        )}
+      </div>
+
+      {showParticipants && event.participants.length > 0 && (
+        <p className="mt-3 text-[0.8125rem] text-text-muted">
+          {event.participants.join(', ')}
+        </p>
       )}
     </div>
   );
@@ -411,7 +454,23 @@ function RowSkeleton() {
   );
 }
 
-/** «Записались: 8». Ноль показывается словом — «0 записавшихся» читается как ошибка. */
-function registeredLabel(count: number): string {
-  return count === 0 ? 'Пока никто не записался' : `Записались: ${count}`;
+/**
+ * Сколько занято и сколько осталось.
+ *
+ * У турнира лимита мест нет — там остаётся только число записавшихся. Ноль
+ * показывается словом: «0 записавшихся» читается как ошибка, а не как пустое
+ * занятие.
+ */
+function seatsLabel(event: ClubEvent): string {
+  if (event.freeSeats === null) {
+    return event.registeredCount === 0
+      ? 'Пока никто не записался'
+      : `Записались: ${event.registeredCount}`;
+  }
+
+  if (event.freeSeats === 0) {
+    return 'Мест нет';
+  }
+
+  return `Осталось ${event.freeSeats} из ${event.capacity}`;
 }

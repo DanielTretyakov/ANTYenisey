@@ -61,4 +61,29 @@ export class EventsController {
   cancel(@CurrentClub() club: ClubContext, @Param('id') id: string): Promise<BookingEntry> {
     return this.events.cancel(club.tenantId, club.userId, id);
   }
+
+  /**
+   * Запись на занятие.
+   *
+   * Отдельный маршрут, а не общий с турниром по идентификатору мероприятия:
+   * записи лежат в разных таблицах, и «мероприятие вообще» — понятие
+   * интерфейса, а не базы. Идентификатор в адресе — сессии.
+   */
+  @Roles('CLIENT')
+  @Post('trainings/:id/booking')
+  registerForTraining(
+    @CurrentClub() club: ClubContext,
+    @Param('id') id: string,
+  ): Promise<BookingEntry> {
+    return this.events.registerForTraining(club.tenantId, club.userId, id);
+  }
+
+  @Roles('CLIENT')
+  @Delete('trainings/:id/booking')
+  cancelTraining(
+    @CurrentClub() club: ClubContext,
+    @Param('id') id: string,
+  ): Promise<BookingEntry> {
+    return this.events.cancelTraining(club.tenantId, club.userId, id);
+  }
 }

@@ -13,6 +13,7 @@ import {
 import type {
   TournamentRequest,
   TournamentTypeRequest,
+  TrainingSessionRequest,
   TrainingTypeRequest,
 } from '@yenisey/types';
 
@@ -76,4 +77,35 @@ export class TournamentDto implements TournamentRequest {
 
   @IsISO8601({ strict: true }, { message: 'Начало указывается моментом времени в ISO-8601' })
   startsAt: string;
+}
+
+export class TrainingSessionDto implements TrainingSessionRequest {
+  @IsString()
+  @MaxLength(64)
+  trainingTypeId: string;
+
+  @IsString()
+  @MaxLength(64)
+  coachId: string;
+
+  @IsISO8601({ strict: true }, { message: 'Начало указывается моментом времени в ISO-8601' })
+  startsAt: string;
+
+  /**
+   * Окончание занятия. У турнира такого поля нет, у занятия есть: группа
+   * собирается на известный отрезок, и от него зависит, чем в это время занят
+   * стол. Порядок моментов проверяет сервис — здесь нечем сравнить два поля.
+   */
+  @IsISO8601({ strict: true }, { message: 'Окончание указывается моментом времени в ISO-8601' })
+  endsAt: string;
+
+  /**
+   * Потолок мест намеренно грубый. Он не про размер зала — сколько человек
+   * влезет, знает тренер, — а про опечатку в форме: «100» вместо «10» пройдёт,
+   * а «1000» уже нет.
+   */
+  @IsInt({ message: 'Мест указывается целым числом' })
+  @Min(1, { message: 'В группе должно быть хотя бы одно место' })
+  @Max(200, { message: 'Слишком много мест для одной группы' })
+  capacity: number;
 }

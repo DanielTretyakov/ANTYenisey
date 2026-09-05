@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { shortName } from './names.ts';
+// Функция переехала в общий пакет: её теперь применяет и сервер, собирая
+// состав записавшихся. Тест остался здесь, потому что в @yenisey/types своего
+// прогона тестов нет, а модули под `node --test` не могут импортировать
+// относительными путями (см. CLAUDE.md).
+import { shortName } from '@yenisey/types';
 
 describe('shortName', () => {
   it('оставляет фамилию и инициал имени', () => {

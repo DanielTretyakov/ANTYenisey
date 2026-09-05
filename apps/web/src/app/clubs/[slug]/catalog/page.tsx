@@ -2,7 +2,13 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
-import type { Role, Tournament, TournamentType, TrainingType } from '@yenisey/types';
+import type {
+  Role,
+  Tournament,
+  TournamentType,
+  TrainingSession,
+  TrainingType,
+} from '@yenisey/types';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -33,6 +39,7 @@ export default function CatalogPage() {
   const [trainingTypes, setTrainingTypes] = useState<TrainingType[]>([]);
   const [tournamentTypes, setTournamentTypes] = useState<TournamentType[]>([]);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -54,12 +61,18 @@ export default function CatalogPage() {
 
     let cancelled = false;
 
-    Promise.all([club.trainingTypes(), club.tournamentTypes(), club.tournaments()])
-      .then(([training, types, events]) => {
+    Promise.all([
+      club.trainingTypes(),
+      club.tournamentTypes(),
+      club.tournaments(),
+      club.trainingSessions(),
+    ])
+      .then(([training, types, events, training_sessions]) => {
         if (cancelled) return;
         setTrainingTypes(training);
         setTournamentTypes(types);
         setTournaments(events);
+        setSessions(training_sessions);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
@@ -78,8 +91,9 @@ export default function CatalogPage() {
       <h1 className="mb-2 text-[1.75rem]">Занятия и турниры</h1>
       <p className="mb-7 max-w-2xl text-[0.9375rem] text-text-muted">
         То, на что клиент будет записываться. Тип занятия несёт цену и название — «просто
-        тренировка» в расписании не говорит клиенту ничего. Турнир после создания
-        ставится в сетку расписания как занятое время.
+        тренировка» в расписании не говорит клиенту ничего. Сами занятия и турниры
+        заводятся в расписании зала, из закрашенного времени, и сюда попадают уже
+        готовыми — здесь их видно списком и здесь же правится число мест.
       </p>
 
       {session.status === 'ready' && !allowed && (
@@ -96,6 +110,7 @@ export default function CatalogPage() {
             onChange={setTournamentTypes}
             onError={setError}
           />
+          <TrainingSessionsCard sessions={sessions} onChange={setSessions} onError={setError} />
           <TournamentsCard tournaments={tournaments} onChange={setTournaments} onError={setError} />
         </div>
       )}
@@ -407,6 +422,138 @@ function TournamentsCard({
         <p className="text-[0.8125rem] text-text-subtle">
           Турнир заводится в расписании зала: выберите кисть «Турнир», его тип и закрасьте
           время, которое он занимает. Дата и время начала берутся из сетки — вводить их
+          дважды незачем.
+        </p>
+      </CardBody>
+    </Card>
+  );
+}
+
+/**
+ * Занятия: конкретные проведения с тренером, временем и лимитом мест.
+ *
+ * Заводятся, как и турниры, в расписании зала — там у окна уже есть и время, и
+ * стол, и тренер. Здесь их видно списком, и здесь же правится число мест:
+ * ошибиться в нём легко, а перекрашивать ради этого расписание не за чем.
+ */
+function TrainingSessionsCard({
+  sessions,
+  onChange,
+  onError,
+}: {
+  sessions: TrainingSession[];
+  onChange: (sessions: TrainingSession[]) => void;
+  onError: (message: string | null) => void;
+}) {
+  const club = useClubApi();
+  const [pending, setPending] = useState(false);
+
+  async function run(action: () => Promise<TrainingSession[]>): Promise<void> {
+    onError(null);
+    setPending(true);
+
+    try {
+      onChange(await action());
+    } catch (cause) {
+      onError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title="Занятия"
+        description="Заводятся в расписании зала: выбираете тип занятия, тренера и число мест, закрашиваете время — занятие появляется здесь, и на него можно записаться."
+      />
+      <CardBody>
+        {sessions.length === 0 ? (
+          <p className="mb-4 text-[0.9375rem] text-text-muted">Занятий пока нет.</p>
+        ) : (
+          <ul className="mb-5 divide-y divide-border border-y border-border">
+            {sessions.map((session) => (
+              <li key={session.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
+                <span className="flex-1 text-[0.9375rem] text-text">
+                  {session.typeName}
+                  <span className="ml-2 text-[0.8125rem] text-text-muted">{session.coachName}</span>
+                </span>
+
+                <span className="text-[0.875rem] text-text-muted">
+                  {new Intl.DateTimeFormat('ru-RU', {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  }).format(new Date(session.startsAt))}
+                </span>
+
+                <label className="flex items-center gap-1.5 text-[0.8125rem] text-text-subtle">
+                  мест
+                  <input
+                    type="number"
+                    min={session.bookedCount || 1}
+                    max={200}
+                    defaultValue={session.capacity}
+                    disabled={pending}
+                    className={cn(inputClassName, 'w-16 py-1 text-[0.8125rem]')}
+                    // По уходу с поля, а не по каждому нажатию: иначе набор
+                    // «12» отправил бы сначала «1» — и отказ, если записан
+                    // хотя бы один человек.
+                    onBlur={(event) => {
+                      const capacity = Number(event.target.value);
+
+                      if (capacity === session.capacity) return;
+
+                      void run(async () => {
+                        const updated = await club.updateTrainingSession(session.id, {
+                          trainingTypeId: session.trainingTypeId,
+                          coachId: session.coachId,
+                          startsAt: session.startsAt,
+                          endsAt: session.endsAt,
+                          capacity,
+                        });
+
+                        return sessions.map((item) => (item.id === updated.id ? updated : item));
+                      });
+                    }}
+                  />
+                </label>
+
+                <span className="text-[0.75rem] tracking-[0.06em] text-text-subtle uppercase">
+                  записались: {session.bookedCount}
+                </span>
+
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  // Те же два запрета, что у турнира: занятие в сетке унесло бы
+                  // с собой куски расписания, а занятие с записями — чужие
+                  // планы на вечер.
+                  disabled={pending || session.placedCount > 0 || session.bookedCount > 0}
+                  title={
+                    session.placedCount > 0
+                      ? 'Занятие стоит в расписании — сначала уберите его из сетки'
+                      : session.bookedCount > 0
+                        ? 'На занятие уже записались'
+                        : undefined
+                  }
+                  onClick={() => {
+                    void run(async () => {
+                      await club.deleteTrainingSession(session.id);
+                      return sessions.filter((item) => item.id !== session.id);
+                    });
+                  }}
+                >
+                  Удалить
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <p className="text-[0.8125rem] text-text-subtle">
+          Занятие заводится в расписании зала: выберите кисть «Тренировка», тип, тренера и число
+          мест, затем закрасьте время. Время начала и окончания берутся из сетки — вводить их
           дважды незачем.
         </p>
       </CardBody>

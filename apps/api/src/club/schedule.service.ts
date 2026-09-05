@@ -71,6 +71,7 @@ export class ScheduleService {
       ...rule,
       weekday: rule.weekday as Weekday,
       tournamentId: null,
+      trainingSessionId: null,
     }));
   }
 
@@ -93,7 +94,9 @@ export class ScheduleService {
 
     // Незаполненные поля приходят как undefined; в базу должен уехать явный
     // null, иначе Prisma просто не тронет колонку при обновлении.
-    rules = rules.map(normalisePeople).map((rule) => ({ ...rule, tournamentId: null }));
+    rules = rules
+      .map(normalisePeople)
+      .map((rule) => ({ ...rule, tournamentId: null, trainingSessionId: null }));
 
     await this.assertTablesInHall(tenantId, hallId, rules);
     await this.assertCatalogExists(tenantId, rules);
@@ -107,10 +110,12 @@ export class ScheduleService {
       // правка одного зала не должна.
       this.prisma.tableClosureRule.deleteMany({ where: { tenantId, tableId: { in: tableIds } } }),
       this.prisma.tableClosureRule.createMany({
-        // tournamentId в шаблоне не хранится вовсе — колонки такой нет. Поле
-        // есть в общем типе окна, поэтому его надо снять явно.
-        // tournamentId в шаблоне не хранится вовсе — колонки такой нет.
-        data: rules.map(({ tournamentId: _tournament, ...rule }) => ({ ...rule, tenantId })),
+        // Ни турнира, ни занятия в шаблоне не хранится — колонок таких нет.
+        // Поля есть в общем типе окна, поэтому их надо снять явно.
+        data: rules.map(({ tournamentId: _tournament, trainingSessionId: _session, ...rule }) => ({
+          ...rule,
+          tenantId,
+        })),
       }),
     ]);
 
@@ -133,7 +138,7 @@ export class ScheduleService {
       where: { tenantId, hallId, date: parseDate(date) },
       select: {
         closures: {
-          select: { ...SLOT_SELECT, tournamentId: true },
+          select: { ...SLOT_SELECT, tournamentId: true, trainingSessionId: true },
           orderBy: { startMinute: 'asc' },
         },
       },
@@ -316,6 +321,22 @@ export class ScheduleService {
         throw new BadRequestException('В расписании указан неизвестный тип турнира');
       }
     }
+
+    const sessionIds = [
+      ...new Set(
+        slots.map((slot) => slot.trainingSessionId).filter((id): id is string => id !== null),
+      ),
+    ];
+
+    if (sessionIds.length > 0) {
+      const found = await this.prisma.trainingSession.count({
+        where: { tenantId, id: { in: sessionIds } },
+      });
+
+      if (found !== sessionIds.length) {
+        throw new BadRequestException('В расписании указано неизвестное занятие');
+      }
+    }
   }
 
   private assertSlotsValid(
@@ -362,6 +383,7 @@ function normalisePeople<T extends ClosureSlot>(slot: T): T {
     coachId: slot.coachId ?? null,
     clientId: slot.clientId ?? null,
     trainingTypeId: slot.trainingTypeId ?? null,
+    trainingSessionId: slot.trainingSessionId ?? null,
     tournamentId: slot.tournamentId ?? null,
     tournamentTypeId: slot.tournamentTypeId ?? null,
   };

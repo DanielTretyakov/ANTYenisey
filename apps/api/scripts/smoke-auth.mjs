@@ -1220,8 +1220,162 @@ async function main() {
   check('«Мои записи» читаются', 200, r.status);
   assert('записей у новичка нет', r.body?.length === 0);
 
+  await eventRegistration(asMe);
+
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
+}
+
+/**
+ * Запись на мероприятия: занятие и турнир.
+ *
+ * Раньше проверялись только списки — сама запись не была покрыта вовсе, хотя
+ * это единственное действие, ради которого клиент вообще приходит на страницу
+ * клуба. Здесь она и проверяется: запись, дубль, отмена, начавшееся
+ * мероприятие и переполнение группы.
+ *
+ * Мероприятия заводятся прямо здесь и здесь же убираются: сид их не заводит
+ * (это данные клуба, а не настройка), а демо-набор на машине может
+ * отсутствовать.
+ */
+async function eventRegistration(asMe) {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('\n=== 27. Запись на мероприятия — ПРОПУЩЕНА (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 27. Запись на занятие и турнир');
+
+  let r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const adminAuth = { Authorization: `Bearer ${r.body?.accessToken ?? ''}` };
+  const asAdmin = (path, options = {}) =>
+    call(path, { ...options, headers: { ...adminAuth, ...(options.headers ?? {}) } });
+
+  // Тренер нужен любой: занятие без тренера не заводится вовсе.
+  r = await asAdmin('/clubs/yenisey/coaches');
+  const coachId = r.body?.[0]?.id;
+
+  if (!coachId) {
+    console.log('     тренеров в клубе нет — сценарий пропущен (заведите тренера)');
+    return;
+  }
+
+  r = await asAdmin('/clubs/yenisey/training-types');
+  const trainingTypeId = r.body?.[0]?.id;
+
+  r = await asAdmin('/clubs/yenisey/tournament-types');
+  const tournamentTypeId = r.body?.[0]?.id;
+
+  const soon = new Date(Date.now() + 7 * 24 * 3600_000);
+  const later = new Date(soon.getTime() + 90 * 60_000);
+
+  // Вместимость 1: ровно на ней и проверяется переполнение группы. Лимит мест
+  // констрейнтом не выражается, его держит блокировка строки в сервисе, и без
+  // этого сценария поломка блокировки прошла бы незамеченной.
+  r = await asAdmin('/clubs/yenisey/training-sessions', {
+    method: 'POST',
+    json: {
+      trainingTypeId,
+      coachId,
+      startsAt: soon.toISOString(),
+      endsAt: later.toISOString(),
+      capacity: 1,
+    },
+  });
+  check('занятие заведено', 201, r.status);
+  const sessionId = r.body?.id;
+  assert('тренер приехал вместе с занятием', typeof r.body?.coachName === 'string');
+  assert('мест занято ноль', r.body?.bookedCount === 0);
+
+  r = await asAdmin('/clubs/yenisey/training-sessions', {
+    method: 'POST',
+    json: {
+      trainingTypeId,
+      coachId,
+      startsAt: later.toISOString(),
+      endsAt: soon.toISOString(),
+      capacity: 4,
+    },
+  });
+  check('занятие, кончающееся раньше начала, отклонено', 400, r.status);
+
+  r = await asAdmin('/clubs/yenisey/tournaments', {
+    method: 'POST',
+    json: { tournamentTypeId, startsAt: soon.toISOString() },
+  });
+  check('турнир заведён', 201, r.status);
+  const tournamentId = r.body?.id;
+
+  // --- Открытый список отдаёт оба вида и различает их.
+  r = await call('/clubs/yenisey/events');
+  const events = r.body ?? [];
+  const session = events.find((event) => event.id === sessionId);
+  assert('занятие попало в открытый список', session?.kind === 'TRAINING');
+  assert('у занятия известно окончание', typeof session?.endsAt === 'string');
+  assert('у занятия видны свободные места', session?.freeSeats === 1 && session?.capacity === 1);
+  assert(
+    'у турнира лимита мест нет',
+    events.find((event) => event.id === tournamentId)?.freeSeats === null,
+  );
+
+  // --- Запись клиента.
+  r = await asMe(`/clubs/yenisey/trainings/${sessionId}/booking`, { method: 'POST' });
+  check('запись на занятие', 201, r.status);
+  assert('запись вернулась строкой списка', r.body?.kind === 'TRAINING');
+  assert('идентификатор — занятия, а не строки записи', r.body?.id === sessionId);
+
+  r = await asMe(`/clubs/yenisey/trainings/${sessionId}/booking`, { method: 'POST' });
+  check('повторная запись на занятие отклонена', 409, r.status);
+
+  r = await asMe(`/clubs/yenisey/tournaments/${tournamentId}/registration`, { method: 'POST' });
+  check('запись на турнир', 201, r.status);
+
+  r = await asMe('/clubs/yenisey/events');
+  const mine = (r.body ?? []).find((event) => event.id === sessionId);
+  assert('вошедший видит себя записанным', mine?.registered === true);
+  assert('состав записавшихся отдаётся сокращённым', /^\S+ \S\.$/.test(mine?.participants?.[0] ?? ''));
+  assert('мест не осталось', mine?.freeSeats === 0);
+
+  r = await asMe('/me/bookings');
+  const kinds = (r.body ?? []).map((entry) => entry.kind);
+  assert('обе записи видны в «Моих записях»', kinds.includes('TRAINING') && kinds.includes('TOURNAMENT'));
+
+  // --- Переполнение группы: второй клиент в группу на одного не помещается.
+  r = await post('/auth/register', registration({ tenantSlug: undefined }));
+  const otherAuth = { Authorization: `Bearer ${r.body?.accessToken ?? ''}` };
+  const asOther = (path, options = {}) =>
+    call(path, { ...options, headers: { ...otherAuth, ...(options.headers ?? {}) } });
+
+  r = await asOther(`/clubs/yenisey/trainings/${sessionId}/booking`, { method: 'POST' });
+  check('в переполненную группу записаться нельзя', 409, r.status);
+
+  // --- Отмена. Занятие через неделю — по политике «Енисея» списывается 0%.
+  r = await asMe(`/clubs/yenisey/trainings/${sessionId}/booking`, { method: 'DELETE' });
+  check('отмена записи на занятие', 200, r.status);
+  assert('запись отменена', r.body?.status === 'CANCELLED');
+  assert('заранее — без списания', r.body?.chargePercent === 0);
+
+  r = await asMe(`/clubs/yenisey/trainings/${sessionId}/booking`, { method: 'DELETE' });
+  check('повторная отмена не находит записи', 404, r.status);
+
+  r = await asOther(`/clubs/yenisey/trainings/${sessionId}/booking`, { method: 'POST' });
+  check('освободившееся место достаётся другому', 201, r.status);
+
+  r = await asMe(`/clubs/yenisey/tournaments/${tournamentId}/registration`, { method: 'DELETE' });
+  check('отмена записи на турнир', 200, r.status);
+
+  // --- Уборка. Занятие с записями не удаляется — сначала снимаем чужую.
+  r = await asOther(`/clubs/yenisey/trainings/${sessionId}/booking`, { method: 'DELETE' });
+  check('чужая запись снята', 200, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/training-sessions/${sessionId}`, { method: 'DELETE' });
+  check('занятие с историей записей не удаляется', 409, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/tournaments/${tournamentId}`, { method: 'DELETE' });
+  check('турнир с историей записей не удаляется', 409, r.status);
 }
 
 main().catch((error) => {

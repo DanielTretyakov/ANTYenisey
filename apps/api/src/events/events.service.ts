@@ -5,23 +5,29 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { BookingStatus, Prisma, Role } from '@yenisey/database';
-import type { BookingEntry, ClubEvent } from '@yenisey/types';
+import type { BookingEntry, ClubEvent, EventKind } from '@yenisey/types';
 import { cancellationPercent } from '../booking/availability';
+import {
+  TOURNAMENT_EVENT_SELECT,
+  TRAINING_EVENT_SELECT,
+  tournamentEvent,
+  trainingEvent,
+} from './event-view';
 import { EntriesService } from '../entries/entries.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
- * Мероприятия клуба и запись на них.
- *
- * Сейчас мероприятие — это турнир. Тренировки (TrainingSession /
- * TrainingBooking) в схеме описаны, но API их пока не обслуживает: расписание
- * занятий строится отдельным заходом. Когда оно появится, оба списка ниже
- * должны научиться собирать и его — форма ответа под это уже рассчитана.
+ * Мероприятия клуба и запись на них: занятия и турниры одним списком.
  *
  * Аренда стола мероприятием НЕ считается и в открытый список не попадает (ТЗ →
  * «Страница клуба»): к чужой броне стола нельзя присоединиться, и публичный
  * список из неё состоял бы из строк, на которые невозможно записаться. В «мои»
  * она при этом входит — это часть расписания человека.
+ *
+ * Занятие и турнир похожи ровно настолько, чтобы их хотелось объединить, и
+ * различаются в одном месте по существу: у занятия есть лимит мест. Из-за него
+ * запись на занятие — не такая же операция, как регистрация на турнир: её
+ * приходится сериализовать блокировкой строки, см. `registerForTraining`.
  */
 @Injectable()
 export class EventsService {
@@ -39,34 +45,32 @@ export class EventsService {
    * кнопку записи, ведущую на форму входа.
    */
   async listUpcoming(tenantId: string, userId: string | null): Promise<ClubEvent[]> {
-    const tournaments = await this.prisma.tournament.findMany({
-      where: { tenantId, startsAt: { gte: new Date() } },
-      select: {
-        id: true,
-        startsAt: true,
-        tournamentType: { select: { name: true, ratingLabel: true, price: true } },
-        registrations: {
-          where: { status: BookingStatus.BOOKED },
-          select: { clientId: true },
-        },
-      },
-      orderBy: { startsAt: 'asc' },
-    });
+    const now = new Date();
 
-    return tournaments.map((tournament) => ({
-      id: tournament.id,
-      title: tournament.tournamentType.name,
-      ratingLabel: tournament.tournamentType.ratingLabel,
-      startsAt: tournament.startsAt.toISOString(),
-      price: tournament.tournamentType.price,
-      registeredCount: tournament.registrations.length,
-      registered: userId
-        ? tournament.registrations.some((row) => row.clientId === userId)
-        : null,
-    }));
+    const [tournaments, sessions] = await Promise.all([
+      this.prisma.tournament.findMany({
+        where: { tenantId, startsAt: { gte: now } },
+        select: TOURNAMENT_EVENT_SELECT,
+        orderBy: { startsAt: 'asc' },
+      }),
+      this.prisma.trainingSession.findMany({
+        where: { tenantId, startsAt: { gte: now } },
+        select: TRAINING_EVENT_SELECT,
+        orderBy: { startsAt: 'asc' },
+      }),
+    ]);
+
+    const events: ClubEvent[] = [
+      ...tournaments.map((row) => tournamentEvent(row, userId)),
+      ...sessions.map((row) => trainingEvent(row, userId)),
+    ];
+
+    // Общая сортировка по времени: человек смотрит на неделю клуба целиком, а
+    // не отдельно на занятия и отдельно на турниры.
+    return events.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
   }
 
-  /** Мои мероприятия в этом клубе: записи на турниры и свои брони столов. */
+  /** Мои мероприятия в этом клубе: записи на занятия, турниры и свои брони столов. */
   listMine(tenantId: string, userId: string): Promise<BookingEntry[]> {
     return this.entries.listForUser(userId, tenantId);
   }
@@ -136,7 +140,96 @@ export class EventsService {
       throw error;
     }
 
-    return this.entryFor(tenantId, userId, tournament.id);
+    return this.entryFor(tenantId, userId, 'TOURNAMENT', tournament.id);
+  }
+
+  /**
+   * Запись на занятие.
+   *
+   * Отличается от турнира одним — лимитом мест, и именно из-за него запись
+   * идёт транзакцией с блокировкой строки сессии. Проверка «занято меньше, чем
+   * мест» в коде без блокировки не работает: два параллельных запроса оба
+   * прочитают «занято 9 из 10» и оба вставят запись. Констрейнтом это тоже не
+   * выражается — проверка требует подсчёта строк в другой таблице, — поэтому
+   * рецепт с `FOR UPDATE` записан прямо в constraints.sql (раздел 4), и здесь
+   * ровно он.
+   *
+   * `SELECT ... FOR UPDATE` держит блокировку до конца транзакции, так что
+   * вторая запись ждёт первую и видит уже обновлённое число занятых мест.
+   */
+  async registerForTraining(
+    tenantId: string,
+    userId: string,
+    sessionId: string,
+  ): Promise<BookingEntry> {
+    const session = await this.prisma.trainingSession.findFirst({
+      where: { id: sessionId, tenantId },
+      select: {
+        id: true,
+        startsAt: true,
+        trainingType: { select: { price: true, isActive: true } },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Занятие не найдено');
+    }
+
+    if (session.startsAt.getTime() <= Date.now()) {
+      throw new BadRequestException('Это занятие уже началось');
+    }
+
+    if (!session.trainingType.isActive) {
+      throw new BadRequestException('Запись на это занятие закрыта');
+    }
+
+    await this.ensureClientMembership(tenantId, userId);
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Блокировка именно строки сессии, а не пересчёт после вставки:
+        // откатывать уже созданную запись пришлось бы вручную, и при отказе
+        // клиенту досталась бы половина операции.
+        const locked = await tx.$queryRaw<{ capacity: number }[]>`
+          SELECT "capacity" FROM "TrainingSession" WHERE "id" = ${session.id} FOR UPDATE
+        `;
+
+        const capacity = locked[0]?.capacity;
+
+        if (capacity === undefined) {
+          throw new NotFoundException('Занятие не найдено');
+        }
+
+        const taken = await tx.trainingBooking.count({
+          where: { sessionId: session.id, status: BookingStatus.BOOKED },
+        });
+
+        if (taken >= capacity) {
+          throw new ConflictException('На это занятие мест больше нет');
+        }
+
+        await tx.trainingBooking.create({
+          data: {
+            tenantId,
+            sessionId: session.id,
+            clientId: userId,
+            // Копия цены на момент записи — по той же причине, что у турнира.
+            priceAtBooking: session.trainingType.price,
+          },
+        });
+      });
+    } catch (error) {
+      // Повторную запись ловит тот же частичный уникальный индекс, что у
+      // турнира, и ловится он так же по коду: имени индекса, заведённого сырым
+      // SQL, Prisma не знает.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Вы уже записаны на это занятие');
+      }
+
+      throw error;
+    }
+
+    return this.entryFor(tenantId, userId, 'TRAINING', session.id);
   }
 
   /**
@@ -161,25 +254,67 @@ export class EventsService {
       throw new BadRequestException('Эту запись уже нельзя отменить');
     }
 
-    const tiers = await this.prisma.cancellationTier.findMany({
-      where: { tenantId },
-      select: { minMinutesBeforeStart: true, chargePercent: true },
-    });
-
-    const minutes = Math.floor(
-      (registration.tournament.startsAt.getTime() - Date.now()) / 60_000,
-    );
-
     await this.prisma.tournamentRegistration.update({
       where: { id: registration.id },
       data: {
         status: BookingStatus.CANCELLED,
         cancelledAt: new Date(),
-        chargeRatio: cancellationPercent(tiers, minutes),
+        chargeRatio: await this.chargeFor(tenantId, registration.tournament.startsAt),
       },
     });
 
-    return this.entryFor(tenantId, userId, tournamentId);
+    return this.entryFor(tenantId, userId, 'TOURNAMENT', tournamentId);
+  }
+
+  /**
+   * Отмена записи на занятие.
+   *
+   * Слово в слово та же механика, что у турнира: политика отмены в ТЗ единая
+   * для тренировок, турниров и аренды стола, и разойтись этим трём способам
+   * отмены в деньгах нельзя.
+   */
+  async cancelTraining(
+    tenantId: string,
+    userId: string,
+    sessionId: string,
+  ): Promise<BookingEntry> {
+    const booking = await this.prisma.trainingBooking.findFirst({
+      where: { tenantId, sessionId, clientId: userId, status: BookingStatus.BOOKED },
+      select: { id: true, session: { select: { startsAt: true } } },
+    });
+
+    if (!booking) {
+      // Отменённая запись сюда не попадает по фильтру статуса: искать её
+      // отдельно, чтобы ответить «уже нельзя отменить», незачем — человек с
+      // отменённой записью и так видит её отменённой.
+      throw new NotFoundException('Запись не найдена');
+    }
+
+    await this.prisma.trainingBooking.update({
+      where: { id: booking.id },
+      data: {
+        status: BookingStatus.CANCELLED,
+        cancelledAt: new Date(),
+        chargeRatio: await this.chargeFor(tenantId, booking.session.startsAt),
+      },
+    });
+
+    return this.entryFor(tenantId, userId, 'TRAINING', sessionId);
+  }
+
+  /**
+   * Процент списания по политике клуба на момент отмены.
+   *
+   * Считается СЕЙЧАС и записывается в строку: политика клуба может измениться
+   * завтра, и тогда уже закрытая запись задним числом сменила бы условия.
+   */
+  private async chargeFor(tenantId: string, startsAt: Date): Promise<number> {
+    const tiers = await this.prisma.cancellationTier.findMany({
+      where: { tenantId },
+      select: { minMinutesBeforeStart: true, chargePercent: true },
+    });
+
+    return cancellationPercent(tiers, Math.floor((startsAt.getTime() - Date.now()) / 60_000));
   }
 
   /**
@@ -222,10 +357,11 @@ export class EventsService {
   private async entryFor(
     tenantId: string,
     userId: string,
-    tournamentId: string,
+    kind: EventKind,
+    eventId: string,
   ): Promise<BookingEntry> {
     const entries = await this.entries.listForUser(userId, tenantId);
-    const entry = entries.find((row) => row.kind === 'TOURNAMENT' && row.id === tournamentId);
+    const entry = entries.find((row) => row.kind === kind && row.id === eventId);
 
     if (!entry) {
       throw new NotFoundException('Запись не найдена');

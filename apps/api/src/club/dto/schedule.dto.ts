@@ -285,6 +285,13 @@ export class ClosureRuleDto extends ClosureSlotDto implements ClosureRuleDraft {
   })
   tournamentId: null = null;
 
+  /** Занятие — то же самое: у него дата, а шаблон повторяется. */
+  @IsOptional()
+  @IsIn([null], {
+    message: 'В шаблон недели попадает тип тренировки, а не конкретное занятие',
+  })
+  trainingSessionId: null = null;
+
   /** ISO-8601: 1 — понедельник, 7 — воскресенье. Ноль запрещён намеренно. */
   @IsInt()
   @Min(1, { message: 'День недели: 1 — понедельник, 7 — воскресенье' })
@@ -302,6 +309,16 @@ export class DayClosureDto extends ClosureSlotDto implements DayClosureDraft {
   @IsString()
   @MaxLength(64)
   tournamentId: string | null;
+
+  /**
+   * Занятие, ради которого закрыт стол. Необязательно даже у тренировки:
+   * индивидуальное занятие закрывает время, но записываться на него некому.
+   */
+  @IsOptional()
+  @ValidateIfNotNull()
+  @IsString()
+  @MaxLength(64)
+  trainingSessionId: string | null;
 }
 
 /**

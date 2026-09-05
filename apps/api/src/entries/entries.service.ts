@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { BookingStatus } from '@yenisey/database';
 import type { BookingEntry } from '@yenisey/types';
+import { shortName } from '@yenisey/types';
 import { cancellationPercent } from '../booking/availability';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
- * Записи человека: аренда столов и участие в турнирах одним списком.
+ * Записи человека: аренда столов, занятия и турниры одним списком.
  *
  * Сервис ОДИН на два экрана — раздел «Мои записи» по всем клубам и блок «Мои
  * мероприятия» на странице клуба. Это не экономия строк: два независимых
@@ -30,7 +31,7 @@ export class EntriesService {
   async listForUser(userId: string, tenantId?: string): Promise<BookingEntry[]> {
     const scope = tenantId ? { tenantId } : {};
 
-    const [tables, tournaments, tiers] = await Promise.all([
+    const [tables, trainings, tournaments, tiers] = await Promise.all([
       this.prisma.tableBooking.findMany({
         where: { clientId: userId, ...scope },
         select: {
@@ -43,6 +44,26 @@ export class EntriesService {
           chargeRatio: true,
           tenant: CLUB_SELECT,
           table: { select: { label: true, hall: { select: { name: true } } } },
+        },
+      }),
+      this.prisma.trainingBooking.findMany({
+        where: { clientId: userId, ...scope },
+        select: {
+          priceAtBooking: true,
+          status: true,
+          chargeRatio: true,
+          tenant: CLUB_SELECT,
+          session: {
+            select: {
+              id: true,
+              startsAt: true,
+              endsAt: true,
+              trainingType: { select: { name: true } },
+              coach: {
+                select: { membership: { select: { user: { select: { fullName: true } } } } },
+              },
+            },
+          },
         },
       }),
       this.prisma.tournamentRegistration.findMany({
@@ -73,6 +94,21 @@ export class EntriesService {
         subtitle: `${booking.table.hall.name}, ${booking.table.label}`,
         startsAt: booking.startsAt.toISOString(),
         endsAt: booking.endsAt.toISOString(),
+        price: booking.priceAtBooking,
+        status: booking.status,
+        chargeRatio: booking.chargeRatio,
+      })),
+      ...trainings.map((booking) => ({
+        // Идентификатор ЗАНЯТИЯ, а не строки записи — по той же причине, что у
+        // турнира: по нему идёт отмена, и человеку в списке нужен адрес
+        // действия.
+        id: booking.session.id,
+        kind: 'TRAINING' as const,
+        club: booking.tenant,
+        title: booking.session.trainingType.name,
+        subtitle: `Тренер: ${shortName(booking.session.coach.membership.user.fullName)}`,
+        startsAt: booking.session.startsAt.toISOString(),
+        endsAt: booking.session.endsAt.toISOString(),
         price: booking.priceAtBooking,
         status: booking.status,
         chargeRatio: booking.chargeRatio,
