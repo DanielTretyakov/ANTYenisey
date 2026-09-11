@@ -3,7 +3,7 @@
 -- ради чего заведены.
 -- ---------------------------------------------------------------------------
 --
--- СТАТУС: прогнано на PostgreSQL 18 (11.09.2026) — 57 из 57 сценариев прошли.
+-- СТАТУС: прогнано на PostgreSQL 18 (12.09.2026) — 59 из 59 сценариев прошли.
 -- Дополнительно проверено, что отказы приходят именно от нужных ограничений,
 -- а не по случайной причине: exclusion-констрейнт даёт 23P01, составные
 -- внешние ключи — 23503, частичный уникальный индекс — 23505, check'и — 23514.
@@ -819,3 +819,33 @@ EXCEPTION WHEN others THEN
     RAISE NOTICE 'BD. ПРОВАЛ: отказ пришёл от %', code;
   END IF;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- Расписание дня (раздел 12 constraints.sql)
+-- ---------------------------------------------------------------------------
+--
+-- Ограничения окон дня были в миграции, но не в constraints.sql, и этот файл
+-- их не видел. Окно dc3 из AK занимает стол tb1 в дне ds1 с 18:00 до 19:30.
+
+-- BE. Второе окно поверх первого на том же столе в тот же день.
+DO $$
+DECLARE code text; cname text;
+BEGIN
+  INSERT INTO "DayClosure" (id,"tenantId","scheduleId","tableId","startMinute","endMinute",purpose,"updatedAt")
+  VALUES ('dc4','t1','ds1','tb1',1140,1200,'OTHER',now());
+  RAISE NOTICE 'BE. ПРОВАЛ: наложение окон дня прошло!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE, cname = CONSTRAINT_NAME;
+  IF code = '23P01' AND cname = 'DayClosure_no_overlap' THEN
+    RAISE NOTICE 'BE. Наложение окон дня отклонено........... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'BE. ПРОВАЛ: отказ пришёл от % (%)', code, cname;
+  END IF;
+END $$;
+
+-- BF. Встык — проходит: полуоткрытый диапазон, 19:30 уже свободно.
+DO $$ BEGIN
+  INSERT INTO "DayClosure" (id,"tenantId","scheduleId","tableId","startMinute","endMinute",purpose,"updatedAt")
+  VALUES ('dc5','t1','ds1','tb1',1170,1200,'OTHER',now());
+  RAISE NOTICE 'BF. Окно дня встык принято................ OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'BF. ПРОВАЛ: %', SQLERRM; END $$;

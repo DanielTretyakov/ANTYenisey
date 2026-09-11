@@ -274,6 +274,25 @@ ALTER TABLE "TableClosureRule"
     int4range("startMinute", "endMinute", '[)') WITH &&
   );
 
+-- То же для расписания конкретной даты: границы окна и запрет двух окон на
+-- одно время одного стола — внутри одного дня.
+--
+-- До 12.09.2026 этих двух ограничений в файле не было, хотя миграция
+-- *_halls_and_day_schedules их накатывает: рабочая база их имела, а
+-- `verify` разворачивал схему отсюда — и наложение окон дня не проверял
+-- никто. Нашлось сверкой имён ограничений в базе с этим файлом.
+ALTER TABLE "DayClosure"
+  ADD CONSTRAINT "DayClosure_minutes_range"
+  CHECK ("startMinute" >= 0 AND "endMinute" <= 1440 AND "endMinute" > "startMinute");
+
+ALTER TABLE "DayClosure"
+  ADD CONSTRAINT "DayClosure_no_overlap"
+  EXCLUDE USING gist (
+    "tableId" WITH =,
+    "scheduleId" WITH =,
+    int4range("startMinute", "endMinute", '[)') WITH &&
+  );
+
 -- Кто и что прикрепляется к окну, зависит от назначения.
 --
 -- Тренировка без тренера не попадёт в его статистику, и через месяц выяснить,
