@@ -7,6 +7,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { BookingModule } from './booking/booking.module';
 import { ClubModule } from './club/club.module';
+import { DeskModule } from './desk/desk.module';
 import { EntriesModule } from './entries/entries.module';
 import { EventsModule } from './events/events.module';
 import { MeModule } from './me/me.module';
@@ -57,6 +58,7 @@ import { validateEnv, type Env } from './config/env';
     AuthModule,
     ClubModule,
     BookingModule,
+    DeskModule,
     TenantsModule,
     EntriesModule,
     EventsModule,
