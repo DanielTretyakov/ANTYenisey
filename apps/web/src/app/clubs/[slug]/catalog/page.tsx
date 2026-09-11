@@ -9,7 +9,7 @@ import type {
   TrainingSession,
   TrainingType,
 } from '@yenisey/types';
-import { AppShell } from '@/components/layout/AppShell';
+import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -17,9 +17,9 @@ import { inputClassName } from '@/components/ui/Field';
 import { MoneyField } from '@/components/ui/MoneyField';
 import { roleInClub } from '@/lib/membership';
 import { ApiError } from '@/lib/api';
-import { useClubApi } from '@/lib/useClubApi';
+import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { cn } from '@/lib/cn';
-import { formatKopecks, inputToKopecks } from '@/lib/money';
+import { formatKopecks, inputToKopecks, kopecksToInput } from '@/lib/money';
 import { useSession } from '@/lib/useSession';
 
 const MANAGERS: Role[] = ['ADMIN', 'OWNER'];
@@ -43,9 +43,14 @@ export default function CatalogPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Роль берётся из привязки к клубу, а не из профиля: аккаунт один на
-  // платформу, и в разных клубах она разная.
-  const role = session.status === 'ready' ? roleInClub(session.user) : null;
+  // Роль берётся из привязки к КЛУБУ ИЗ АДРЕСА, а не из профиля: аккаунт один
+  // на платформу, и в разных клубах она разная. Раньше клуб здесь не
+  // указывался вовсе, и роль бралась из запасного TENANT_SLUG окружения —
+  // администратор одного клуба видел админский интерфейс в чужом, а в своём
+  // получал отказ. Настоящий доступ это не открывало (сервер проверяет
+  // TenantMembership на каждый запрос), но показывало не то.
+  const slug = useClubSlug();
+  const role = session.status === 'ready' ? roleInClub(session.user, slug) : null;
   const allowed = role !== null && MANAGERS.includes(role);
 
   useEffect(() => {
@@ -87,7 +92,7 @@ export default function CatalogPage() {
   }, [allowed]);
 
   return (
-    <AppShell>
+    <AdminShell>
       <h1 className="mb-2 text-[1.75rem]">Занятия и турниры</h1>
       <p className="mb-7 max-w-2xl text-[0.9375rem] text-text-muted">
         То, на что клиент будет записываться. Тип занятия несёт цену и название — «просто
@@ -114,7 +119,7 @@ export default function CatalogPage() {
           <TournamentsCard tournaments={tournaments} onChange={setTournaments} onError={setError} />
         </div>
       )}
-    </AppShell>
+    </AdminShell>
   );
 }
 
@@ -132,6 +137,7 @@ function TrainingTypesCard({
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [pending, setPending] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   async function run(action: () => Promise<TrainingType[]>): Promise<void> {
     onError(null);
@@ -168,7 +174,7 @@ function TrainingTypesCard({
     <Card>
       <CardHeader
         title="Типы тренировок"
-        description="Классификация занятий и цена каждого. Тип выбирается при постановке тренировки в расписание."
+        description="Классификация занятий и цена каждого. Тип выбирается при постановке тренировки в расписание. Новая цена действует на будущие записи: у записанных сумма зафиксирована на момент записи и правкой типа не меняется."
       />
       <CardBody>
         {types.length === 0 ? (
@@ -179,6 +185,28 @@ function TrainingTypesCard({
           <ul className="mb-5 divide-y divide-border border-y border-border">
             {types.map((type) => (
               <li key={type.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
+                {editingId === type.id ? (
+                  <TypeEditor
+                    initial={type}
+                    pending={pending}
+                    onError={onError}
+                    onCancel={() => setEditingId(null)}
+                    onSave={(values) =>
+                      void run(async () => {
+                        const updated = await club.updateTrainingType(type.id, {
+                          name: values.name,
+                          price: values.price,
+                          isActive: type.isActive,
+                        });
+                        setEditingId(null);
+                        return types
+                          .map((item) => (item.id === type.id ? updated : item))
+                          .sort(byActiveThenName);
+                      })
+                    }
+                  />
+                ) : (
+                  <>
                 <span className={cn('flex-1 text-[0.9375rem]', type.isActive ? 'text-text' : 'text-text-subtle line-through')}>
                   {type.name}
                 </span>
@@ -188,6 +216,18 @@ function TrainingTypesCard({
                     в расписании: {type.usageCount}
                   </span>
                 )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={pending}
+                  onClick={() => {
+                    onError(null);
+                    setEditingId(type.id);
+                  }}
+                >
+                  Изменить
+                </Button>
                 <Button
                   type="button"
                   variant="ghost"
@@ -223,6 +263,8 @@ function TrainingTypesCard({
                 >
                   Удалить
                 </Button>
+                  </>
+                )}
               </li>
             ))}
           </ul>
@@ -262,6 +304,7 @@ function TournamentTypesCard({
   const [rating, setRating] = useState('');
   const [price, setPrice] = useState('');
   const [pending, setPending] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   async function handleAdd(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -297,7 +340,7 @@ function TournamentTypesCard({
     <Card>
       <CardHeader
         title="Типы турниров"
-        description="Из них администратор собирает конкретные турниры. Число-ограничение по рейтингу в названии — справочное: система его не проверяет и допуск не блокирует."
+        description="Из них администратор собирает конкретные турниры. Число-ограничение по рейтингу в названии — справочное: система его не проверяет и допуск не блокирует. Новая цена действует на будущие регистрации: у записанных сумма зафиксирована на момент записи."
       />
       <CardBody>
         {types.length === 0 ? (
@@ -306,19 +349,74 @@ function TournamentTypesCard({
           <ul className="mb-5 divide-y divide-border border-y border-border">
             {types.map((type) => (
               <li key={type.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
-                <span className={cn('flex-1 text-[0.9375rem]', type.isActive ? 'text-text' : 'text-text-subtle line-through')}>
-                  {type.name}
-                  {type.ratingLabel && (
-                    <span className="ml-2 text-[0.8125rem] text-text-subtle">
-                      рейтинг {type.ratingLabel}
+                {editingId === type.id ? (
+                  <TypeEditor
+                    initial={type}
+                    withRating
+                    pending={pending}
+                    onError={onError}
+                    onCancel={() => setEditingId(null)}
+                    onSave={(values) => {
+                      onError(null);
+                      setPending(true);
+
+                      club
+                        .updateTournamentType(type.id, {
+                          name: values.name,
+                          ratingLabel: values.ratingLabel,
+                          price: values.price,
+                          isActive: type.isActive,
+                        })
+                        .then((updated) => {
+                          onChange(
+                            types
+                              .map((item) => (item.id === type.id ? updated : item))
+                              .sort(byActiveThenName),
+                          );
+                          setEditingId(null);
+                        })
+                        .catch((cause: unknown) =>
+                          onError(cause instanceof ApiError ? cause.message : 'Сервис недоступен'),
+                        )
+                        .finally(() => setPending(false));
+                    }}
+                  />
+                ) : (
+                  <>
+                    <span
+                      className={cn(
+                        'flex-1 text-[0.9375rem]',
+                        type.isActive ? 'text-text' : 'text-text-subtle line-through',
+                      )}
+                    >
+                      {type.name}
+                      {type.ratingLabel && (
+                        <span className="ml-2 text-[0.8125rem] text-text-subtle">
+                          рейтинг {type.ratingLabel}
+                        </span>
+                      )}
                     </span>
-                  )}
-                </span>
-                <span className="text-[0.875rem] text-text-muted">{formatKopecks(type.price)}</span>
-                {type.tournamentCount > 0 && (
-                  <span className="text-[0.75rem] tracking-[0.06em] text-text-subtle uppercase">
-                    турниров: {type.tournamentCount}
-                  </span>
+                    <span className="text-[0.875rem] text-text-muted">
+                      {formatKopecks(type.price)}
+                    </span>
+                    {type.tournamentCount > 0 && (
+                      <span className="text-[0.75rem] tracking-[0.06em] text-text-subtle uppercase">
+                        турниров: {type.tournamentCount}
+                      </span>
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={pending}
+                      onClick={() => {
+                        onError(null);
+                        setEditingId(type.id);
+                      }}
+                    >
+                      Изменить
+                    </Button>
+                  </>
                 )}
               </li>
             ))}
@@ -563,3 +661,82 @@ function TrainingSessionsCard({
 
 const byActiveThenName = <T extends { isActive: boolean; name: string }>(a: T, b: T): number =>
   a.isActive === b.isActive ? a.name.localeCompare(b.name, 'ru') : Number(b.isActive) - Number(a.isActive);
+
+/**
+ * Правка типа прямо в строке списка.
+ *
+ * Не отдельная страница и не модальное окно: у типа всего три поля, и уводить
+ * ради них с экрана — больше движений, чем самой правки. Строка на время
+ * превращается в форму, остальные остаются на месте, и видно, что меняешь
+ * именно эту.
+ *
+ * Одна форма на оба справочника: у типа турнира к названию и цене добавляется
+ * справочный рейтинг, и заводить ради одного поля вторую копию формы значило
+ * бы развести их на первой же правке.
+ */
+function TypeEditor({
+  initial,
+  withRating = false,
+  pending,
+  onSave,
+  onCancel,
+  onError,
+}: {
+  initial: { name: string; ratingLabel?: string | null; price: number };
+  withRating?: boolean;
+  pending: boolean;
+  onSave: (values: { name: string; ratingLabel: string | null; price: number }) => void;
+  onCancel: () => void;
+  onError: (message: string | null) => void;
+}) {
+  const [name, setName] = useState(initial.name);
+  const [rating, setRating] = useState(initial.ratingLabel ?? '');
+  const [price, setPrice] = useState(kopecksToInput(initial.price));
+
+  function submit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+
+    const kopecks = inputToKopecks(price);
+
+    if (kopecks === null) {
+      onError('Цена указывается числом, например 700 или 700,50');
+      return;
+    }
+
+    onError(null);
+    onSave({ name: name.trim(), ratingLabel: rating.trim() || null, price: kopecks });
+  }
+
+  return (
+    <form onSubmit={submit} className="flex w-full flex-wrap items-stretch gap-2 py-1">
+      <input
+        aria-label="Название"
+        maxLength={120}
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        className={cn(inputClassName, 'min-w-48 flex-1 py-1.5 text-[0.9375rem]')}
+        autoFocus
+      />
+
+      {withRating && (
+        <input
+          aria-label="Ограничение по рейтингу"
+          placeholder="рейтинг"
+          maxLength={32}
+          value={rating}
+          onChange={(event) => setRating(event.target.value)}
+          className={cn(inputClassName, 'w-32 py-1.5 text-[0.9375rem]')}
+        />
+      )}
+
+      <MoneyField className="w-32" value={price} onChange={setPrice} />
+
+      <Button type="submit" size="sm" pending={pending} disabled={name.trim() === ''}>
+        Сохранить
+      </Button>
+      <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={onCancel}>
+        Отмена
+      </Button>
+    </form>
+  );
+}
