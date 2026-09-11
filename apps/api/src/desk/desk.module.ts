@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { DeskController } from './desk.controller';
 import { DeskService } from './desk.service';
+import { AttendanceModule } from '../attendance/attendance.module';
 import { BookingModule } from '../booking/booking.module';
 import { ClubModule } from '../club/club.module';
 
@@ -15,9 +16,12 @@ import { ClubModule } from '../club/club.module';
  * `ClubModule` — ради `MembershipService`: администратор сажает человека,
  * который может не состоять в клубе, и привязка заводится тем же кодом, что
  * при самостоятельной записи.
+ *
+ * `AttendanceModule` — ради отметок: экран смены показывает, кто и когда
+ * отметил, а бронь задним числом сразу становится «пришёл».
  */
 @Module({
-  imports: [BookingModule, ClubModule],
+  imports: [AttendanceModule, BookingModule, ClubModule],
   controllers: [DeskController],
   providers: [DeskService],
 })

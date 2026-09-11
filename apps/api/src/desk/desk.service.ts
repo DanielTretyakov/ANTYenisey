@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BookingSource, BookingStatus } from '@yenisey/database';
+import { BookingSource, BookingStatus, Prisma } from '@yenisey/database';
 import type {
   BookingStep,
   CancelDeskBookingRequest,
@@ -12,11 +12,18 @@ import type {
   DeskBooking,
   DeskDay,
   DeskEvent,
+  DeskMarkInfo,
   DeskParticipant,
   DeskPerson,
   MoveDeskBookingRequest,
 } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
+import { attendancePhase, autoNoShowAt } from '../attendance/attendance-rules';
+import {
+  AttendanceService,
+  type Actor,
+  type ClubAttendancePolicy,
+} from '../attendance/attendance.service';
 import { instantAt, localParts } from '../club/closures';
 import { MembershipService } from '../club/membership.service';
 import {
@@ -85,11 +92,58 @@ const BOOKING_SELECT = {
   cancelledAt: true,
   chargeRatio: true,
   source: true,
-  table: { select: { label: true, hallId: true } },
+  table: { select: { label: true, hallId: true, hall: { select: { name: true } } } },
   client: { select: { membership: PERSON_SELECT } },
   coach: { select: { membership: PERSON_SELECT } },
   createdBy: { select: { user: { select: { fullName: true } } } },
 } as const;
+
+/** Занятие с составом и деньгами — одна форма для ленты дня и «Требует отметки». */
+const SESSION_SELECT = {
+  id: true,
+  startsAt: true,
+  endsAt: true,
+  capacity: true,
+  trainingType: { select: { name: true, price: true } },
+  coach: { select: { membership: PERSON_SELECT } },
+  bookings: { select: { ...CHARGE_SELECT, client: { select: { membership: PERSON_SELECT } } } },
+} as const;
+
+const TOURNAMENT_SELECT = {
+  id: true,
+  startsAt: true,
+  endsAt: true,
+  tournamentType: { select: { name: true, price: true } },
+  registrations: {
+    select: { ...CHARGE_SELECT, client: { select: { membership: PERSON_SELECT } } },
+  },
+} as const;
+
+type SessionRow = Prisma.TrainingSessionGetPayload<{ select: typeof SESSION_SELECT }>;
+type TournamentRow = Prisma.TournamentGetPayload<{ select: typeof TOURNAMENT_SELECT }>;
+
+/** Мероприятия как их отдаёт база — до того, как их покажут. */
+interface EventRows {
+  sessions: SessionRow[];
+  tournaments: TournamentRow[];
+}
+
+/**
+ * Сколько записей каждого вида в «Требует отметки». Больше — значит отметку
+ * давно не ведут, и список длиннее экрана ничем не поможет: остальное всё
+ * равно закроет джоба.
+ */
+const PENDING_LIMIT = 100;
+
+/**
+ * То, что нужно для показа записи, кроме неё самой: момент, от которого
+ * считаются фазы, правила клуба и кто ставил нынешние отметки.
+ */
+interface View {
+  now: Date;
+  policy: ClubAttendancePolicy;
+  marks: Map<string, DeskMarkInfo>;
+}
 
 type PersonRow = { user: { id: string; fullName: string; phone: string } };
 
@@ -107,6 +161,7 @@ export class DeskService {
     private readonly prisma: PrismaService,
     private readonly occupancy: OccupancyService,
     private readonly membership: MembershipService,
+    private readonly attendance: AttendanceService,
   ) {}
 
   async findDay(tenantId: string, hallId: string, date: string): Promise<DeskDay> {
@@ -125,24 +180,71 @@ export class DeskService {
     // и «сегодня» у зала в Абакане своё. Считать по часам головного клуба
     // значит показать администратору не тот день.
     const timezone = hall.timezone;
-    const now = localParts(new Date(), timezone);
+    const moment = new Date();
+    const now = localParts(moment, timezone);
     const today = now.date === date;
 
-    const tables = await this.prisma.table.findMany({
-      where: { tenantId, hallId },
-      select: { id: true, label: true },
-      orderBy: { label: 'asc' },
-    });
+    const [tables, policy] = await Promise.all([
+      this.prisma.table.findMany({
+        where: { tenantId, hallId },
+        select: { id: true, label: true },
+        orderBy: { label: 'asc' },
+      }),
+      this.attendance.policy(tenantId),
+    ]);
 
     const [slots, bookings] = await Promise.all([
       this.occupancy.slotsOn(tenantId, hallId, date),
       this.bookings(tenantId, hallId, date, timezone),
     ]);
 
-    const [events, names] = await Promise.all([
-      this.events(tenantId, slots),
+    const [events, names, pendingRows, visits] = await Promise.all([
+      this.eventRows(tenantId, {
+        sessionIds: slots.map((slot) => slot.trainingSessionId),
+        tournamentIds: slots.map((slot) => slot.tournamentId),
+      }),
       this.names(tenantId, slots.flatMap((slot) => [slot.coachId, slot.clientId])),
+      this.pendingRows(tenantId, moment, policy),
+      // Визит с порога залу не принадлежит — у него нет стола. Показывается
+      // по клубу за местные сутки зала.
+      this.attendance.visitsBetween(
+        tenantId,
+        instantAt(date, 0, timezone),
+        instantAt(date, CLOSE_MINUTE, timezone),
+      ),
     ]);
+
+    // Неотмеченное этого дня — в «Требует отметки», даже если оно старше
+    // начала учёта: такое джоба не закроет, и кроме администратора некому.
+    const started = (row: { startsAt: Date }): boolean => row.startsAt <= moment;
+    const pending = {
+      bookings: uniqueById([
+        ...pendingRows.bookings,
+        ...bookings.filter((row) => row.status === BookingStatus.BOOKED && started(row)),
+      ]),
+      events: {
+        sessions: uniqueById([
+          ...pendingRows.events.sessions,
+          ...events.sessions.filter((row) => started(row) && row.bookings.some(isUnmarked)),
+        ]),
+        tournaments: uniqueById([
+          ...pendingRows.events.tournaments,
+          ...events.tournaments.filter((row) => started(row) && row.registrations.some(isUnmarked)),
+        ]),
+      },
+    };
+
+    const view: View = {
+      now: moment,
+      policy,
+      marks: await this.attendance.marksOf(tenantId, [
+        ...markedIds(bookings),
+        ...markedIds(events.sessions.flatMap((row) => row.bookings)),
+        ...markedIds(events.tournaments.flatMap((row) => row.registrations)),
+        ...markedIds(pending.events.sessions.flatMap((row) => row.bookings)),
+        ...markedIds(pending.events.tournaments.flatMap((row) => row.registrations)),
+      ]),
+    };
 
     const spans = this.spansByTable(slots, bookings, names, timezone);
     const spansOf = (tableId: string): BusySpan[] => spans.get(tableId) ?? [];
@@ -169,16 +271,33 @@ export class DeskService {
         nextFromMinute: nextFrom(spansOf(table.id), today ? now.minutes : -1),
       })),
 
-      bookings: bookings.map(present),
+      bookings: bookings.map((row) => present(row, view)),
 
-      events: events.events,
+      events: presentEvents(events, view),
       load: loadByHour(tables.map((table) => spansOf(table.id)), OPEN_MINUTE, CLOSE_MINUTE),
 
+      // Деньги считаются по КОПИЯМ цен на момент записи, а не по цене типа:
+      // поднятый на прошлой неделе прайс не должен задним числом переписывать
+      // то, о чём клуб уже договорился с клиентом.
       money: moneyOf({
         tables: bookings.map(charge),
-        trainings: events.trainings,
-        tournaments: events.tournaments,
+        trainings: events.sessions.flatMap((session) => session.bookings.map(charge)),
+        tournaments: events.tournaments.flatMap((tournament) => tournament.registrations.map(charge)),
       }),
+
+      policy: {
+        noShowChargePercent: policy.noShowChargePercent,
+        reminderAfterMinutes: policy.reminderAfterMinutes,
+        autoNoShowAfterMinutes: policy.autoNoShowAfterMinutes,
+        trackedSince: policy.trackedSince.toISOString(),
+      },
+      pending: {
+        bookings: pending.bookings
+          .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
+          .map((row) => present(row, view)),
+        events: presentEvents(pending.events, view),
+      },
+      visits,
     };
   }
 
@@ -213,7 +332,7 @@ export class DeskService {
       take: query.limit ?? 100,
     });
 
-    return rows.map(bookingRow).map(present);
+    return this.presentBookings(tenantId, rows);
   }
 
   /**
@@ -231,10 +350,16 @@ export class DeskService {
    *
    * Что НЕ отличается: чужая бронь по-прежнему непреодолима (два человека за
    * одним столом не помещаются физически), а цену считает только сервер.
+   *
+   * Бронь, которая уже началась, заводится сразу «пришёл» — в той же
+   * транзакции. Это не только сверка истории: администратор сажает человека
+   * «прямо сейчас», и начало по шагу зала оказывается на пару минут в прошлом.
+   * Без отметки такую бронь через сутки закрыла бы неявкой джоба — со
+   * списанием за игру, которая состоялась у администратора на глазах.
    */
   async createBooking(
     tenantId: string,
-    authorId: string,
+    actor: Actor,
     dto: CreateDeskBookingRequest,
   ): Promise<DeskBooking> {
     const table = await this.table(tenantId, dto.tableId);
@@ -251,26 +376,48 @@ export class DeskService {
     // самостоятельной записи, — второго пути здесь быть не должно.
     await this.membership.ensureClient(tenantId, dto.clientId);
 
-    return this.write(() =>
-      this.prisma.tableBooking.create({
-        data: {
-          tenantId,
-          tableId: table.id,
-          clientId: dto.clientId,
-          withRobot: dto.withRobot,
-          startsAt,
-          endsAt: endOf(startsAt, dto.durationMinutes),
-          // Цену считает сервер и только он: второй расчёт на клиенте
-          // разошёлся бы с этим молча.
-          priceAtBooking: quote(table.hall, dto.durationMinutes, dto.withRobot).price,
-          source: BookingSource.MANUAL,
-          // Обязателен при MANUAL — это проверяет check-констрейнт. За ручной
-          // бронью стоят чужие деньги, и «кто меня записал» должно иметь ответ.
-          createdByUserId: authorId,
-        },
-        select: BOOKING_SELECT,
+    const policy = await this.attendance.policy(tenantId);
+
+    const id = await this.write(() =>
+      this.prisma.$transaction(async (tx) => {
+        const created = await tx.tableBooking.create({
+          data: {
+            tenantId,
+            tableId: table.id,
+            clientId: dto.clientId,
+            withRobot: dto.withRobot,
+            startsAt,
+            endsAt: endOf(startsAt, dto.durationMinutes),
+            // Цену считает сервер и только он: второй расчёт на клиенте
+            // разошёлся бы с этим молча.
+            priceAtBooking: quote(table.hall, dto.durationMinutes, dto.withRobot).price,
+            source: BookingSource.MANUAL,
+            // Обязателен при MANUAL — это проверяет check-констрейнт. За ручной
+            // бронью стоят чужие деньги, и «кто меня записал» должно иметь ответ.
+            createdByUserId: actor.userId,
+          },
+          select: { id: true },
+        });
+
+        const now = new Date();
+
+        if (startsAt.getTime() <= now.getTime()) {
+          await this.attendance.applyInTx(
+            tx,
+            tenantId,
+            'TABLE',
+            created.id,
+            { status: 'ATTENDED', reason: 'Бронь заведена после начала — человек уже за столом' },
+            actor,
+            { now, noShowChargePercent: policy.noShowChargePercent },
+          );
+        }
+
+        return created.id;
       }),
     );
+
+    return this.presentOne(tenantId, id);
   }
 
   /**
@@ -301,7 +448,7 @@ export class DeskService {
 
     await this.assertBookable(tenantId, table, startsAt, dto.durationMinutes, bookingId);
 
-    return this.write(() =>
+    await this.write(() =>
       this.prisma.tableBooking.update({
         where: { id: bookingId },
         data: {
@@ -310,9 +457,11 @@ export class DeskService {
           endsAt: endOf(startsAt, dto.durationMinutes),
           priceAtBooking: quote(table.hall, dto.durationMinutes, booking.withRobot).price,
         },
-        select: BOOKING_SELECT,
+        select: { id: true },
       }),
     );
+
+    return this.presentOne(tenantId, bookingId);
   }
 
   /**
@@ -343,7 +492,7 @@ export class DeskService {
 
     const minutes = Math.floor((booking.startsAt.getTime() - Date.now()) / 60_000);
 
-    const updated = await this.prisma.tableBooking.update({
+    await this.prisma.tableBooking.update({
       where: { id: bookingId },
       data: {
         status: BookingStatus.CANCELLED,
@@ -352,10 +501,9 @@ export class DeskService {
         cancelledAt: new Date(),
         chargeRatio: dto.waiveCharge ? 0 : cancellationPercent(tiers, minutes),
       },
-      select: BOOKING_SELECT,
     });
 
-    return present(bookingRow(updated));
+    return this.presentOne(tenantId, bookingId);
   }
 
   // --- Внутреннее ------------------------------------------------------------
@@ -448,9 +596,9 @@ export class DeskService {
    * Пересечение ловит exclusion-констрейнт. Prisma такую ошибку не
    * классифицирует — узнать её можно только по имени констрейнта в тексте.
    */
-  private async write(action: () => Promise<BookingRow>): Promise<DeskBooking> {
+  private async write<T>(action: () => Promise<T>): Promise<T> {
     try {
-      return present(bookingRow(await action()));
+      return await action();
     } catch (error) {
       if (String(error).includes('TableBooking_no_overlap')) {
         throw new ConflictException('Этот стол в это время уже занят другой бронью');
@@ -562,78 +710,95 @@ export class DeskService {
    * затем, чтобы увидеть, кого ждать, и второй запрос на каждое занятие
    * превратил бы это в десяток походов к серверу.
    */
-  private async events(
+  private async eventRows(
     tenantId: string,
-    slots: readonly { trainingSessionId: string | null; tournamentId: string | null }[],
-  ): Promise<{ events: DeskEvent[]; trainings: ChargeRow[]; tournaments: ChargeRow[] }> {
-    const sessionIds = [...new Set(slots.map((slot) => slot.trainingSessionId).filter(isId))];
-    const tournamentIds = [...new Set(slots.map((slot) => slot.tournamentId).filter(isId))];
-
-    if (sessionIds.length === 0 && tournamentIds.length === 0) {
-      return { events: [], trainings: [], tournaments: [] };
-    }
+    ids: { sessionIds: readonly (string | null)[]; tournamentIds: readonly (string | null)[] },
+  ): Promise<EventRows> {
+    const sessionIds = [...new Set(ids.sessionIds.filter(isId))];
+    const tournamentIds = [...new Set(ids.tournamentIds.filter(isId))];
 
     const [sessions, tournaments] = await Promise.all([
+      sessionIds.length === 0
+        ? []
+        : this.prisma.trainingSession.findMany({
+            where: { tenantId, id: { in: sessionIds } },
+            select: SESSION_SELECT,
+          }),
+      tournamentIds.length === 0
+        ? []
+        : this.prisma.tournament.findMany({
+            where: { tenantId, id: { in: tournamentIds } },
+            select: TOURNAMENT_SELECT,
+          }),
+    ]);
+
+    return { sessions, tournaments };
+  }
+
+  /**
+   * Что ждёт отметки по всему клубу — независимо от зала и даты на экране.
+   *
+   * Лента дня берёт мероприятия из сетки зала и не видит ни вчерашнего, ни
+   * заведённого не в сетке. Без общего списка такое не отметил бы никто, кроме
+   * джобы, — а джоба ставит неявку, и человеку, который был, спишут 100%.
+   *
+   * Только то, что в учёте (закончилось не раньше `trackedSince`): старшее
+   * джоба не тронет, и собирать сюда всю историю клуба незачем. Старое
+   * неотмеченное видно в «Требует отметки» своего дня.
+   */
+  private async pendingRows(
+    tenantId: string,
+    now: Date,
+    policy: ClubAttendancePolicy,
+  ): Promise<{ bookings: BookingWithPerson[]; events: EventRows }> {
+    const within = { startsAt: { lte: now }, endsAt: { gte: policy.trackedSince } };
+    const booked = { status: BookingStatus.BOOKED };
+
+    const [bookings, sessions, tournaments] = await Promise.all([
+      this.prisma.tableBooking.findMany({
+        where: { tenantId, ...booked, ...within },
+        select: BOOKING_SELECT,
+        orderBy: { startsAt: 'asc' },
+        take: PENDING_LIMIT,
+      }),
       this.prisma.trainingSession.findMany({
-        where: { tenantId, id: { in: sessionIds } },
-        select: {
-          id: true,
-          startsAt: true,
-          endsAt: true,
-          capacity: true,
-          trainingType: { select: { name: true, price: true } },
-          coach: { select: { membership: PERSON_SELECT } },
-          bookings: { select: { ...CHARGE_SELECT, client: { select: { membership: PERSON_SELECT } } } },
-        },
+        where: { tenantId, ...within, bookings: { some: booked } },
+        select: SESSION_SELECT,
+        orderBy: { startsAt: 'asc' },
+        take: PENDING_LIMIT,
       }),
       this.prisma.tournament.findMany({
-        where: { tenantId, id: { in: tournamentIds } },
-        select: {
-          id: true,
-          startsAt: true,
-          endsAt: true,
-          tournamentType: { select: { name: true, price: true } },
-          registrations: {
-            select: { ...CHARGE_SELECT, client: { select: { membership: PERSON_SELECT } } },
-          },
-        },
+        where: { tenantId, ...within, registrations: { some: booked } },
+        select: TOURNAMENT_SELECT,
+        orderBy: { startsAt: 'asc' },
+        take: PENDING_LIMIT,
       }),
     ]);
 
-    const events: DeskEvent[] = [
-      ...sessions.map((session) => ({
-        id: session.id,
-        kind: 'TRAINING' as const,
-        title: session.trainingType.name,
-        startsAt: session.startsAt.toISOString(),
-        endsAt: session.endsAt.toISOString(),
-        price: session.trainingType.price,
-        capacity: session.capacity,
-        coachName: session.coach.membership.user.fullName,
-        participants: session.bookings.map(participant),
-      })),
-      ...tournaments.map((tournament) => ({
-        id: tournament.id,
-        kind: 'TOURNAMENT' as const,
-        title: tournament.tournamentType.name,
-        startsAt: tournament.startsAt.toISOString(),
-        endsAt: tournament.endsAt.toISOString(),
-        price: tournament.tournamentType.price,
-        // Лимита мест у турнира нет вовсе — число записавшихся справочно.
-        capacity: null,
-        coachName: null,
-        participants: tournament.registrations.map(participant),
-      })),
-    ];
+    return { bookings: bookings.map(bookingRow), events: { sessions, tournaments } };
+  }
 
-    return {
-      events: events.sort((a, b) => a.startsAt.localeCompare(b.startsAt)),
-      // Деньги считаются по КОПИЯМ цен на момент записи, а не по цене типа:
-      // поднятый на прошлой неделе прайс не должен задним числом переписывать
-      // то, о чём клуб уже договорился с клиентом.
-      trainings: sessions.flatMap((session) => session.bookings.map(charge)),
-      tournaments: tournaments.flatMap((tournament) => tournament.registrations.map(charge)),
-    };
+  /** Брони в том виде, в каком их отдаёт рабочее место, — с отметками. */
+  private async presentBookings(tenantId: string, rows: BookingRow[]): Promise<DeskBooking[]> {
+    const [policy, marks] = await Promise.all([
+      this.attendance.policy(tenantId),
+      this.attendance.marksOf(tenantId, markedIds(rows)),
+    ]);
+
+    const view: View = { now: new Date(), policy, marks };
+
+    return rows.map(bookingRow).map((row) => present(row, view));
+  }
+
+  private async presentOne(tenantId: string, id: string): Promise<DeskBooking> {
+    const row = await this.prisma.tableBooking.findUniqueOrThrow({
+      where: { id },
+      select: BOOKING_SELECT,
+    });
+
+    const [booking] = await this.presentBookings(tenantId, [row]);
+
+    return booking!;
   }
 
   /**
@@ -673,7 +838,7 @@ interface BookingRow {
   cancelledAt: Date | null;
   chargeRatio: number | null;
   source: BookingSource;
-  table: { label: string; hallId: string };
+  table: { label: string; hallId: string; hall: { name: string } };
   client: { membership: PersonRow } | null;
   coach: { membership: PersonRow } | null;
   createdBy: { user: { fullName: string } } | null;
@@ -694,12 +859,13 @@ function bookingRow(row: BookingRow): BookingWithPerson {
   };
 }
 
-function present(row: BookingWithPerson): DeskBooking {
+function present(row: BookingWithPerson, view: View): DeskBooking {
   return {
     id: row.id,
     tableId: row.tableId,
     tableLabel: row.table.label,
     hallId: row.table.hallId,
+    hallName: row.table.hall.name,
     startsAt: row.startsAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
     withRobot: row.withRobot,
@@ -710,7 +876,58 @@ function present(row: BookingWithPerson): DeskBooking {
     createdBy: row.createdBy?.user.fullName ?? null,
     cancelledAt: row.cancelledAt?.toISOString() ?? null,
     chargePercent: row.chargeRatio,
+    ...timing(row, row.status === BookingStatus.BOOKED, view),
+    mark: view.marks.get(row.id) ?? null,
   };
+}
+
+/**
+ * Где запись по отношению к отметке и когда её закроет система.
+ *
+ * Срок автонеявки — только у того, что ещё ждёт: у отмеченного и отменённого
+ * система уже ничего не сделает, и «отметит неявку в 19:00» было бы враньём.
+ */
+function timing(
+  row: { startsAt: Date; endsAt: Date },
+  waiting: boolean,
+  view: View,
+): Pick<DeskBooking, 'phase' | 'autoNoShowAt'> {
+  return {
+    phase: attendancePhase(row, view.policy, view.now),
+    autoNoShowAt: waiting ? (autoNoShowAt(row.endsAt, view.policy)?.toISOString() ?? null) : null,
+  };
+}
+
+function presentEvents(rows: EventRows, view: View): DeskEvent[] {
+  const events: DeskEvent[] = [
+    ...rows.sessions.map((session) => ({
+      id: session.id,
+      kind: 'TRAINING' as const,
+      title: session.trainingType.name,
+      startsAt: session.startsAt.toISOString(),
+      endsAt: session.endsAt.toISOString(),
+      price: session.trainingType.price,
+      capacity: session.capacity,
+      coachName: session.coach.membership.user.fullName,
+      participants: session.bookings.map((row) => participant(row, view)),
+      ...timing(session, session.bookings.some(isUnmarked), view),
+    })),
+    ...rows.tournaments.map((tournament) => ({
+      id: tournament.id,
+      kind: 'TOURNAMENT' as const,
+      title: tournament.tournamentType.name,
+      startsAt: tournament.startsAt.toISOString(),
+      endsAt: tournament.endsAt.toISOString(),
+      price: tournament.tournamentType.price,
+      // Лимита мест у турнира нет вовсе — число записавшихся справочно.
+      capacity: null,
+      coachName: null,
+      participants: tournament.registrations.map((row) => participant(row, view)),
+      ...timing(tournament, tournament.registrations.some(isUnmarked), view),
+    })),
+  ];
+
+  return events.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
 }
 
 function personOf(row: { membership: PersonRow } | null): DeskPerson {
@@ -727,11 +944,29 @@ function personOf(row: { membership: PersonRow } | null): DeskPerson {
   };
 }
 
-const participant = (row: EntryRow): DeskParticipant => ({
+const participant = (row: EntryRow, view: View): DeskParticipant => ({
   ...personOf(row.client),
   entryId: row.id,
   status: row.status,
+  chargePercent: row.chargeRatio,
+  mark: view.marks.get(row.id) ?? null,
 });
+
+/** Запись, всё ещё ждущая отметки. */
+function isUnmarked(row: { status: BookingStatus }): boolean {
+  return row.status === BookingStatus.BOOKED;
+}
+
+/** Идентификаторы отмеченных записей — только у них есть что спросить у журнала. */
+function markedIds(rows: readonly { id: string; status: BookingStatus }[]): string[] {
+  return rows
+    .filter((row) => row.status === BookingStatus.ATTENDED || row.status === BookingStatus.NO_SHOW)
+    .map((row) => row.id);
+}
+
+function uniqueById<T extends { id: string }>(rows: readonly T[]): T[] {
+  return [...new Map(rows.map((row) => [row.id, row])).values()];
+}
 
 const charge = (row: {
   priceAtBooking: number;

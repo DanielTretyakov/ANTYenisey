@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import type { ExecutionContext } from '@nestjs/common';
 import type { Request } from 'express';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { AttendanceModule } from './attendance/attendance.module';
 import { AuthModule } from './auth/auth.module';
 import { BookingModule } from './booking/booking.module';
 import { ClubModule } from './club/club.module';
@@ -59,6 +60,7 @@ import { validateEnv, type Env } from './config/env';
     ClubModule,
     BookingModule,
     DeskModule,
+    AttendanceModule,
     TenantsModule,
     EntriesModule,
     EventsModule,

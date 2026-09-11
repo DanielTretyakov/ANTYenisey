@@ -1454,6 +1454,177 @@ async function main() {
     r = await asAdmin(`${deskBookings}/${seatId}/cancel`, { method: 'POST', json: {} });
     check('повторная отмена отклонена', 400, r.status);
 
+    console.log('=== 22в. Отметка присутствия: аренда');
+    const attendance = '/clubs/yenisey/desk/attendance';
+    const seatZone = 'Asia/Krasnoyarsk';
+    const yesterday = dateIn(seatZone, -1);
+    const seat = (startsAt, durationMinutes = 60) =>
+      asAdmin(deskBookings, {
+        method: 'POST',
+        json: { clientId: seatedId, tableId: seatTableId, startsAt, durationMinutes, withRobot: false },
+      });
+
+    r = await seat(seatAt);
+    check('будущая бронь заведена', 201, r.status);
+    const futureId = r.body?.id ?? '';
+    assert('будущая бронь ждёт своего часа', r.body?.status === 'BOOKED' && r.body?.phase === 'UPCOMING');
+
+    r = await asAdmin(`${attendance}/table/${futureId}`, { method: 'PUT', json: { status: 'ATTENDED' } });
+    check('отметить бронь до начала нельзя', 400, r.status);
+
+    r = await call(`${attendance}/table/${futureId}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${access}` },
+      json: { status: 'ATTENDED' },
+    });
+    check('клиенту отметка закрыта', 403, r.status);
+
+    r = await asAdmin(`${attendance}/sparring/${futureId}`, { method: 'PUT', json: { status: 'ATTENDED' } });
+    check('неизвестный вид записи', 404, r.status);
+
+    r = await asAdmin(`${attendance}/table/net-takoi-broni`, { method: 'PUT', json: { status: 'ATTENDED' } });
+    check('несуществующая бронь', 404, r.status);
+
+    r = await asAdmin(`${attendance}/table/${futureId}`, { method: 'PUT', json: { status: 'MAYBE' } });
+    check('неизвестная отметка отклонена', 400, r.status);
+
+    // Бронь задним числом — сразу «пришёл», в той же транзакции. Иначе через
+    // сутки её закрыла бы неявкой джоба — со списанием за состоявшуюся игру.
+    r = await seat(instantAt(yesterday, 10 * 60, seatZone));
+    check('бронь задним числом заведена', 201, r.status);
+    const retroId = r.body?.id ?? '';
+    assert(
+      'бронь задним числом сразу «пришёл»',
+      r.body?.status === 'ATTENDED' && r.body?.chargePercent === 100,
+    );
+    assert(
+      'у отметки есть подпись администратора',
+      typeof r.body?.mark?.by === 'string' && r.body?.mark?.auto === false,
+    );
+
+    // Неотмеченная начавшаяся бронь: перенос во вчера статус не трогает —
+    // перенос правит время, а не факт прихода.
+    r = await seat(instantAt(seatDate, 18 * 60, seatZone));
+    const missedId = r.body?.id ?? '';
+    r = await asAdmin(`${deskBookings}/${missedId}`, {
+      method: 'PATCH',
+      json: { tableId: seatTableId, startsAt: instantAt(yesterday, 12 * 60, seatZone), durationMinutes: 60 },
+    });
+    check('бронь перенесена во вчера', 200, r.status);
+    assert(
+      'перенесённая во вчера ждёт отметки и просрочена',
+      r.body?.status === 'BOOKED' && r.body?.phase === 'OVERDUE',
+    );
+
+    // Процент неявки — из смены: сценарий настроек выше мог его поменять.
+    const yesterdayDesk = `/clubs/yenisey/desk/halls/${seatHallId}/days/${yesterday}`;
+    r = await asAdmin(yesterdayDesk);
+    check('вчерашний день зала открыт', 200, r.status);
+    const noShowPercent = r.body?.policy?.noShowChargePercent;
+    assert('политика присутствия приехала со сменой', Number.isInteger(noShowPercent));
+    const pendingIds = (r.body?.pending?.bookings ?? []).map((item) => item.id);
+    assert('неотмеченная бронь — в «Требует отметки»', pendingIds.includes(missedId));
+    assert('отмеченная — нет', !pendingIds.includes(retroId));
+
+    const markMissed = (json) =>
+      asAdmin(`${attendance}/table/${missedId}`, { method: 'PUT', json });
+
+    r = await markMissed({ status: 'NO_SHOW' });
+    check('неявка отмечена', 200, r.status);
+    assert(
+      'неявка — по проценту клуба',
+      r.body?.status === 'NO_SHOW' && r.body?.chargePercent === noShowPercent && r.body?.changed === true,
+    );
+
+    r = await markMissed({ status: 'NO_SHOW' });
+    check('повтор неявки не ошибка', 200, r.status);
+    assert('повтор ничего не меняет', r.body?.changed === false);
+
+    r = await markMissed({ status: 'ATTENDED' });
+    check('исправление без причины отклонено', 400, r.status);
+    assert('отказ просит причину', String(r.body?.message ?? '').includes('причин'));
+
+    r = await markMissed({ status: 'NO_SHOW', waiveCharge: true, reason: '   ' });
+    check('прощение без причины отклонено', 400, r.status);
+
+    r = await markMissed({ status: 'ATTENDED', waiveCharge: true, reason: 'клуб виноват' });
+    check('простить можно только неявку', 400, r.status);
+
+    r = await markMissed({ status: 'NO_SHOW', waiveCharge: true, reason: 'Стол сломался' });
+    check('неявка прощена', 200, r.status);
+    assert('прощённая неявка — без списания', r.body?.chargePercent === 0 && r.body?.changed === true);
+
+    // Неявка освобождает стол, и время заняли. Вернуть «пришёл» — снова занять
+    // его, а два человека за одним столом не помещаются.
+    r = await seat(instantAt(yesterday, 12 * 60, seatZone));
+    check('на освободившееся время посадили другого', 201, r.status);
+
+    r = await markMissed({ status: 'ATTENDED', reason: 'Пришёл к концу' });
+    check('«пришёл» на занятое время отклонён', 409, r.status);
+
+    r = await asAdmin(`${attendance}/table/${missedId}/history`);
+    check('история отметок читается', 200, r.status);
+    const history = Array.isArray(r.body) ? r.body : [];
+    assert('в истории обе отметки, без повтора', history.length === 2);
+    assert('первая — неявка от человека', history[0]?.after?.status === 'NO_SHOW' && history[0]?.auto === false);
+    assert(
+      'вторая — прощение с причиной и процентом до и после',
+      history[1]?.reason === 'Стол сломался' &&
+        history[1]?.before?.chargePercent === noShowPercent &&
+        history[1]?.after?.chargePercent === 0,
+    );
+
+    r = await call(`${attendance}/table/${missedId}/history`, {
+      headers: { Authorization: `Bearer ${access}` },
+    });
+    check('клиенту история закрыта', 403, r.status);
+
+    r = await asAdmin(yesterdayDesk);
+    const missed = (r.body?.bookings ?? []).find((item) => item.id === missedId);
+    assert('в смене видно, кто и почему поставил отметку', missed?.mark?.reason === 'Стол сломался');
+    assert('отмеченное ушло из «Требует отметки»', !(r.body?.pending?.bookings ?? []).some((item) => item.id === missedId));
+
+    console.log('=== 22г. Визит с порога');
+    const visits = '/clubs/yenisey/desk/visits';
+    const visitAt = instantAt(yesterday, 15 * 60, seatZone);
+
+    r = await call(visits, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${access}` },
+      json: { clientId: seatedId, visitedAt: visitAt },
+    });
+    check('клиенту визит с порога закрыт', 403, r.status);
+
+    r = await asAdmin(visits, {
+      method: 'POST',
+      json: { clientId: seatedId, visitedAt: new Date(Date.now() + 86_400_000).toISOString() },
+    });
+    check('визит в будущем отклонён', 400, r.status);
+
+    r = await asAdmin(visits, { method: 'POST', json: { clientId: 'net-takogo', visitedAt: visitAt } });
+    check('визит несуществующего человека', 404, r.status);
+
+    r = await asAdmin(visits, {
+      method: 'POST',
+      json: { clientId: seatedId, visitedAt: visitAt, coachId: seatedId },
+    });
+    check('тренер не из клуба отклонён', 400, r.status);
+
+    r = await asAdmin(visits, {
+      method: 'POST',
+      json: { clientId: seatedId, visitedAt: visitAt, note: 'Пришёл с другом' },
+    });
+    check('визит с порога внесён', 201, r.status);
+    const visitId = r.body?.id;
+    assert('комментарий сохранён', r.body?.note === 'Пришёл с другом');
+    assert('у визита есть автор', typeof r.body?.recordedBy === 'string');
+
+    r = await asAdmin(visits, { method: 'POST', json: { clientId: seatedId, visitedAt: visitAt } });
+    check('двойное нажатие — не второй визит', 409, r.status);
+
+    r = await asAdmin(yesterdayDesk);
+    assert('визит виден в смене своего дня', (r.body?.visits ?? []).some((item) => item.id === visitId));
+
     // Стол с бронями удалить нельзя — даже отменёнными: за бронями стоит
     // история платежей. Зал с таким столом, соответственно, тоже.
     r = await asAdmin(`/clubs/yenisey/tables/${seatTableId}`, { method: 'DELETE' });
@@ -1581,6 +1752,7 @@ async function main() {
   assert('записей у новичка нет', r.body?.length === 0);
 
   await eventRegistration(asMe);
+  await eventAttendance(asMe);
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
@@ -1736,6 +1908,150 @@ async function eventRegistration(asMe) {
 
   r = await asAdmin(`/clubs/yenisey/tournaments/${tournamentId}`, { method: 'DELETE' });
   check('турнир с историей записей не удаляется', 409, r.status);
+}
+
+/**
+ * Отметка на занятии и турнире.
+ *
+ * Мероприятия заводятся с началом через несколько секунд: записаться на
+ * начавшееся нельзя, а отметить не начавшееся — тоже нельзя. Ни в одну сетку
+ * они не поставлены, и это часть проверки: «Требует отметки» собирается по
+ * всему клубу, а не из окон зала.
+ */
+async function eventAttendance(asMe) {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('\n=== 28. Отметка на мероприятиях — ПРОПУЩЕНА (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 28. Отметка на занятии и турнире');
+
+  let r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const adminAuth = { Authorization: `Bearer ${r.body?.accessToken ?? ''}` };
+  const asAdmin = (path, options = {}) =>
+    call(path, { ...options, headers: { ...adminAuth, ...(options.headers ?? {}) } });
+
+  r = await asAdmin('/clubs/yenisey/coaches');
+  const coachId = r.body?.[0]?.id;
+
+  r = await asAdmin('/clubs/yenisey/halls');
+  const anyHall = r.body?.[0];
+
+  if (!coachId || !anyHall) {
+    console.log('     в клубе нет тренера или зала — сценарий пропущен');
+    return;
+  }
+
+  r = await asAdmin('/clubs/yenisey/training-types');
+  const trainingTypeId = r.body?.[0]?.id;
+  r = await asAdmin('/clubs/yenisey/tournament-types');
+  const tournamentTypeId = r.body?.[0]?.id;
+
+  const startsAt = new Date(Date.now() + 4_000);
+  const endsAt = new Date(startsAt.getTime() + 60 * 60_000);
+
+  r = await asAdmin('/clubs/yenisey/training-sessions', {
+    method: 'POST',
+    json: {
+      trainingTypeId,
+      coachId,
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      capacity: 4,
+    },
+  });
+  check('занятие через секунды заведено', 201, r.status);
+  const sessionId = r.body?.id;
+
+  r = await asAdmin('/clubs/yenisey/tournaments', {
+    method: 'POST',
+    json: { tournamentTypeId, startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString() },
+  });
+  check('турнир через секунды заведён', 201, r.status);
+  const tournamentId = r.body?.id;
+
+  r = await asMe(`/clubs/yenisey/trainings/${sessionId}/booking`, { method: 'POST' });
+  check('запись на занятие до начала', 201, r.status);
+  r = await asMe(`/clubs/yenisey/tournaments/${tournamentId}/registration`, { method: 'POST' });
+  check('запись на турнир до начала', 201, r.status);
+
+  // Идентификаторы записей — из смены: по ним и отмечают.
+  const deskToday = () =>
+    asAdmin(`/clubs/yenisey/desk/halls/${anyHall.id}/days/${dateIn(anyHall.timezone, 0)}`);
+  const entryOf = (desk, id) =>
+    (desk?.pending?.events ?? []).find((event) => event.id === id)?.participants?.[0]?.entryId;
+
+  const waitUntil = async (moment) => {
+    const left = moment.getTime() - Date.now();
+    if (left > 0) await new Promise((resolve) => setTimeout(resolve, left + 300));
+  };
+
+  await waitUntil(startsAt);
+
+  r = await deskToday();
+  check('смена открыта', 200, r.status);
+  const trainingEntry = entryOf(r.body, sessionId);
+  const tournamentEntry = entryOf(r.body, tournamentId);
+  assert('начавшееся занятие вне сетки — в «Требует отметки»', typeof trainingEntry === 'string');
+  assert('начавшийся турнир вне сетки — там же', typeof tournamentEntry === 'string');
+  const pendingSession = (r.body?.pending?.events ?? []).find((event) => event.id === sessionId);
+  assert('идущее занятие — в фазе «идёт»', pendingSession?.phase === 'ONGOING');
+  assert('у ждущего занятия есть срок автонеявки', typeof pendingSession?.autoNoShowAt === 'string');
+
+  const batch = '/clubs/yenisey/desk/attendance';
+
+  r = await asAdmin(batch, {
+    method: 'POST',
+    json: {
+      marks: [
+        { kind: 'TRAINING', entryId: trainingEntry, status: 'ATTENDED' },
+        { kind: 'TRAINING', entryId: trainingEntry, status: 'ATTENDED' },
+      ],
+    },
+  });
+  check('одна запись дважды в пакете отклонена', 400, r.status);
+
+  r = await asAdmin(batch, { method: 'POST', json: { marks: [] } });
+  check('пустой пакет отклонён', 400, r.status);
+
+  r = await asAdmin(batch, {
+    method: 'POST',
+    json: {
+      marks: [
+        { kind: 'TOURNAMENT', entryId: tournamentEntry, status: 'ATTENDED' },
+        { kind: 'TRAINING', entryId: trainingEntry, status: 'ATTENDED' },
+      ],
+    },
+  });
+  check('пакетная отметка', 200, r.status);
+  assert(
+    'ответ — в порядке запроса, обе отмечены',
+    r.body?.[0]?.kind === 'TOURNAMENT' &&
+      r.body?.[1]?.kind === 'TRAINING' &&
+      r.body.every((item) => item.status === 'ATTENDED' && item.changed === true),
+  );
+
+  r = await deskToday();
+  const stillPending = (r.body?.pending?.events ?? []).map((event) => event.id);
+  assert('отмеченные ушли из «Требует отметки»', !stillPending.includes(sessionId) && !stillPending.includes(tournamentId));
+
+  r = await asAdmin(`${batch}/training/${trainingEntry}`, {
+    method: 'PUT',
+    json: { status: 'NO_SHOW', reason: 'Отметили по ошибке' },
+  });
+  check('присутствие исправлено на неявку с причиной', 200, r.status);
+
+  r = await asAdmin(`${batch}/training/${trainingEntry}/history`);
+  assert(
+    'история занятия: отметка и исправление',
+    r.body?.length === 2 && r.body?.[1]?.reason === 'Отметили по ошибке',
+  );
+
+  r = await asAdmin(`${batch}/tournament/${trainingEntry}`, { method: 'PUT', json: { status: 'ATTENDED' } });
+  check('запись занятия по адресу турнира не находится', 404, r.status);
 }
 
 main().catch((error) => {

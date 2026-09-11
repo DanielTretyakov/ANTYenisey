@@ -33,6 +33,43 @@ import type { ClosurePurpose } from './club';
  */
 export type AttendancePhase = 'UPCOMING' | 'ONGOING' | 'AWAITING' | 'OVERDUE';
 
+/**
+ * Вид записи, которую отмечают: аренда стола, запись на занятие, регистрация
+ * на турнир. Правила отметки у всех трёх одни, различается только таблица.
+ */
+export type AttendanceKind = 'TABLE' | 'TRAINING' | 'TOURNAMENT';
+
+/** Итог отметки. «Не отмечено» отметкой не бывает — вернуть в него нельзя. */
+export type AttendanceMarkStatus = 'ATTENDED' | 'NO_SHOW';
+
+/**
+ * Кто и когда поставил отметку, которая сейчас стоит у записи.
+ *
+ * Из журнала аудита, а не из самой записи: у записи только текущий статус, а
+ * «кто поставил мне неявку» — первый вопрос в споре о деньгах.
+ */
+export interface DeskMarkInfo {
+  /** Кто отметил. `null` — неявку зафиксировала система. */
+  by: string | null;
+  at: string;
+  /** Причина исправления или прощения неявки. */
+  reason: string | null;
+  /** Неявку поставила джоба автонеявки, а не человек. */
+  auto: boolean;
+}
+
+/**
+ * Правила присутствия клуба — столько, сколько нужно экрану смены, чтобы
+ * сказать «списать 100% по политике клуба?» и «система отметит неявку в …».
+ */
+export interface DeskAttendancePolicy {
+  noShowChargePercent: number;
+  reminderAfterMinutes: number;
+  autoNoShowAfterMinutes: number;
+  /** С какого момента клуб ведёт учёт: старшее джоба не трогает. */
+  trackedSince: string;
+}
+
 /** Человек в списках рабочего места: столько, сколько нужно, чтобы позвонить. */
 export interface DeskPerson {
   userId: string;
@@ -97,6 +134,8 @@ export interface DeskBooking {
   price: number;
   status: BookingStatus;
   client: DeskPerson;
+  /** Зал брони: в списке «Требует отметки» лежат брони всех залов клуба. */
+  hallName: string;
   /**
    * Бронь завёл администратор, а не клиент сам.
    *
@@ -108,7 +147,13 @@ export interface DeskBooking {
   createdBy: string | null;
   /** Момент отмены и сколько с клиента списано по политике клуба. */
   cancelledAt: string | null;
+  /** Процент списания: по политике отмены, 100 у пришедшего, процент неявки. */
   chargePercent: number | null;
+  phase: AttendancePhase;
+  /** Когда система сама зафиксирует неявку; `null` — не зафиксирует. */
+  autoNoShowAt: string | null;
+  /** Кто поставил нынешнюю отметку. У неотмеченной — `null`. */
+  mark: DeskMarkInfo | null;
 }
 
 /**
@@ -166,6 +211,8 @@ export interface DeskParticipant extends DeskPerson {
    */
   entryId: string;
   status: BookingStatus;
+  chargePercent: number | null;
+  mark: DeskMarkInfo | null;
 }
 
 /**
@@ -188,6 +235,8 @@ export interface DeskEvent {
   /** Тренер занятия. У турнира отсутствует. */
   coachName: string | null;
   participants: DeskParticipant[];
+  phase: AttendancePhase;
+  autoNoShowAt: string | null;
 }
 
 /**
@@ -262,4 +311,74 @@ export interface DeskDay {
   events: DeskEvent[];
   load: DeskLoadHour[];
   money: DeskMoney;
+
+  policy: DeskAttendancePolicy;
+  /**
+   * Что ждёт отметки — по всему клубу, а не только в этом зале и в этот день.
+   *
+   * Вчерашнее неотмеченное и мероприятие, заведённое не в сетке, в ленту дня
+   * не попадают — и без общего списка их не отметил бы никто, кроме джобы. Плюс
+   * неотмеченное этого дня, даже если оно старше начала учёта.
+   */
+  pending: { bookings: DeskBooking[]; events: DeskEvent[] };
+  /** Визиты с порога в этот день — по всему клубу: у визита нет зала. */
+  visits: DeskVisit[];
+}
+
+/** Отметка одной записи. */
+export interface MarkAttendanceRequest {
+  status: AttendanceMarkStatus;
+  /** Обязательна при исправлении уже поставленной отметки и при прощении. */
+  reason?: string;
+  /** Неявка без списания: клиент не пришёл по вине клуба. */
+  waiveCharge?: boolean;
+}
+
+/** «Отметить всех пришедшими» — одной транзакцией. */
+export interface MarkAttendanceBatchRequest {
+  marks: (MarkAttendanceRequest & { kind: AttendanceKind; entryId: string })[];
+}
+
+/** Что стало с записью после отметки. */
+export interface AttendanceResult {
+  kind: AttendanceKind;
+  entryId: string;
+  status: BookingStatus;
+  chargePercent: number | null;
+  /** `false` — запись уже была в этом состоянии, в журнал ничего не легло. */
+  changed: boolean;
+}
+
+/** Строка истории отметок записи — для спора с клиентом. */
+export interface AttendanceHistoryItem {
+  at: string;
+  /** Кто действовал; `null` — система. */
+  by: string | null;
+  auto: boolean;
+  before: { status: BookingStatus; chargePercent: number | null } | null;
+  after: { status: BookingStatus; chargePercent: number | null } | null;
+  reason: string | null;
+}
+
+/**
+ * Визит с порога или внесённый задним числом.
+ *
+ * Один инструмент на оба случая, как в ТЗ: человек пришёл без брони — или
+ * играл, а записать забыли. Денег визит не двигает.
+ */
+export interface RecordVisitRequest {
+  clientId: string;
+  /** Момент визита в ISO-8601 с зоной. Не в будущем. */
+  visitedAt: string;
+  coachId?: string;
+  note?: string;
+}
+
+export interface DeskVisit {
+  id: string;
+  client: DeskPerson;
+  visitedAt: string;
+  coachName: string | null;
+  note: string | null;
+  recordedBy: string | null;
 }

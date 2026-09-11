@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Ip, Param, Patch, Post, Query } from '@nestjs/common';
 import type { DeskBooking, DeskDay } from '@yenisey/types';
 import { DeskService } from './desk.service';
 import {
@@ -65,8 +65,9 @@ export class DeskController {
   createBooking(
     @CurrentClub() club: ClubContext,
     @Body() dto: CreateDeskBookingDto,
+    @Ip() ip: string,
   ): Promise<DeskBooking> {
-    return this.desk.createBooking(club.tenantId, club.userId, dto);
+    return this.desk.createBooking(club.tenantId, { userId: club.userId, ipAddress: ip ?? null }, dto);
   }
 
   /** Перенос: другой стол, другое время, другая длительность. */
