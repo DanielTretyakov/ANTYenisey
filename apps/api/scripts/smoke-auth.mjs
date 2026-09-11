@@ -1344,6 +1344,9 @@ async function main() {
     r = await post('/auth/register', registration({ tenantSlug: undefined }));
     check('новичок платформы заведён', 201, r.status);
     const seatedId = r.body?.user?.id ?? '';
+    const seatedAuth = { Authorization: `Bearer ${r.body?.accessToken ?? ''}` };
+    const asSeated = (path, options = {}) =>
+      call(path, { ...options, headers: { ...seatedAuth, ...(options.headers ?? {}) } });
     assert('в клубах он не состоит', r.body?.user?.memberships?.length === 0);
 
     const deskBookings = '/clubs/yenisey/desk/bookings';
@@ -1525,6 +1528,22 @@ async function main() {
     const pendingIds = (r.body?.pending?.bookings ?? []).map((item) => item.id);
     assert('неотмеченная бронь — в «Требует отметки»', pendingIds.includes(missedId));
     assert('отмеченная — нет', !pendingIds.includes(retroId));
+
+    // После начала запись не отменяется, а отмечается — и клиентом, и
+    // администратором. Иначе пропустивший отменял бы задним числом и платил
+    // позднюю отмену вместо неявки.
+    r = await asSeated(`/clubs/yenisey/booking/bookings/${missedId}`, { method: 'DELETE' });
+    check('клиент не отменяет начавшуюся бронь', 400, r.status);
+    assert('отказ объясняет, что бронь уже началась', String(r.body?.message ?? '').includes('началась'));
+
+    r = await asAdmin(`${deskBookings}/${missedId}/cancel`, { method: 'POST', json: { waiveCharge: true } });
+    check('администратор не отменяет начавшуюся бронь', 400, r.status);
+    assert('отказ отправляет к отметке', String(r.body?.message ?? '').includes('отметьте'));
+
+    r = await asSeated('/me/bookings');
+    const missedEntry = (r.body ?? []).find((entry) => entry.entryId === missedId);
+    assert('в «Моих записях» начавшаяся бронь не отменяемая', missedEntry?.cancellable === false);
+    assert('и спрашивать, сколько спишет отмена, не с чего', missedEntry?.cancelChargePercentNow === null);
 
     const markMissed = (json) =>
       asAdmin(`${attendance}/table/${missedId}`, { method: 'PUT', json });
@@ -1898,6 +1917,24 @@ async function eventRegistration(asMe) {
 
   r = await asMe(`/clubs/yenisey/tournaments/${tournamentId}/registration`, { method: 'DELETE' });
   check('отмена записи на турнир', 200, r.status);
+  const firstEntry = r.body?.entryId;
+  assert('до начала запись отменяемая, после отмены — нет', r.body?.cancellable === false);
+
+  // Отменил и записался снова: у турнира две строки одного человека. Раньше
+  // отмена находила старую отменённую и отвечала «уже нельзя отменить».
+  r = await asMe(`/clubs/yenisey/tournaments/${tournamentId}/registration`, { method: 'POST' });
+  check('повторная запись на турнир после отмены', 201, r.status);
+  const secondEntry = r.body?.entryId;
+  assert('ответ — новая запись, а не старая отменённая', r.body?.status === 'BOOKED' && secondEntry !== firstEntry);
+  assert('живая запись отменяемая', r.body?.cancellable === true);
+
+  r = await asMe('/me/bookings');
+  const cupEntries = (r.body ?? []).filter((entry) => entry.id === tournamentId);
+  assert('в «Моих записях» обе строки, с разными ключами', cupEntries.length === 2 && new Set(cupEntries.map((entry) => entry.entryId)).size === 2);
+
+  r = await asMe(`/clubs/yenisey/tournaments/${tournamentId}/registration`, { method: 'DELETE' });
+  check('повторная отмена живой записи', 200, r.status);
+  assert('отменена именно живая', r.body?.entryId === secondEntry && r.body?.status === 'CANCELLED');
 
   // --- Уборка. Занятие с записями не удаляется — сначала снимаем чужую.
   r = await asOther(`/clubs/yenisey/trainings/${sessionId}/booking`, { method: 'DELETE' });
@@ -2000,6 +2037,16 @@ async function eventAttendance(asMe) {
   const pendingSession = (r.body?.pending?.events ?? []).find((event) => event.id === sessionId);
   assert('идущее занятие — в фазе «идёт»', pendingSession?.phase === 'ONGOING');
   assert('у ждущего занятия есть срок автонеявки', typeof pendingSession?.autoNoShowAt === 'string');
+
+  r = await asMe(`/clubs/yenisey/trainings/${sessionId}/booking`, { method: 'DELETE' });
+  check('отмена начавшегося занятия отклонена', 400, r.status);
+  r = await asMe(`/clubs/yenisey/tournaments/${tournamentId}/registration`, { method: 'DELETE' });
+  check('отмена начавшегося турнира отклонена', 400, r.status);
+
+  r = await asMe('/me/bookings');
+  const startedEntry = (r.body ?? []).find((entry) => entry.entryId === trainingEntry);
+  assert('начавшееся занятие в «Моих записях» — без отмены', startedEntry?.cancellable === false);
+  assert('у записи свой идентификатор, не занятия', startedEntry?.id === sessionId && startedEntry?.entryId !== sessionId);
 
   const batch = '/clubs/yenisey/desk/attendance';
 

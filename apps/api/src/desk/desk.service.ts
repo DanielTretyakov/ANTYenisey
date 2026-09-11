@@ -28,6 +28,7 @@ import { instantAt, localParts } from '../club/closures';
 import { MembershipService } from '../club/membership.service';
 import {
   bookingViolation,
+  cancellationOpen,
   cancellationPercent,
   CLOSE_MINUTE,
   mergeBusy,
@@ -473,6 +474,10 @@ export class DeskService {
    * `waiveCharge` прощает списание целиком: сломался стол, отменили занятие,
    * клуб виноват. Без него администратору осталось бы только звонить в
    * бухгалтерию — «мы сами виноваты» в политику отмены не заложено.
+   *
+   * После начала не отменяет и администратор — та же граница, что у клиента.
+   * Началось — значит, отмечается: пришёл или не пришёл. Для «клуб виноват»
+   * есть неявка без списания, с причиной в журнале.
    */
   async cancelBooking(
     tenantId: string,
@@ -485,6 +490,10 @@ export class DeskService {
       throw new BadRequestException('Эту бронь уже нельзя отменить');
     }
 
+    if (!cancellationOpen(booking.startsAt, new Date())) {
+      throw new BadRequestException('Уже началось — отметьте присутствие или неявку');
+    }
+
     const tiers = await this.prisma.cancellationTier.findMany({
       where: { tenantId },
       select: { minMinutesBeforeStart: true, chargePercent: true },
@@ -492,8 +501,9 @@ export class DeskService {
 
     const minutes = Math.floor((booking.startsAt.getTime() - Date.now()) / 60_000);
 
-    await this.prisma.tableBooking.update({
-      where: { id: bookingId },
+    // Условие на статус — против гонки с клиентом, отменившим ту же бронь.
+    const { count } = await this.prisma.tableBooking.updateMany({
+      where: { id: bookingId, status: BookingStatus.BOOKED },
       data: {
         status: BookingStatus.CANCELLED,
         // Момент отмены обязателен — check-констрейнт: от него считается
@@ -502,6 +512,10 @@ export class DeskService {
         chargeRatio: dto.waiveCharge ? 0 : cancellationPercent(tiers, minutes),
       },
     });
+
+    if (count === 0) {
+      throw new ConflictException('Бронь уже изменилась — обновите страницу');
+    }
 
     return this.presentOne(tenantId, bookingId);
   }

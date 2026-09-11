@@ -32,6 +32,7 @@ const PARTICIPANT_SELECT = {
 export const TOURNAMENT_EVENT_SELECT = {
   id: true,
   startsAt: true,
+  endsAt: true,
   tournamentType: { select: { name: true, ratingLabel: true, price: true } },
   registrations: {
     where: { status: BookingStatus.BOOKED },
@@ -39,7 +40,7 @@ export const TOURNAMENT_EVENT_SELECT = {
   },
 } as const;
 
-/** То же для занятия. Отличий три: тренер, окончание и лимит мест. */
+/** То же для занятия. Отличий два: тренер и лимит мест. */
 export const TRAINING_EVENT_SELECT = {
   id: true,
   startsAt: true,
@@ -58,6 +59,7 @@ type Participant = { clientId: string; client: { membership: { user: { fullName:
 type TournamentRow = {
   id: string;
   startsAt: Date;
+  endsAt: Date;
   tournamentType: { name: string; ratingLabel: string | null; price: number };
   registrations: Participant[];
 };
@@ -79,8 +81,7 @@ export function tournamentEvent(row: TournamentRow, userId: string | null): Club
     title: row.tournamentType.name,
     ratingLabel: row.tournamentType.ratingLabel,
     startsAt: row.startsAt.toISOString(),
-    // У турнира окончание в схеме не задано: известен только момент начала.
-    endsAt: null,
+    endsAt: row.endsAt.toISOString(),
     subtitle: null,
     price: row.tournamentType.price,
     registeredCount: row.registrations.length,

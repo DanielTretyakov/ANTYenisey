@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { BookingStatus } from '@yenisey/database';
 import type { BookingEntry } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
-import { cancellationPercent } from '../booking/availability';
+import { cancellationOpen, cancellationPercent } from '../booking/availability';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -49,6 +49,7 @@ export class EntriesService {
       this.prisma.trainingBooking.findMany({
         where: { clientId: userId, ...scope },
         select: {
+          id: true,
           priceAtBooking: true,
           status: true,
           chargeRatio: true,
@@ -69,6 +70,7 @@ export class EntriesService {
       this.prisma.tournamentRegistration.findMany({
         where: { clientId: userId, ...scope },
         select: {
+          id: true,
           priceAtBooking: true,
           status: true,
           chargeRatio: true,
@@ -77,6 +79,7 @@ export class EntriesService {
             select: {
               id: true,
               startsAt: true,
+              endsAt: true,
               tournamentType: { select: { name: true, ratingLabel: true } },
             },
           },
@@ -88,6 +91,7 @@ export class EntriesService {
     const entries: BookingEntry[] = [
       ...tables.map((booking) => ({
         id: booking.id,
+        entryId: booking.id,
         kind: 'TABLE' as const,
         club: booking.tenant,
         title: booking.withRobot ? 'Аренда стола с роботом' : 'Аренда стола',
@@ -103,6 +107,7 @@ export class EntriesService {
         // турнира: по нему идёт отмена, и человеку в списке нужен адрес
         // действия.
         id: booking.session.id,
+        entryId: booking.id,
         kind: 'TRAINING' as const,
         club: booking.tenant,
         title: booking.session.trainingType.name,
@@ -118,6 +123,7 @@ export class EntriesService {
         // (DELETE /clubs/:slug/tournaments/:id/registration), и человеку в
         // списке нужен именно адрес действия.
         id: registration.tournament.id,
+        entryId: registration.id,
         kind: 'TOURNAMENT' as const,
         club: registration.tenant,
         title: titleOf(
@@ -126,26 +132,30 @@ export class EntriesService {
         ),
         subtitle: null,
         startsAt: registration.tournament.startsAt.toISOString(),
-        // У турнира окончание в схеме не задано: известен только момент начала.
-        endsAt: null,
+        endsAt: registration.tournament.endsAt.toISOString(),
         price: registration.priceAtBooking,
         status: registration.status,
         chargeRatio: registration.chargeRatio,
       })),
-    ].map(({ chargeRatio, ...entry }) => ({
-      ...entry,
-      chargePercent: chargeRatio,
-      // Сколько спишется при отмене прямо сейчас — вопрос, на который человек
-      // должен получить ответ ДО нажатия кнопки, а не после. Ступени берутся
-      // по клубу записи: политика отмены у каждого клуба своя.
-      cancelChargePercentNow:
-        entry.status === BookingStatus.BOOKED
+    ].map(({ chargeRatio, ...entry }) => {
+      const cancellable =
+        entry.status === BookingStatus.BOOKED && cancellationOpen(new Date(entry.startsAt), new Date());
+
+      return {
+        ...entry,
+        chargePercent: chargeRatio,
+        cancellable,
+        // Сколько спишется при отмене прямо сейчас — вопрос, на который человек
+        // должен получить ответ ДО нажатия кнопки, а не после. Ступени берутся
+        // по клубу записи: политика отмены у каждого клуба своя.
+        cancelChargePercentNow: cancellable
           ? cancellationPercent(
               tiers.get(entry.club.slug) ?? [],
               minutesUntil(new Date(entry.startsAt)),
             )
           : null,
-    }));
+      };
+    });
 
     // Ближайшие сверху. Прошедшие оказываются внизу сами — их момент меньше;
     // делить список на «предстоящие» и «историю» решает интерфейс, а не

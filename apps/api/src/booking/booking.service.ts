@@ -17,6 +17,7 @@ import { localParts } from '../club/closures';
 import { MembershipService } from '../club/membership.service';
 import {
   bookingViolation,
+  cancellationOpen,
   cancellationPercent,
   CLOSE_MINUTE,
   mergeBusy,
@@ -281,6 +282,10 @@ export class BookingService {
    * Денег это пока не двигает — платёжного шлюза нет. `chargeRatio`
    * записывается именно для того, чтобы, когда он появится, было от чего
    * считать списание.
+   *
+   * После начала бронь не отменяется: пропустивший игру отменял бы её задним
+   * числом и платил позднюю отмену по ступеням политики вместо неявки. После
+   * начала бронь только отмечается — присутствием или неявкой.
    */
   async cancel(tenantId: string, clientId: string, bookingId: string): Promise<ClientBooking> {
     const booking = await this.prisma.tableBooking.findFirst({
@@ -296,16 +301,30 @@ export class BookingService {
       throw new BadRequestException('Эту бронь уже нельзя отменить');
     }
 
+    if (!cancellationOpen(booking.startsAt, new Date())) {
+      throw new BadRequestException('Бронь уже началась — отменить её нельзя');
+    }
+
     const tiers = await this.tiers(tenantId);
     const percent = cancellationPercent(tiers, minutesUntil(booking.startsAt));
 
-    const cancelled = await this.prisma.tableBooking.update({
-      where: { id: bookingId },
+    // Условие на статус — против гонки: вторая вкладка отменила бронь, пока
+    // эта читала её живой, — и процент записался бы дважды, вторым поверх.
+    const { count } = await this.prisma.tableBooking.updateMany({
+      where: { id: bookingId, status: BookingStatus.BOOKED },
       data: {
         status: BookingStatus.CANCELLED,
         cancelledAt: new Date(),
         chargeRatio: percent,
       },
+    });
+
+    if (count === 0) {
+      throw new ConflictException('Бронь уже изменилась — обновите страницу');
+    }
+
+    const cancelled = await this.prisma.tableBooking.findUniqueOrThrow({
+      where: { id: bookingId },
       select: BOOKING_SELECT,
     });
 

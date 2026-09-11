@@ -5,8 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { BookingStatus, Prisma } from '@yenisey/database';
-import type { BookingEntry, ClubEvent, EventKind } from '@yenisey/types';
-import { cancellationPercent } from '../booking/availability';
+import type { BookingEntry, ClubEvent } from '@yenisey/types';
+import { cancellationOpen, cancellationPercent } from '../booking/availability';
 import {
   TOURNAMENT_EVENT_SELECT,
   TRAINING_EVENT_SELECT,
@@ -111,8 +111,11 @@ export class EventsService {
 
     await this.membership.ensureClient(tenantId, userId);
 
+    let entryId: string;
+
     try {
-      await this.prisma.tournamentRegistration.create({
+      ({ id: entryId } = await this.prisma.tournamentRegistration.create({
+        select: { id: true },
         data: {
           tenantId,
           tournamentId: tournament.id,
@@ -121,7 +124,7 @@ export class EventsService {
           // переписывать то, о чём клуб уже договорился с человеком.
           priceAtBooking: tournament.tournamentType.price,
         },
-      });
+      }));
     } catch (error) {
       // Повторную запись ловит частичный уникальный индекс из constraints.sql.
       // Частичный он намеренно: записаться заново после собственной отмены —
@@ -142,7 +145,7 @@ export class EventsService {
       throw error;
     }
 
-    return this.entryFor(tenantId, userId, 'TOURNAMENT', tournament.id);
+    return this.entryFor(tenantId, userId, entryId);
   }
 
   /**
@@ -187,8 +190,10 @@ export class EventsService {
 
     await this.membership.ensureClient(tenantId, userId);
 
+    let entryId: string;
+
     try {
-      await this.prisma.$transaction(async (tx) => {
+      entryId = await this.prisma.$transaction(async (tx) => {
         // Блокировка именно строки сессии, а не пересчёт после вставки:
         // откатывать уже созданную запись пришлось бы вручную, и при отказе
         // клиенту досталась бы половина операции.
@@ -210,7 +215,7 @@ export class EventsService {
           throw new ConflictException('На это занятие мест больше нет');
         }
 
-        await tx.trainingBooking.create({
+        const created = await tx.trainingBooking.create({
           data: {
             tenantId,
             sessionId: session.id,
@@ -218,7 +223,10 @@ export class EventsService {
             // Копия цены на момент записи — по той же причине, что у турнира.
             priceAtBooking: session.trainingType.price,
           },
+          select: { id: true },
         });
+
+        return created.id;
       });
     } catch (error) {
       // Повторную запись ловит тот же частичный уникальный индекс, что у
@@ -231,7 +239,7 @@ export class EventsService {
       throw error;
     }
 
-    return this.entryFor(tenantId, userId, 'TRAINING', session.id);
+    return this.entryFor(tenantId, userId, entryId);
   }
 
   /**
@@ -241,31 +249,37 @@ export class EventsService {
    * политика клуба может измениться завтра, и тогда уже закрытая запись задним
    * числом сменила бы условия. Та же механика и те же ступени, что у брони
    * стола, — иначе два способа отмены разошлись бы в деньгах.
+   *
+   * Ищется только живая запись. Раньше фильтра статуса не было, и после
+   * «отменил и записался снова» находилась старая отменённая строка — отмена
+   * живой записи отвечала «уже нельзя отменить».
    */
   async cancel(tenantId: string, userId: string, tournamentId: string): Promise<BookingEntry> {
     const registration = await this.prisma.tournamentRegistration.findFirst({
-      where: { tenantId, tournamentId, clientId: userId },
-      select: { id: true, status: true, tournament: { select: { startsAt: true } } },
+      where: { tenantId, tournamentId, clientId: userId, status: BookingStatus.BOOKED },
+      select: { id: true, tournament: { select: { startsAt: true } } },
     });
 
     if (!registration) {
       throw new NotFoundException('Запись не найдена');
     }
 
-    if (registration.status !== BookingStatus.BOOKED) {
-      throw new BadRequestException('Эту запись уже нельзя отменить');
+    if (!cancellationOpen(registration.tournament.startsAt, new Date())) {
+      throw new BadRequestException('Турнир уже начался — отменить запись нельзя');
     }
 
-    await this.prisma.tournamentRegistration.update({
-      where: { id: registration.id },
-      data: {
-        status: BookingStatus.CANCELLED,
-        cancelledAt: new Date(),
-        chargeRatio: await this.chargeFor(tenantId, registration.tournament.startsAt),
-      },
-    });
+    await this.cancelEntry(
+      this.prisma.tournamentRegistration.updateMany({
+        where: { id: registration.id, status: BookingStatus.BOOKED },
+        data: {
+          status: BookingStatus.CANCELLED,
+          cancelledAt: new Date(),
+          chargeRatio: await this.chargeFor(tenantId, registration.tournament.startsAt),
+        },
+      }),
+    );
 
-    return this.entryFor(tenantId, userId, 'TOURNAMENT', tournamentId);
+    return this.entryFor(tenantId, userId, registration.id);
   }
 
   /**
@@ -292,16 +306,36 @@ export class EventsService {
       throw new NotFoundException('Запись не найдена');
     }
 
-    await this.prisma.trainingBooking.update({
-      where: { id: booking.id },
-      data: {
-        status: BookingStatus.CANCELLED,
-        cancelledAt: new Date(),
-        chargeRatio: await this.chargeFor(tenantId, booking.session.startsAt),
-      },
-    });
+    if (!cancellationOpen(booking.session.startsAt, new Date())) {
+      throw new BadRequestException('Занятие уже началось — отменить запись нельзя');
+    }
 
-    return this.entryFor(tenantId, userId, 'TRAINING', sessionId);
+    await this.cancelEntry(
+      this.prisma.trainingBooking.updateMany({
+        where: { id: booking.id, status: BookingStatus.BOOKED },
+        data: {
+          status: BookingStatus.CANCELLED,
+          cancelledAt: new Date(),
+          chargeRatio: await this.chargeFor(tenantId, booking.session.startsAt),
+        },
+      }),
+    );
+
+    return this.entryFor(tenantId, userId, booking.id);
+  }
+
+  /**
+   * Отмена условным обновлением — `WHERE status = 'BOOKED'`.
+   *
+   * Между чтением записи и записью отмены её могли отменить во второй вкладке
+   * или отметить: обновление по одному `id` записало бы отмену поверх, и
+   * процент лёг бы вторым, другим. Условие на статус превращает гонку в
+   * внятный отказ.
+   */
+  private async cancelEntry(update: Promise<{ count: number }>): Promise<void> {
+    if ((await update).count === 0) {
+      throw new ConflictException('Запись уже изменилась — обновите страницу');
+    }
   }
 
   /**
@@ -329,11 +363,12 @@ export class EventsService {
   private async entryFor(
     tenantId: string,
     userId: string,
-    kind: EventKind,
-    eventId: string,
+    entryId: string,
   ): Promise<BookingEntry> {
+    // По строке записи, а не по мероприятию: после «отменил и записался снова»
+    // у одного занятия две строки, и поиск по занятию мог вернуть старую.
     const entries = await this.entries.listForUser(userId, tenantId);
-    const entry = entries.find((row) => row.kind === kind && row.id === eventId);
+    const entry = entries.find((row) => row.entryId === entryId);
 
     if (!entry) {
       throw new NotFoundException('Запись не найдена');
