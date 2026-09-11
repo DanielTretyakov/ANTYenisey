@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AttendanceController } from './attendance.controller';
 import { AttendanceService } from './attendance.service';
+import { AutoNoShowJob } from './auto-no-show.job';
 import { ClubModule } from '../club/club.module';
 
 /**
@@ -12,11 +13,14 @@ import { ClubModule } from '../club/club.module';
  *
  * `ClubModule` — ради `MembershipService`: пришедший с порога может не
  * состоять в клубе, и привязка заводится тем же кодом, что при записи.
+ *
+ * `AutoNoShowJob` живёт здесь же: неявку от джобы пишут те же функции, что и
+ * неявку от администратора, — второй путь записи разошёлся бы с первым.
  */
 @Module({
   imports: [ClubModule],
   controllers: [AttendanceController],
-  providers: [AttendanceService],
+  providers: [AttendanceService, AutoNoShowJob],
   exports: [AttendanceService],
 })
 export class AttendanceModule {}

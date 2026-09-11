@@ -1493,7 +1493,9 @@ async function main() {
 
     // Бронь задним числом — сразу «пришёл», в той же транзакции. Иначе через
     // сутки её закрыла бы неявкой джоба — со списанием за состоявшуюся игру.
-    r = await seat(instantAt(yesterday, 10 * 60, seatZone));
+    // Вечер вчерашнего дня: кончается меньше суток назад, и включённая джоба
+    // автонеявки не закроет эти брони посреди проверки.
+    r = await seat(instantAt(yesterday, 21 * 60, seatZone));
     check('бронь задним числом заведена', 201, r.status);
     const retroId = r.body?.id ?? '';
     assert(
@@ -1511,12 +1513,14 @@ async function main() {
     const missedId = r.body?.id ?? '';
     r = await asAdmin(`${deskBookings}/${missedId}`, {
       method: 'PATCH',
-      json: { tableId: seatTableId, startsAt: instantAt(yesterday, 12 * 60, seatZone), durationMinutes: 60 },
+      json: { tableId: seatTableId, startsAt: instantAt(yesterday, 23 * 60, seatZone), durationMinutes: 60 },
     });
     check('бронь перенесена во вчера', 200, r.status);
+    // Просрочена или только ждёт — зависит от часа прогона: в первый час
+    // суток вчерашняя бронь до 24:00 кончилась меньше часа назад.
     assert(
-      'перенесённая во вчера ждёт отметки и просрочена',
-      r.body?.status === 'BOOKED' && r.body?.phase === 'OVERDUE',
+      'перенесённая во вчера закончилась и ждёт отметки',
+      r.body?.status === 'BOOKED' && ['AWAITING', 'OVERDUE'].includes(r.body?.phase),
     );
 
     // Процент неявки — из смены: сценарий настроек выше мог его поменять.
@@ -1575,7 +1579,7 @@ async function main() {
 
     // Неявка освобождает стол, и время заняли. Вернуть «пришёл» — снова занять
     // его, а два человека за одним столом не помещаются.
-    r = await seat(instantAt(yesterday, 12 * 60, seatZone));
+    r = await seat(instantAt(yesterday, 23 * 60, seatZone));
     check('на освободившееся время посадили другого', 201, r.status);
 
     r = await markMissed({ status: 'ATTENDED', reason: 'Пришёл к концу' });
@@ -1772,6 +1776,7 @@ async function main() {
 
   await eventRegistration(asMe);
   await eventAttendance(asMe);
+  await autoNoShow(asMe);
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
@@ -2099,6 +2104,115 @@ async function eventAttendance(asMe) {
 
   r = await asAdmin(`${batch}/tournament/${trainingEntry}`, { method: 'PUT', json: { status: 'ATTENDED' } });
   check('запись занятия по адресу турнира не находится', 404, r.status);
+}
+
+/**
+ * Джоба автонеявки — только по явной просьбе.
+ *
+ * Нужны API с `ATTENDANCE_JOB=on ATTENDANCE_JOB_INTERVAL=10s` и
+ * `SMOKE_AUTO_NO_SHOW=1` здесь. На время секции срок автонеявки клуба
+ * опускается до минуты, и джоба закроет неявкой ВСЕ неотмеченные записи
+ * клуба, закончившиеся в учётном окне больше минуты назад, — не только
+ * заведённые смоуком. На базе разработки это законно, на чужой — нет.
+ * Настройки клуба секция возвращает как были.
+ */
+async function autoNoShow(asMe) {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (process.env.SMOKE_AUTO_NO_SHOW !== '1' || !adminEmail || !adminPassword) {
+    console.log('\n=== 29. Джоба автонеявки — ПРОПУЩЕНА (нужны SMOKE_AUTO_NO_SHOW=1 и API с ATTENDANCE_JOB=on)');
+    return;
+  }
+
+  console.log('\n=== 29. Джоба автонеявки');
+
+  let r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const adminAuth = { Authorization: `Bearer ${r.body?.accessToken ?? ''}` };
+  const asAdmin = (path, options = {}) =>
+    call(path, { ...options, headers: { ...adminAuth, ...(options.headers ?? {}) } });
+
+  r = await asAdmin('/clubs/yenisey/coaches');
+  const coachId = r.body?.[0]?.id;
+  r = await asAdmin('/clubs/yenisey/training-types');
+  const trainingTypeId = r.body?.[0]?.id;
+
+  if (!coachId || !trainingTypeId) {
+    console.log('     в клубе нет тренера или типа тренировки — сценарий пропущен');
+    return;
+  }
+
+  r = await asAdmin('/clubs/yenisey/settings');
+  const original = {
+    attendanceReminderAfterMinutes: r.body?.attendanceReminderAfterMinutes,
+    attendanceAutoNoShowAfterMinutes: r.body?.attendanceAutoNoShowAfterMinutes,
+  };
+  const noShowPercent = r.body?.noShowChargePercent;
+
+  try {
+    r = await asAdmin('/clubs/yenisey/settings', {
+      method: 'PATCH',
+      json: { attendanceReminderAfterMinutes: 0, attendanceAutoNoShowAfterMinutes: 1 },
+    });
+    check('срок автонеявки опущен до минуты', 200, r.status);
+
+    const startsAt = new Date(Date.now() + 3_000);
+    const endsAt = new Date(startsAt.getTime() + 3_000);
+
+    r = await asAdmin('/clubs/yenisey/training-sessions', {
+      method: 'POST',
+      json: {
+        trainingTypeId,
+        coachId,
+        startsAt: startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
+        capacity: 2,
+      },
+    });
+    check('короткое занятие заведено', 201, r.status);
+    const sessionId = r.body?.id;
+
+    r = await asMe(`/clubs/yenisey/trainings/${sessionId}/booking`, { method: 'POST' });
+    check('запись на короткое занятие', 201, r.status);
+    const entryId = r.body?.entryId;
+
+    // Минута после окончания плюс интервал джобы с запасом.
+    const deadline = endsAt.getTime() + 150_000;
+    let entry = null;
+
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+      r = await asMe('/me/bookings');
+      entry = (r.body ?? []).find((item) => item.entryId === entryId);
+      if (entry?.status !== 'BOOKED') break;
+    }
+
+    assert('джоба поставила неявку', entry?.status === 'NO_SHOW');
+    assert('списание — по проценту клуба', entry?.chargePercent === noShowPercent);
+
+    r = await asAdmin(`/clubs/yenisey/desk/attendance/training/${entryId}/history`);
+    const auto = r.body?.[0];
+    assert(
+      'в журнале — система, без автора и с причиной',
+      r.body?.length === 1 && auto?.auto === true && auto?.by === null && String(auto?.reason ?? '').includes('не отмечено'),
+    );
+
+    r = await asAdmin(`/clubs/yenisey/desk/attendance/training/${entryId}`, {
+      method: 'PUT',
+      json: { status: 'ATTENDED' },
+    });
+    check('исправить автонеявку без причины нельзя', 400, r.status);
+
+    r = await asAdmin(`/clubs/yenisey/desk/attendance/training/${entryId}`, {
+      method: 'PUT',
+      json: { status: 'ATTENDED', reason: 'Забыли отметить' },
+    });
+    check('автонеявка исправлена администратором', 200, r.status);
+    assert('после исправления — полное списание', r.body?.status === 'ATTENDED' && r.body?.chargePercent === 100);
+  } finally {
+    r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: original });
+    check('сроки присутствия клуба возвращены', 200, r.status);
+  }
 }
 
 main().catch((error) => {

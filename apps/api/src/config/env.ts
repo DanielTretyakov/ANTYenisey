@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseDuration } from '../auth/tokens';
 
 /**
  * Схема переменных окружения. Валидируется один раз при старте: приложение
@@ -27,6 +28,14 @@ const envSchema = z
     // запросами, а не от подбора пароля.
     RATE_LIMIT: z.coerce.number().int().positive().default(120),
     RATE_LIMIT_WINDOW: z.string().default('1m'),
+    // Джоба автонеявки: через сутки после окончания неотмеченная запись
+    // становится неявкой со списанием. Не задано — включена в production и
+    // выключена в разработке: иначе dev-сервер ставил бы неявки демо-данным.
+    ATTENDANCE_JOB: z.enum(['on', 'off']).optional(),
+    ATTENDANCE_JOB_INTERVAL: z
+      .string()
+      .default('5m')
+      .refine(isDuration, 'Ожидается длительность вида 30s, 5m, 1h'),
   })
   .refine((env) => env.JWT_ACCESS_SECRET !== env.JWT_REFRESH_SECRET, {
     // Совпадение секретов означает, что refresh-токен примут как access:
@@ -48,6 +57,19 @@ export function validateEnv(raw: Record<string, unknown>): Env {
   }
 
   return parsed.data;
+}
+
+/** Работает ли джоба автонеявки при этом окружении. */
+export function attendanceJobEnabled(env: Pick<Env, 'ATTENDANCE_JOB' | 'NODE_ENV'>): boolean {
+  return (env.ATTENDANCE_JOB ?? (env.NODE_ENV === 'production' ? 'on' : 'off')) === 'on';
+}
+
+function isDuration(value: string): boolean {
+  try {
+    return parseDuration(value) > 0;
+  } catch {
+    return false;
+  }
 }
 
 /** Источники для CORS: в .env хранятся строкой через запятую. */
