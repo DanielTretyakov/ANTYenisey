@@ -356,6 +356,20 @@ export function slotsForDate(
   return template.filter((rule) => rule.weekday === weekday);
 }
 
+/**
+ * День недели по ISO-8601 для календарной даты «2026-03-12».
+ *
+ * Считается в UTC: у календарной даты пояса нет. Здесь, а не в сервисах, —
+ * его спрашивают и движок брони, и расписание зала, и копии в двух местах
+ * однажды разошлись бы на воскресенье: `getUTCDay` отдаёт его нулём, а ISO —
+ * семёркой.
+ */
+export function weekdayOf(date: string): Weekday {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+
+  return (day === 0 ? 7 : day) as Weekday;
+}
+
 /** Минуты от полуночи в «15:00» — для сообщений человеку. */
 export function formatMinutes(minutes: number): string {
   const hours = Math.floor(minutes / 60);

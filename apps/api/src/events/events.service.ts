@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BookingStatus, Prisma, Role } from '@yenisey/database';
+import { BookingStatus, Prisma } from '@yenisey/database';
 import type { BookingEntry, ClubEvent, EventKind } from '@yenisey/types';
 import { cancellationPercent } from '../booking/availability';
 import {
@@ -13,6 +13,7 @@ import {
   tournamentEvent,
   trainingEvent,
 } from './event-view';
+import { MembershipService } from '../club/membership.service';
 import { EntriesService } from '../entries/entries.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -34,6 +35,7 @@ export class EventsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly entries: EntriesService,
+    private readonly membership: MembershipService,
   ) {}
 
   /**
@@ -107,7 +109,7 @@ export class EventsService {
       throw new BadRequestException('Запись на этот турнир закрыта');
     }
 
-    await this.ensureClientMembership(tenantId, userId);
+    await this.membership.ensureClient(tenantId, userId);
 
     try {
       await this.prisma.tournamentRegistration.create({
@@ -183,7 +185,7 @@ export class EventsService {
       throw new BadRequestException('Запись на это занятие закрыта');
     }
 
-    await this.ensureClientMembership(tenantId, userId);
+    await this.membership.ensureClient(tenantId, userId);
 
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -315,36 +317,6 @@ export class EventsService {
     });
 
     return cancellationPercent(tiers, Math.floor((startsAt.getTime() - Date.now()) / 60_000));
-  }
-
-  /**
-   * Заводит привязку человека к клубу и анкету клиента, если их ещё нет.
-   *
-   * Оба upsert'а идут одной транзакцией: привязка без анкеты — это членство,
-   * которое не может ни на что записаться, и чинить его пришлось бы руками.
-   *
-   * Роль существующей привязки не трогаем: тренер, записавшийся на турнир, не
-   * должен от этого стать клиентом.
-   *
-   * Дублирует `BookingService.ensureClientMembership` — сознательно, до
-   * появления третьего места, где это понадобится. Оба сервиса пишут в свои
-   * таблицы, и общий предок ради двух upsert'ов связал бы модуль брони с
-   * модулем мероприятий без нужды.
-   */
-  private async ensureClientMembership(tenantId: string, userId: string): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      await tx.tenantMembership.upsert({
-        where: { userId_tenantId: { userId, tenantId } },
-        update: {},
-        create: { userId, tenantId, role: Role.CLIENT },
-      });
-
-      await tx.clientProfile.upsert({
-        where: { userId_tenantId: { userId, tenantId } },
-        update: {},
-        create: { userId, tenantId },
-      });
-    });
   }
 
   /**

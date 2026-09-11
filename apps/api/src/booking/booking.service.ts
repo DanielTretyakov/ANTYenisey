@@ -4,18 +4,17 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BookingStatus, Role } from '@yenisey/database';
+import { BookingStatus } from '@yenisey/database';
 import {
   BOOKING_HORIZON_DAYS,
   type BookingDay,
   type BookingQuote,
-  type BusyInterval,
   type ClientBooking,
   type CreateBookingRequest,
-  type Weekday,
 } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
-import { instantAt, localParts, slotsForDate } from '../club/closures';
+import { localParts } from '../club/closures';
+import { MembershipService } from '../club/membership.service';
 import {
   bookingViolation,
   cancellationPercent,
@@ -24,12 +23,17 @@ import {
   OPEN_MINUTE,
   STEP_MINUTES,
 } from './availability';
+import { assertDateFormat, OccupancyService } from './occupancy.service';
 import { quote } from './pricing';
 
-/** Статусы, при которых бронь занимает время. Те же, что в exclusion-констрейнте. */
-const ACTIVE: BookingStatus[] = [BookingStatus.BOOKED, BookingStatus.ATTENDED];
-
-const HALL_PRICING = {
+/**
+ * Что нужно от зала, чтобы посчитать цену и проверить заявку.
+ *
+ * Экспортируется: рабочее место администратора считает цену ручной брони тем
+ * же `quote()` и по тем же полям. Второй набор колонок разошёлся бы с этим на
+ * первой же правке прайса.
+ */
+export const HALL_PRICING = {
   id: true,
   name: true,
   // Часовой пояс едет вместе с ценами намеренно: и то, и другое — свойство
@@ -44,26 +48,6 @@ const HALL_PRICING = {
   robot30MinPrice: true,
   robot60MinPrice: true,
   robotExtra30MinPrice: true,
-} as const;
-
-/**
- * Поля окна расписания, которых требует общий тип `ClosureSlot`.
- *
- * Движку бронирования из окна нужны только границы, но `slotsForDate` — та
- * самая функция, которая решает, заменяет ли правленая дата шаблон, — работает
- * с окном целиком. Повторять её правило здесь ради экономии пяти колонок
- * значило бы завести второе понимание расписания, расходящееся с профилем
- * клуба.
- */
-const SLOT_SELECT = {
-  id: true,
-  tableId: true,
-  startMinute: true,
-  endMinute: true,
-  purpose: true,
-  coachId: true,
-  clientId: true,
-  trainingTypeId: true,
 } as const;
 
 const BOOKING_SELECT = {
@@ -113,7 +97,11 @@ type Tier = { minMinutesBeforeStart: number; chargePercent: number };
  */
 @Injectable()
 export class BookingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly occupancy: OccupancyService,
+    private readonly membership: MembershipService,
+  ) {}
 
   /**
    * Что свободно в зале на дату.
@@ -138,7 +126,7 @@ export class BookingService {
       orderBy: { label: 'asc' },
     });
 
-    const busyByTable = await this.busyByTable(
+    const busyByTable = await this.occupancy.busyByTable(
       tenantId,
       hallId,
       date,
@@ -214,7 +202,9 @@ export class BookingService {
       throw new BadRequestException('В этом зале нет аренды с роботом');
     }
 
-    const busy = await this.busyByTable(tenantId, table.hallId, start.date, timezone, [table.id]);
+    const busy = await this.occupancy.busyByTable(tenantId, table.hallId, start.date, timezone, [
+      table.id,
+    ]);
 
     const violation = bookingViolation({
       startMinute: start.minutes,
@@ -235,7 +225,7 @@ export class BookingService {
     // записаться может любой пользователь платформы, вступать в клуб не нужно, —
     // но бронь ссылается на ClientProfile, а тот — на TenantMembership. Без
     // этого шага первая же бронь новичка падала бы ошибкой внешнего ключа.
-    await this.ensureClientMembership(tenantId, clientId);
+    await this.membership.ensureClient(tenantId, clientId);
 
     let created: BookingRow;
 
@@ -324,89 +314,6 @@ export class BookingService {
 
   // --- Внутреннее ----------------------------------------------------------
 
-  /**
-   * Занятое время столов на дату, в минутах от местной полуночи.
-   *
-   * Два источника: расписание зала (шаблон недели или правка на дату) и уже
-   * заведённые брони. Клиенту они приходят одним списком — различать их ему
-   * незачем, а причина занятости его не касается.
-   */
-  private async busyByTable(
-    tenantId: string,
-    hallId: string,
-    date: string,
-    timezone: string,
-    tableIds: string[],
-  ): Promise<Map<string, BusyInterval[]>> {
-    const busy = new Map<string, BusyInterval[]>();
-
-    const add = (tableId: string, interval: BusyInterval): void => {
-      const list = busy.get(tableId) ?? [];
-      list.push(interval);
-      busy.set(tableId, list);
-    };
-
-    const [template, day] = await Promise.all([
-      this.prisma.tableClosureRule.findMany({
-        where: { tenantId, table: { hallId } },
-        select: { ...SLOT_SELECT, weekday: true, tournamentTypeId: true },
-      }),
-      this.prisma.hallDaySchedule.findFirst({
-        where: { tenantId, hallId, date: parseDate(date) },
-        select: {
-          closures: { select: { ...SLOT_SELECT, tournamentId: true, trainingSessionId: true } },
-        },
-      }),
-    ]);
-
-    // Правленая дата ЗАМЕНЯЕТ шаблон целиком, а не дополняет его. Логика этого
-    // выбора живёт в slotsForDate — повторять её здесь нельзя, иначе движок
-    // бронирования и профиль клуба разошлись бы в понимании расписания.
-    const slots = slotsForDate(
-      template.map((rule) => ({
-        ...rule,
-        weekday: rule.weekday as Weekday,
-        tournamentId: null,
-        trainingSessionId: null,
-      })),
-      day
-        ? {
-            customised: true,
-            closures: day.closures.map((closure) => ({ ...closure, tournamentTypeId: null })),
-          }
-        : null,
-      weekdayOf(date),
-    );
-
-    for (const slot of slots) {
-      add(slot.tableId, { startMinute: slot.startMinute, endMinute: slot.endMinute });
-    }
-
-    const bookings = await this.prisma.tableBooking.findMany({
-      where: {
-        tenantId,
-        tableId: { in: tableIds },
-        status: { in: ACTIVE },
-        // Полуоткрытый промежуток суток: бронь, кончающаяся ровно в местную
-        // полночь, принадлежит уходящему дню, а не наступающему.
-        startsAt: { lt: instantAt(date, CLOSE_MINUTE, timezone) },
-        endsAt: { gt: instantAt(date, 0, timezone) },
-      },
-      select: { tableId: true, startsAt: true, endsAt: true },
-    });
-
-    for (const booking of bookings) {
-      add(booking.tableId, {
-        startMinute: localParts(booking.startsAt, timezone).minutes,
-        // Конец ровно в полночь местные сутки отдают как 1440, а не как 0:
-        // иначе промежуток вывернулся бы и перестал считаться занятым.
-        endMinute: localParts(booking.endsAt, timezone).minutes || CLOSE_MINUTE,
-      });
-    }
-
-    return busy;
-  }
-
   private present(booking: BookingRow, tiers: readonly Tier[]): ClientBooking {
     return {
       id: booking.id,
@@ -428,31 +335,6 @@ export class BookingService {
           ? cancellationPercent(tiers, minutesUntil(booking.startsAt))
           : null,
     };
-  }
-
-  /**
-   * Заводит привязку человека к клубу и анкету клиента, если их ещё нет.
-   *
-   * Оба upsert'а идут одной транзакцией: привязка без анкеты — это членство,
-   * которое не может ничего забронировать, и чинить его пришлось бы руками.
-   *
-   * Роль существующей привязки не трогаем: тренер, бронирующий стол себе,
-   * не должен от этого стать клиентом.
-   */
-  private async ensureClientMembership(tenantId: string, userId: string): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      await tx.tenantMembership.upsert({
-        where: { userId_tenantId: { userId, tenantId } },
-        update: {},
-        create: { userId, tenantId, role: Role.CLIENT },
-      });
-
-      await tx.clientProfile.upsert({
-        where: { userId_tenantId: { userId, tenantId } },
-        update: {},
-        create: { userId, tenantId },
-      });
-    });
   }
 
   private tiers(tenantId: string): Promise<Tier[]> {
@@ -522,27 +404,6 @@ function earliestMinute(date: string, timezone: string): number {
   }
 
   return Math.max(OPEN_MINUTE, now.minutes);
-}
-
-/** День недели по ISO-8601 для календарной даты. */
-function weekdayOf(date: string): Weekday {
-  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
-
-  // getUTCDay отдаёт воскресенье нулём, а ISO-8601 — семёркой.
-  return (day === 0 ? 7 : day) as Weekday;
-}
-
-function assertDateFormat(date: string): void {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    throw new BadRequestException('Дата указывается в виде 2026-03-12');
-  }
-}
-
-/** «2026-03-12» → полночь UTC этой даты: колонка типа DATE часов не хранит. */
-function parseDate(date: string): Date {
-  assertDateFormat(date);
-
-  return new Date(`${date}T00:00:00Z`);
 }
 
 function parseInstant(value: string): Date {
