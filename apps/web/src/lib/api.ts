@@ -1,4 +1,7 @@
 import type {
+  AttendanceHistoryItem,
+  AttendanceKind,
+  AttendanceResult,
   AuthResponse,
   BookingDay,
   BookingEntry,
@@ -26,11 +29,15 @@ import type {
   DaySchedule,
   DeskBooking,
   DeskDay,
+  DeskVisit,
   Hall,
+  MarkAttendanceBatchRequest,
+  MarkAttendanceRequest,
   MoveDeskBookingRequest,
   LoginRequest,
   PublicTenant,
   PublicUser,
+  RecordVisitRequest,
   RegisterRequest,
   Tournament,
   TournamentRequest,
@@ -486,6 +493,28 @@ export function clubApi(slug: string = TENANT_SLUG) {
       payload: CancelDeskBookingRequest = {},
     ): Promise<DeskBooking> =>
       authorized(`${club}/desk/bookings/${id}/cancel`, json('POST', payload)),
+
+    // --- Отметка присутствия
+
+    /** Пришёл или не пришёл. Повтор того же ничего не меняет — это PUT. */
+    markAttendance: (
+      kind: AttendanceKind,
+      entryId: string,
+      payload: MarkAttendanceRequest,
+    ): Promise<AttendanceResult> =>
+      authorized(`${club}/desk/attendance/${kind.toLowerCase()}/${entryId}`, json('PUT', payload)),
+
+    /** «Отметить всех пришедшими» — всё или ничего. */
+    markAttendanceBatch: (payload: MarkAttendanceBatchRequest): Promise<AttendanceResult[]> =>
+      authorized(`${club}/desk/attendance`, json('POST', payload)),
+
+    /** Кто, когда и почему отмечал запись — для спора с клиентом. */
+    attendanceHistory: (kind: AttendanceKind, entryId: string): Promise<AttendanceHistoryItem[]> =>
+      authorized(`${club}/desk/attendance/${kind.toLowerCase()}/${entryId}/history`),
+
+    /** Визит с порога или внесённый задним числом. */
+    recordVisit: (payload: RecordVisitRequest): Promise<DeskVisit> =>
+      authorized(`${club}/desk/visits`, json('POST', payload)),
   };
 }
 

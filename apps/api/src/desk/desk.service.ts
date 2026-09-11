@@ -107,7 +107,12 @@ const SESSION_SELECT = {
   capacity: true,
   trainingType: { select: { name: true, price: true } },
   coach: { select: { membership: PERSON_SELECT } },
-  bookings: { select: { ...CHARGE_SELECT, client: { select: { membership: PERSON_SELECT } } } },
+  // По порядку записи: без сортировки база отдаёт строки как придётся, и
+  // после каждой отметки состав перетасовывался бы у администратора под рукой.
+  bookings: {
+    select: { ...CHARGE_SELECT, client: { select: { membership: PERSON_SELECT } } },
+    orderBy: { createdAt: 'asc' },
+  },
 } as const;
 
 const TOURNAMENT_SELECT = {
@@ -117,6 +122,7 @@ const TOURNAMENT_SELECT = {
   tournamentType: { select: { name: true, price: true } },
   registrations: {
     select: { ...CHARGE_SELECT, client: { select: { membership: PERSON_SELECT } } },
+    orderBy: { createdAt: 'asc' },
   },
 } as const;
 
@@ -199,7 +205,10 @@ export class DeskService {
       this.bookings(tenantId, hallId, date, timezone),
     ]);
 
-    const [events, names, pendingRows, visits] = await Promise.all([
+    const dayStart = instantAt(date, 0, timezone);
+    const dayEnd = instantAt(date, CLOSE_MINUTE, timezone);
+
+    const [events, names, pendingRows, visits, unplaced] = await Promise.all([
       this.eventRows(tenantId, {
         sessionIds: slots.map((slot) => slot.trainingSessionId),
         tournamentIds: slots.map((slot) => slot.tournamentId),
@@ -208,11 +217,8 @@ export class DeskService {
       this.pendingRows(tenantId, moment, policy),
       // Визит с порога залу не принадлежит — у него нет стола. Показывается
       // по клубу за местные сутки зала.
-      this.attendance.visitsBetween(
-        tenantId,
-        instantAt(date, 0, timezone),
-        instantAt(date, CLOSE_MINUTE, timezone),
-      ),
+      this.attendance.visitsBetween(tenantId, dayStart, dayEnd),
+      this.unplacedRows(tenantId, dayStart, dayEnd),
     ]);
 
     // Неотмеченное этого дня — в «Требует отметки», даже если оно старше
@@ -244,6 +250,8 @@ export class DeskService {
         ...markedIds(events.tournaments.flatMap((row) => row.registrations)),
         ...markedIds(pending.events.sessions.flatMap((row) => row.bookings)),
         ...markedIds(pending.events.tournaments.flatMap((row) => row.registrations)),
+        ...markedIds(unplaced.sessions.flatMap((row) => row.bookings)),
+        ...markedIds(unplaced.tournaments.flatMap((row) => row.registrations)),
       ]),
     };
 
@@ -299,6 +307,7 @@ export class DeskService {
         events: presentEvents(pending.events, view),
       },
       visits,
+      unplaced: presentEvents(unplaced, view),
     };
   }
 
@@ -790,6 +799,24 @@ export class DeskService {
     ]);
 
     return { bookings: bookings.map(bookingRow), events: { sessions, tournaments } };
+  }
+
+  /**
+   * Мероприятия дня, не стоящие ни в одной сетке клуба.
+   *
+   * Сетка — единственное, что связывает занятие с залом, и без неё занятие
+   * не видно ни в одном зале. Отдаётся в каждом: как визит с порога, оно
+   * принадлежит клубу, а не залу.
+   */
+  private async unplacedRows(tenantId: string, from: Date, to: Date): Promise<EventRows> {
+    const where = { tenantId, startsAt: { gte: from, lt: to }, dayClosures: { none: {} } };
+
+    const [sessions, tournaments] = await Promise.all([
+      this.prisma.trainingSession.findMany({ where, select: SESSION_SELECT }),
+      this.prisma.tournament.findMany({ where, select: TOURNAMENT_SELECT }),
+    ]);
+
+    return { sessions, tournaments };
   }
 
   /** Брони в том виде, в каком их отдаёт рабочее место, — с отметками. */

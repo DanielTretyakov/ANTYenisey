@@ -2089,6 +2089,12 @@ async function eventAttendance(asMe) {
   r = await deskToday();
   const stillPending = (r.body?.pending?.events ?? []).map((event) => event.id);
   assert('отмеченные ушли из «Требует отметки»', !stillPending.includes(sessionId) && !stillPending.includes(tournamentId));
+  // Вне сетки занятие не видно ни в одном зале: после отметки ему остаётся
+  // только список мероприятий дня без сетки — иначе оно пропало бы с экрана.
+  assert(
+    'отмеченное занятие вне сетки видно в смене дня',
+    (r.body?.unplaced ?? []).some((event) => event.id === sessionId && event.participants.length === 1),
+  );
 
   r = await asAdmin(`${batch}/training/${trainingEntry}`, {
     method: 'PUT',

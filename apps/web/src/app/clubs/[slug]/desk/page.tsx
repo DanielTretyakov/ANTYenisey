@@ -15,8 +15,12 @@ import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { BookingDialog } from './BookingDialog';
+import { MarkedBlock } from './MarkedBlock';
+import { PendingBlock } from './PendingBlock';
+import { VisitDialog } from './VisitDialog';
 import { inputClassName } from '@/components/ui/Field';
 import { ApiError } from '@/lib/api';
+import { pendingCounts } from '@/lib/attendance';
 import { formatDate, formatMinute, todayIn } from '@/lib/bookingGrid';
 import { cn } from '@/lib/cn';
 import { roleInClub } from '@/lib/membership';
@@ -36,8 +40,13 @@ const MANAGERS: Role[] = ['ADMIN', 'OWNER'];
  *
  * Порядок разделов — не хронологический, и это осознанно. Сверху стоит то, что
  * требует действия руками (неотмеченное присутствие), потом состояние зала
- * прямо сейчас, и только потом лента будущего. Хронология здесь проиграла бы
- * задаче: неотмеченное вчера важнее, чем занятие через три часа.
+ * прямо сейчас, потом лента будущего и в конце — уже отмеченное. Хронология
+ * здесь проиграла бы задаче: неотмеченное вчера важнее, чем занятие через три
+ * часа.
+ *
+ * Каждая запись стоит ровно в одном месте: не началась — в ленте, началась и
+ * не отмечена — в «Требует отметки», отмечена — в «Отмечено в этот день».
+ * Одна запись в двух списках читалась бы как две.
  *
  * Адрес `/desk`, а не `/today`: экран показывает не только сегодня — вечером
  * смотрят завтра, в понедельник разбирают субботу, — и `today` начал бы врать
@@ -58,6 +67,7 @@ export default function DeskPage() {
   const [day, setDay] = useState<DeskDay | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [seating, setSeating] = useState(false);
+  const [visiting, setVisiting] = useState(false);
 
   useEffect(() => {
     if (session.status === 'anonymous') {
@@ -111,7 +121,19 @@ export default function DeskPage() {
     load();
   }, [load]);
 
-  const rows = useMemo(() => (day ? split(day) : null), [day]);
+  // Экран держат открытым весь вечер: раз в минуту он перечитывается сам,
+  // иначе «просрочено» и свободные столы застывали бы на моменте открытия.
+  // Только при видимой вкладке — фоновая вкладка ходила бы к серверу впустую.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') load();
+    }, 60_000);
+
+    return () => window.clearInterval(timer);
+  }, [load]);
+
+  const ahead = useMemo(() => (day ? aheadOf(day) : null), [day]);
+  const counts = day ? pendingCounts(day.pending) : null;
 
   return (
     <AdminShell>
@@ -170,11 +192,25 @@ export default function DeskPage() {
         )}
 
         {day && hall && (
-          <Button className="ml-auto" onClick={() => setSeating(true)}>
-            Посадить клиента
-          </Button>
+          <span className="ml-auto flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => setVisiting(true)}>
+              Внести визит
+            </Button>
+            <Button onClick={() => setSeating(true)}>Посадить клиента</Button>
+          </span>
         )}
       </div>
+
+      {visiting && day && (
+        <VisitDialog
+          day={day}
+          onClose={() => setVisiting(false)}
+          onCreated={() => {
+            setVisiting(false);
+            load();
+          }}
+        />
+      )}
 
       {seating && day && hall && (
         <BookingDialog
@@ -199,15 +235,20 @@ export default function DeskPage() {
 
       {allowed && !day && !error && <DaySkeleton />}
 
-      {day && rows && (
-        <div className="grid gap-6">
-          <Tiles day={day} unmarked={rows.unmarked.length} />
+      {day && ahead && counts && (
+        // grid-cols-1 — это minmax(0, 1fr): без нуля в минимуме колонка
+        // растягивается по самому широкому содержимому, и график загрузки с
+        // горизонтальной прокруткой раздувал весь экран на телефоне до 600px.
+        <div className="grid grid-cols-1 gap-6">
+          <Tiles day={day} pending={counts} />
 
-          {rows.unmarked.length > 0 && <Unmarked rows={rows.unmarked} />}
+          <PendingBlock day={day} onChanged={load} />
 
           {day.today && <Now day={day} />}
 
-          <Ahead day={day} rows={rows.ahead} onChanged={load} />
+          <Ahead day={day} rows={ahead} onChanged={load} />
+
+          <MarkedBlock day={day} onChanged={load} />
         </div>
       )}
     </AdminShell>
@@ -218,7 +259,7 @@ export default function DeskPage() {
    Итог дня
    ========================================================================== */
 
-function Tiles({ day, unmarked }: { day: DeskDay; unmarked: number }) {
+function Tiles({ day, pending }: { day: DeskDay; pending: { total: number; overdue: number } }) {
   const free = day.tables.filter((table) => table.busy === null).length;
   // Когда освободится ближайший занятый — это второй по частоте вопрос после
   // «есть свободный стол?», и ответ на него должен стоять рядом с первым.
@@ -268,9 +309,17 @@ function Tiles({ day, unmarked }: { day: DeskDay; unmarked: number }) {
 
       <Tile
         title="Ждут отметки"
-        value={String(unmarked)}
-        note={unmarked === 0 ? 'всё отмечено' : 'закончились, присутствие не проставлено'}
-        alert={unmarked > 0}
+        value={String(pending.total)}
+        // По всему клубу, как и сам список: вчерашнее неотмеченное важнее
+        // того, в каком зале оно было.
+        note={
+          pending.total === 0
+            ? 'всё отмечено'
+            : pending.overdue > 0
+              ? `из них просрочено ${pending.overdue}`
+              : 'по всему клубу'
+        }
+        alert={pending.overdue > 0}
       />
     </div>
   );
@@ -300,39 +349,6 @@ function Tile({
       </p>
       {note && <p className="mt-0.5 text-[0.8125rem] text-text-muted">{note}</p>}
     </div>
-  );
-}
-
-/* ==========================================================================
-   Требует отметки
-   ========================================================================== */
-
-/**
- * То, что закончилось, а присутствие не проставлено.
- *
- * Пока не отмечено, деньги не списываются и в истории клиента остаётся
- * «Записан». Кнопок отметки здесь пока нет — маршрут появится своей фазой, — но
- * сам список нужен уже сейчас: он показывает размер накопившегося долга.
- */
-function Unmarked({ rows }: { rows: Row[] }) {
-  return (
-    <Card className="border-warning-border">
-      <CardHeader
-        title="Требует отметки"
-        description="Занятие закончилось, а пришёл человек или нет — не записано. Пока не отмечено, деньги не списываются и в истории клиента остаётся «Записан»."
-      />
-      <ul className="divide-y divide-border">
-        {rows.map((row) => (
-          <li key={row.key} className="flex flex-wrap items-center gap-x-5 gap-y-2 px-6 py-3.5">
-            <When at={row.at} note={row.note} />
-            <RowBody row={row} />
-            <span className="text-[0.875rem] whitespace-nowrap text-text-muted tabular-nums">
-              {formatKopecks(row.price)}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </Card>
   );
 }
 
@@ -526,7 +542,11 @@ function Ahead({
       {rows.length === 0 ? (
         <CardBody>
           <p className="text-[0.9375rem] text-text-muted">
-            {day.today ? 'До конца дня в этом зале больше ничего нет.' : 'В этот день зал свободен.'}
+            {day.today
+              ? 'До конца дня в этом зале больше ничего не начнётся.'
+              : day.date < todayIn(day.timezone)
+                ? 'Всё, что было в этот день, — в отметках ниже.'
+                : 'В этот день зал свободен.'}
           </p>
         </CardBody>
       ) : (
@@ -674,51 +694,26 @@ const PURPOSE: Record<string, string> = {
 };
 
 /**
- * Разделение дня на «требует отметки» и «дальше».
+ * Лента дня — то, что ещё не началось.
  *
- * Граница считается по НАСТОЯЩЕМУ моменту, а не по `nowMinute` зала: тот
- * существует только у сегодняшнего дня, а разбирать неотмеченное приходится и
- * в прошлую субботу.
- *
- * Турниры в неотмеченное не попадают: у них в схеме нет времени окончания, и
- * считать турнир завершённым сразу после начала значило бы требовать отметки у
- * того, что ещё идёт.
+ * Начавшееся уходит в «Требует отметки», отмеченное — в «Отмечено в этот
+ * день». Фазу считает сервер: по часам браузера бронь могла бы казаться
+ * начавшейся, когда отменить её сервер ещё позволит, — и наоборот.
  */
-function split(day: DeskDay): { unmarked: Row[]; ahead: Row[] } {
-  const now = Date.now();
-  const unmarked: Row[] = [];
-  const ahead: Row[] = [];
-
-  for (const booking of day.bookings) {
+function aheadOf(day: DeskDay): Row[] {
+  const rows: Row[] = [
     // Отменённые в ленте не показываются: они не занимают стол и никого не
     // ждут. В деньгах дня они при этом учтены — там своя правда.
-    if (booking.status === 'CANCELLED') continue;
+    ...day.bookings
+      .filter((booking) => booking.status !== 'CANCELLED' && booking.phase === 'UPCOMING')
+      .map(bookingRow),
+    // Мероприятия вне сетки не видны ни в одном зале, кроме как здесь.
+    ...[...day.events, ...day.unplaced]
+      .filter((event) => event.phase === 'UPCOMING')
+      .map(eventRow),
+  ];
 
-    const row = bookingRow(booking);
-
-    if (Date.parse(booking.endsAt) < now) {
-      if (booking.status === 'BOOKED') unmarked.push(row);
-      continue;
-    }
-
-    ahead.push(row);
-  }
-
-  for (const event of day.events) {
-    const row = eventRow(event);
-    const ended = Date.parse(event.endsAt) < now;
-
-    if (ended) {
-      if (event.participants.some((entry) => entry.status === 'BOOKED')) unmarked.push(row);
-      continue;
-    }
-
-    ahead.push(row);
-  }
-
-  const byTime = (a: Row, b: Row): number => a.at.localeCompare(b.at);
-
-  return { unmarked: unmarked.sort(byTime), ahead: ahead.sort(byTime) };
+  return rows.sort((a, b) => a.at.localeCompare(b.at));
 }
 
 function bookingRow(booking: DeskBooking): Row {

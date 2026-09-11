@@ -53,11 +53,11 @@ export default function MyBookingsPage() {
 
   const { upcoming, past } = useMemo(() => split(entries ?? []), [entries]);
 
+  // По строке записи, а не по мероприятию: у одного занятия бывают две
+  // строки — отменённая и живая после повторной записи.
   function replace(updated: BookingEntry): void {
     setEntries((current) =>
-      (current ?? []).map((entry) =>
-        entry.kind === updated.kind && entry.id === updated.id ? updated : entry,
-      ),
+      (current ?? []).map((entry) => (entry.entryId === updated.entryId ? updated : entry)),
     );
   }
 
@@ -138,7 +138,7 @@ function Group({
 
             <ul className="mt-3 border-t border-border">
               {list.map((entry) => (
-                <li key={`${entry.kind}-${entry.id}`}>
+                <li key={entry.entryId}>
                   <Row entry={entry} onChanged={onChanged} onError={onError} />
                 </li>
               ))}
@@ -156,6 +156,31 @@ const STATUS_LABELS: Record<BookingStatus, string> = {
   ATTENDED: 'Состоялась',
   NO_SHOW: 'Неявка',
 };
+
+/**
+ * Что показать в статусе строки.
+ *
+ * Началась, а статус всё ещё «записан» — значит, клуб присутствие не отметил.
+ * «Активна» в истории читалась бы как «можно отменить», а отменить нельзя:
+ * после начала запись только отмечается. Списание — только у отмены и неявки:
+ * «Состоялась, списано 100%» было бы шумом, цена и так в строке.
+ */
+function statusOf(entry: BookingEntry): string {
+  if (entry.status === 'BOOKED') {
+    return entry.cancellable ? STATUS_LABELS.BOOKED : 'Ждёт отметки клуба';
+  }
+
+  if (entry.status === 'NO_SHOW' && entry.chargePercent === 0) {
+    return 'Неявка, без списания';
+  }
+
+  const charged =
+    (entry.status === 'CANCELLED' || entry.status === 'NO_SHOW') && (entry.chargePercent ?? 0) > 0
+      ? `, списано ${entry.chargePercent}%`
+      : '';
+
+  return `${STATUS_LABELS[entry.status]}${charged}`;
+}
 
 function Row({
   entry,
@@ -197,11 +222,6 @@ function Row({
     }
   }
 
-  const charged =
-    entry.chargePercent !== null && entry.chargePercent > 0
-      ? `, списано ${entry.chargePercent}%`
-      : '';
-
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-border py-4">
       <span
@@ -223,12 +243,11 @@ function Row({
         </span>
       </span>
 
-      <span className="text-[0.8125rem] whitespace-nowrap text-text-subtle">
-        {STATUS_LABELS[entry.status]}
-        {charged}
-      </span>
+      <span className="text-[0.8125rem] whitespace-nowrap text-text-subtle">{statusOf(entry)}</span>
 
-      {entry.status === 'BOOKED' && (
+      {/* Можно ли отменить, решает сервер: его часы — часы клуба, а после
+          начала запись не отменяется, а отмечается. */}
+      {entry.cancellable && (
         <Button variant="danger" size="sm" pending={pending} onClick={() => void cancel()}>
           Отменить
           {entry.cancelChargePercentNow ? ` (спишется ${entry.cancelChargePercentNow}%)` : ''}
@@ -306,5 +325,7 @@ function toEntry(
     status: cancelled.status,
     chargePercent: cancelled.chargePercent,
     cancelChargePercentNow: cancelled.cancelChargePercentNow,
+    // Отменённая больше не отменяется.
+    cancellable: false,
   };
 }

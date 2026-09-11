@@ -240,7 +240,7 @@ function MyEvents({ entries, anonymous }: { entries: BookingEntry[] | null; anon
         <ul className="border-t border-border">
           {upcoming.map((entry) => (
             <li
-              key={`${entry.kind}-${entry.id}`}
+              key={entry.entryId}
               className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-border py-4"
             >
               <WhenSpan startsAt={entry.startsAt} endsAt={entry.endsAt} />
