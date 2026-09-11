@@ -320,6 +320,13 @@ model Tenant {
   legalAcceptances        LegalAcceptance[]
   platformSubscription    TenantSubscription?
   favouritedBy            UserClub[]
+
+  // Поиск клубов на стартовой странице фильтрует по городу — и клуба, и его
+  // залов. Индекс завела миграция platform_layer, но в схему его тогда не
+  // внесли, и Prisma с тех пор считала его лишним: следующая же миграция
+  // молча предложила бы его удалить, а поиск по городу — поехать по всей
+  // таблице. У Hall такой индекс объявлен, у Tenant не был.
+  @@index([cityId])
 }
 
 /// Ступень политики отмены клуба: «если клиент отменил не позднее чем за
@@ -582,6 +589,13 @@ model TenantMembership {
   legalAcceptances LegalAcceptance[]
   auditEntries     AuditLog[]        @relation("AuditActor")
 
+  // Записи, заведённые этим сотрудником вручную. Мишень та же, что у
+  // visitsRecorded, и по той же причине: автор записи обязан быть человеком
+  // ЭТОГО клуба, и следит за этим составной внешний ключ, а не код.
+  tableBookingsCreated           TableBooking[]           @relation("TableBookingAuthor")
+  trainingBookingsCreated        TrainingBooking[]        @relation("TrainingBookingAuthor")
+  tournamentRegistrationsCreated TournamentRegistration[] @relation("TournamentRegistrationAuthor")
+
   // Первичный ключ и одновременно мишень всех составных FK клубных таблиц.
   @@id([userId, tenantId])
   @@index([tenantId, role])
@@ -721,6 +735,11 @@ model TrainingBooking {
   status    BookingStatus   @default(BOOKED)
   source    BookingSource   @default(ONLINE) // ONLINE — клиент записался сам; MANUAL — добавил admin
 
+  /// Кто из сотрудников завёл запись вручную. Обязательно при source = MANUAL,
+  /// см. TableBooking.createdByUserId — там же и объяснение.
+  createdByUserId String?
+  createdBy       TenantMembership? @relation("TrainingBookingAuthor", fields: [createdByUserId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
   // Копия цены на момент записи (копейки). Без неё изменение прайса или
   // удаление типа тренировки исказило бы всю историю. Заполняется и при
   // оплате абонементом — иначе стоимость визита не восстановить вообще.
@@ -812,6 +831,16 @@ model TournamentRegistration {
   clientId     String
   client       ClientProfile @relation(fields: [clientId, tenantId], references: [userId, tenantId], onDelete: Restrict)
   status       BookingStatus @default(BOOKED)
+
+  /// Как появилась регистрация: клиент записался сам или её завёл админ.
+  /// Заведено вместе с тем же полем у аренды — у записи на тренировку оно
+  /// было изначально, и отсутствие у двух других выглядело забытой строкой.
+  source BookingSource @default(ONLINE)
+
+  /// Кто из сотрудников завёл регистрацию вручную. Обязательно при
+  /// source = MANUAL, см. TableBooking.createdByUserId.
+  createdByUserId String?
+  createdBy       TenantMembership? @relation("TournamentRegistrationAuthor", fields: [createdByUserId, tenantId], references: [userId, tenantId], onDelete: Restrict)
 
   priceAtBooking Int // копия цены участия на момент регистрации, копейки
 
@@ -1111,6 +1140,27 @@ model TableBooking {
   isSparring Boolean @default(false)
   withRobot  Boolean @default(false) // отдельная услуга со своей сеткой цен, не наценка поверх обычной аренды
 
+  /// Как появилась бронь: клиент занял стол сам или её завёл администратор.
+  ///
+  /// У TrainingBooking такое поле было с самого начала, а у аренды и
+  /// регистрации на турнир — нет, и это выглядело забытой строкой, а не
+  /// решением. Без него нельзя ответить на первый же вопрос к рабочему месту
+  /// через месяц: сколько броней клуб заводит руками по телефону.
+  source BookingSource @default(ONLINE)
+
+  /// Кто из сотрудников завёл бронь вручную. Пусто у самостоятельной онлайн-
+  /// брони: клиент сам себе не «автор».
+  ///
+  /// Обязательно при source = MANUAL — это проверяет check-констрейнт. За
+  /// админской бронью стоят чужие деньги, и «кто меня записал» — первый
+  /// вопрос при споре; восстановить ответ больше неоткуда, потому что
+  /// AuditLog на этом этапе не пишется.
+  ///
+  /// Ключ составной и целится в TenantMembership — ровно та же мишень, что у
+  /// VisitLog.recordedBy: база не примет автора из чужого клуба.
+  createdByUserId String?
+  createdBy       TenantMembership? @relation("TableBookingAuthor", fields: [createdByUserId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
   // Явный интервал вместо startTime + durationMinutes: exclusion-констрейнту
   // нужен диапазон, а длительность выводится как endsAt - startsAt.
   startsAt DateTime @db.Timestamptz(3)
@@ -1141,6 +1191,10 @@ model TableBooking {
   // у которых занятие уже закончилось». Без составного индекса это
   // последовательное чтение всей таблицы на каждом прогоне.
   @@index([tenantId, status, endsAt])
+  // «Брони этого человека в этом клубе, свежие сверху» — запрос кабинета
+  // клиента (BookingService.listMine) и карточки человека в рабочем месте.
+  // По clientId индекса не было вовсе, хотя оба запроса по нему уже ходили.
+  @@index([tenantId, clientId, startsAt])
 }
 
 // ---------------------------------------------------------------------------

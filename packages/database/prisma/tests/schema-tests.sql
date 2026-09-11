@@ -3,7 +3,7 @@
 -- ради чего заведены.
 -- ---------------------------------------------------------------------------
 --
--- СТАТУС: прогнано на PostgreSQL 18 (05.09.2026) — 39 из 39 сценариев прошли.
+-- СТАТУС: прогнано на PostgreSQL 18 (08.09.2026) — 43 из 43 сценариев прошли.
 -- Дополнительно проверено, что отказы приходят именно от нужных ограничений,
 -- а не по случайной причине: exclusion-констрейнт даёт 23P01, составные
 -- внешние ключи — 23503, частичный уникальный индекс — 23505, check'и — 23514.
@@ -96,10 +96,12 @@ DO $$ BEGIN
   RAISE NOTICE 'C. Бронь встык 19:00-20:00 создана......... OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'C. ПРОВАЛ: встык отклонён: %', SQLERRM; END $$;
 
--- D. Отменённая бронь время не занимает — 18:30-19:30 со статусом CANCELLED
+-- D. Отменённая бронь время не занимает — 18:30-19:30 со статусом CANCELLED.
+--    Момент отмены обязателен (TableBooking_cancelled_has_time): от него
+--    считается процент списания, см. сценарий AO.
 DO $$ BEGIN
-  INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","startsAt","endsAt","priceAtBooking",status,"updatedAt")
-  VALUES ('bk4','t1','tb1','u1','2026-09-01 18:30+07','2026-09-01 19:30+07',40000,'CANCELLED',now());
+  INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","startsAt","endsAt","priceAtBooking",status,"cancelledAt","updatedAt")
+  VALUES ('bk4','t1','tb1','u1','2026-09-01 18:30+07','2026-09-01 19:30+07',40000,'CANCELLED',now(),now());
   RAISE NOTICE 'D. Отменённая бронь не занимает время...... OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'D. ПРОВАЛ: %', SQLERRM; END $$;
 
@@ -161,7 +163,7 @@ EXCEPTION WHEN others THEN RAISE NOTICE 'K. Робот без цен откло�
 --    показать: констрейнт проверяет диапазон, а не список значений.
 --    Прежний констрейнт IN (0,50,100) на этом кейсе падал.
 DO $$ BEGIN
-  UPDATE "TrainingBooking" SET status='CANCELLED', "chargeRatio"=25 WHERE id='tb_3';
+  UPDATE "TrainingBooking" SET status='CANCELLED', "cancelledAt"=now(), "chargeRatio"=25 WHERE id='tb_3';
   RAISE NOTICE 'L. Процент вне набора Енисея принят........ OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'L. ПРОВАЛ: %', SQLERRM; END $$;
 
@@ -517,3 +519,81 @@ DO $$ BEGIN
   VALUES ('dc3','t1','ds1','tb1',1080,1170,'TRAINING','c1','tt1','ts1',now());
   RAISE NOTICE 'AK. Занятие в своём расписании............. OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'AK. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- ---------------------------------------------------------------------------
+-- Ручная запись и её автор (раздел 16 constraints.sql)
+-- ---------------------------------------------------------------------------
+
+-- AL. Ручная бронь без автора. За админской бронью стоят чужие деньги, и
+--     «кто меня записал» — первый вопрос при споре. Ответить больше нечем:
+--     AuditLog на этом этапе не пишется.
+DO $$
+DECLARE code text;
+BEGIN
+  INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","startsAt","endsAt","priceAtBooking",source,"updatedAt")
+  VALUES ('bk10','t1','tb1','u1','2026-09-20 10:00+07','2026-09-20 11:00+07',40000,'MANUAL',now());
+
+  RAISE NOTICE 'AL. ПРОВАЛ: ручная бронь без автора прошла!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+  IF code = '23514' THEN
+    RAISE NOTICE 'AL. Ручная бронь без автора отклонена...... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'AL. ПРОВАЛ: отказ пришёл не от check, а от %', code;
+  END IF;
+END $$;
+
+-- AM. Ручная бронь с автором своего клуба — проходит. Сценарий-контроль:
+--     без него отказ в AL мог бы приходить по любой другой причине.
+DO $$ BEGIN
+  INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","startsAt","endsAt","priceAtBooking",source,"createdByUserId","updatedAt")
+  VALUES ('bk11','t1','tb1','u1','2026-09-20 10:00+07','2026-09-20 11:00+07',40000,'MANUAL','c1',now());
+  RAISE NOTICE 'AM. Ручная бронь с автором создана......... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'AM. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- AN. Автор из ЧУЖОГО клуба. Ключ составной и целится в TenantMembership —
+--     та же мишень, что у VisitLog.recordedBy. Клуб t1 подставляет u2,
+--     который состоит только в t2.
+DO $$
+DECLARE code text;
+BEGIN
+  INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","startsAt","endsAt","priceAtBooking",source,"createdByUserId","updatedAt")
+  VALUES ('bk12','t1','tb1','u1','2026-09-21 10:00+07','2026-09-21 11:00+07',40000,'MANUAL','u2',now());
+
+  RAISE NOTICE 'AN. ПРОВАЛ: автор из чужого клуба прошёл!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+  IF code = '23503' THEN
+    RAISE NOTICE 'AN. Автор из чужого клуба отклонён........ OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'AN. ПРОВАЛ: отказ пришёл не от внешнего ключа, а от %', code;
+  END IF;
+END $$;
+
+-- AO. Отмена без момента отмены. От него считается процент списания по
+--     политике клуба, и запись без него делает спор о деньгах неразрешимым:
+--     неизвестно, отменили за сутки или за минуту.
+DO $$
+DECLARE code text;
+BEGIN
+  INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","startsAt","endsAt","priceAtBooking",status,"updatedAt")
+  VALUES ('bk13','t1','tb1','u1','2026-09-22 10:00+07','2026-09-22 11:00+07',40000,'CANCELLED',now());
+
+  RAISE NOTICE 'AO. ПРОВАЛ: отмена без момента отмены прошла!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+  IF code = '23514' THEN
+    RAISE NOTICE 'AO. Отмена без момента отмены отклонена.... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'AO. ПРОВАЛ: отказ пришёл не от check, а от %', code;
+  END IF;
+END $$;
+
+-- AP. Онлайн-бронь автора не требует: клиент сам себе не «автор», и поле
+--     остаётся пустым. Контроль к AL — он не должен запрещать обычную бронь.
+DO $$ BEGIN
+  INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","startsAt","endsAt","priceAtBooking","updatedAt")
+  VALUES ('bk14','t1','tb1','u1','2026-09-23 10:00+07','2026-09-23 11:00+07',40000,now());
+  RAISE NOTICE 'AP. Онлайн-бронь без автора создана....... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'AP. ПРОВАЛ: %', SQLERRM; END $$;
+

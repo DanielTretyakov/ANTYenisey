@@ -401,3 +401,56 @@ ALTER TABLE "UserClub"
 ALTER TABLE "Tenant"
   ADD CONSTRAINT "Tenant_accent_color_format"
   CHECK ("accentColor" IS NULL OR "accentColor" ~ '^#[0-9a-fA-F]{6}$');
+
+-- ---------------------------------------------------------------------------
+-- 16. Ручная запись и её автор
+-- ---------------------------------------------------------------------------
+
+-- Запись, заведённая администратором, обязана помнить, кто её завёл.
+--
+-- За ручной записью стоят чужие деньги, и «кто меня записал» — первый вопрос
+-- при споре. Ответить на него больше нечем: AuditLog на этом этапе не
+-- пишется, а когда начнёт — у записей, заведённых раньше, автора уже не
+-- появится. Само поле остаётся необязательным: у самостоятельной онлайн-
+-- записи автора нет по смыслу, клиент сам себе не «автор».
+ALTER TABLE "TableBooking"
+  ADD CONSTRAINT "TableBooking_manual_has_author"
+  CHECK ("source" <> 'MANUAL'::"BookingSource" OR "createdByUserId" IS NOT NULL);
+
+ALTER TABLE "TrainingBooking"
+  ADD CONSTRAINT "TrainingBooking_manual_has_author"
+  CHECK ("source" <> 'MANUAL'::"BookingSource" OR "createdByUserId" IS NOT NULL);
+
+ALTER TABLE "TournamentRegistration"
+  ADD CONSTRAINT "TournamentRegistration_manual_has_author"
+  CHECK ("source" <> 'MANUAL'::"BookingSource" OR "createdByUserId" IS NOT NULL);
+
+-- Отменённая запись обязана нести момент отмены.
+--
+-- От него считается процент списания по политике клуба, и запись без него
+-- делает спор о деньгах неразрешимым: неизвестно, отменили за сутки или за
+-- минуту. Обратное неверно — момент отмены без статуса CANCELLED тут не
+-- запрещён: он законно остаётся у записи, которую после отмены восстановили.
+ALTER TABLE "TableBooking"
+  ADD CONSTRAINT "TableBooking_cancelled_has_time"
+  CHECK ("status" <> 'CANCELLED'::"BookingStatus" OR "cancelledAt" IS NOT NULL);
+
+ALTER TABLE "TrainingBooking"
+  ADD CONSTRAINT "TrainingBooking_cancelled_has_time"
+  CHECK ("status" <> 'CANCELLED'::"BookingStatus" OR "cancelledAt" IS NOT NULL);
+
+ALTER TABLE "TournamentRegistration"
+  ADD CONSTRAINT "TournamentRegistration_cancelled_has_time"
+  CHECK ("status" <> 'CANCELLED'::"BookingStatus" OR "cancelledAt" IS NOT NULL);
+
+-- Чего здесь НЕТ и почему.
+--
+-- Пересечение брони стола с закрытым временем расписания НЕ запрещается.
+-- Закрытое расписанием время закрыто только для самостоятельной онлайн-брони
+-- клиента; администратор обязан мочь посадить человека поверх — ради этого
+-- рабочее место и пишется. Констрейнт запретил бы ровно тот сценарий, для
+-- которого раздел существует.
+--
+-- А вот TableBooking_no_overlap (раздел 1) не ослабляется и не снимается:
+-- два человека за одним столом одновременно не помещаются физически, и
+-- «администратор может всё» на этом заканчивается.
