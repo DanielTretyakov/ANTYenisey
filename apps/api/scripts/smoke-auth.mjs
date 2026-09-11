@@ -891,6 +891,97 @@ async function main() {
     r = await asAdmin(`/clubs/yenisey/halls/${hallId}/days/2026-13-45`, { method: 'DELETE' });
     check('несуществующая дата отклонена', 400, r.status);
 
+    console.log('=== 22о. Отвязка дня от шаблона и уборка ничьих мероприятий');
+    // Шаблон зала на время сценария подменяется и потом возвращается как был:
+    // от него зависят проверки ниже.
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}/template`);
+    const templateBefore = (r.body ?? []).map(({ id: _id, ...rule }) => rule);
+
+    // Вторник — как weekday: 2 у окон window().
+    const detachDate = '2026-10-06';
+    assert('дата отвязки — вторник', new Date(`${detachDate}T00:00:00Z`).getUTCDay() === 2);
+
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}/template`, {
+      method: 'PUT',
+      json: {
+        rules: [
+          window({ startMinute: 600, endMinute: 660 }),
+          window({ startMinute: 720, endMinute: 840, purpose: 'TOURNAMENT', tournamentTypeId }),
+        ],
+      },
+    });
+    check('шаблон с арендой и турниром сохранён', 200, r.status);
+
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}/days/${detachDate}`);
+    assert('до отвязки день идёт по шаблону', r.body?.customised === false);
+
+    const tournamentIds = async () =>
+      ((await asAdmin('/clubs/yenisey/tournaments')).body ?? []).map((item) => item.id);
+    const tournamentsBefore = (await tournamentIds()).length;
+
+    const detachPath = `/clubs/yenisey/halls/${hallId}/days/${detachDate}/detach`;
+    const cupOf = (body) => (body?.closures ?? []).find((closure) => closure.purpose === 'TOURNAMENT');
+
+    r = await asAdmin(detachPath, { method: 'POST' });
+    check('день отвязан от шаблона', 200, r.status);
+    assert('день стал правленым', r.body?.customised === true);
+    assert('окна шаблона скопированы в день', r.body?.closures?.length === 2);
+    const firstCup = cupOf(r.body)?.tournamentId;
+    // Турнир заводится: окно турнира в дне обязано ссылаться на проведение.
+    assert('у турнирного окна появилось проведение', typeof firstCup === 'string');
+    // Занятия — нет: окно тренировки без занятия законно, а заводить запись на
+    // каждое окно из шаблона значило бы открыть клиентам несобранные группы.
+    assert(
+      'занятий при отвязке не заводится',
+      (r.body?.closures ?? []).every((closure) => closure.trainingSessionId === null),
+    );
+
+    r = await asAdmin(detachPath, { method: 'POST' });
+    check('повторная отвязка не ошибка', 200, r.status);
+    assert('повторная отвязка не заводит второй турнир', cupOf(r.body)?.tournamentId === firstCup);
+    assert('заведён ровно один турнир', (await tournamentIds()).length === tournamentsBefore + 1);
+
+    // Правка, стирающая окно турнира, уносит и сам турнир: он больше нигде не
+    // стоит, записей на нём нет, а клиент видел бы его в ленте.
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}/days/${detachDate}`, {
+      method: 'PUT',
+      json: {
+        closures: [
+          { tableId, startMinute: 600, endMinute: 660, purpose: 'RENT', coachId: null },
+        ],
+      },
+    });
+    check('окно турнира стёрто правкой дня', 200, r.status);
+    assert('стёртый турнир ушёл вместе с окном', !(await tournamentIds()).includes(firstCup));
+
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}/days/${detachDate}`, { method: 'DELETE' });
+    check('правленый день возвращён к шаблону', 200, r.status);
+
+    r = await asAdmin(detachPath, { method: 'POST' });
+    const secondCup = cupOf(r.body)?.tournamentId;
+    assert('после возврата день отвязывается заново', typeof secondCup === 'string');
+
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}/days/${detachDate}`, { method: 'DELETE' });
+    check('отвязанный день возвращён к шаблону', 200, r.status);
+    assert('турнир, стоявший только в этом дне, ушёл вместе с днём', !(await tournamentIds()).includes(secondCup));
+
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}/days/2026-13-45/detach`, { method: 'POST' });
+    check('отвязка несуществующей даты отклонена', 400, r.status);
+
+    r = await asAdmin(`/clubs/yenisey/halls/net-takogo-zala/days/${detachDate}/detach`, {
+      method: 'POST',
+    });
+    check('отвязка в несуществующем зале', 404, r.status);
+
+    r = await call(detachPath, { method: 'POST', headers: { Authorization: `Bearer ${access}` } });
+    check('отвязка клиенту закрыта', 403, r.status);
+
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}/template`, {
+      method: 'PUT',
+      json: { rules: templateBefore },
+    });
+    check('шаблон возвращён как был', 200, r.status);
+
     console.log('=== 24. Бронирование стола клиентом');
     // Бронь заводится в ОСНОВНОМ зале клуба, а не в зале проверки: за бронью
     // стоит платёж, внешний ключ стоит на Restrict, и стол с историей уже не
@@ -1102,10 +1193,234 @@ async function main() {
       }
     }
 
+    console.log('=== 22р. Рабочее место администратора');
+    const deskPath = `/clubs/yenisey/desk/halls/${hallId}/days/${cupDate}`;
+
+    r = await call(deskPath);
+    check('смена без токена закрыта', 401, r.status);
+
+    r = await call(deskPath, { headers: { Authorization: `Bearer ${access}` } });
+    check('смена клиенту закрыта', 403, r.status);
+
+    r = await asAdmin(`/clubs/yenisey/desk/halls/net-takogo-zala/days/${cupDate}`);
+    check('несуществующий зал', 404, r.status);
+
+    r = await asAdmin(`/clubs/yenisey/desk/halls/${hallId}/days/03-10-2026`);
+    check('дата задом наперёд отклонена', 400, r.status);
+
+    r = await asAdmin(deskPath);
+    check('смена открыта администратору', 200, r.status);
+
+    const desk = r.body;
+    assert('смена про запрошенный зал', desk?.hallId === hallId);
+
+    // Дата проверки — будущая, и «сейчас» у неё быть не может: текущего
+    // момента у чужого дня не существует, и рисовать на нём занятость
+    // «прямо сейчас» значило бы соврать.
+    assert('будущий день не считается сегодняшним', desk?.today === false);
+    assert('у несегодняшнего дня нет текущей минуты', desk?.nowMinute === null);
+    // Стол в этом зале ровно один: twinId выше заводится в ГЛАВНОМ зале
+    // клуба, а не в тестовом.
+    assert('столы зала на месте', Array.isArray(desk?.tables) && desk.tables.length === 1);
+
+    // Сетка идёт с 06:00 до полуночи — те же границы, что у брони.
+    assert('график покрывает сутки работы', desk?.load?.length === 18);
+    assert('границы сетки те же, что у брони', desk?.openMinute === 360 && desk?.closeMinute === 1440);
+
+    // Турнир стоит в сетке этого дня, и рабочее место обязано его показать.
+    // Берётся он именно из окон расписания: у турнира и занятия нет зала,
+    // связывает их с ним только сетка.
+    const deskCup = (desk?.events ?? []).find((item) => item.id === tournamentId);
+    assert('турнир из сетки виден в смене', deskCup?.kind === 'TOURNAMENT');
+    assert('у турнира нет лимита мест', deskCup?.capacity === null);
+    assert('у турнира нет тренера', deskCup?.coachName === null);
+    assert('окончания у турнира в схеме нет', deskCup?.endsAt === null);
+
+    // Окно турнира занимает стол с 10:00: у несегодняшнего дня это и есть
+    // ответ на вопрос «с какого часа зал занят».
+    const deskTable = (desk?.tables ?? []).find((item) => item.tableId === tableId);
+    assert('стол под турниром занят с 10:00', deskTable?.nextFromMinute === 600);
+    assert('состояние «сейчас» у чужого дня пустое', deskTable?.busy === null);
+
+    const tenth = (desk?.load ?? []).find((item) => item.hour === 10);
+    const ninth = (desk?.load ?? []).find((item) => item.hour === 9);
+    assert('в десятом часу занят один стол', tenth?.busyTables === 1);
+    assert('в девятом часу свободно', ninth?.busyTables === 0);
+
+    assert(
+      'деньги разложены по видам услуг',
+      desk?.money !== undefined &&
+        Number.isInteger(desk.money.tables) &&
+        Number.isInteger(desk.money.trainings) &&
+        Number.isInteger(desk.money.tournaments) &&
+        desk.money.total === desk.money.tables + desk.money.trainings + desk.money.tournaments,
+    );
+
+    console.log('=== 22б. Бронь администратором');
+
+    // Отдельные зал и стол под брони, а не те, что выше.
+    //
+    // Причина в правиле продукта: бронь не удаляется никогда — это история
+    // платежей, — и стол, за которым хоть раз кого-то посадили, удалить уже
+    // нельзя. Пусти брони на общий тестовый стол, и уборка ниже перестала бы
+    // проходить; пусти на twinId — а он живёт в НАСТОЯЩЕМ главном зале клуба —
+    // и смоук оставил бы неудаляемый стол в рабочих данных.
+    //
+    // Этот зал уборка не трогает: его вместе с бронями снимает
+    // `pnpm db:clean-probes`, как и учётки probe-*.
+    r = await asAdmin('/clubs/yenisey/halls', {
+      method: 'POST',
+      json: {
+        name: `Зал проверки ${RUN} (брони)`,
+        timezone: 'Asia/Krasnoyarsk',
+        cityId: null,
+        address: null,
+        bookingStep: 'MIN_30',
+        tableHourPrice: 30000,
+        tableExtra30MinPrice: 15000,
+        hasRobotOption: false,
+        robot30MinPrice: null,
+        robot60MinPrice: null,
+        robotExtra30MinPrice: null,
+      },
+    });
+    check('зал под брони заведён', 201, r.status);
+    const seatHallId = r.body?.id;
+
+    r = await asAdmin('/clubs/yenisey/tables', {
+      method: 'POST',
+      json: { hallId: seatHallId, label: `Стол проверки ${RUN} (брони)` },
+    });
+    check('стол под брони заведён', 201, r.status);
+    const seatTableId = r.body?.id;
+
+    // Клиента заводим отдельного, и он ещё НЕ состоит в клубе — это часть
+    // проверки: привязка обязана завестись первой же бронью.
+    r = await post('/auth/register', registration({ tenantSlug: undefined }));
+    check('новичок платформы заведён', 201, r.status);
+    const seatedId = r.body?.user?.id ?? '';
+    assert('в клубах он не состоит', r.body?.user?.memberships?.length === 0);
+
+    const deskBookings = '/clubs/yenisey/desk/bookings';
+    const seatDate = dateIn('Asia/Krasnoyarsk', 3);
+    const seatAt = instantAt(seatDate, 14 * 60, 'Asia/Krasnoyarsk');
+
+    r = await call(deskBookings, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${access}` },
+      json: { clientId: seatedId, tableId: seatTableId, startsAt: seatAt, durationMinutes: 60, withRobot: false },
+    });
+    check('посадка клиенту закрыта', 403, r.status);
+
+    r = await asAdmin(deskBookings, {
+      method: 'POST',
+      json: { clientId: seatedId, tableId: seatTableId, startsAt: seatAt, durationMinutes: 60, withRobot: false },
+    });
+    check('администратор посадил клиента', 201, r.status);
+
+    const seatId = r.body?.id ?? '';
+    const seatPrice = r.body?.price;
+    assert('бронь помечена как ручная', r.body?.manual === true);
+    assert(
+      'у брони записан автор',
+      typeof r.body?.createdBy === 'string' && r.body.createdBy.length > 0,
+    );
+    assert('в броне виден телефон клиента', typeof r.body?.client?.phone === 'string');
+
+    // Привязка к клубу заводится первой же бронью — тем же кодом, что и при
+    // самостоятельной записи.
+    r = await asAdmin(`${deskBookings}?clientId=${seatedId}`);
+    check('список броней клуба читается', 200, r.status);
+    assert('бронь новичка в списке', Array.isArray(r.body) && r.body.length === 1);
+
+    // Цену считает только сервер. Сверяем с тем же расчётом, которым
+    // пользуется клиентская форма: разойтись им нельзя.
+    r = await asAdmin(
+      `/clubs/yenisey/booking/quote?hallId=${seatHallId}&durationMinutes=60&withRobot=false`,
+    );
+    check('расчёт цены открыт администратору', 200, r.status);
+    assert(
+      'цена брони равна расчёту сервера',
+      typeof seatPrice === 'number' && seatPrice > 0 && r.body?.price === seatPrice,
+    );
+
+    // Чужая бронь непреодолима: два человека за одним столом не помещаются
+    // физически, и это держит exclusion-констрейнт.
+    r = await asAdmin(deskBookings, {
+      method: 'POST',
+      json: { clientId: seatedId, tableId: seatTableId, startsAt: seatAt, durationMinutes: 60, withRobot: false },
+    });
+    // 400, а не 409: занятость видна проверке в сервисе, и она отвечает
+    // внятной строкой. 409 от exclusion-констрейнта остаётся на гонку —
+    // два одновременных запроса, которые оба увидели стол свободным.
+    // Тот же порядок, что у клиентской брони.
+    check('бронь поверх чужой брони отклонена', 400, r.status);
+    assert(
+      'отказ объясняет причину',
+      String(r.body?.message ?? '').includes('занят'),
+    );
+
+    r = await asAdmin(deskBookings, {
+      method: 'POST',
+      json: { clientId: seatedId, tableId: seatTableId, startsAt: seatAt, durationMinutes: 37, withRobot: false },
+    });
+    check('длительность не по шагу зала отклонена', 400, r.status);
+
+    r = await asAdmin(deskBookings, {
+      method: 'POST',
+      json: {
+        clientId: seatedId,
+        tableId: seatTableId,
+        startsAt: instantAt(seatDate, 3 * 60, 'Asia/Krasnoyarsk'),
+        durationMinutes: 60,
+        withRobot: false,
+      },
+    });
+    check('бронь вне часов работы отклонена', 400, r.status);
+
+    r = await asAdmin(deskBookings, {
+      method: 'POST',
+      json: { clientId: seatedId, tableId: seatTableId, startsAt: seatAt, durationMinutes: 60, withRobot: true },
+    });
+    check('робот в зале без робота отклонён', 400, r.status);
+
+    // Перенос, а не «отменить и создать»: отмена зафиксировала бы процент
+    // списания и испортила клиенту статистику отмен.
+    r = await asAdmin(`${deskBookings}/${seatId}`, {
+      method: 'PATCH',
+      json: {
+        tableId: seatTableId,
+        startsAt: instantAt(seatDate, 16 * 60, 'Asia/Krasnoyarsk'),
+        durationMinutes: 90,
+      },
+    });
+    check('бронь перенесена', 200, r.status);
+    assert('статус остался активным', r.body?.status === 'BOOKED');
+    assert('цена пересчитана под новую длительность', r.body?.price !== seatPrice);
+
+    r = await asAdmin(`${deskBookings}/${seatId}/cancel`, {
+      method: 'POST',
+      json: { waiveCharge: true },
+    });
+    check('бронь отменена без списания', 201, r.status);
+    assert('списание прощено', r.body?.chargePercent === 0);
+    assert('момент отмены записан', typeof r.body?.cancelledAt === 'string');
+
+    r = await asAdmin(`${deskBookings}/${seatId}/cancel`, { method: 'POST', json: {} });
+    check('повторная отмена отклонена', 400, r.status);
+
+    // Стол с бронями удалить нельзя — даже отменёнными: за бронями стоит
+    // история платежей. Зал с таким столом, соответственно, тоже.
+    r = await asAdmin(`/clubs/yenisey/tables/${seatTableId}`, { method: 'DELETE' });
+    check('стол с бронями удалить нельзя', 409, r.status);
+
     console.log('=== 23. Уборка проверочных данных');
-    await asAdmin(`/clubs/yenisey/halls/${hallId}/days/${cupDate}`, { method: 'DELETE' });
-    r = await asAdmin(`/clubs/yenisey/tournaments/${tournamentId}`, { method: 'DELETE' });
-    check('турнир убран', 204, r.status);
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}/days/${cupDate}`, { method: 'DELETE' });
+    check('день с турниром возвращён к шаблону', 200, r.status);
+    // Отдельного удаления турнира больше не нужно: он стоял только в этом дне и
+    // записей не имел — ушёл вместе с днём.
+    r = await asAdmin('/clubs/yenisey/tournaments');
+    assert('турнир ушёл вместе с днём', !(r.body ?? []).some((item) => item.id === tournamentId));
     r = await asAdmin(`/clubs/yenisey/tournament-types/${tournamentTypeId}`, { method: 'DELETE' });
     check('тип турнира убран', 204, r.status);
     await asAdmin(`/clubs/yenisey/halls/${hallId}/template`, { method: 'PUT', json: { rules: [] } });

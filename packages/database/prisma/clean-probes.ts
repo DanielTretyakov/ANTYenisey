@@ -18,14 +18,39 @@ const prisma = new PrismaClient();
 // скрипт не должен уметь снести живую клиентскую базу.
 const PROBE_EMAIL_PREFIX = 'probe-';
 
+// Те же префиксы, что ставит smoke-auth.mjs залам и столам проверки. Шире
+// брать нельзя по той же причине, что и с почтой.
+const PROBE_HALL_PREFIX = 'Зал проверки ';
+const PROBE_TABLE_PREFIX = 'Стол проверки ';
+
 async function main(): Promise<void> {
   const where = { email: { startsWith: PROBE_EMAIL_PREFIX } };
 
-  const users = await prisma.user.findMany({ where, select: { id: true } });
+  const users = await prisma.user.findMany({ where, select: { id: true, createdAt: true } });
   const ids = users.map((user) => user.id);
+
+  /**
+   * Нижняя граница «своего» — момент появления самой ранней проверочной учётки.
+   *
+   * Она отделяет мероприятия, которые смоук создал сам, от клубных, на которые
+   * проверочный клиент всего лишь записался. Без неё условие «ни одной записи и
+   * ни одного окна» их не различает: пустой демо-турнир клуба выглядит ровно
+   * так же, как брошенный турнир смоука, — и уборка сносит живые данные.
+   *
+   * Проверено на себе: запись пробного клиента на демо-турнир «Енисея» стоила
+   * этому турниру жизни.
+   */
+  const notOlderThan = users.reduce<Date | null>(
+    (earliest, user) => (earliest === null || user.createdAt < earliest ? user.createdAt : earliest),
+    null,
+  );
 
   if (ids.length === 0) {
     console.log('Тестовых пользователей не найдено.');
+    // Залы и столы смоука убираются всё равно: они переживают уборку учёток
+    // (стол с бронями удалить нельзя, пока брони не удалены), и после
+    // повторного запуска остались бы висеть навсегда.
+    await removeProbeRooms();
     return;
   }
 
@@ -74,13 +99,19 @@ async function main(): Promise<void> {
   // окна в расписании. Занятие, которое смоук взял из живого расписания клуба,
   // под это условие не подойдёт и останется на месте.
   const sessions = await prisma.trainingSession.deleteMany({
-    where: { id: { in: [...touchedSessions] }, bookings: { none: {} }, dayClosures: { none: {} } },
+    where: {
+      id: { in: [...touchedSessions] },
+      bookings: { none: {} },
+      dayClosures: { none: {} },
+      ...(notOlderThan ? { createdAt: { gte: notOlderThan } } : {}),
+    },
   });
   const tournaments = await prisma.tournament.deleteMany({
     where: {
       id: { in: [...touchedTournaments] },
       registrations: { none: {} },
       dayClosures: { none: {} },
+      ...(notOlderThan ? { createdAt: { gte: notOlderThan } } : {}),
     },
   });
 
@@ -88,6 +119,38 @@ async function main(): Promise<void> {
   console.log(
     `Убрано мероприятий смоука: занятий ${sessions.count}, турниров ${tournaments.count}`,
   );
+
+  await removeProbeRooms();
+}
+
+/**
+ * Залы и столы, заведённые смоуком под проверку ручной брони.
+ *
+ * Своя уборка внутри проверки их снять не может, и это не недоработка, а
+ * правило продукта: бронь не удаляется никогда — это история платежей, — и
+ * стол, за которым хоть раз кого-то посадили, остаётся неудаляемым. Смоук это
+ * правило прямо проверяет и оставляет зал здесь.
+ *
+ * Условия сужены до предела: имя с точным префиксом смоука И ни одной
+ * оставшейся брони, ни одного окна расписания. Живой зал клуба под них не
+ * подойдёт, даже если кто-то назовёт его похоже.
+ */
+async function removeProbeRooms(): Promise<void> {
+  const tables = await prisma.table.deleteMany({
+    where: {
+      label: { startsWith: PROBE_TABLE_PREFIX },
+      bookings: { none: {} },
+      closureRules: { none: {} },
+      dayClosures: { none: {} },
+    },
+  });
+
+  // После столов, а не до: зал со столом база удалить не даст.
+  const halls = await prisma.hall.deleteMany({
+    where: { name: { startsWith: PROBE_HALL_PREFIX }, tables: { none: {} } },
+  });
+
+  console.log(`Убрано залов смоука: ${halls.count}, столов: ${tables.count}`);
 }
 
 main()
