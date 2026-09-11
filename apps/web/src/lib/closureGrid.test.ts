@@ -7,12 +7,19 @@ import {
   copyLane,
   countOnLane,
   GRID_START_MINUTE,
+  markTouched,
+  nowMinuteIn,
   sameCells,
+  sameValue,
+  shiftDate,
   slotLabel,
   slotMinute,
   slotsToCells,
   SLOTS_PER_DAY,
   splitByGrid,
+  toClosureRuleDraft,
+  toDayClosureDraft,
+  weekdayOf,
   type CellValue,
   type Cells,
 } from './closureGrid.ts';
@@ -299,5 +306,178 @@ describe('countOnLane и sameCells', () => {
 
     assert.equal(sameCells(a, a), true);
     assert.equal(sameCells(a, b), false);
+  });
+});
+
+/** Клетка со всеми полями — база для сравнений. */
+const value = (over: Partial<CellValue> = {}): CellValue => ({
+  purpose: 'TRAINING',
+  coachId: 'coach-1',
+  clientId: null,
+  trainingTypeId: 'type-1',
+  trainingSessionId: null,
+  tournamentId: null,
+  tournamentTypeId: null,
+  ...over,
+});
+
+describe('sameValue', () => {
+  it('пустая клетка совпадает только с пустой', () => {
+    assert.equal(sameValue(undefined, undefined), true);
+    assert.equal(sameValue(value(), undefined), false);
+    assert.equal(sameValue(undefined, value()), false);
+  });
+
+  /**
+   * Ровно тот случай, который раньше проваливался: `sameCells` не смотрел на
+   * занятие, а склейка окон смотрела. Подмена занятия не поднимала «есть
+   * несохранённые правки», зато резала окно надвое при сохранении.
+   */
+  it('разное занятие делает клетки разными', () => {
+    assert.equal(
+      sameValue(value({ trainingSessionId: 's1' }), value({ trainingSessionId: 's2' })),
+      false,
+    );
+  });
+
+  it('различается любое из семи полей', () => {
+    const fields: Partial<CellValue>[] = [
+      { purpose: 'RENT' },
+      { coachId: 'coach-2' },
+      { clientId: 'client-1' },
+      { trainingTypeId: 'type-2' },
+      { trainingSessionId: 'session-1' },
+      { tournamentId: 'cup-1' },
+      { tournamentTypeId: 'cup-type-1' },
+    ];
+
+    for (const field of fields) {
+      assert.equal(sameValue(value(), value(field)), false, JSON.stringify(field));
+    }
+  });
+});
+
+describe('sameCells видит подмену занятия', () => {
+  it('клетки, отличающиеся только занятием, считаются разными', () => {
+    const key = cellKey('day', 't1', 0);
+
+    assert.equal(
+      sameCells(cells([[key, value()]]), cells([[key, value({ trainingSessionId: 's1' })]])),
+      false,
+    );
+  });
+});
+
+describe('toDayClosureDraft', () => {
+  /**
+   * Главное, ради чего функция заведена: у шаблонного окна есть `weekday`, и
+   * снятие полей через `...rest` протаскивало его в тело запроса дня. Сервер с
+   * `forbidNonWhitelisted` такое тело отклонял, и сохранение дня падало на
+   * любом зале, где в шаблоне есть окно до шести утра.
+   */
+  it('лишние поля не проезжают в тело запроса', () => {
+    const draft = toDayClosureDraft({ ...slot(), weekday: 3, id: 'rule-1' } as ClosureSlot);
+
+    assert.equal('weekday' in draft, false);
+    assert.equal('id' in draft, false);
+    assert.equal(Object.keys(draft).length, 10);
+  });
+
+  it('все поля окна сохраняются', () => {
+    const source = slot({ tournamentTypeId: 'cup-1' });
+
+    assert.deepEqual(toDayClosureDraft(source), source);
+  });
+
+  it('шаблонное окно получает день недели', () => {
+    assert.equal(toClosureRuleDraft(slot(), 5).weekday, 5);
+  });
+});
+
+describe('weekdayOf', () => {
+  it('воскресенье — семь, а не ноль', () => {
+    // 15 марта 2026 года — воскресенье.
+    assert.equal(weekdayOf('2026-03-15'), 7);
+  });
+
+  it('понедельник — единица', () => {
+    assert.equal(weekdayOf('2026-03-16'), 1);
+  });
+});
+
+describe('shiftDate', () => {
+  it('сдвигает на день вперёд и назад', () => {
+    assert.equal(shiftDate('2026-03-12', 1), '2026-03-13');
+    assert.equal(shiftDate('2026-03-12', -1), '2026-03-11');
+  });
+
+  it('переходит через границу месяца и года', () => {
+    assert.equal(shiftDate('2026-02-28', 1), '2026-03-01');
+    assert.equal(shiftDate('2026-12-31', 1), '2027-01-01');
+  });
+
+  it('знает про високосный год', () => {
+    assert.equal(shiftDate('2028-02-28', 1), '2028-02-29');
+  });
+});
+
+describe('nowMinuteIn', () => {
+  it('считает по поясу зала, а не браузера', () => {
+    // 12:00 UTC — это 19:00 в Красноярске (UTC+7) и 15:00 в Москве (UTC+3).
+    const at = new Date('2026-03-12T12:00:00Z');
+
+    assert.equal(nowMinuteIn('Asia/Krasnoyarsk', at), 19 * 60);
+    assert.equal(nowMinuteIn('Europe/Moscow', at), 15 * 60);
+  });
+
+  it('полночь — ноль, а не 1440', () => {
+    assert.equal(nowMinuteIn('UTC', new Date('2026-03-12T00:00:00Z')), 0);
+  });
+});
+
+describe('markTouched', () => {
+  /** Окно 06:00–07:00 на первом столе: клетки 0 и 1. */
+  const window = slot({ startMinute: GRID_START_MINUTE, endMinute: GRID_START_MINUTE + 60 });
+  const half = (tableId: string) =>
+    slot({ tableId, startMinute: GRID_START_MINUTE, endMinute: GRID_START_MINUTE + 30 });
+
+  it('нетронутое окно не метится', () => {
+    const same = cells([
+      [cellKey('day', 't1', 0), value()],
+      [cellKey('day', 't1', 1), value()],
+    ]);
+
+    assert.equal(markTouched([window], same, same, oneLane)[0]!.touched, false);
+  });
+
+  /**
+   * Ровно то, ради чего функция нужна: день, отвязанный от шаблона, полон окон
+   * с типом тренировки и без занятия. Заводить по ним занятия нельзя —
+   * администратор их не размечал, он их просто увидел.
+   */
+  it('окно из шаблона остаётся нетронутым при правке соседнего стола', () => {
+    const before = cells([[cellKey('day', 't1', 0), value()]]);
+    const after = cells([
+      [cellKey('day', 't1', 0), value()],
+      [cellKey('day', 't2', 0), value()],
+    ]);
+
+    const marked = markTouched([half('t1'), half('t2')], after, before, oneLane);
+
+    assert.equal(marked[0]!.touched, false);
+    assert.equal(marked[1]!.touched, true);
+  });
+
+  it('правка одной клетки метит всё окно', () => {
+    const before = cells([
+      [cellKey('day', 't1', 0), value()],
+      [cellKey('day', 't1', 1), value()],
+    ]);
+    const after = cells([
+      [cellKey('day', 't1', 0), value()],
+      [cellKey('day', 't1', 1), value({ coachId: 'coach-2' })],
+    ]);
+
+    assert.equal(markTouched([window], after, before, oneLane)[0]!.touched, true);
   });
 });

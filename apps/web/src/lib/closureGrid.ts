@@ -1,4 +1,10 @@
-import type { ClosurePurpose, ClosureSlot, Weekday } from '@yenisey/types';
+import type {
+  ClosurePurpose,
+  ClosureRuleDraft,
+  ClosureSlot,
+  DayClosureDraft,
+  Weekday,
+} from '@yenisey/types';
 
 /**
  * Перевод между сеткой на экране и окнами расписания.
@@ -212,15 +218,7 @@ export function cellsToSlots(
       for (let slot = 0; slot <= SLOTS_PER_DAY; slot += 1) {
         const value = slot < SLOTS_PER_DAY ? cells.get(cellKey(lane, tableId, slot)) : undefined;
         const continues =
-          value !== undefined &&
-          runValue !== null &&
-          value.purpose === runValue.purpose &&
-          value.coachId === runValue.coachId &&
-          value.clientId === runValue.clientId &&
-          value.trainingTypeId === runValue.trainingTypeId &&
-          value.trainingSessionId === runValue.trainingSessionId &&
-          value.tournamentId === runValue.tournamentId &&
-          value.tournamentTypeId === runValue.tournamentTypeId;
+          value !== undefined && runValue !== null && sameValue(value, runValue);
 
         if (!continues && runStart !== null && runValue !== null) {
           slots.push({
@@ -295,6 +293,31 @@ export function countOnLane(cells: Cells, lane: string): number {
   return count;
 }
 
+/**
+ * Одинаковы ли две клетки.
+ *
+ * Единственное сравнение значений на весь модуль. Раньше их было три —
+ * в `sameCells`, в склейке окон и в решении «красим или стираем», — и они
+ * успели разойтись: `sameCells` не смотрел на `trainingSessionId`, а склейка
+ * смотрела. Из-за этого подмена занятия при неизменных прочих полях не поднимала
+ * «есть несохранённые правки», а сохранение при этом резало окно надвое.
+ */
+export function sameValue(a: CellValue | undefined, b: CellValue | undefined): boolean {
+  if (a === undefined || b === undefined) {
+    return a === b;
+  }
+
+  return (
+    a.purpose === b.purpose &&
+    a.coachId === b.coachId &&
+    a.clientId === b.clientId &&
+    a.trainingTypeId === b.trainingTypeId &&
+    a.trainingSessionId === b.trainingSessionId &&
+    a.tournamentId === b.tournamentId &&
+    a.tournamentTypeId === b.tournamentTypeId
+  );
+}
+
 /** Совпадают ли две сетки — чтобы не предлагать сохранить неизменённое. */
 export function sameCells(a: Cells, b: Cells): boolean {
   if (a.size !== b.size) {
@@ -302,20 +325,125 @@ export function sameCells(a: Cells, b: Cells): boolean {
   }
 
   for (const [key, value] of a) {
-    const other = b.get(key);
-
-    if (
-      !other ||
-      other.purpose !== value.purpose ||
-      other.coachId !== value.coachId ||
-      other.clientId !== value.clientId ||
-      other.trainingTypeId !== value.trainingTypeId ||
-      other.tournamentId !== value.tournamentId ||
-      other.tournamentTypeId !== value.tournamentTypeId
-    ) {
+    if (!sameValue(value, b.get(key))) {
       return false;
     }
   }
 
   return true;
+}
+
+/**
+ * Окно в том виде, в каком его принимает сервер.
+ *
+ * Поля перечислены руками, а не сняты с исходного объекта через `...rest`.
+ * Разница не косметическая: у шаблонного окна есть `weekday`, и когда день
+ * показан по шаблону, его ночная часть уезжала в `replaceDay` вместе с этим
+ * полем. `forbidNonWhitelisted` на сервере такое тело отклоняет, и сохранение
+ * дня падало четырёхсотой ошибкой на любом зале, где в шаблоне есть окно до
+ * шести утра. Явный список полей делает это невозможным по построению.
+ */
+export function toDayClosureDraft(slot: ClosureSlot): DayClosureDraft {
+  return {
+    tableId: slot.tableId,
+    startMinute: slot.startMinute,
+    endMinute: slot.endMinute,
+    purpose: slot.purpose,
+    coachId: slot.coachId,
+    clientId: slot.clientId,
+    trainingTypeId: slot.trainingTypeId,
+    trainingSessionId: slot.trainingSessionId,
+    tournamentId: slot.tournamentId,
+    tournamentTypeId: slot.tournamentTypeId,
+  };
+}
+
+/** То же для шаблона недели: к окну добавляется день недели. */
+export function toClosureRuleDraft(slot: ClosureSlot, weekday: Weekday): ClosureRuleDraft {
+  return { ...toDayClosureDraft(slot), weekday };
+}
+
+/** День недели по ISO-8601 для даты вида «2026-03-12». */
+export function weekdayOf(date: string): Weekday {
+  // getUTCDay даёт 0 для воскресенья; ISO-8601 ждёт 7.
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+
+  return (day === 0 ? 7 : day) as Weekday;
+}
+
+/**
+ * Дата, сдвинутая на сутки вперёд или назад.
+ *
+ * Считается в UTC намеренно: календарная дата пояса не имеет — «12 марта» это
+ * «12 марта» и в Красноярске, и в Москве. Складывать её в местном времени
+ * значило бы на переходе на летнее время получить тот же день дважды.
+ */
+export function shiftDate(date: string, days: number): string {
+  const at = new Date(`${date}T00:00:00Z`);
+
+  at.setUTCDate(at.getUTCDate() + days);
+
+  return at.toISOString().slice(0, 10);
+}
+
+/**
+ * Который сейчас час в зале, в минутах от местной полуночи.
+ *
+ * Пояс ЗАЛА, а не браузера: клуб во Владивостоке администрируют и из Москвы, и
+ * линия текущего времени, нарисованная по часам администратора, показывала бы
+ * ему вечер, когда в зале утро.
+ *
+ * `at` — аргумент ради теста: без него проверить нечего, кроме «не падает».
+ */
+export function nowMinuteIn(timezone: string, at: Date = new Date()): number {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    // h23 обязателен: иначе полночь приходит как «24», и сутки начинаются с
+    // 1440-й минуты.
+    hourCycle: 'h23',
+  }).formatToParts(at);
+
+  const value = (type: Intl.DateTimeFormatPartTypes): number =>
+    Number(parts.find((part) => part.type === type)?.value ?? 0);
+
+  return value('hour') * 60 + value('minute');
+}
+
+/**
+ * Пометка окон, которых администратор коснулся в этой правке.
+ *
+ * Нужна, чтобы не заводить занятия и турниры по окнам, которые он не размечал,
+ * а просто увидел. День, отвязанный от шаблона, приходит полным окон с типом
+ * тренировки, но без занятия — и следующая правка одной-единственной клетки
+ * аренды заводила бы занятия сразу на все такие окна: отличить их по полям
+ * нельзя, они выглядят одинаково.
+ *
+ * Сравнение идёт по клеткам, а не по окнам: окно — это уже результат склейки,
+ * и продление тренировки на полчаса даёт другое окно с теми же полями.
+ */
+export function markTouched<T extends ClosureSlot>(
+  slots: readonly T[],
+  cells: Cells,
+  saved: Cells,
+  lane: (slot: T) => string,
+): (T & { touched: boolean })[] {
+  return slots.map((slot) => {
+    const first = Math.max(0, Math.floor((slot.startMinute - GRID_START_MINUTE) / SLOT_MINUTES));
+    const last = Math.min(
+      SLOTS_PER_DAY,
+      Math.ceil((slot.endMinute - GRID_START_MINUTE) / SLOT_MINUTES),
+    );
+
+    let touched = false;
+
+    for (let index = first; index < last && !touched; index += 1) {
+      const key = cellKey(lane(slot), slot.tableId, index);
+
+      touched = !sameValue(cells.get(key), saved.get(key));
+    }
+
+    return { ...slot, touched };
+  });
 }

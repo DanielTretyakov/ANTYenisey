@@ -1,28 +1,20 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type {
-  ClubCoach,
-  ClubSettings,
-  ClubTable,
-  Hall,
-  Role,
-  Tournament,
-  TournamentType,
-  TrainingType,
-} from '@yenisey/types';
-import { AppShell } from '@/components/layout/AppShell';
+import type { ClubSettings, ClubTable, Hall, Role } from '@yenisey/types';
+import { AdminShell } from '@/components/layout/AdminShell';
+import { clubPath } from '@/components/layout/ClubNav';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
+import { Tab } from '@/components/ui/Tab';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { roleInClub } from '@/lib/membership';
 import { ApiError } from '@/lib/api';
-import { useClubApi } from '@/lib/useClubApi';
-import { cn } from '@/lib/cn';
+import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { useSession } from '@/lib/useSession';
 import { HallForm } from './HallForm';
-import { ScheduleCard } from './ScheduleCard';
 import { SettingsForm } from './SettingsForm';
 import { TablesCard } from './TablesCard';
 
@@ -33,14 +25,16 @@ type Loaded = {
   settings: ClubSettings;
   halls: Hall[];
   tables: ClubTable[];
-  coaches: ClubCoach[];
-  trainingTypes: TrainingType[];
-  tournamentTypes: TournamentType[];
-  tournaments: Tournament[];
 };
 
 /**
- * Настройки клуба: общие правила, залы, столы и расписание.
+ * Настройки клуба: общие правила, залы и столы.
+ *
+ * Расписания здесь больше нет — оно переехало в раздел «Расписание»
+ * операционки. Сетку правят каждый вечер, а эту страницу открывают раз в
+ * сезон, и держать их вместе значило гонять администратора через цены ради
+ * переноса занятия. Заодно страница стала грузить три справочника вместо
+ * семи: тренеры, типы и турниры были нужны только сетке.
  *
  * Проверка роли здесь — это удобство, а не защита: она убирает со страницы то,
  * чем человек всё равно не сможет воспользоваться. Настоящий запрет стоит на
@@ -56,9 +50,14 @@ export default function ClubPage() {
   const [error, setError] = useState<string | null>(null);
   const [addingHall, setAddingHall] = useState(false);
 
-  // Роль берётся из привязки к клубу, а не из профиля: аккаунт один на
-  // платформу, и в разных клубах она разная.
-  const role = session.status === 'ready' ? roleInClub(session.user) : null;
+  // Роль берётся из привязки к КЛУБУ ИЗ АДРЕСА, а не из профиля: аккаунт один
+  // на платформу, и в разных клубах она разная. Раньше клуб здесь не
+  // указывался вовсе, и роль бралась из запасного TENANT_SLUG окружения —
+  // администратор одного клуба видел админский интерфейс в чужом, а в своём
+  // получал отказ. Настоящий доступ это не открывало (сервер проверяет
+  // TenantMembership на каждый запрос), но показывало не то.
+  const slug = useClubSlug();
+  const role = session.status === 'ready' ? roleInClub(session.user, slug) : null;
   const allowed = role !== null && CLUB_MANAGERS.includes(role);
 
   useEffect(() => {
@@ -78,29 +77,11 @@ export default function ClubPage() {
 
     // Всё грузится разом: это один экран, и ждать части по очереди означало бы
     // умножить ожидание на ровном месте.
-    Promise.all([
-      club.clubSettings(),
-      club.halls(),
-      club.clubTables(),
-      club.coaches(),
-      club.trainingTypes(),
-      club.tournamentTypes(),
-      club.tournaments(),
-    ])
-      .then(([settings, halls, tables, coaches, trainingTypes, tournamentTypes, tournaments]) => {
+    Promise.all([club.clubSettings(), club.halls(), club.clubTables()])
+      .then(([settings, halls, tables]) => {
         if (cancelled) return;
 
-        // В сетку предлагаются только действующие типы: снятый с продажи не
-        // должен появляться в новых окнах, хотя в старых он остаётся.
-        setData({
-          settings,
-          halls,
-          tables,
-          coaches,
-          trainingTypes: trainingTypes.filter((type) => type.isActive),
-          tournamentTypes: tournamentTypes.filter((type) => type.isActive),
-          tournaments,
-        });
+        setData({ settings, halls, tables });
         setHallId((previous) => previous ?? halls[0]?.id ?? null);
       })
       .catch((cause: unknown) => {
@@ -154,7 +135,7 @@ export default function ClubPage() {
   }
 
   return (
-    <AppShell>
+    <AdminShell>
       <h1 className="mb-2 text-[1.75rem]">Настройки клуба</h1>
       <p className="mb-7 max-w-2xl text-[0.9375rem] text-text-muted">
         Всё на этой странице клуб меняет сам, без участия разработчика. Изменения
@@ -184,20 +165,9 @@ export default function ClubPage() {
               </span>
 
               {data.halls.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  aria-pressed={item.id === hallId}
-                  onClick={() => setHallId(item.id)}
-                  className={cn(
-                    'rounded-control border px-3.5 py-1.5 text-[0.875rem] transition-colors',
-                    item.id === hallId
-                      ? 'border-border-accent bg-surface-accent-soft text-text-accent'
-                      : 'border-border text-text-muted hover:bg-surface-sunken',
-                  )}
-                >
+                <Tab key={item.id} active={item.id === hallId} onClick={() => setHallId(item.id)}>
                   {item.name}
-                </button>
+                </Tab>
               ))}
 
               <Button
@@ -235,33 +205,22 @@ export default function ClubPage() {
                   onChange={(tables) => setData({ ...data, tables })}
                 />
 
-                <ScheduleCard
-                  // Смена зала должна полностью пересобрать сетку: иначе в новом
-                  // зале останутся клетки предыдущего.
-                  key={hall.id}
-                  hallId={hall.id}
-                  tables={data.tables}
-                  coaches={data.coaches}
-                  trainingTypes={data.trainingTypes}
-                  tournamentTypes={data.tournamentTypes}
-                  tournaments={data.tournaments}
-                  // Пояс ЗАЛА, а не клуба: расписание этого зала живёт по
-                  // его собственному времени.
-                  timezone={hall.timezone}
-                  // Постановка турнира в сетку заводит его: список в разделе
-                  // «Занятия и турниры» после этого устарел.
-                  onTournamentsChanged={() => {
-                    void club.tournaments().then((tournaments) =>
-                      setData((previous) => (previous ? { ...previous, tournaments } : previous)),
-                    );
-                  }}
-                />
+                <p className="text-[0.875rem] text-text-muted">
+                  Расписание зала — шаблон недели и правки на даты — теперь в разделе{' '}
+                  <Link
+                    href={clubPath(slug, '/schedule')}
+                    className="text-text-accent underline underline-offset-2"
+                  >
+                    «Расписание»
+                  </Link>
+                  .
+                </p>
               </div>
             )}
           </div>
         </div>
       )}
-    </AppShell>
+    </AdminShell>
   );
 }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type {
   ClosurePurpose,
   ClubCoach,
@@ -9,23 +9,29 @@ import type {
   TrainingType,
 } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
+import { ClientPicker } from '@/components/club/ClientPicker';
 import { inputClassName } from '@/components/ui/Field';
-import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
-import { useClubApi } from '@/lib/useClubApi';
-import type { PersonColor } from '@/lib/personColor';
+import { tintFill, tintMark, type PersonColor } from '@/lib/personColor';
 
 /** Кисть «освободить»: отдельное значение, потому что назначением она не является. */
 export const ERASER = 'ERASE';
 
 export type Brush = ClosurePurpose | typeof ERASER;
 
+/**
+ * Назначения окна и краски, которыми они различаются в сетке.
+ *
+ * Цвета вычисляются из красок палитры (`tokens.css`), а не пишутся классами
+ * Tailwind: сырой `bg-sky-500/55` не переключался по теме и по чёрному фону
+ * давал грязь. Формулы — общие с раздачей цветов людям, см. `personColor.ts`.
+ */
 export const PURPOSES: { value: ClosurePurpose; label: string; cell: string; chip: string }[] = [
-  { value: 'RENT', label: 'Аренда', cell: 'bg-sky-500/55', chip: 'bg-sky-500/70' },
-  { value: 'SPARRING', label: 'Спарринг', cell: 'bg-violet-500/55', chip: 'bg-violet-500/70' },
-  { value: 'TRAINING', label: 'Тренировка', cell: 'bg-accent/65', chip: 'bg-accent/80' },
-  { value: 'ROBOT', label: 'Робот', cell: 'bg-amber-500/55', chip: 'bg-amber-500/70' },
-  { value: 'TOURNAMENT', label: 'Турнир', cell: 'bg-rose-500/55', chip: 'bg-rose-500/70' },
+  { value: 'RENT', label: 'Аренда', cell: tintFill('var(--hue-blue)'), chip: tintMark('var(--hue-blue)') },
+  { value: 'SPARRING', label: 'Спарринг', cell: tintFill('var(--hue-violet)'), chip: tintMark('var(--hue-violet)') },
+  { value: 'TRAINING', label: 'Тренировка', cell: tintFill('var(--brand-600)'), chip: tintMark('var(--brand-600)') },
+  { value: 'ROBOT', label: 'Робот', cell: tintFill('var(--hue-amber)'), chip: tintMark('var(--hue-amber)') },
+  { value: 'TOURNAMENT', label: 'Турнир', cell: tintFill('var(--hue-rose)'), chip: tintMark('var(--hue-rose)') },
 ];
 
 /**
@@ -34,8 +40,11 @@ export const PURPOSES: { value: ClosurePurpose; label: string; cell: string; chi
  * Назначение «другое» ничего не объясняло ни администратору через месяц, ни
  * статистике, и вместо него в сетке теперь турнир. Убирать значение из enum
  * нельзя: на него ссылаются уже заведённые окна, и цвет с подписью им нужны.
+ *
+ * Краска у него служебная — серый из нейтральной шкалы: «другое» не должно
+ * выглядеть как ещё одно полноценное назначение.
  */
-const OTHER_CELL = 'bg-zinc-500/55';
+const OTHER_CELL = tintFill('var(--ink-500)');
 const OTHER_MARK = '·';
 
 export const PURPOSE_LABEL = new Map<ClosurePurpose, string>([
@@ -143,7 +152,11 @@ export function SchedulePalette({
               : 'border-border text-text-muted hover:bg-surface-sunken',
           )}
         >
-          <span className={cn('h-3 w-3 rounded-sm', purpose.chip)} aria-hidden="true" />
+          <span
+            className="h-3 w-3 rounded-sm"
+            style={{ background: purpose.chip }}
+            aria-hidden="true"
+          />
           {purpose.label}
         </button>
       ))}
@@ -184,7 +197,7 @@ export function SchedulePalette({
       )}
 
       {attachment === 'client' && (
-        <ClientPicker value={client} onChange={onClient} />
+        <ClientPicker value={client} onChange={onClient} inline />
       )}
 
       {brush === 'TRAINING' && (
@@ -241,7 +254,11 @@ export function SchedulePalette({
       {attachment !== 'none' && (
         <p className="flex w-full items-center gap-2 text-[0.8125rem] text-text-subtle">
           {attachedColor && (
-            <span className={cn('h-3 w-3 rounded-sm', attachedColor.dot)} aria-hidden="true" />
+            <span
+              className="h-3 w-3 rounded-sm"
+              style={{ background: attachedColor.dot }}
+              aria-hidden="true"
+            />
           )}
           Закрашиваете: {PURPOSE_LABEL.get(brush as ClosurePurpose)?.toLowerCase()}
           {attachment === 'coach' && currentCoach ? `, ${shortName(currentCoach.fullName)}` : ''}
@@ -249,122 +266,6 @@ export function SchedulePalette({
           {attachment === 'client' && !client ? ', без клиента' : ''} — закрасьте нужные часы,
           поверх уже закрашенного тоже можно.
         </p>
-      )}
-    </div>
-  );
-}
-
-/**
- * Выбор клиента поиском.
- *
- * Не выпадающий список: клиентов у клуба тысячи, и перебирать их глазами
- * нельзя. Ищем по мере ввода — по фамилии, почте или телефону, как их обычно и
- * помнят на стойке.
- */
-function ClientPicker({
-  value,
-  onChange,
-}: {
-  value: ClubPerson | null;
-  onChange: (person: ClubPerson | null) => void;
-}) {
-  const club = useClubApi();
-
-  const [query, setQuery] = useState('');
-  const [found, setFound] = useState<ClubPerson[]>([]);
-  const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (query.trim().length < 2) {
-      setFound([]);
-      return;
-    }
-
-    let cancelled = false;
-    // Пауза перед запросом: без неё каждая буква фамилии — отдельный поход в
-    // базу, и ответы возвращаются вперемешку.
-    const timer = setTimeout(() => {
-      club
-        .people({ role: 'CLIENT', search: query.trim(), limit: 8 })
-        .then((page) => {
-          if (!cancelled) setFound(page.items);
-        })
-        .catch(() => {
-          if (!cancelled) setFound([]);
-        });
-    }, 250);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [query]);
-
-  useEffect(() => {
-    const close = (event: PointerEvent): void => {
-      if (box.current && !box.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-
-    window.addEventListener('pointerdown', close);
-    return () => window.removeEventListener('pointerdown', close);
-  }, []);
-
-  return (
-    <div ref={box} className="relative ml-2 flex items-center gap-2 text-[0.875rem] text-text-muted">
-      Клиент
-      {value ? (
-        <span className="flex items-center gap-2">
-          <span className="text-text">{shortName(value.fullName)}</span>
-          <button
-            type="button"
-            onClick={() => {
-              onChange(null);
-              setQuery('');
-            }}
-            className="text-text-subtle underline hover:text-text"
-          >
-            убрать
-          </button>
-        </span>
-      ) : (
-        <input
-          aria-label="Поиск клиента"
-          placeholder="фамилия, почта, телефон"
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          className={cn(inputClassName, 'w-56 py-1.5 text-[0.875rem]')}
-        />
-      )}
-
-      {open && !value && found.length > 0 && (
-        <ul className="absolute top-full left-14 z-20 mt-1 max-h-56 w-72 overflow-auto rounded-control border border-border bg-surface-raised shadow-lg">
-          {found.map((person) => (
-            <li key={person.id}>
-              <button
-                type="button"
-                onClick={() => {
-                  onChange(person);
-                  setOpen(false);
-                }}
-                className="block w-full px-3 py-2 text-left text-[0.875rem] text-text hover:bg-surface-sunken"
-              >
-                {person.fullName}
-                <span className="block text-[0.75rem] text-text-subtle">{person.email}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {open && !value && query.trim().length >= 2 && found.length === 0 && (
-        <span className="text-[0.8125rem] text-text-subtle">никого не нашлось</span>
       )}
     </div>
   );
