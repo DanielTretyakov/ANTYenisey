@@ -369,4 +369,21 @@ export class ClubController {
   ): Promise<DaySchedule> {
     return this.schedule.resetDay(club.tenantId, hallId, date);
   }
+
+  /**
+   * Отвязка даты от шаблона: день становится копией шаблона и дальше живёт сам.
+   *
+   * POST, а не PUT: содержимое дня здесь не присылается и не заменяется —
+   * день переводится в другое состояние. Повторный вызов отвечает тем же, что
+   * первый, и ничего не заводит второй раз.
+   */
+  @Post('halls/:hallId/days/:date/detach')
+  @HttpCode(200)
+  detachDay(
+    @CurrentClub() club: ClubContext,
+    @Param('hallId') hallId: string,
+    @Param('date') date: string,
+  ): Promise<DaySchedule> {
+    return this.schedule.detachDay(club.tenantId, hallId, date);
+  }
 }

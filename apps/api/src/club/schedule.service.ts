@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@yenisey/database';
 import type {
   ClosureRule,
   ClosureRuleDraft,
@@ -12,9 +13,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   findOverlap,
   formatMinutes,
+  instantAt,
   ruleGroupKey,
   slotViolations,
   templateViolations,
+  weekdayOf,
 } from './closures';
 
 const WEEKDAY_NAMES = [
@@ -194,6 +197,11 @@ export class ScheduleService {
         select: { id: true },
       });
 
+      // Что стояло в дне до правки — запоминается ДО удаления окон: после него
+      // связь с мероприятиями теряется, и отличить стёртое из этого дня от
+      // стоящего где-то ещё будет уже нечем.
+      const before = await this.eventsOf(tx, { scheduleId: schedule.id });
+
       await tx.dayClosure.deleteMany({ where: { scheduleId: schedule.id } });
       await tx.dayClosure.createMany({
         // tournamentTypeId у расписания даты не хранится: там уже есть само
@@ -204,20 +212,216 @@ export class ScheduleService {
           scheduleId: schedule.id,
         })),
       });
+
+      await this.dropOrphanedEvents(tx, tenantId, before);
     });
 
     return this.findDay(tenantId, hallId, date);
   }
 
-  /** Возврат даты к шаблону: заголовок дня убирается, окна уходят каскадом. */
+  /**
+   * Возврат даты к шаблону: заголовок дня убирается, окна уходят каскадом.
+   *
+   * Вместе с днём уходят мероприятия, ставшие ничьими, — см.
+   * `dropOrphanedEvents`. Раньше они оставались: занятие, заведённое правкой
+   * этого дня, после возврата к шаблону не занимало ни одного стола, но клиент
+   * по-прежнему видел его в ленте и мог на него записаться.
+   */
   async resetDay(tenantId: string, hallId: string, date: string): Promise<DaySchedule> {
     await this.assertHall(tenantId, hallId);
 
-    await this.prisma.hallDaySchedule.deleteMany({
-      where: { tenantId, hallId, date: parseDate(date) },
+    const day = parseDate(date);
+
+    await this.prisma.$transaction(async (tx) => {
+      const before = await this.eventsOf(tx, { schedule: { tenantId, hallId, date: day } });
+
+      await tx.hallDaySchedule.deleteMany({ where: { tenantId, hallId, date: day } });
+
+      await this.dropOrphanedEvents(tx, tenantId, before);
     });
 
     return this.findDay(tenantId, hallId, date);
+  }
+
+  /**
+   * Отвязка даты от шаблона: расписание дня становится копией шаблона и дальше
+   * живёт само по себе.
+   *
+   * Отдельным действием, а не побочным следствием «Сохранить». Раньше день,
+   * показанный по шаблону, отвязывался первым же сохранением — даже без единой
+   * правки, — и одно случайное нажатие навсегда отрывало субботу от шаблона
+   * вместе с занятиями, которых администратор не рисовал.
+   *
+   * Занятия при отвязке НЕ заводятся. Окно тренировки без занятия законно —
+   * стол закрыт, записываться некому, — а заводить запись на каждое окно,
+   * доставшееся из шаблона, значило бы открыть клиентам группы, которые никто
+   * не собирал. Их администратор ставит кистью.
+   *
+   * Турниры — заводятся, и это не непоследовательность, а требование базы:
+   * окно турнира в расписании даты обязано ссылаться на само проведение
+   * (`DayClosure_attachments_match_purpose`), а типа турнира у окна даты нет
+   * вовсе. Турнир в шаблоне — это «каждую субботу Клуб 100»; зафиксировать
+   * субботу как есть и значит завести её Клуб 100.
+   *
+   * Всё одной транзакцией: турнир без дня, в котором он стоит, был бы тем же
+   * мусором, от которого эта функция и избавляет.
+   */
+  async detachDay(tenantId: string, hallId: string, date: string): Promise<DaySchedule> {
+    const hall = await this.prisma.hall.findFirst({
+      where: { id: hallId, tenantId },
+      select: { timezone: true },
+    });
+
+    if (!hall) {
+      throw new NotFoundException('Зал не найден');
+    }
+
+    const day = parseDate(date);
+
+    const rules = await this.prisma.tableClosureRule.findMany({
+      where: { tenantId, table: { hallId }, weekday: weekdayOf(date) },
+      select: TEMPLATE_SELECT,
+    });
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Уже отвязанный день не трогаем: второе нажатие — не ошибка, а то же
+        // намерение, и отвечать на него надо тем же состоянием.
+        const existing = await tx.hallDaySchedule.findFirst({
+          where: { tenantId, hallId, date: day },
+          select: { id: true },
+        });
+
+        if (existing) {
+          return;
+        }
+
+        // Один турнир на тип и дату: два турнира одного типа в один день клуб
+        // не проводит. Начало — у самого раннего окна этого типа.
+        const tournaments = new Map<string, string>();
+        const typeIds = new Set(
+          rules.map((rule) => rule.tournamentTypeId).filter((id): id is string => id !== null),
+        );
+
+        for (const typeId of typeIds) {
+          const earliest = Math.min(
+            ...rules
+              .filter((rule) => rule.tournamentTypeId === typeId)
+              .map((rule) => rule.startMinute),
+          );
+
+          const created = await tx.tournament.create({
+            data: {
+              tenantId,
+              tournamentTypeId: typeId,
+              // Пояс ЗАЛА: от момента начала считается порог отмены.
+              startsAt: instantAt(date, earliest, hall.timezone),
+            },
+            select: { id: true },
+          });
+
+          tournaments.set(typeId, created.id);
+        }
+
+        const schedule = await tx.hallDaySchedule.create({
+          data: { tenantId, hallId, date: day },
+          select: { id: true },
+        });
+
+        await tx.dayClosure.createMany({
+          // Поля перечислены руками: у шаблонного окна есть weekday и тип
+          // турнира, которых у окна даты нет и быть не может.
+          data: rules.map((rule) => ({
+            tenantId,
+            scheduleId: schedule.id,
+            tableId: rule.tableId,
+            startMinute: rule.startMinute,
+            endMinute: rule.endMinute,
+            purpose: rule.purpose,
+            coachId: rule.coachId,
+            clientId: rule.clientId,
+            trainingTypeId: rule.trainingTypeId,
+            trainingSessionId: null,
+            tournamentId: rule.tournamentTypeId
+              ? (tournaments.get(rule.tournamentTypeId) ?? null)
+              : null,
+          })),
+        });
+      });
+    } catch (error) {
+      // Два одновременных нажатия: второе упрётся в уникальность дня, и его
+      // транзакция откатится целиком — вместе с турнирами. Ответ тот же, что у
+      // первого.
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) {
+        throw error;
+      }
+    }
+
+    return this.findDay(tenantId, hallId, date);
+  }
+
+  // --- Мероприятия без расписания -----------------------------------------
+
+  /** Занятия и турниры, на которые ссылаются окна, подходящие под условие. */
+  private async eventsOf(
+    tx: Prisma.TransactionClient,
+    where: Prisma.DayClosureWhereInput,
+  ): Promise<{ sessionIds: string[]; tournamentIds: string[] }> {
+    const closures = await tx.dayClosure.findMany({
+      where,
+      select: { trainingSessionId: true, tournamentId: true },
+    });
+
+    const present = (id: string | null): id is string => id !== null;
+
+    return {
+      sessionIds: [...new Set(closures.map((closure) => closure.trainingSessionId).filter(present))],
+      tournamentIds: [...new Set(closures.map((closure) => closure.tournamentId).filter(present))],
+    };
+  }
+
+  /**
+   * Снос мероприятий, оставшихся без расписания.
+   *
+   * Занятие, которое не занимает ни одного стола, клиент всё равно видит в
+   * ленте и может на него записаться — это уже не мусор, а неверные данные.
+   * Осиротеть оно может двумя путями: возвратом дня к шаблону и правкой дня, в
+   * которой окно стёрли. Поэтому проверка живёт в одном месте.
+   *
+   * Условие намеренно узкое:
+   * - только то, что стояло в изменённом дне, — заготовки из каталога, ни в
+   *   один день не поставленные, в набор не попадают вовсе;
+   * - только то, что после правки не стоит ни в одном дне, — занятие,
+   *   поставленное в две даты, переживает правку одной;
+   * - только без записей, даже отменённых: за записью стоит история денег, и
+   *   внешний ключ такое удаление не пропустит всё равно.
+   */
+  private async dropOrphanedEvents(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    events: { sessionIds: string[]; tournamentIds: string[] },
+  ): Promise<void> {
+    if (events.sessionIds.length > 0) {
+      await tx.trainingSession.deleteMany({
+        where: {
+          tenantId,
+          id: { in: events.sessionIds },
+          dayClosures: { none: {} },
+          bookings: { none: {} },
+        },
+      });
+    }
+
+    if (events.tournamentIds.length > 0) {
+      await tx.tournament.deleteMany({
+        where: {
+          tenantId,
+          id: { in: events.tournamentIds },
+          dayClosures: { none: {} },
+          registrations: { none: {} },
+        },
+      });
+    }
   }
 
   // --- Общие проверки ------------------------------------------------------
