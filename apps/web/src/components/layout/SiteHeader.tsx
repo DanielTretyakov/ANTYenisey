@@ -41,10 +41,20 @@ export function SiteHeader({
   actions,
   /** Прижать шапку к верху при прокрутке. Стартовой странице не нужно. */
   sticky = true,
+  /**
+   * Широкая полоса — под экраны, ширину которых диктуют данные, а не текст.
+   *
+   * Такой у нас один: сетка расписания, где столов бывает двенадцать. Шапка
+   * обязана расширяться вместе с телом страницы — иначе логотип и разделы
+   * повиснут посреди экрана, а содержимое уедет левее, и полоса перестанет
+   * читаться как край страницы.
+   */
+  wide = false,
 }: {
   clubNav?: ReactNode;
   actions?: ReactNode;
   sticky?: boolean;
+  wide?: boolean;
 }) {
   return (
     <header
@@ -55,7 +65,8 @@ export function SiteHeader({
     >
       <div
         className={cn(
-          'mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-5 sm:px-8',
+          'mx-auto flex w-full items-center justify-between gap-4 px-5 sm:px-8',
+          wide ? 'max-w-[112rem]' : 'max-w-6xl',
           HEADER_HEIGHT,
         )}
       >

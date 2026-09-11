@@ -18,11 +18,16 @@ import type {
   ClubPerson,
   ClubSettings,
   ClubTable,
+  CancelDeskBookingRequest,
   CreateBookingRequest,
+  CreateDeskBookingRequest,
   CreateHallRequest,
   DayClosureDraft,
   DaySchedule,
+  DeskBooking,
+  DeskDay,
   Hall,
+  MoveDeskBookingRequest,
   LoginRequest,
   PublicTenant,
   PublicUser,
@@ -377,9 +382,16 @@ export function clubApi(slug: string = TENANT_SLUG) {
     replaceDay: (hallId: string, date: string, closures: DayClosureDraft[]): Promise<DaySchedule> =>
       authorized(`${club}/halls/${hallId}/days/${date}`, json('PUT', { closures })),
 
-    /** Возврат даты к шаблону. */
+    /** Возврат даты к шаблону. Занятия и турниры, ставшие ничьими, уходят вместе с днём. */
     resetDay: (hallId: string, date: string): Promise<DaySchedule> =>
       authorized(`${club}/halls/${hallId}/days/${date}`, { method: 'DELETE' }),
+
+    /**
+     * Отвязка даты от шаблона. Отдельным действием, а не побочным следствием
+     * сохранения: раньше день отвязывался первым же «Сохранить», даже без правок.
+     */
+    detachDay: (hallId: string, date: string): Promise<DaySchedule> =>
+      authorized(`${club}/halls/${hallId}/days/${date}/detach`, { method: 'POST' }),
 
     // --- Мероприятия клуба
     /**
@@ -433,5 +445,56 @@ export function clubApi(slug: string = TENANT_SLUG) {
     /** Отмена возвращает саму бронь: клиент должен увидеть, сколько с него списалось. */
     cancelBooking: (id: string): Promise<ClientBooking> =>
       authorized(`${club}/booking/bookings/${id}`, { method: 'DELETE' }),
+
+    // --- Рабочее место администратора
+    /**
+     * День зала целиком: столы, брони, мероприятия, загрузка и деньги.
+     *
+     * Один запрос, а не четыре: экран смены открывают двадцать раз за вечер, и
+     * четыре ожидания вместо одного — умножение задержки на ровном месте.
+     */
+    deskDay: (hallId: string, date: string): Promise<DeskDay> =>
+      authorized(`${club}/desk/halls/${hallId}/days/${date}`),
+
+    /** Поиск по истории броней клуба: диапазон дат, зал, клиент, статус. */
+    deskBookings: (query: DeskBookingsQuery = {}): Promise<DeskBooking[]> => {
+      const search = new URLSearchParams();
+
+      for (const [key, value] of Object.entries(query)) {
+        if (value !== undefined && value !== '') search.set(key, String(value));
+      }
+
+      const tail = search.toString();
+
+      return authorized(`${club}/desk/bookings${tail ? `?${tail}` : ''}`);
+    },
+
+    /** Посадить человека за стол. Автора сервер берёт из токена, а не из тела. */
+    createDeskBooking: (payload: CreateDeskBookingRequest): Promise<DeskBooking> =>
+      authorized(`${club}/desk/bookings`, json('POST', payload)),
+
+    /** Перенос: другой стол, время или длительность. Цену сервер пересчитает. */
+    moveDeskBooking: (id: string, payload: MoveDeskBookingRequest): Promise<DeskBooking> =>
+      authorized(`${club}/desk/bookings/${id}`, json('PATCH', payload)),
+
+    /**
+     * Отмена брони администратором. POST, а не DELETE: у неё есть тело
+     * («простить списание»), а тело DELETE-запроса режет половина прокси.
+     */
+    cancelDeskBooking: (
+      id: string,
+      payload: CancelDeskBookingRequest = {},
+    ): Promise<DeskBooking> =>
+      authorized(`${club}/desk/bookings/${id}/cancel`, json('POST', payload)),
   };
+}
+
+/** Фильтры списка броней клуба — то же, что принимает сервер. */
+export interface DeskBookingsQuery {
+  hallId?: string;
+  clientId?: string;
+  status?: DeskBooking['status'];
+  from?: string;
+  to?: string;
+  limit?: number;
 }

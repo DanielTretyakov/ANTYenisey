@@ -3,14 +3,15 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import type { ClubPeoplePage, ClubPerson, Role } from '@yenisey/types';
-import { AppShell } from '@/components/layout/AppShell';
+import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
+import { Tab } from '@/components/ui/Tab';
 import { inputClassName } from '@/components/ui/Field';
 import { roleInClub } from '@/lib/membership';
 import { ApiError } from '@/lib/api';
-import { useClubApi } from '@/lib/useClubApi';
+import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { cn } from '@/lib/cn';
 import { useSession } from '@/lib/useSession';
 
@@ -54,9 +55,14 @@ export default function PeoplePage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Роль берётся из привязки к клубу, а не из профиля: аккаунт один на
-  // платформу, и в разных клубах она разная.
-  const role = session.status === 'ready' ? roleInClub(session.user) : null;
+  // Роль берётся из привязки к КЛУБУ ИЗ АДРЕСА, а не из профиля: аккаунт один
+  // на платформу, и в разных клубах она разная. Раньше клуб здесь не
+  // указывался вовсе, и роль бралась из запасного TENANT_SLUG окружения —
+  // администратор одного клуба видел админский интерфейс в чужом, а в своём
+  // получал отказ. Настоящий доступ это не открывало (сервер проверяет
+  // TenantMembership на каждый запрос), но показывало не то.
+  const slug = useClubSlug();
+  const role = session.status === 'ready' ? roleInClub(session.user, slug) : null;
   const allowed = role !== null && MANAGERS.includes(role);
 
   useEffect(() => {
@@ -106,7 +112,7 @@ export default function PeoplePage() {
   const total = page?.total ?? 0;
 
   return (
-    <AppShell>
+    <AdminShell>
       <h1 className="mb-2 text-[1.75rem]">Состав клуба</h1>
       <p className="mb-7 max-w-2xl text-[0.9375rem] text-text-muted">
         Сотрудники и клиенты одним списком. Отключённые учётки остаются здесь и
@@ -133,20 +139,9 @@ export default function PeoplePage() {
           <CardBody>
             <div className="mb-4 flex flex-wrap items-center gap-1.5">
               {TABS.map((item) => (
-                <button
-                  key={item.value}
-                  type="button"
-                  aria-pressed={tab === item.value}
-                  onClick={() => setTab(item.value)}
-                  className={cn(
-                    'rounded-control border px-3.5 py-1.5 text-[0.875rem] transition-colors',
-                    tab === item.value
-                      ? 'border-border-accent bg-surface-accent-soft text-text-accent'
-                      : 'border-border text-text-muted hover:bg-surface-sunken',
-                  )}
-                >
+                <Tab key={item.value} active={tab === item.value} onClick={() => setTab(item.value)}>
                   {item.label}
-                </button>
+                </Tab>
               ))}
 
               <input
@@ -228,7 +223,7 @@ export default function PeoplePage() {
           </CardBody>
         </Card>
       )}
-    </AppShell>
+    </AdminShell>
   );
 }
 

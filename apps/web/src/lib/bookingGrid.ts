@@ -1,4 +1,4 @@
-import type { BookingDay, BookingDayTable, BusyInterval } from '@yenisey/types';
+import type { BookingDay, BookingDayTable, BookingStep, BusyInterval } from '@yenisey/types';
 
 /**
  * Сетка выбора времени в форме брони.
@@ -13,6 +13,22 @@ import type { BookingDay, BookingDayTable, BusyInterval } from '@yenisey/types';
  * последнее слово за ним: здесь она нужна, чтобы недоступное время было видно
  * до нажатия кнопки, а не после отказа.
  */
+
+/**
+ * Минимальный шаг брони зала в минутах.
+ *
+ * Клиентской форме он приезжает готовым числом в `BookingDay.stepMinutes`, а
+ * рабочему месту администратора — нет: там сетка не строится, зал выбирается
+ * из общего списка, и расшифровать enum нужно на месте. Значения те же, что в
+ * `booking/availability.ts` на сервере.
+ */
+export const STEP_MINUTES: Record<BookingStep, number> = {
+  MIN_10: 10,
+  MIN_15: 15,
+  MIN_20: 20,
+  MIN_30: 30,
+  HOUR_1: 60,
+};
 
 /** Клетка сетки: начало отрезка и можно ли его занять. */
 export interface Slot {
