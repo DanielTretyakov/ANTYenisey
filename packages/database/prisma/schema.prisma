@@ -290,6 +290,17 @@ model Tenant {
   attendanceReminderAfterMinutes   Int @default(60)
   attendanceAutoNoShowAfterMinutes Int @default(1440)
 
+  /// С какого момента клуб ведёт учёт присутствия.
+  ///
+  /// Записи, закончившиеся раньше, джоба автонеявки не трогает никогда. До
+  /// появления отметки в продукте всё прошедшее так и осталось «записан» —
+  /// отметить его было нечем, — и первый же прогон записал бы в неявки всю
+  /// историю клуба, со списанием по 100%. Вручную старое отметить можно.
+  ///
+  /// У клубов, заведённых до отметки, — момент миграции; у новых — момент
+  /// создания клуба.
+  attendanceTrackedSince DateTime @default(now()) @db.Timestamptz(3)
+
   // --- Обратные связи: всё, что принадлежит этому клубу.
   memberships             TenantMembership[]
   clientProfiles          ClientProfile[]
@@ -809,6 +820,15 @@ model Tournament {
   tournamentType   TournamentType @relation(fields: [tournamentTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
   startsAt DateTime @db.Timestamptz(3)
+
+  /// Когда турнир заканчивается.
+  ///
+  /// Без него экран смены не знает, когда турнир «закончился и ждёт
+  /// отметки», а джоба — когда фиксировать неявку. Одно значение, которое
+  /// читают оба, а не вывод из окон расписания: у турнира, заведённого не в
+  /// сетке, окон нет вовсе, и второй расчёт разошёлся бы с первым. Правка дня
+  /// в расписании пересчитывает его по концу своих окон.
+  endsAt DateTime @db.Timestamptz(3)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1425,10 +1445,11 @@ model VisitLog {
   // Откуда визит. Раньше здесь была одна строка sourceId без внешнего ключа
   // — и база не могла отличить настоящую ссылку от опечатки или от брони,
   // удалённой в другом клубе. Теперь три отдельные необязательные связи:
-  // заполнена ровно одна, либо ни одной (для WALK_IN и для визитов,
-  // добавленных администратором вручную при сверке истории клиента).
+  // у TRAINING, TOURNAMENT и TABLE заполнена ровно своя, у WALK_IN — ни одной
+  // (визит с порога и визит, внесённый администратором задним числом при
+  // сверке истории, — один инструмент, ТЗ → «Отметка присутствия»).
   // Согласованность с sourceType и запрет «двух источников сразу» проверяет
-  // check-констрейнт, см. schema-constraints.sql.
+  // check-констрейнт, см. constraints.sql.
   trainingBookingId String?
   trainingBooking   TrainingBooking? @relation(fields: [trainingBookingId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
@@ -1443,15 +1464,33 @@ model VisitLog {
 
   attended Boolean
 
+  /// Когда был визит — начало записи или время, названное администратором
+  /// для визита с порога. Не путать с `recordedAt`: вчерашнее занятие
+  /// отмечают сегодня, и история клиента по моменту отметки поехала бы на
+  /// день.
+  visitedAt DateTime @db.Timestamptz(3)
+
+  /// Комментарий администратора к визиту с порога: «пришёл с другом»,
+  /// «оплатил наличными».
+  note String?
+
   // Кто из admin/owner отметил присутствие. Настоящая связь, а не просто
   // строка: за этой отметкой стоит списание денег, и она должна указывать на
   // реально существующего пользователя того же клуба.
-  recordedByUserId String
-  recordedBy       TenantMembership @relation("VisitRecordedBy", fields: [recordedByUserId, tenantId], references: [userId, tenantId], onDelete: Restrict)
-  recordedAt       DateTime         @default(now())
+  //
+  // Пусто только у неявки, зафиксированной джобой: у неё нет автора-человека.
+  // Это проверяет check-констрейнт (раздел 17 constraints.sql) — присутствие
+  // и визит с порога без автора база не примет.
+  recordedByUserId String?
+  recordedBy       TenantMembership? @relation("VisitRecordedBy", fields: [recordedByUserId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+  recordedAt       DateTime          @default(now())
 
+  // Одна запись — один визит: частичные уникальные индексы по каждой ссылке,
+  // см. раздел 17 constraints.sql.
   @@index([tenantId, clientId])
   @@index([tenantId, coachId])
+  // «Визиты клуба за день» — лента «Отмечено в этот день» на экране смены.
+  @@index([tenantId, visitedAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -1497,7 +1536,8 @@ model RefreshToken {
 
 /// Append-only журнал действий, за которыми стоят деньги, права или
 /// персональные данные. Только вставки: строки никогда не изменяются и не
-/// удаляются, иначе журнал не имеет доказательной силы.
+/// удаляются, иначе журнал не имеет доказательной силы. Держит это триггер
+/// `AuditLog_append_only` (раздел 17 constraints.sql), а не дисциплина кода.
 ///
 /// Зачем: администратор отмечает неявку — и у клиента списывается 100%.
 /// Клиент через неделю приходит с «я был на тренировке». Без журнала

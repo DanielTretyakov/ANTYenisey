@@ -180,8 +180,7 @@ export interface DeskEvent {
   kind: 'TRAINING' | 'TOURNAMENT';
   title: string;
   startsAt: string;
-  /** У турнира окончание в схеме не задано — известен только момент начала. */
-  endsAt: string | null;
+  endsAt: string;
   /** Цена участия на момент показа, копейки. */
   price: number;
   /** Лимит мест. У турнира его нет вовсе. */

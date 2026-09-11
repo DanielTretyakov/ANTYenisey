@@ -3,7 +3,7 @@
 -- ради чего заведены.
 -- ---------------------------------------------------------------------------
 --
--- СТАТУС: прогнано на PostgreSQL 18 (08.09.2026) — 43 из 43 сценариев прошли.
+-- СТАТУС: прогнано на PostgreSQL 18 (11.09.2026) — 57 из 57 сценариев прошли.
 -- Дополнительно проверено, что отказы приходят именно от нужных ограничений,
 -- а не по случайной причине: exclusion-констрейнт даёт 23P01, составные
 -- внешние ключи — 23503, частичный уникальный индекс — 23505, check'и — 23514.
@@ -173,12 +173,25 @@ DO $$ BEGIN
   RAISE NOTICE 'L2. ПРОВАЛ: списание 150%% прошло!';
 EXCEPTION WHEN others THEN RAISE NOTICE 'L2. Списание вне 0..100 отклонено.......... OK (ожидалось)'; END $$;
 
--- M. Опечатка в часовом поясе — должна быть отклонена
-DO $$ BEGIN
-  INSERT INTO "Tenant" (id,name,slug,"createdAt","updatedAt",timezone)
-  VALUES ('t4','Опечатка','typo',now(),now(),'Asia/Krasnayarsk');
+-- M. Опечатка в часовом поясе зала — должна быть отклонена.
+--    До 11.09.2026 сценарий писал пояс в Tenant, где его нет с переезда пояса
+--    в зал: падал на несуществующей колонке, и это засчитывалось успехом.
+--    Приведение к неизвестной зоне падает с 22023 (invalid_parameter_value)
+--    ещё до того, как CHECK вернёт false, — поэтому ждём именно его.
+DO $$
+DECLARE code text;
+BEGIN
+  INSERT INTO "Hall" (id,"tenantId",name,"tableHourPrice","tableExtra30MinPrice","hasRobotOption",timezone,"createdAt","updatedAt")
+  VALUES ('h4','t1','Зал с опечаткой',40000,20000,false,'Asia/Krasnayarsk',now(),now());
   RAISE NOTICE 'M. ПРОВАЛ: несуществующая таймзона принята!';
-EXCEPTION WHEN others THEN RAISE NOTICE 'M. Опечатка в таймзоне отклонена........... OK (ожидалось)'; END $$;
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+  IF code = '22023' THEN
+    RAISE NOTICE 'M. Опечатка в таймзоне отклонена........... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'M. ПРОВАЛ: отказ пришёл не от проверки зоны, а от %: %', code, SQLERRM;
+  END IF;
+END $$;
 
 -- N. Автонеявка раньше напоминания — бессмысленная настройка, должна быть отклонена
 DO $$ BEGIN
@@ -196,15 +209,15 @@ EXCEPTION WHEN others THEN RAISE NOTICE 'O. Удаление клиента с �
 
 -- P. Визит «с порога» с привязанной бронью — противоречие, должно быть отклонено
 DO $$ BEGIN
-  INSERT INTO "VisitLog" (id,"tenantId","clientId","sourceType","trainingBookingId",attended,"recordedByUserId")
-  VALUES ('v1','t1','u1','WALK_IN','tb_3',true,'u1');
+  INSERT INTO "VisitLog" (id,"tenantId","clientId","sourceType","trainingBookingId",attended,"recordedByUserId","visitedAt")
+  VALUES ('v1','t1','u1','WALK_IN','tb_3',true,'u1','2026-09-01 18:00+07');
   RAISE NOTICE 'P. ПРОВАЛ: визит с порога с бронью принят!';
 EXCEPTION WHEN others THEN RAISE NOTICE 'P. Противоречивый источник визита отклонён. OK (ожидалось)'; END $$;
 
 -- Q. Визит без брони (админ добавил задним числом) — должен пройти
 DO $$ BEGIN
-  INSERT INTO "VisitLog" (id,"tenantId","clientId","sourceType",attended,"recordedByUserId")
-  VALUES ('v2','t1','u1','WALK_IN',true,'u1');
+  INSERT INTO "VisitLog" (id,"tenantId","clientId","sourceType",attended,"recordedByUserId","visitedAt")
+  VALUES ('v2','t1','u1','WALK_IN',true,'u1','2026-09-01 12:00+07');
   RAISE NOTICE 'Q. Визит с порога без брони................ OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'Q. ПРОВАЛ: %', SQLERRM; END $$;
 
@@ -597,3 +610,212 @@ DO $$ BEGIN
   RAISE NOTICE 'AP. Онлайн-бронь без автора создана....... OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'AP. ПРОВАЛ: %', SQLERRM; END $$;
 
+-- ---------------------------------------------------------------------------
+-- Отметка присутствия (раздел 17 constraints.sql)
+-- ---------------------------------------------------------------------------
+--
+-- Своя пара броней, чтобы не зависеть от того, что сделали сценарии выше:
+-- bk20 отмечается присутствием, bk21 — неявкой от джобы.
+
+INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","startsAt","endsAt","priceAtBooking","updatedAt")
+VALUES ('bk20','t1','tb1','u1','2026-09-24 10:00+07','2026-09-24 11:00+07',40000,now()),
+       ('bk21','t1','tb1','u1','2026-09-24 12:00+07','2026-09-24 13:00+07',40000,now());
+
+INSERT INTO "AuditLog" (id,"tenantId",action,"actorUserId","entityType","entityId",before,after,reason)
+VALUES ('al1','t1','NO_SHOW_MARKED','c1','TableBooking','bk21',
+        '{"status":"BOOKED"}','{"status":"NO_SHOW","chargeRatio":100}',NULL);
+
+-- AQ. Визит по записи без самой записи. Раньше это был законный «визит,
+--     добавленный задним числом», теперь такой визит — WALK_IN, а TRAINING
+--     без ссылки — потерянная связь, к которой не привязать «одна запись —
+--     один визит».
+DO $$
+DECLARE code text; cname text;
+BEGIN
+  INSERT INTO "VisitLog" (id,"tenantId","clientId","sourceType",attended,"recordedByUserId","visitedAt")
+  VALUES ('v10','t1','u1','TRAINING',true,'c1','2026-09-01 18:00+07');
+  RAISE NOTICE 'AQ. ПРОВАЛ: визит по записи без записи прошёл!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE, cname = CONSTRAINT_NAME;
+  IF code = '23514' AND cname = 'VisitLog_source_matches_type' THEN
+    RAISE NOTICE 'AQ. Визит по записи без записи отклонён... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'AQ. ПРОВАЛ: отказ пришёл от % (%)', code, cname;
+  END IF;
+END $$;
+
+-- AR. Первый визит по брони с автором — проходит. Контроль к AS и AT.
+DO $$ BEGIN
+  INSERT INTO "VisitLog" (id,"tenantId","clientId","sourceType","tableBookingId",attended,"recordedByUserId","visitedAt")
+  VALUES ('v11','t1','u1','TABLE','bk20',true,'c1','2026-09-24 10:00+07');
+  RAISE NOTICE 'AR. Визит по брони создан.................. OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'AR. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- AS. Второй визит на ту же бронь. Исправление отметки и джоба могут прийти
+--     одновременно, и проверка «визит уже есть?» в коде от гонки не спасает.
+DO $$
+DECLARE code text; cname text;
+BEGIN
+  INSERT INTO "VisitLog" (id,"tenantId","clientId","sourceType","tableBookingId",attended,"recordedByUserId","visitedAt")
+  VALUES ('v12','t1','u1','TABLE','bk20',false,'c1','2026-09-24 10:00+07');
+  RAISE NOTICE 'AS. ПРОВАЛ: второй визит на одну бронь прошёл!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE, cname = CONSTRAINT_NAME;
+  IF code = '23505' AND cname = 'VisitLog_table_booking_uniq' THEN
+    RAISE NOTICE 'AS. Второй визит на бронь отклонён......... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'AS. ПРОВАЛ: отказ пришёл от % (%)', code, cname;
+  END IF;
+END $$;
+
+-- AT. Присутствие без автора. Пустой автор законен только у неявки, которую
+--     поставила джоба; «кто поставил мне визит» — вопрос с обязательным ответом.
+DO $$
+DECLARE code text; cname text;
+BEGIN
+  INSERT INTO "VisitLog" (id,"tenantId","clientId","sourceType","tableBookingId",attended,"visitedAt")
+  VALUES ('v13','t1','u1','TABLE','bk21',true,'2026-09-24 12:00+07');
+  RAISE NOTICE 'AT. ПРОВАЛ: присутствие без автора прошло!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE, cname = CONSTRAINT_NAME;
+  IF code = '23514' AND cname = 'VisitLog_author_unless_auto_no_show' THEN
+    RAISE NOTICE 'AT. Присутствие без автора отклонено....... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'AT. ПРОВАЛ: отказ пришёл от % (%)', code, cname;
+  END IF;
+END $$;
+
+-- AU. Неявка без автора — проходит: так её пишет джоба автонеявки.
+DO $$ BEGIN
+  INSERT INTO "VisitLog" (id,"tenantId","clientId","sourceType","tableBookingId",attended,"visitedAt")
+  VALUES ('v14','t1','u1','TABLE','bk21',false,'2026-09-24 12:00+07');
+  RAISE NOTICE 'AU. Неявка от джобы без автора............. OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'AU. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- AV. Визит с порога дважды в один момент — двойное нажатие, а не два визита.
+DO $$
+DECLARE code text; cname text;
+BEGIN
+  INSERT INTO "VisitLog" (id,"tenantId","clientId","sourceType",attended,"recordedByUserId","visitedAt")
+  VALUES ('v15','t1','u1','WALK_IN',true,'c1','2026-09-01 12:00+07');
+  RAISE NOTICE 'AV. ПРОВАЛ: дубль визита с порога прошёл!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE, cname = CONSTRAINT_NAME;
+  IF code = '23505' AND cname = 'VisitLog_walk_in_uniq' THEN
+    RAISE NOTICE 'AV. Дубль визита с порога отклонён......... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'AV. ПРОВАЛ: отказ пришёл от % (%)', code, cname;
+  END IF;
+END $$;
+
+-- AW. Визит с порога в другое время того же дня — проходит: это второй
+--     визит, а не повтор. Контроль к AV.
+DO $$ BEGIN
+  INSERT INTO "VisitLog" (id,"tenantId","clientId","sourceType",attended,"recordedByUserId","visitedAt")
+  VALUES ('v16','t1','u1','WALK_IN',true,'c1','2026-09-01 19:00+07');
+  RAISE NOTICE 'AW. Второй визит с порога за день.......... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'AW. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- AX. «Пришёл с порога и не пришёл» не означает ничего.
+DO $$
+DECLARE code text; cname text;
+BEGIN
+  INSERT INTO "VisitLog" (id,"tenantId","clientId","sourceType",attended,"recordedByUserId","visitedAt")
+  VALUES ('v17','t1','u1','WALK_IN',false,'c1','2026-09-02 12:00+07');
+  RAISE NOTICE 'AX. ПРОВАЛ: неявка с порога прошла!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE, cname = CONSTRAINT_NAME;
+  IF code = '23514' AND cname = 'VisitLog_walk_in_attended' THEN
+    RAISE NOTICE 'AX. Неявка с порога отклонена.............. OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'AX. ПРОВАЛ: отказ пришёл от % (%)', code, cname;
+  END IF;
+END $$;
+
+-- AY. Неявка без процента. Процент — снимок в момент отметки, и без него
+--     неявку не отличить от прощённой.
+DO $$
+DECLARE code text; cname text;
+BEGIN
+  UPDATE "TableBooking" SET status='NO_SHOW' WHERE id='bk21';
+  RAISE NOTICE 'AY. ПРОВАЛ: неявка без процента прошла!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE, cname = CONSTRAINT_NAME;
+  IF code = '23514' AND cname = 'TableBooking_marked_has_ratio' THEN
+    RAISE NOTICE 'AY. Неявка без процента отклонена.......... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'AY. ПРОВАЛ: отказ пришёл от % (%)', code, cname;
+  END IF;
+END $$;
+
+-- AZ. Прощённая неявка — процент 0 — проходит. Контроль к AY: правило
+--     требует процент, а не ненулевой процент.
+DO $$ BEGIN
+  UPDATE "TableBooking" SET status='NO_SHOW', "chargeRatio"=0 WHERE id='bk21';
+  RAISE NOTICE 'AZ. Прощённая неявка с процентом 0......... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'AZ. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- BA. Турнир, кончающийся раньше начала. По окончанию экран смены понимает,
+--     что турнир закончился, а джоба — когда ставить неявку.
+DO $$
+DECLARE code text; cname text;
+BEGIN
+  INSERT INTO "TournamentType" (id,"tenantId",name,price,"updatedAt")
+  VALUES ('tt_x','t1','Абсолют',50000,now());
+  INSERT INTO "Tournament" (id,"tenantId","tournamentTypeId","startsAt","endsAt","updatedAt")
+  VALUES ('tn_x','t1','tt_x','2026-09-26 12:00+07','2026-09-26 10:00+07',now());
+  RAISE NOTICE 'BA. ПРОВАЛ: турнир кончается раньше начала!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE, cname = CONSTRAINT_NAME;
+  IF code = '23514' AND cname = 'Tournament_time_order' THEN
+    RAISE NOTICE 'BA. Турнир с концом до начала отклонён..... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'BA. ПРОВАЛ: отказ пришёл от % (%)', code, cname;
+  END IF;
+END $$;
+
+-- BB. Правка строки журнала аудита. Журнал, который можно поправить, в споре
+--     о деньгах ничего не доказывает.
+DO $$
+DECLARE code text;
+BEGIN
+  UPDATE "AuditLog" SET reason = 'задним числом' WHERE id = 'al1';
+  RAISE NOTICE 'BB. ПРОВАЛ: строку аудита переписали!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+  IF code = '23001' THEN
+    RAISE NOTICE 'BB. Правка строки аудита отклонена......... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'BB. ПРОВАЛ: отказ пришёл от %', code;
+  END IF;
+END $$;
+
+-- BC. Удаление строки журнала аудита.
+DO $$
+DECLARE code text;
+BEGIN
+  DELETE FROM "AuditLog" WHERE id = 'al1';
+  RAISE NOTICE 'BC. ПРОВАЛ: строку аудита удалили!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+  IF code = '23001' THEN
+    RAISE NOTICE 'BC. Удаление строки аудита отклонено....... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'BC. ПРОВАЛ: отказ пришёл от %', code;
+  END IF;
+END $$;
+
+-- BD. Очистка журнала целиком — TRUNCATE мимо построчных триггеров.
+DO $$
+DECLARE code text;
+BEGIN
+  TRUNCATE "AuditLog";
+  RAISE NOTICE 'BD. ПРОВАЛ: журнал аудита очищен!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+  IF code = '23001' THEN
+    RAISE NOTICE 'BD. Очистка журнала аудита отклонена....... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'BD. ПРОВАЛ: отказ пришёл от %', code;
+  END IF;
+END $$;

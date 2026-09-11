@@ -63,9 +63,12 @@ export async function resolveEvents(
   for (const typeId of new Set(pendingTournaments.map((slot) => slot.tournamentTypeId!))) {
     const own = pendingTournaments.filter((slot) => slot.tournamentTypeId === typeId);
 
+    // Окончание сервер потом пересчитает по всем окнам турнира при сохранении
+    // дня; здесь — конец окон этого дня, чтобы турнир не заводился без него.
     const tournament = await club.createTournament({
       tournamentTypeId: typeId,
       startsAt: instant(Math.min(...own.map((slot) => slot.startMinute)), 'турнир'),
+      endsAt: instant(Math.max(...own.map((slot) => slot.endMinute)), 'турнир'),
     });
 
     tournaments.set(typeId, tournament.id);

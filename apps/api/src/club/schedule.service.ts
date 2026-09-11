@@ -214,6 +214,11 @@ export class ScheduleService {
       });
 
       await this.dropOrphanedEvents(tx, tenantId, before);
+      await this.syncTournamentEnds(
+        tx,
+        tenantId,
+        closures.map((closure) => closure.tournamentId),
+      );
     });
 
     return this.findDay(tenantId, hallId, date);
@@ -297,25 +302,24 @@ export class ScheduleService {
         }
 
         // Один турнир на тип и дату: два турнира одного типа в один день клуб
-        // не проводит. Начало — у самого раннего окна этого типа.
+        // не проводит. Границы — от самого раннего начала до самого позднего
+        // конца окон этого типа.
         const tournaments = new Map<string, string>();
         const typeIds = new Set(
           rules.map((rule) => rule.tournamentTypeId).filter((id): id is string => id !== null),
         );
 
         for (const typeId of typeIds) {
-          const earliest = Math.min(
-            ...rules
-              .filter((rule) => rule.tournamentTypeId === typeId)
-              .map((rule) => rule.startMinute),
-          );
+          const own = rules.filter((rule) => rule.tournamentTypeId === typeId);
 
           const created = await tx.tournament.create({
             data: {
               tenantId,
               tournamentTypeId: typeId,
-              // Пояс ЗАЛА: от момента начала считается порог отмены.
-              startsAt: instantAt(date, earliest, hall.timezone),
+              // Пояс ЗАЛА: от момента начала считается порог отмены, от
+              // окончания — срок отметки присутствия.
+              startsAt: instantAt(date, Math.min(...own.map((rule) => rule.startMinute)), hall.timezone),
+              endsAt: instantAt(date, Math.max(...own.map((rule) => rule.endMinute)), hall.timezone),
             },
             select: { id: true },
           });
@@ -421,6 +425,66 @@ export class ScheduleService {
           registrations: { none: {} },
         },
       });
+    }
+  }
+
+  /**
+   * Окончание турниров — по концу их окон в расписании.
+   *
+   * Администратор растянул турнир в сетке на час — и экран смены, и джоба
+   * автонеявки должны узнать об этом сразу, а не читать окончание, указанное
+   * при заведении. Считается по ВСЕМ окнам турнира, а не только по окнам этого
+   * дня: турнир одного дня законно идёт в двух залах.
+   *
+   * Начало не трогается: от него считается порог отмены, и сдвигать его
+   * задним числом у тех, кто уже записался, значит менять условия сделки.
+   * Окончание, которое оказалось бы не позже начала (окна перенесли раньше
+   * старта), не пишется: такой турнир база не примет, а у администратора
+   * остаётся прежнее, осмысленное.
+   */
+  private async syncTournamentEnds(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    ids: (string | null | undefined)[],
+  ): Promise<void> {
+    const tournamentIds = [...new Set(ids.filter((id): id is string => typeof id === 'string'))];
+
+    if (tournamentIds.length === 0) {
+      return;
+    }
+
+    const closures = await tx.dayClosure.findMany({
+      where: { tenantId, tournamentId: { in: tournamentIds } },
+      select: {
+        tournamentId: true,
+        endMinute: true,
+        schedule: { select: { date: true, hall: { select: { timezone: true } } } },
+      },
+    });
+
+    const ends = new Map<string, number>();
+
+    for (const closure of closures) {
+      const end = instantAt(
+        formatDate(closure.schedule.date),
+        closure.endMinute,
+        closure.schedule.hall.timezone,
+      ).getTime();
+
+      ends.set(closure.tournamentId!, Math.max(ends.get(closure.tournamentId!) ?? end, end));
+    }
+
+    const tournaments = await tx.tournament.findMany({
+      where: { tenantId, id: { in: [...ends.keys()] } },
+      select: { id: true, startsAt: true, endsAt: true },
+    });
+
+    for (const tournament of tournaments) {
+      const end = ends.get(tournament.id)!;
+
+      if (end > tournament.startsAt.getTime() && end !== tournament.endsAt.getTime()) {
+        await tx.tournament.update({ where: { id: tournament.id }, data: { endsAt: new Date(end) } });
+      }
     }
   }
 

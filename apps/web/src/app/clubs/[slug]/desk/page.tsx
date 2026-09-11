@@ -706,7 +706,7 @@ function split(day: DeskDay): { unmarked: Row[]; ahead: Row[] } {
 
   for (const event of day.events) {
     const row = eventRow(event);
-    const ended = event.endsAt !== null && Date.parse(event.endsAt) < now;
+    const ended = Date.parse(event.endsAt) < now;
 
     if (ended) {
       if (event.participants.some((entry) => entry.status === 'BOOKED')) unmarked.push(row);

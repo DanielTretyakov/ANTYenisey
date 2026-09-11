@@ -75,6 +75,11 @@ ALTER TABLE "TableBooking"
 ALTER TABLE "TrainingSession"
   ADD CONSTRAINT "TrainingSession_time_order" CHECK ("endsAt" > "startsAt");
 
+-- Окончание турнира появилось с отметкой присутствия (раздел 17): по нему
+-- экран смены понимает, что турнир закончился, а джоба — когда ставить неявку.
+ALTER TABLE "Tournament"
+  ADD CONSTRAINT "Tournament_time_order" CHECK ("endsAt" > "startsAt");
+
 -- Доля списания по политике отмены — процент от 0 до 100.
 --
 -- Раньше здесь стояло IN (0, 50, 100) по значениям «Енисея». После того как
@@ -143,17 +148,29 @@ ALTER TABLE "Subscription"
   ADD CONSTRAINT "Subscription_visits_non_negative"
   CHECK ("remainingVisits" IS NULL OR "remainingVisits" >= 0);
 
--- У визита не может быть двух источников сразу, и заполненный источник
--- обязан соответствовать заявленному типу. Пустые ссылки при этом законны:
--- визит «с порога» и визит, добавленный администратором задним числом при
--- сверке истории, брони не имеют вовсе.
+-- Источник визита соответствует его типу: у визита по записи заполнена ровно
+-- своя ссылка, у визита с порога — ни одной.
+--
+-- До отметки присутствия здесь проверялось только «не две ссылки сразу», и
+-- визит типа TRAINING без ссылки на запись был законен — под «визит,
+-- добавленный администратором задним числом». Теперь такой визит — WALK_IN
+-- (ТЗ описывает один инструмент и для «с порога», и для сверки истории), а
+-- визит по записи без самой записи — потерянная связь: к нему нельзя
+-- привязать уникальность «одна запись — один визит» (раздел 17), и две
+-- отметки одного занятия легли бы двумя визитами.
 ALTER TABLE "VisitLog"
   ADD CONSTRAINT "VisitLog_source_matches_type"
   CHECK (
     CASE "sourceType"
-      WHEN 'TRAINING' THEN "tournamentRegistrationId" IS NULL AND "tableBookingId" IS NULL
-      WHEN 'TOURNAMENT' THEN "trainingBookingId" IS NULL AND "tableBookingId" IS NULL
-      WHEN 'TABLE' THEN "trainingBookingId" IS NULL AND "tournamentRegistrationId" IS NULL
+      WHEN 'TRAINING' THEN "trainingBookingId" IS NOT NULL
+                      AND "tournamentRegistrationId" IS NULL
+                      AND "tableBookingId" IS NULL
+      WHEN 'TOURNAMENT' THEN "tournamentRegistrationId" IS NOT NULL
+                        AND "trainingBookingId" IS NULL
+                        AND "tableBookingId" IS NULL
+      WHEN 'TABLE' THEN "tableBookingId" IS NOT NULL
+                   AND "trainingBookingId" IS NULL
+                   AND "tournamentRegistrationId" IS NULL
       WHEN 'WALK_IN' THEN "trainingBookingId" IS NULL
                      AND "tournamentRegistrationId" IS NULL
                      AND "tableBookingId" IS NULL
@@ -454,3 +471,106 @@ ALTER TABLE "TournamentRegistration"
 -- А вот TableBooking_no_overlap (раздел 1) не ослабляется и не снимается:
 -- два человека за одним столом одновременно не помещаются физически, и
 -- «администратор может всё» на этом заканчивается.
+
+-- ---------------------------------------------------------------------------
+-- 17. Отметка присутствия
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_attendance. За отметкой стоят деньги: неявка списывает
+-- процент клуба, присутствие — всю цену. Поэтому здесь то, что должно
+-- выдерживать гонку двух администраторов, джобы и повторного нажатия.
+
+-- Одна запись — один визит.
+--
+-- Отметку исправляют («пришёл» → «не пришёл»), и сервис обновляет уже
+-- заведённый визит, а не заводит второй. Но исправление и джоба автонеявки
+-- могут прийти одновременно, и проверка «визит уже есть?» в коде от этого не
+-- спасает — две строки на одно занятие дали бы в истории клиента два визита.
+-- Индексы частичные: у визита с порога ссылок нет вовсе.
+CREATE UNIQUE INDEX "VisitLog_training_booking_uniq"
+  ON "VisitLog" ("trainingBookingId")
+  WHERE "trainingBookingId" IS NOT NULL;
+
+CREATE UNIQUE INDEX "VisitLog_tournament_registration_uniq"
+  ON "VisitLog" ("tournamentRegistrationId")
+  WHERE "tournamentRegistrationId" IS NOT NULL;
+
+CREATE UNIQUE INDEX "VisitLog_table_booking_uniq"
+  ON "VisitLog" ("tableBookingId")
+  WHERE "tableBookingId" IS NOT NULL;
+
+-- Визит с порога: тот же человек в тот же момент — двойное нажатие «Внести
+-- визит», а не два визита. Настоящий второй визит за день идёт с другим
+-- временем.
+CREATE UNIQUE INDEX "VisitLog_walk_in_uniq"
+  ON "VisitLog" ("tenantId", "clientId", "visitedAt")
+  WHERE "sourceType" = 'WALK_IN'::"VisitSourceType";
+
+-- Визит с порога — всегда присутствие: «человек пришёл без брони и не
+-- пришёл» не означает ничего.
+ALTER TABLE "VisitLog"
+  ADD CONSTRAINT "VisitLog_walk_in_attended"
+  CHECK ("sourceType" <> 'WALK_IN'::"VisitSourceType" OR attended);
+
+-- Без автора — только неявка по записи: её фиксирует джоба, человека за ней
+-- нет. Присутствие и визит с порога всегда отмечает администратор, и «кто
+-- поставил мне визит» — вопрос, на который обязан быть ответ.
+ALTER TABLE "VisitLog"
+  ADD CONSTRAINT "VisitLog_author_unless_auto_no_show"
+  CHECK (
+    "recordedByUserId" IS NOT NULL
+    OR (NOT attended AND "sourceType" <> 'WALK_IN'::"VisitSourceType")
+  );
+
+-- Отмеченная запись несёт процент списания.
+--
+-- Пустой процент у неявки прежде читался как «джоба ещё не отработала» и
+-- считался полным, у присутствия — как полная цена. Теперь процент — снимок
+-- в момент отметки (100 у присутствия, процент клуба у неявки, 0 у
+-- прощённой), и без него неявку нельзя отличить от прощённой. Строки,
+-- отмеченные до этого раздела, не существуют: отмечать было нечем.
+ALTER TABLE "TableBooking"
+  ADD CONSTRAINT "TableBooking_marked_has_ratio"
+  CHECK ("status" NOT IN ('ATTENDED'::"BookingStatus", 'NO_SHOW'::"BookingStatus") OR "chargeRatio" IS NOT NULL);
+
+ALTER TABLE "TrainingBooking"
+  ADD CONSTRAINT "TrainingBooking_marked_has_ratio"
+  CHECK ("status" NOT IN ('ATTENDED'::"BookingStatus", 'NO_SHOW'::"BookingStatus") OR "chargeRatio" IS NOT NULL);
+
+ALTER TABLE "TournamentRegistration"
+  ADD CONSTRAINT "TournamentRegistration_marked_has_ratio"
+  CHECK ("status" NOT IN ('ATTENDED'::"BookingStatus", 'NO_SHOW'::"BookingStatus") OR "chargeRatio" IS NOT NULL);
+
+-- Журнал аудита — только вставки.
+--
+-- Схема так и называла его «append-only», но держала это только словами. За
+-- строкой журнала стоит спор о деньгах: «я был на тренировке» разрешается
+-- тем, кто, когда и с какой причиной поставил неявку. Журнал, который можно
+-- поправить, доказательной силы не имеет — поэтому UPDATE, DELETE и TRUNCATE
+-- отклоняет база, с кодом 23001 (restrict_violation).
+CREATE FUNCTION "AuditLog_reject_change"() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'AuditLog — журнал только для вставок, % запрещён', TG_OP
+    USING ERRCODE = '23001';
+END
+$$;
+
+CREATE TRIGGER "AuditLog_append_only"
+  BEFORE UPDATE OR DELETE ON "AuditLog"
+  FOR EACH ROW EXECUTE FUNCTION "AuditLog_reject_change"();
+
+CREATE TRIGGER "AuditLog_no_truncate"
+  BEFORE TRUNCATE ON "AuditLog"
+  FOR EACH STATEMENT EXECUTE FUNCTION "AuditLog_reject_change"();
+
+-- Чего здесь НЕТ и почему.
+--
+-- «Отмечать можно только начавшееся» в CHECK не выражается: сравнение с
+-- now() требует STABLE-функции, а CHECK принимает только IMMUTABLE (та же
+-- причина, что у Hall_timezone_valid в разделе 3). Правило живёт в
+-- decideMark (apps/api/src/attendance/attendance-rules.ts) и покрыто тестами.
+--
+-- Соответствие VisitLog.attended статусу записи тоже не проверяется: это
+-- сравнение строк двух таблиц. Их согласованность держит одна транзакция
+-- AttendanceService, которая меняет обе.

@@ -125,7 +125,14 @@ async function main(): Promise<void> {
     if (existing) continue;
 
     await prisma.tournament.create({
-      data: { tenantId: tenant.id, tournamentTypeId: type.id, startsAt },
+      // Турниры «Енисея» идут около четырёх часов; точное окончание
+      // администратор задаст, поставив турнир в сетку.
+      data: {
+        tenantId: tenant.id,
+        tournamentTypeId: type.id,
+        startsAt,
+        endsAt: new Date(startsAt.getTime() + 4 * HOUR),
+      },
     });
 
     tournaments += 1;

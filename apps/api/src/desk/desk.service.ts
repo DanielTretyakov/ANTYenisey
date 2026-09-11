@@ -591,6 +591,7 @@ export class DeskService {
         select: {
           id: true,
           startsAt: true,
+          endsAt: true,
           tournamentType: { select: { name: true, price: true } },
           registrations: {
             select: { ...CHARGE_SELECT, client: { select: { membership: PERSON_SELECT } } },
@@ -616,8 +617,7 @@ export class DeskService {
         kind: 'TOURNAMENT' as const,
         title: tournament.tournamentType.name,
         startsAt: tournament.startsAt.toISOString(),
-        // У турнира окончание в схеме не задано: известен только момент начала.
-        endsAt: null,
+        endsAt: tournament.endsAt.toISOString(),
         price: tournament.tournamentType.price,
         // Лимита мест у турнира нет вовсе — число записавшихся справочно.
         capacity: null,

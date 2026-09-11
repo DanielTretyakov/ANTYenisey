@@ -273,6 +273,7 @@ export class CatalogService {
         id: true,
         tournamentTypeId: true,
         startsAt: true,
+        endsAt: true,
         tournamentType: { select: { name: true } },
         _count: { select: { dayClosures: true } },
       },
@@ -286,15 +287,21 @@ export class CatalogService {
       tournamentTypeId: tournament.tournamentTypeId,
       typeName: tournament.tournamentType.name,
       startsAt: tournament.startsAt.toISOString(),
+      endsAt: tournament.endsAt.toISOString(),
       placedCount: tournament._count.dayClosures,
     }));
   }
 
   async createTournament(tenantId: string, dto: TournamentRequest): Promise<Tournament> {
     const startsAt = new Date(dto.startsAt);
+    const endsAt = new Date(dto.endsAt);
 
-    if (Number.isNaN(startsAt.getTime())) {
-      throw new BadRequestException('Начало турнира указывается моментом времени в ISO-8601');
+    if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
+      throw new BadRequestException('Начало и конец турнира указываются моментами в ISO-8601');
+    }
+
+    if (endsAt.getTime() <= startsAt.getTime()) {
+      throw new BadRequestException('Турнир не может кончаться раньше, чем начался');
     }
 
     const type = await this.prisma.tournamentType.findFirst({
@@ -311,7 +318,7 @@ export class CatalogService {
     }
 
     const created = await this.prisma.tournament.create({
-      data: { tenantId, tournamentTypeId: type.id, startsAt },
+      data: { tenantId, tournamentTypeId: type.id, startsAt, endsAt },
       select: { id: true },
     });
 

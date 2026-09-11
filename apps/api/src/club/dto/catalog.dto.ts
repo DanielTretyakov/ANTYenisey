@@ -77,6 +77,13 @@ export class TournamentDto implements TournamentRequest {
 
   @IsISO8601({ strict: true }, { message: 'Начало указывается моментом времени в ISO-8601' })
   startsAt: string;
+
+  /**
+   * Окончание турнира. Без него ни экран смены, ни джоба автонеявки не знают,
+   * когда турнир закончился. Порядок моментов проверяет сервис.
+   */
+  @IsISO8601({ strict: true }, { message: 'Окончание указывается моментом времени в ISO-8601' })
+  endsAt: string;
 }
 
 export class TrainingSessionDto implements TrainingSessionRequest {

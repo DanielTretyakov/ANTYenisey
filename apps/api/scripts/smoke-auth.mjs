@@ -623,15 +623,40 @@ async function main() {
 
     r = await asAdmin('/clubs/yenisey/tournaments', {
       method: 'POST',
-      json: { tournamentTypeId, startsAt: '2026-10-03T04:00:00.000Z' },
+      json: {
+        tournamentTypeId,
+        startsAt: '2026-10-03T04:00:00.000Z',
+        endsAt: '2026-10-03T08:00:00.000Z',
+      },
     });
     check('турнир заведён', 201, r.status);
+    assert('окончание турнира сохранено', r.body?.endsAt === '2026-10-03T08:00:00.000Z');
     const tournamentId = r.body?.id;
     assert('название типа приехало вместе с турниром', r.body?.typeName === tournamentTypeName);
 
     r = await asAdmin('/clubs/yenisey/tournaments', {
       method: 'POST',
-      json: { tournamentTypeId: 'chuzhoy-tip', startsAt: '2026-10-03T04:00:00.000Z' },
+      json: {
+        tournamentTypeId,
+        startsAt: '2026-10-03T04:00:00.000Z',
+        endsAt: '2026-10-03T04:00:00.000Z',
+      },
+    });
+    check('турнир, кончающийся в момент начала, отклонён', 400, r.status);
+
+    r = await asAdmin('/clubs/yenisey/tournaments', {
+      method: 'POST',
+      json: { tournamentTypeId, startsAt: '2026-10-03T04:00:00.000Z' },
+    });
+    check('турнир без окончания отклонён', 400, r.status);
+
+    r = await asAdmin('/clubs/yenisey/tournaments', {
+      method: 'POST',
+      json: {
+        tournamentTypeId: 'chuzhoy-tip',
+        startsAt: '2026-10-03T04:00:00.000Z',
+        endsAt: '2026-10-03T08:00:00.000Z',
+      },
     });
     check('турнир по несуществующему типу отклонён', 404, r.status);
 
@@ -941,6 +966,26 @@ async function main() {
     assert('повторная отвязка не заводит второй турнир', cupOf(r.body)?.tournamentId === firstCup);
     assert('заведён ровно один турнир', (await tournamentIds()).length === tournamentsBefore + 1);
 
+    // Окончание турнира — конец его окон: по нему экран смены и джоба
+    // автонеявки понимают, что турнир закончился.
+    const cupSpan = async (id) => {
+      const cup = ((await asAdmin('/clubs/yenisey/tournaments')).body ?? []).find((item) => item.id === id);
+      return cup ? (Date.parse(cup.endsAt) - Date.parse(cup.startsAt)) / 60_000 : null;
+    };
+    assert('отвязанный турнир кончается с концом своих окон', (await cupSpan(firstCup)) === 120);
+
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}/days/${detachDate}`, {
+      method: 'PUT',
+      json: {
+        closures: [
+          { tableId, startMinute: 600, endMinute: 660, purpose: 'RENT', coachId: null },
+          { tableId, startMinute: 720, endMinute: 900, purpose: 'TOURNAMENT', coachId: null, tournamentId: firstCup },
+        ],
+      },
+    });
+    check('окно турнира растянуто правкой дня', 200, r.status);
+    assert('окончание турнира пересчитано по окнам', (await cupSpan(firstCup)) === 180);
+
     // Правка, стирающая окно турнира, уносит и сам турнир: он больше нигде не
     // стоит, записей на нём нет, а клиент видел бы его в ленте.
     r = await asAdmin(`/clubs/yenisey/halls/${hallId}/days/${detachDate}`, {
@@ -1234,7 +1279,7 @@ async function main() {
     assert('турнир из сетки виден в смене', deskCup?.kind === 'TOURNAMENT');
     assert('у турнира нет лимита мест', deskCup?.capacity === null);
     assert('у турнира нет тренера', deskCup?.coachName === null);
-    assert('окончания у турнира в схеме нет', deskCup?.endsAt === null);
+    assert('у турнира в смене есть окончание', typeof deskCup?.endsAt === 'string');
 
     // Окно турнира занимает стол с 10:00: у несегодняшнего дня это и есть
     // ответ на вопрос «с какого часа зал занят».
@@ -1619,7 +1664,7 @@ async function eventRegistration(asMe) {
 
   r = await asAdmin('/clubs/yenisey/tournaments', {
     method: 'POST',
-    json: { tournamentTypeId, startsAt: soon.toISOString() },
+    json: { tournamentTypeId, startsAt: soon.toISOString(), endsAt: later.toISOString() },
   });
   check('турнир заведён', 201, r.status);
   const tournamentId = r.body?.id;
