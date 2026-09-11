@@ -12,7 +12,7 @@ const row = (over: Partial<ChargeRow> = {}): ChargeRow => ({
 describe('chargeOf', () => {
   it('за активную и состоявшуюся запись начисляется полная цена', () => {
     assert.equal(chargeOf(row({ status: 'BOOKED' })), 80_000);
-    assert.equal(chargeOf(row({ status: 'ATTENDED' })), 80_000);
+    assert.equal(chargeOf(row({ status: 'ATTENDED', chargeRatio: 100 })), 80_000);
   });
 
   it('ранняя отмена без зафиксированного процента не приносит ничего', () => {
@@ -26,16 +26,25 @@ describe('chargeOf', () => {
   });
 
   /**
-   * Пустой процент у неявки означает «джоба эскалации ещё не отработала», а не
-   * «бесплатно». Обнулить его здесь значило бы терять деньги молча.
+   * Без процента бывают только строки, отмеченные до появления отметки в
+   * продукте. Обнулить их здесь значило бы терять деньги молча.
    */
-  it('неявка без проставленного процента считается полной', () => {
+  it('отметка без проставленного процента считается полной', () => {
     assert.equal(chargeOf(row({ status: 'NO_SHOW', chargeRatio: null })), 80_000);
+    assert.equal(chargeOf(row({ status: 'ATTENDED', chargeRatio: null })), 80_000);
   });
 
   it('неявка с процентом считается по нему', () => {
     assert.equal(chargeOf(row({ status: 'NO_SHOW', chargeRatio: 100 })), 80_000);
     assert.equal(chargeOf(row({ status: 'NO_SHOW', chargeRatio: 50 })), 40_000);
+  });
+
+  it('прощённая неявка не приносит ничего', () => {
+    assert.equal(chargeOf(row({ status: 'NO_SHOW', chargeRatio: 0 })), 0);
+  });
+
+  it('присутствие считается по снятому проценту', () => {
+    assert.equal(chargeOf(row({ status: 'ATTENDED', chargeRatio: 100 })), 80_000);
   });
 
   it('процент округляется до целой копейки', () => {

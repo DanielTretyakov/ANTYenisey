@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   bookingViolation,
+  cancellationOpen,
   cancellationPercent,
   CLOSE_MINUTE,
   mergeBusy,
@@ -149,5 +150,25 @@ describe('STEP_MINUTES', () => {
     for (const minutes of Object.values(STEP_MINUTES)) {
       assert.equal(OPEN_MINUTE % minutes, 0, `шаг ${minutes} не делит 06:00 нацело`);
     }
+  });
+});
+
+describe('cancellationOpen', () => {
+  const startsAt = new Date('2026-09-12T12:00:00Z');
+
+  it('до начала отменить можно', () => {
+    assert.equal(cancellationOpen(startsAt, new Date('2026-09-12T11:59:59Z')), true);
+  });
+
+  /**
+   * Граница включительно: в момент начала занятие уже идёт, и отменить его —
+   * значит уйти от неявки на поздней отмене.
+   */
+  it('в момент начала — уже нельзя', () => {
+    assert.equal(cancellationOpen(startsAt, startsAt), false);
+  });
+
+  it('после начала нельзя', () => {
+    assert.equal(cancellationOpen(startsAt, new Date('2026-09-12T15:00:00Z')), false);
   });
 });
