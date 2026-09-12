@@ -45,7 +45,14 @@ export function personSummary(
   const wasHere: string[] = visits.map((visit) => visit.visitedAt);
 
   for (const entry of entries) {
-    summary.accrued += entry.charged;
+    // Начислено — по СОСТОЯВШЕМУСЯ: пришёл, не пришёл, отменил. Будущая
+    // бронь денег клубу ещё не принесла, и складывать её в общий итог значит
+    // показать администратору сумму, которой нет. У дня на смене правило
+    // другое и это не противоречие: там день идёт прямо сейчас, и «записан»
+    // — это человек, который вот-вот придёт.
+    if (entry.status !== 'BOOKED') {
+      summary.accrued += entry.charged;
+    }
 
     switch (entry.status) {
       case 'ATTENDED':

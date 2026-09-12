@@ -241,6 +241,17 @@ const STATUS_LABELS: Record<BookingStatus, string> = {
   NO_SHOW: 'неявка',
 };
 
+/**
+ * Что написать в статусе.
+ *
+ * Началась, а статус всё ещё «записан» — значит, клуб её не отметил. То же
+ * слово, что видит у себя клиент в «Моих записях»: администратор и человек
+ * должны читать одно и то же.
+ */
+function statusOf(entry: ClubPersonEntry): string {
+  return entry.status === 'BOOKED' && !entry.cancellable ? 'ждёт отметки' : STATUS_LABELS[entry.status];
+}
+
 function EntryRow({ entry }: { entry: ClubPersonEntry }) {
   const charged =
     (entry.status === 'CANCELLED' || entry.status === 'NO_SHOW') && (entry.chargePercent ?? 0) > 0
@@ -265,9 +276,10 @@ function EntryRow({ entry }: { entry: ClubPersonEntry }) {
           className={cn(
             entry.status === 'ATTENDED' && 'text-text-accent',
             entry.status === 'NO_SHOW' && entry.chargePercent !== 0 && 'text-warning',
+            entry.status === 'BOOKED' && !entry.cancellable && 'text-warning',
           )}
         >
-          {STATUS_LABELS[entry.status]}
+          {statusOf(entry)}
           {charged}
         </span>
         {entry.mark && (

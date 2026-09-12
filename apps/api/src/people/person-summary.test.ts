@@ -49,7 +49,7 @@ describe('personSummary', () => {
     assert.equal(summary.lateCancellations, 1);
   });
 
-  it('начислено складывается по всем записям, включая неявки и отмены', () => {
+  it('начислено складывается по неявкам и отменам тоже', () => {
     const summary = personSummary(
       [
         entry({ charged: 80_000 }),
@@ -61,6 +61,21 @@ describe('personSummary', () => {
     );
 
     assert.equal(summary.accrued, 190_000);
+  });
+
+  /**
+   * Иначе у человека, который только записался и ещё ни разу не пришёл, в
+   * карточке стояла бы сумма, которой клуб не получал.
+   */
+  it('будущая бронь в начислено не попадает', () => {
+    const summary = personSummary(
+      [entry({ status: 'BOOKED', startsAt: '2026-09-20T10:00:00.000Z', charged: 80_000 })],
+      [],
+      NOW,
+    );
+
+    assert.equal(summary.accrued, 0);
+    assert.equal(summary.upcoming, 1);
   });
 
   /**

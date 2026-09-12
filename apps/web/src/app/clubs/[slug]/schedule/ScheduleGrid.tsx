@@ -37,6 +37,13 @@ import { PURPOSE_CELL, PURPOSE_LABEL, PURPOSE_MARK } from './SchedulePalette';
  *
  * Ключ карты — `tableId|slot`, как у клеток расписания.
  */
+/** Промежуток, выделяемый протяжкой: клетки одного стола подряд. */
+interface Range {
+  tableId: string;
+  from: number;
+  to: number;
+}
+
 export interface BookedCell {
   /** Кого посадили — показывается в первой клетке брони. */
   person: string;
@@ -91,7 +98,21 @@ export function ScheduleGrid({
   const scroller = useRef<HTMLDivElement>(null);
   const firstRow = useRef<HTMLTableRowElement>(null);
   /** Что выделено протяжкой — только в режиме промежутка. */
-  const [range, setRange] = useState<{ tableId: string; from: number; to: number } | null>(null);
+  const [range, setRange] = useState<Range | null>(null);
+  /**
+   * То же выделение зеркалом в ref.
+   *
+   * Обработчик `pointerup` вешается один раз и в замыкании видел бы пустое
+   * выделение. Читать его из функции-обновления `setRange` нельзя: она обязана
+   * быть чистой, а вызов родителя оттуда даёт «Cannot update a component while
+   * rendering a different component» — React жалуется справедливо.
+   */
+  const rangeRef = useRef<Range | null>(null);
+
+  const select = (next: Range | null): void => {
+    rangeRef.current = next;
+    setRange(next);
+  };
   const [lineTop, setLineTop] = useState<number | null>(null);
   const [bodyTop, setBodyTop] = useState(0);
 
@@ -131,10 +152,12 @@ export function ScheduleGrid({
     if (!onRange) return;
 
     const done = (): void => {
-      setRange((current) => {
-        if (current) onRange(current.tableId, current.from, current.to + 1);
-        return null;
-      });
+      const current = rangeRef.current;
+
+      if (!current) return;
+
+      select(null);
+      onRange(current.tableId, current.from, current.to + 1);
     };
 
     window.addEventListener('pointerup', done);
@@ -237,14 +260,14 @@ export function ScheduleGrid({
                       slot >= range.from &&
                       slot <= range.to
                     }
-                    onSelectStart={() => setRange({ tableId: table.id, from: slot, to: slot })}
-                    onSelectTo={() =>
-                      setRange((current) =>
-                        current && current.tableId === table.id
-                          ? { ...current, to: slot }
-                          : current,
-                      )
-                    }
+                    onSelectStart={() => select({ tableId: table.id, from: slot, to: slot })}
+                    onSelectTo={() => {
+                      const current = rangeRef.current;
+
+                      if (current && current.tableId === table.id) {
+                        select({ ...current, to: slot });
+                      }
+                    }}
                   />
                 ))}
               </tr>
