@@ -1,33 +1,43 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   ClosureSlot,
   ClubCoach,
   ClubTable,
   DayClosureDraft,
+  DeskBooking,
   Tournament,
   TournamentType,
   TrainingType,
 } from '@yenisey/types';
+import { shortName } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { inputClassName } from '@/components/ui/Field';
-import { formatDate, todayIn } from '@/lib/bookingGrid';
+import { formatDate, formatMinute, todayIn } from '@/lib/bookingGrid';
 import {
   cellsToSlots,
+  GRID_END_MINUTE,
   markTouched,
+  minuteOfInstant,
   nowMinuteIn,
   shiftDate,
+  slotMinute,
+  slotRange,
   slotsToCells,
   splitByGrid,
   toDayClosureDraft,
   weekdayOf,
 } from '@/lib/closureGrid';
 import { cn } from '@/lib/cn';
+import { formatKopecks } from '@/lib/money';
+import { zonedToInstant } from '@/lib/timezones';
 import { useClubApi } from '@/lib/useClubApi';
 import { resolveEvents } from './dayEvents';
 import { ScheduleCanvas } from './ScheduleCanvas';
+import { seatsClient } from './SchedulePalette';
+import type { BookedCell } from './ScheduleGrid';
 import { messageOf, NoTables } from './TemplateBoard';
 import { useScheduleGrid } from './useScheduleGrid';
 
@@ -89,6 +99,10 @@ export function DayBoard({
 
   /** Ночные окна — сразу в виде, в каком их примет сервер: без `weekday` шаблона. */
   const [night, setNight] = useState<DayClosureDraft[]>([]);
+  /** Брони этого дня: сетка их показывает, но кистью не трогает. */
+  const [bookings, setBookings] = useState<DeskBooking[]>([]);
+  /** Промежуток, который администратор протянул кистью аренды с клиентом. */
+  const [seat, setSeat] = useState<Seat | null>(null);
   const [customised, setCustomised] = useState(false);
   const [customisedDates, setCustomisedDates] = useState<string[]>([]);
   const [asking, setAsking] = useState<'detach' | 'reset' | null>(null);
@@ -141,6 +155,37 @@ export function DayBoard({
   useEffect(() => {
     void load();
   }, [load]);
+
+  // --- Брони ---------------------------------------------------------------
+
+  /**
+   * Брони дня — отдельным запросом, а не частью расписания.
+   *
+   * Расписание — это план клуба, а бронь — договорённость с человеком, и живут
+   * они в разных таблицах. Сетке они нужны, чтобы не предлагать закрасить
+   * занятое: сервер такую бронь всё равно не пустит, но узнать об этом лучше
+   * до протяжки, а не после «Сохранить».
+   */
+  const loadBookings = useCallback(async (): Promise<void> => {
+    const rows = await club.deskBookings({ hallId, from: date, to: shiftDate(date, 1) });
+
+    // Отменённая и неявка стол не занимают: exclusion-констрейнт их не
+    // считает, и сетка не должна считать тоже.
+    setBookings(rows.filter((row) => row.status === 'BOOKED' || row.status === 'ATTENDED'));
+  }, [club, hallId, date]);
+
+  useEffect(() => {
+    setBookings([]);
+    setSeat(null);
+    loadBookings().catch(() => setBookings([]));
+  }, [loadBookings]);
+
+  const booked = useMemo(
+    () => bookedCells(bookings, timezone),
+    [bookings, timezone],
+  );
+
+  const seating = seatsClient(grid.palette.brush) && grid.palette.client !== null;
 
   // --- Текущее время -----------------------------------------------------------
 
@@ -224,6 +269,36 @@ export function DayBoard({
       await load();
     });
 
+  /**
+   * Посадить человека на протянутый промежуток.
+   *
+   * Бронь заводится сразу, а не при «Сохранить»: она не часть расписания —
+   * это чужие деньги и запись в кабинете человека, и откладывать её до общего
+   * сохранения дня значило бы смешать план клуба с договорённостью с клиентом.
+   * Цену считает сервер, здесь она только показывается.
+   */
+  const confirmSeat = (): Promise<void> =>
+    run(async () => {
+      if (!seat || !grid.palette.client) return;
+
+      const startsAt = zonedToInstant(date, formatMinute(seat.startMinute), timezone);
+
+      if (!startsAt) {
+        throw new Error('Не удалось определить время начала');
+      }
+
+      await club.createDeskBooking({
+        clientId: grid.palette.client.id,
+        tableId: seat.tableId,
+        startsAt: startsAt.toISOString(),
+        durationMinutes: seat.endMinute - seat.startMinute,
+        withRobot: grid.palette.brush === 'ROBOT',
+      });
+
+      setSeat(null);
+      await loadBookings();
+    });
+
   if (grid.own.length === 0) {
     return <NoTables />;
   }
@@ -244,9 +319,34 @@ export function DayBoard({
         grid={grid}
         lane={DAY_LANE}
         askCapacity
+        allowClient
+        booked={booked}
+        onRange={
+          seating
+            ? (tableId, from, to) =>
+                setSeat({
+                  tableId,
+                  startMinute: slotMinute(from),
+                  endMinute: slotMinute(to),
+                })
+            : undefined
+        }
         nightCount={night.length}
         nowMinute={date === today ? nowMinute : null}
       />
+
+      {seat && grid.palette.client && (
+        <SeatQuestion
+          seat={seat}
+          person={grid.palette.client.fullName}
+          tableLabel={grid.own.find((table) => table.id === seat.tableId)?.label ?? ''}
+          hallId={hallId}
+          withRobot={grid.palette.brush === 'ROBOT'}
+          pending={grid.pending}
+          onConfirm={() => void confirmSeat()}
+          onCancel={() => setSeat(null)}
+        />
+      )}
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <DayState
@@ -514,6 +614,117 @@ function DayStrip({
 
       <p className="mt-1 text-[0.75rem] text-text-subtle">
         Точкой отмечены дни, отвязанные от шаблона.
+      </p>
+    </div>
+  );
+}
+
+/** Промежуток, протянутый кистью аренды: из него получится бронь. */
+interface Seat {
+  tableId: string;
+  startMinute: number;
+  endMinute: number;
+}
+
+/**
+ * Брони дня → занятые клетки сетки.
+ *
+ * Минуты считаются по поясу ЗАЛА, а не браузера: бронь в абаканском зале не
+ * должна съезжать на час оттого, что администратор смотрит из Красноярска.
+ */
+function bookedCells(bookings: readonly DeskBooking[], timezone: string): Map<string, BookedCell> {
+  const cells = new Map<string, BookedCell>();
+
+  for (const booking of bookings) {
+    const startMinute = minuteOfInstant(booking.startsAt, timezone);
+    // Конец ровно в полночь местные сутки отдают как 1440, а не как 0: иначе
+    // промежуток вывернулся бы и бронь пропала из сетки.
+    const endMinute = minuteOfInstant(booking.endsAt, timezone) || GRID_END_MINUTE;
+    const { from, to } = slotRange(startMinute, endMinute);
+
+    for (let slot = from; slot < to; slot += 1) {
+      cells.set(`${booking.tableId}|${slot}`, {
+        person: booking.client.fullName,
+        startsHere: slot === from,
+      });
+    }
+  }
+
+  return cells;
+}
+
+/**
+ * «Посадить человека?» — с ценой, которую вернул сервер.
+ *
+ * Два шага, как у отмены брони на экране смены: за бронью стоят чужие деньги,
+ * и протяжка мышью слишком дёшева, чтобы сразу их списывать. Цена приходит с
+ * сервера — второй расчёт в форме разошёлся бы с ним молча.
+ */
+function SeatQuestion({
+  seat,
+  person,
+  tableLabel,
+  hallId,
+  withRobot,
+  pending,
+  onConfirm,
+  onCancel,
+}: {
+  seat: Seat;
+  person: string;
+  tableLabel: string;
+  hallId: string;
+  withRobot: boolean;
+  pending: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const club = useClubApi();
+  const [price, setPrice] = useState<number | null>(null);
+  const minutes = seat.endMinute - seat.startMinute;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setPrice(null);
+    club
+      .bookingQuote(hallId, minutes, withRobot)
+      .then((quote) => {
+        if (!cancelled) setPrice(quote.price);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [club, hallId, minutes, withRobot]);
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-control border border-border-accent bg-surface-accent-soft px-4 py-3 text-[0.875rem]">
+      <span>
+        Посадить <b>{shortName(person)}</b> · {tableLabel} ·{' '}
+        <span className="tabular-nums">
+          {formatMinute(seat.startMinute)}–{formatMinute(seat.endMinute)}
+        </span>
+        {withRobot ? ' · с роботом' : ''}
+      </span>
+
+      <span className="font-display text-[1.125rem] tabular-nums">
+        {price === null ? '…' : formatKopecks(price)}
+      </span>
+
+      <span className="ml-auto flex items-center gap-2">
+        <Button size="sm" pending={pending} onClick={onConfirm}>
+          Посадить
+        </Button>
+        <Button size="sm" variant="secondary" disabled={pending} onClick={onCancel}>
+          Не надо
+        </Button>
+      </span>
+
+      <p className="basis-full text-[0.8125rem] text-text-subtle">
+        Заведётся бронь: человек увидит её в «Моих записях» и сможет отменить сам. Расписание
+        этим не меняется — «Сохранить день» для брони не нужно.
       </p>
     </div>
   );

@@ -1,6 +1,6 @@
 'use client';
 
-import { NightNotice, ScheduleGrid, ScheduleLegend } from './ScheduleGrid';
+import { NightNotice, ScheduleGrid, ScheduleLegend, type BookedCell } from './ScheduleGrid';
 import { SchedulePalette } from './SchedulePalette';
 import type { ScheduleGridState } from './useScheduleGrid';
 
@@ -15,6 +15,9 @@ export function ScheduleCanvas({
   grid,
   lane,
   askCapacity,
+  allowClient = false,
+  booked,
+  onRange,
   nightCount,
   nowMinute = null,
 }: {
@@ -25,12 +28,18 @@ export function ScheduleCanvas({
    * расписания даты, а шаблон повторяется и конкретного занятия не несёт.
    */
   askCapacity: boolean;
+  /** Сажать ли клиента кистью аренды — только в расписании даты. */
+  allowClient?: boolean;
+  /** Брони этого дня: сетка их показывает, но кистью не трогает. */
+  booked?: Map<string, BookedCell>;
+  /** Протяжка выделяет промежуток под бронь вместо закраски. */
+  onRange?: (tableId: string, startSlot: number, endSlot: number) => void;
   nightCount: number;
   nowMinute?: number | null;
 }) {
   return (
     <>
-      <SchedulePalette {...grid.palette} askCapacity={askCapacity} />
+      <SchedulePalette {...grid.palette} askCapacity={askCapacity} allowClient={allowClient} />
 
       {grid.loading ? (
         <div
@@ -42,12 +51,14 @@ export function ScheduleCanvas({
           tables={grid.own}
           lane={lane}
           cells={grid.cells}
+          booked={booked}
           nameOf={grid.nameOf}
           captionOf={grid.captionOf}
           colors={grid.colors}
           painting={grid.painting}
           brushValue={grid.brushValue}
           onPaint={grid.paint}
+          onRange={onRange}
           nowMinute={nowMinute}
         />
       )}

@@ -53,10 +53,12 @@ export const WORKDAYS: Weekday[] = [1, 2, 3, 4, 5];
 /** Чем занят стол в клетке. `null` в карте не хранится — клетка просто отсутствует. */
 export interface CellValue {
   purpose: ClosurePurpose;
-  /** Тренер — у тренировки и спарринга. */
+  /**
+   * Тренер — у тренировки и спарринга. Больше за окном никого не бывает:
+   * клиент у аренды был ловушкой — окно не несёт ни цены, ни отмены, а человек
+   * считал себя записанным. Теперь его держит бронь стола.
+   */
   coachId: string | null;
-  /** Клиент — у аренды и робота. Оба поля разом не заполняются никогда. */
-  clientId: string | null;
   /** Тип тренировки — только у тренировки. */
   trainingTypeId: string | null;
   /**
@@ -80,13 +82,11 @@ export interface CellValue {
 }
 
 /**
- * Кто закреплён за клеткой, независимо от назначения.
- *
- * Сетке всё равно, тренер это или клиент: ей нужно знать, менялся ли человек
+ * Кто закреплён за клеткой. Сетке он нужен, чтобы знать, менялся ли человек
  * между соседними клетками и каким цветом красить.
  */
 export function personOf(value: CellValue): string | null {
-  return value.coachId ?? value.clientId;
+  return value.coachId;
 }
 
 /**
@@ -181,7 +181,6 @@ export function slotsToCells(
       cells.set(cellKey(lane(slot), slot.tableId, index), {
         purpose: slot.purpose,
         coachId: slot.coachId,
-        clientId: slot.clientId,
         trainingTypeId: slot.trainingTypeId,
         trainingSessionId: slot.trainingSessionId,
         tournamentId: slot.tournamentId,
@@ -199,7 +198,7 @@ export function slotsToCells(
  * Соседние клетки склеиваются в одно окно, но только если совпадают и
  * назначение, и закреплённый человек: тренировка Иванова, идущая встык с
  * тренировкой Петрова, — это два занятия, и слить их в одно значило бы
- * приписать часы одному из них. То же с арендой двух разных клиентов подряд.
+ * приписать часы одному из них.
  */
 export function cellsToSlots(
   cells: Cells,
@@ -228,7 +227,6 @@ export function cellsToSlots(
             endMinute: slotMinute(slot),
             purpose: runValue.purpose,
             coachId: runValue.coachId,
-            clientId: runValue.clientId,
             trainingTypeId: runValue.trainingTypeId,
             trainingSessionId: runValue.trainingSessionId,
             tournamentId: runValue.tournamentId,
@@ -310,7 +308,6 @@ export function sameValue(a: CellValue | undefined, b: CellValue | undefined): b
   return (
     a.purpose === b.purpose &&
     a.coachId === b.coachId &&
-    a.clientId === b.clientId &&
     a.trainingTypeId === b.trainingTypeId &&
     a.trainingSessionId === b.trainingSessionId &&
     a.tournamentId === b.tournamentId &&
@@ -350,7 +347,6 @@ export function toDayClosureDraft(slot: ClosureSlot): DayClosureDraft {
     endMinute: slot.endMinute,
     purpose: slot.purpose,
     coachId: slot.coachId,
-    clientId: slot.clientId,
     trainingTypeId: slot.trainingTypeId,
     trainingSessionId: slot.trainingSessionId,
     tournamentId: slot.tournamentId,
@@ -409,6 +405,32 @@ export function nowMinuteIn(timezone: string, at: Date = new Date()): number {
     Number(parts.find((part) => part.type === type)?.value ?? 0);
 
   return value('hour') * 60 + value('minute');
+}
+
+/**
+ * Момент в ISO → минуты от местной полуночи зала.
+ *
+ * Тем же способом, что и «сейчас»: бронь, начавшаяся в 18:00 в Абакане, в
+ * сетке абаканского зала должна стоять на 18:00, а не на московских часах
+ * администратора.
+ */
+export function minuteOfInstant(iso: string, timezone: string): number {
+  return nowMinuteIn(timezone, new Date(iso));
+}
+
+/**
+ * Какие клетки сетки покрывает окно `[startMinute, endMinute)`.
+ *
+ * Возвращает полуинтервал `[from, to)` уже подрезанным по сетке: ночное время
+ * в таблицу не попадает, а бронь, кончающаяся в полночь, упирается в её низ.
+ * Частично занятая клетка считается занятой целиком — стол в эти полчаса не
+ * свободен, и показать его свободным значило бы соврать.
+ */
+export function slotRange(startMinute: number, endMinute: number): { from: number; to: number } {
+  const from = Math.max(0, Math.floor((startMinute - GRID_START_MINUTE) / SLOT_MINUTES));
+  const to = Math.min(SLOTS_PER_DAY, Math.ceil((endMinute - GRID_START_MINUTE) / SLOT_MINUTES));
+
+  return { from, to: Math.max(from, to) };
 }
 
 /**

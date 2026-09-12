@@ -75,11 +75,20 @@ export const PURPOSE_CHIP = new Map<ClosurePurpose, string>(
   PURPOSES.map((item) => [item.value, item.chip] as const),
 );
 
-/** Кого прикрепляют к окну: тренера, клиента или никого. */
-export function attachmentOf(purpose: Brush): 'coach' | 'client' | 'none' {
+/**
+ * Кого прикрепляют к ОКНУ: только тренера.
+ *
+ * У аренды клиента нет: время, занятое человеком, — это бронь, а не окно.
+ * Выбранный клиент в палитре кисть не меняет — он говорит, кого посадить.
+ */
+export function attachmentOf(purpose: Brush): 'coach' | 'none' {
   if (purpose === 'TRAINING' || purpose === 'SPARRING') return 'coach';
-  if (purpose === 'RENT' || purpose === 'ROBOT') return 'client';
   return 'none';
+}
+
+/** Кистью аренды или робота сажают человека — если он выбран. */
+export function seatsClient(purpose: Brush): boolean {
+  return purpose === 'RENT' || purpose === 'ROBOT';
 }
 
 /**
@@ -107,6 +116,7 @@ export function SchedulePalette({
   tournamentTypes,
   tournamentTypeId,
   onTournamentType,
+  allowClient,
 }: {
   brush: Brush;
   onBrush: (brush: Brush) => void;
@@ -131,10 +141,17 @@ export function SchedulePalette({
   tournamentTypes: TournamentType[];
   tournamentTypeId: string | null;
   onTournamentType: (id: string | null) => void;
+  /**
+   * Можно ли посадить клиента кистью аренды. Только в расписании даты: бронь
+   * заводится на конкретное время, а шаблон недели повторяется — постоянного
+   * арендатора сажают бронью на нужные даты, а не строкой шаблона.
+   */
+  allowClient: boolean;
 }) {
   const attachment = attachmentOf(brush);
+  const seating = allowClient && seatsClient(brush);
   const currentCoach = coaches.find((coach) => coach.id === coachId);
-  const attachedId = attachment === 'coach' ? coachId : (client?.id ?? null);
+  const attachedId = attachment === 'coach' ? coachId : null;
   const attachedColor = attachedId ? colors.get(attachedId) : undefined;
 
   return (
@@ -196,9 +213,7 @@ export function SchedulePalette({
         </label>
       )}
 
-      {attachment === 'client' && (
-        <ClientPicker value={client} onChange={onClient} inline />
-      )}
+      {seating && <ClientPicker value={client} onChange={onClient} inline />}
 
       {brush === 'TRAINING' && (
         <label className="flex items-center gap-2 text-[0.875rem] text-text-muted">
@@ -251,7 +266,7 @@ export function SchedulePalette({
         </label>
       )}
 
-      {attachment !== 'none' && (
+      {(attachment !== 'none' || seating) && (
         <p className="flex w-full items-center gap-2 text-[0.8125rem] text-text-subtle">
           {attachedColor && (
             <span
@@ -260,11 +275,21 @@ export function SchedulePalette({
               aria-hidden="true"
             />
           )}
-          Закрашиваете: {PURPOSE_LABEL.get(brush as ClosurePurpose)?.toLowerCase()}
-          {attachment === 'coach' && currentCoach ? `, ${shortName(currentCoach.fullName)}` : ''}
-          {attachment === 'client' && client ? `, ${shortName(client.fullName)}` : ''}
-          {attachment === 'client' && !client ? ', без клиента' : ''} — закрасьте нужные часы,
-          поверх уже закрашенного тоже можно.
+          {seating && client ? (
+            <>
+              Посадите {shortName(client.fullName)}: протяните по нужным часам — получится бронь с
+              ценой, отменой и строкой в «Моих записях» у человека.
+            </>
+          ) : (
+            <>
+              Закрашиваете: {PURPOSE_LABEL.get(brush as ClosurePurpose)?.toLowerCase()}
+              {attachment === 'coach' && currentCoach
+                ? `, ${shortName(currentCoach.fullName)}`
+                : ''}
+              {seating ? ' без клиента — окно просто закроет стол' : ''} — закрасьте нужные часы,
+              поверх уже закрашенного тоже можно.
+            </>
+          )}
         </p>
       )}
     </div>

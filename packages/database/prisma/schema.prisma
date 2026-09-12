@@ -637,8 +637,8 @@ model ClientProfile {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  closureRules            TableClosureRule[]
-  dayClosures             DayClosure[]
+  // Окон расписания у клиента нет: время, закреплённое за человеком, — это
+  // бронь, а не окно. Кисть «Аренда» с клиентом заводит TableBooking.
   trainingBookings        TrainingBooking[]
   tournamentRegistrations TournamentRegistration[]
   tableBookings           TableBooking[]           @relation("ClientTableBookings")
@@ -1004,12 +1004,11 @@ model TableClosureRule {
   coachId String?
   coach   CoachProfile? @relation(fields: [coachId, tenantId], references: [userId, tenantId], onDelete: Restrict)
 
-  /// Клиент, за которым закреплено время: арендатор стола или тот, кто взял
-  /// робота. Необязателен — администратор может занять стол под аренду ещё до
-  /// того, как знает, кто именно придёт. Для тренировки и спарринга запрещён:
-  /// там участников много, и один «закреплённый» ввёл бы в заблуждение.
-  clientId String?
-  client   ClientProfile? @relation(fields: [clientId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+  // КЛИЕНТА У ОКНА НЕТ. Он тут был — «закреплённый арендатор», — и это
+  // оказалось ловушкой: окно не несёт ни цены, ни статуса, ни отмены, а
+  // человек, которого администратор вписал кистью «Аренда», считал себя
+  // записанным. В «Моих записях» у него при этом было пусто. Теперь такое
+  // время — бронь (TableBooking), а окно только закрывает стол.
 
   /// Какая это тренировка: «Общая групповая», «Первая подача». Обязателен при
   /// purpose = TRAINING — от типа зависит цена, а «просто тренировка» в
@@ -1039,7 +1038,6 @@ model TableClosureRule {
   @@index([tenantId, weekday])
   @@index([tableId])
   @@index([coachId])
-  @@index([clientId])
   @@index([trainingTypeId])
   @@index([tournamentTypeId])
 }
@@ -1096,8 +1094,7 @@ model DayClosure {
   purpose        ClosurePurpose @default(OTHER)
   coachId        String?
   coach          CoachProfile?  @relation(fields: [coachId, tenantId], references: [userId, tenantId], onDelete: Restrict)
-  clientId       String?
-  client         ClientProfile? @relation(fields: [clientId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+  // Клиента нет — см. TableClosureRule.
   trainingTypeId String?
   trainingType   TrainingType?  @relation(fields: [trainingTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
@@ -1129,7 +1126,6 @@ model DayClosure {
   @@index([scheduleId])
   @@index([tableId])
   @@index([coachId])
-  @@index([clientId])
   @@index([trainingTypeId])
   @@index([tournamentId])
   @@index([trainingSessionId])

@@ -301,32 +301,34 @@ ALTER TABLE "DayClosure"
 -- говорит клиенту ничего. Спарринг всегда с тренером, но заводить его может и
 -- администратор, ещё не зная, кто проведёт, поэтому там тренер необязателен.
 --
--- Аренда и робот закрепляются за КЛИЕНТОМ, а не за тренером: это он занял
--- стол. Клиент необязателен — стол можно занять под аренду до того, как
--- известно, кто придёт.
+-- Аренда и робот не закрепляются ни за кем: окно только закрывает стол.
+-- Клиент у окна был — «закреплённый арендатор», — и это оказалось ловушкой.
+-- Окно не несёт ни цены, ни статуса, ни отмены, а человек, которого
+-- администратор вписал кистью «Аренда», считал себя записанным и не видел
+-- записи у себя в кабинете. С 12.09.2026 время, закреплённое за человеком, —
+-- это бронь (`TableBooking`), и колонки `clientId` у окон больше нет.
 --
 -- Турнир в шаблоне недели хранится ТИПОМ, а не конкретным проведением: у
 -- турнира дата, и из повторяющегося шаблона её не взять. Конкретный турнир
 -- заводится, когда администратор открывает дату и сохраняет её расписание.
 --
 -- Перекрёстные поля запрещены, а не просто необязательны: тренер у аренды
--- набрал бы в статистику чужие часы, а «закреплённый клиент» у тренировки, где
--- участников десяток, ввёл бы в заблуждение.
+-- набрал бы в статистику чужие часы.
 ALTER TABLE "TableClosureRule"
   ADD CONSTRAINT "TableClosureRule_attachments_match_purpose"
   CHECK (
     ("purpose" = 'TRAINING'::"ClosurePurpose"
-       AND "coachId" IS NOT NULL AND "clientId" IS NULL
+       AND "coachId" IS NOT NULL
        AND "trainingTypeId" IS NOT NULL AND "tournamentTypeId" IS NULL)
     OR ("purpose" = 'SPARRING'::"ClosurePurpose"
-       AND "clientId" IS NULL AND "trainingTypeId" IS NULL AND "tournamentTypeId" IS NULL)
+       AND "trainingTypeId" IS NULL AND "tournamentTypeId" IS NULL)
     OR ("purpose" IN ('RENT'::"ClosurePurpose", 'ROBOT'::"ClosurePurpose")
        AND "coachId" IS NULL AND "trainingTypeId" IS NULL AND "tournamentTypeId" IS NULL)
     OR ("purpose" = 'TOURNAMENT'::"ClosurePurpose"
-       AND "coachId" IS NULL AND "clientId" IS NULL
+       AND "coachId" IS NULL
        AND "trainingTypeId" IS NULL AND "tournamentTypeId" IS NOT NULL)
     OR ("purpose" = 'OTHER'::"ClosurePurpose"
-       AND "coachId" IS NULL AND "clientId" IS NULL
+       AND "coachId" IS NULL
        AND "trainingTypeId" IS NULL AND "tournamentTypeId" IS NULL)
   );
 
@@ -334,20 +336,20 @@ ALTER TABLE "DayClosure"
   ADD CONSTRAINT "DayClosure_attachments_match_purpose"
   CHECK (
     ("purpose" = 'TRAINING'::"ClosurePurpose"
-       AND "coachId" IS NOT NULL AND "clientId" IS NULL
+       AND "coachId" IS NOT NULL
        AND "trainingTypeId" IS NOT NULL AND "tournamentId" IS NULL)
     OR ("purpose" = 'SPARRING'::"ClosurePurpose"
-       AND "clientId" IS NULL AND "trainingTypeId" IS NULL AND "tournamentId" IS NULL
+       AND "trainingTypeId" IS NULL AND "tournamentId" IS NULL
        AND "trainingSessionId" IS NULL)
     OR ("purpose" IN ('RENT'::"ClosurePurpose", 'ROBOT'::"ClosurePurpose")
        AND "coachId" IS NULL AND "trainingTypeId" IS NULL AND "tournamentId" IS NULL
        AND "trainingSessionId" IS NULL)
     OR ("purpose" = 'TOURNAMENT'::"ClosurePurpose"
-       AND "coachId" IS NULL AND "clientId" IS NULL
+       AND "coachId" IS NULL
        AND "trainingTypeId" IS NULL AND "tournamentId" IS NOT NULL
        AND "trainingSessionId" IS NULL)
     OR ("purpose" = 'OTHER'::"ClosurePurpose"
-       AND "coachId" IS NULL AND "clientId" IS NULL
+       AND "coachId" IS NULL
        AND "trainingTypeId" IS NULL AND "tournamentId" IS NULL
        AND "trainingSessionId" IS NULL)
   );

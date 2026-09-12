@@ -40,7 +40,6 @@ const SLOT_SELECT = {
   endMinute: true,
   purpose: true,
   coachId: true,
-  clientId: true,
   trainingTypeId: true,
 } as const;
 

@@ -28,7 +28,6 @@ function rule(overrides: Partial<ClosureRule> = {}): ClosureRule {
     endMinute: 19 * 60,
     purpose: 'TRAINING',
     coachId: 'coach-1',
-    clientId: null,
     trainingTypeId: 'type-1',
     trainingSessionId: null,
     tournamentId: null,
@@ -45,7 +44,6 @@ function dayClosure(overrides: Partial<DayClosure> = {}): DayClosure {
     endMinute: 11 * 60,
     purpose: 'RENT',
     coachId: null,
-    clientId: null,
     trainingTypeId: null,
     trainingSessionId: null,
     tournamentId: null,
@@ -399,36 +397,21 @@ describe('slotViolations', () => {
     assert.ok(violations.some((message) => /выбирается тип турнира/.test(message)));
   });
 
-  it('аренда закрепляется за клиентом', () => {
-    assert.deepEqual(
-      slotViolations(
-        rule({ purpose: 'RENT', coachId: null, clientId: 'client-1', trainingTypeId: null }),
-      ),
-      [],
-    );
-  });
-
-  it('аренда без клиента тоже законна — стол занимают до того, как знают кто', () => {
+  it('аренда никого за собой не держит: окно просто закрывает стол', () => {
+    // Человека за столом держит бронь — у неё есть цена, статус и отмена.
     assert.deepEqual(
       slotViolations(rule({ purpose: 'RENT', coachId: null, trainingTypeId: null })),
       [],
     );
   });
 
-  it('клиент у тренировки отклоняется', () => {
-    // Участников на тренировке десяток, и один «закреплённый» ввёл бы в
-    // заблуждение.
-    const violations = slotViolations(rule({ clientId: 'client-1' }));
-
-    assert.equal(violations.length, 1);
-    assert.match(violations[0]!, /только за арендой и роботом/);
-  });
-
   it('незаполненные поля приходят как undefined и замечаний не вызывают', () => {
-    // Клиент, не присланный вовсе, — это undefined, а не null. Без приведения
-    // «клиент только у аренды» срабатывало бы на каждой тренировке.
-    const partial = { ...rule() } as Partial<ClosureRule> & ClosureRule;
-    delete (partial as { clientId?: unknown }).clientId;
+    // Тренер, не присланный вовсе, — это undefined, а не null. Без приведения
+    // «тренер только у тренировки» срабатывало бы на каждой аренде.
+    const partial = {
+      ...rule({ purpose: 'RENT', trainingTypeId: null }),
+    } as Partial<ClosureRule> & ClosureRule;
+    delete (partial as { coachId?: unknown }).coachId;
 
     assert.deepEqual(slotViolations(partial), []);
   });
@@ -445,15 +428,9 @@ describe('attachedPersonId', () => {
     assert.equal(attachedPersonId(rule({ purpose: 'SPARRING' })), 'coach-1');
   });
 
-  it('у аренды и робота — клиент', () => {
-    assert.equal(
-      attachedPersonId(rule({ purpose: 'RENT', coachId: null, clientId: 'client-1' })),
-      'client-1',
-    );
-    assert.equal(
-      attachedPersonId(rule({ purpose: 'ROBOT', coachId: null, clientId: 'client-1' })),
-      'client-1',
-    );
+  it('у аренды и робота — никого: за столом человек по брони, а не по окну', () => {
+    assert.equal(attachedPersonId(rule({ purpose: 'RENT', coachId: null })), null);
+    assert.equal(attachedPersonId(rule({ purpose: 'ROBOT', coachId: null })), null);
   });
 
   it('у прочего никого', () => {

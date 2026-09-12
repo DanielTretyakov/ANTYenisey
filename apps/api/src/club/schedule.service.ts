@@ -38,7 +38,6 @@ const SLOT_SELECT = {
   endMinute: true,
   purpose: true,
   coachId: true,
-  clientId: true,
   trainingTypeId: true,
 } as const;
 
@@ -343,7 +342,6 @@ export class ScheduleService {
             endMinute: rule.endMinute,
             purpose: rule.purpose,
             coachId: rule.coachId,
-            clientId: rule.clientId,
             trainingTypeId: rule.trainingTypeId,
             trainingSessionId: null,
             tournamentId: rule.tournamentTypeId
@@ -649,7 +647,6 @@ function normalisePeople<T extends ClosureSlot>(slot: T): T {
   return {
     ...slot,
     coachId: slot.coachId ?? null,
-    clientId: slot.clientId ?? null,
     trainingTypeId: slot.trainingTypeId ?? null,
     trainingSessionId: slot.trainingSessionId ?? null,
     tournamentId: slot.tournamentId ?? null,

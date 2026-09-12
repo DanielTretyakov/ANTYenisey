@@ -213,7 +213,7 @@ export class DeskService {
         sessionIds: slots.map((slot) => slot.trainingSessionId),
         tournamentIds: slots.map((slot) => slot.tournamentId),
       }),
-      this.names(tenantId, slots.flatMap((slot) => [slot.coachId, slot.clientId])),
+      this.names(tenantId, slots.map((slot) => slot.coachId)),
       this.pendingRows(tenantId, moment, policy),
       // Визит с порога залу не принадлежит — у него нет стола. Показывается
       // по клубу за местные сутки зала.
@@ -645,7 +645,6 @@ export class DeskService {
       endMinute: number;
       purpose: BusySpan['purpose'];
       coachId: string | null;
-      clientId: string | null;
     }[],
     bookings: readonly BookingWithPerson[],
     names: Map<string, string>,
@@ -665,10 +664,9 @@ export class DeskService {
         endMinute: slot.endMinute,
         source: 'SCHEDULE',
         purpose: slot.purpose,
-        // За тренировкой и спаррингом стоит тренер, за арендой и роботом —
-        // закреплённый клиент. То же правило, что у `attachedPersonId`
-        // в closures.ts: обоих полей сразу у окна не бывает.
-        person: names.get(slot.coachId ?? slot.clientId ?? '') ?? null,
+        // За окном стоит только тренер: клиента у окна нет — человека за
+        // столом держит бронь (`attachedPersonId` в closures.ts).
+        person: names.get(slot.coachId ?? '') ?? null,
       });
     }
 

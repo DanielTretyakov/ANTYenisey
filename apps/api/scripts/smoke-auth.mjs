@@ -541,7 +541,6 @@ async function main() {
       endMinute: 1140,
       purpose: 'RENT',
       coachId: null,
-      clientId: null,
       trainingTypeId: null,
       tournamentId: null,
       tournamentTypeId: null,
@@ -728,8 +727,7 @@ async function main() {
             endMinute: 720,
             purpose: 'TOURNAMENT',
             coachId: null,
-            clientId: null,
-            trainingTypeId: null,
+                  trainingTypeId: null,
             tournamentId,
           },
         ],
@@ -755,8 +753,7 @@ async function main() {
             endMinute: 720,
             purpose: 'TOURNAMENT',
             coachId: null,
-            clientId: null,
-            trainingTypeId: null,
+                  trainingTypeId: null,
             tournamentId: null,
           },
         ],
@@ -764,44 +761,40 @@ async function main() {
     });
     check('турнир без указания какой — отклонён', 400, r.status);
 
-    console.log('=== 21б. Клиент, закреплённый за арендой');
+    console.log('=== 21б. У окна расписания клиента нет');
+    // Клиент у окна был ловушкой: окно не несёт ни цены, ни статуса, ни
+    // отмены, а человек, которого администратор вписал кистью «Аренда»,
+    // считал себя записанным и не видел записи в кабинете. Время, занятое
+    // человеком, — это бронь.
     const clients = (await asAdmin('/clubs/yenisey/people?role=CLIENT&limit=1')).body?.items ?? [];
     const clientId = clients[0]?.id ?? null;
 
-    if (!clientId) {
-      console.log('     клиентов в клубе нет — проверки аренды пропущены');
-    } else {
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}/template`, {
+      method: 'PUT',
+      json: { rules: [window({ purpose: 'RENT' })] },
+    });
+    check('аренда без клиента принята', 200, r.status);
+    assert('клиента в ответе нет вовсе', !('clientId' in (r.body?.[0] ?? {})));
+
+    if (clientId) {
       r = await asAdmin(`/clubs/yenisey/halls/${hallId}/template`, {
         method: 'PUT',
         json: { rules: [window({ purpose: 'RENT', clientId })] },
       });
-      check('аренда с клиентом принята', 200, r.status);
-      assert('клиент сохранён', r.body?.[0]?.clientId === clientId);
-
-      r = await asAdmin(`/clubs/yenisey/halls/${hallId}/template`, {
-        method: 'PUT',
-        json: { rules: [window({ purpose: 'RENT', clientId: null })] },
-      });
-      check('аренда без клиента тоже принята', 200, r.status);
-
-      r = await asAdmin(`/clubs/yenisey/halls/${hallId}/template`, {
-        method: 'PUT',
-        json: { rules: [window({ purpose: 'TRAINING', coachId, clientId })] },
-      });
-      check('клиент у тренировки отклонён', 400, r.status);
-
-      // Поле, не присланное вовсе, — это undefined, а не null: проверки не
-      // должны принимать его за заполненное.
-      r = await asAdmin(`/clubs/yenisey/halls/${hallId}/template`, {
-        method: 'PUT',
-        json: {
-          rules: [
-            { tableId, weekday: 2, startMinute: 900, endMinute: 1140, purpose: 'OTHER' },
-          ],
-        },
-      });
-      check('окно без полей тренера и клиента принято', 200, r.status);
+      check('клиент у окна отклонён как лишнее поле', 400, r.status);
     }
+
+    // Поле, не присланное вовсе, — это undefined, а не null: проверки не
+    // должны принимать его за заполненное.
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}/template`, {
+      method: 'PUT',
+      json: {
+        rules: [
+          { tableId, weekday: 2, startMinute: 900, endMinute: 1140, purpose: 'OTHER' },
+        ],
+      },
+    });
+    check('окно без полей тренера принято', 200, r.status);
 
     console.log('=== 21в. Состав клуба');
     r = await call('/clubs/yenisey/people', { headers: { Authorization: `Bearer ${access}` } });

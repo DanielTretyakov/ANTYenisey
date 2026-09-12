@@ -188,15 +188,14 @@ export function useScheduleGrid({
   function brushValue(): CellValue | null {
     if (brush === ERASER) return null;
 
-    // Человек кладётся только туда, где он осмыслен: тренер у занятия, клиент
-    // у аренды. Перекрёстные поля не просто необязательны, а запрещены —
-    // иначе в статистику тренера попадут чужие часы.
+    // Тренер кладётся только туда, где он осмыслен: у занятия и спарринга.
+    // У аренды он запрещён — иначе в его статистику попадут чужие часы.
+    // Клиента у окна нет вовсе: выбранным клиентом сажают человека бронью.
     const attachment = attachmentOf(brush);
 
     return {
       purpose: brush,
       coachId: attachment === 'coach' ? coachId : null,
-      clientId: attachment === 'client' ? (client?.id ?? null) : null,
       trainingTypeId: brush === 'TRAINING' ? trainingTypeId : null,
       // Занятие и проведение турнира в клетке не хранятся: они заводятся при
       // сохранении дня — из типа, тренера и границ закрашенного окна.

@@ -32,21 +32,41 @@ import { PURPOSE_CELL, PURPOSE_LABEL, PURPOSE_MARK } from './SchedulePalette';
  * таблица занимает высоту окна, а не 26rem — прежние 26rem показывали 13
  * строк из 36, меньше половины вечера.
  */
+/**
+ * Бронь в сетке: клетка, занятая человеком, а не планом клуба.
+ *
+ * Ключ карты — `tableId|slot`, как у клеток расписания.
+ */
+export interface BookedCell {
+  /** Кого посадили — показывается в первой клетке брони. */
+  person: string;
+  /** Первая клетка брони: подпись ставится только в ней. */
+  startsHere: boolean;
+}
+
 export function ScheduleGrid({
   tables,
   lane,
   cells,
+  booked,
   nameOf,
   captionOf,
   colors,
   painting,
   brushValue,
   onPaint,
+  onRange,
   nowMinute = null,
 }: {
   tables: ClubTable[];
   lane: string;
   cells: Cells;
+  /**
+   * Брони этого дня. Сетка их только показывает: бронь — это чужие деньги и
+   * договорённость с человеком, её не стирают кистью. Без них закрашивание
+   * поверх брони выглядело бы удавшимся, а сервер потом отказывал.
+   */
+  booked?: Map<string, BookedCell>;
   nameOf: (id: string) => string;
   /** Чем занято окно: название занятия или турнира. */
   captionOf: (value: CellValue) => string | null;
@@ -55,6 +75,14 @@ export function ScheduleGrid({
   brushValue: () => CellValue | null;
   onPaint: (tableId: string, slot: number, value: CellValue | null) => void;
   /**
+   * Протяжка выделяет промежуток вместо закрашивания клеток.
+   *
+   * Так работает кисть аренды с выбранным клиентом: закрашивать нечего —
+   * из промежутка получится бронь. Пока проп не передан, сетка красит как
+   * обычно.
+   */
+  onRange?: (tableId: string, startSlot: number, endSlot: number) => void;
+  /**
    * Который сейчас час в зале — только на сегодняшнем дне. `null` — линии нет:
    * в шаблоне недели «сегодня» не существует, а у вчерашнего дня нет «сейчас».
    */
@@ -62,6 +90,8 @@ export function ScheduleGrid({
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const firstRow = useRef<HTMLTableRowElement>(null);
+  /** Что выделено протяжкой — только в режиме промежутка. */
+  const [range, setRange] = useState<{ tableId: string; from: number; to: number } | null>(null);
   const [lineTop, setLineTop] = useState<number | null>(null);
   const [bodyTop, setBodyTop] = useState(0);
 
@@ -94,6 +124,27 @@ export function ScheduleGrid({
 
     return () => observer.disconnect();
   }, [nowMinute, showLine, tables.length]);
+
+  // Промежуток отдаётся наверх, когда кнопку отпустили, — где угодно, хоть
+  // за пределами таблицы: иначе выделение «залипало» бы до следующего клика.
+  useEffect(() => {
+    if (!onRange) return;
+
+    const done = (): void => {
+      setRange((current) => {
+        if (current) onRange(current.tableId, current.from, current.to + 1);
+        return null;
+      });
+    };
+
+    window.addEventListener('pointerup', done);
+    window.addEventListener('pointercancel', done);
+
+    return () => {
+      window.removeEventListener('pointerup', done);
+      window.removeEventListener('pointercancel', done);
+    };
+  }, [onRange]);
 
   // На сегодняшнем дне сетка один раз прокручивается к текущему часу: иначе
   // администратор каждый раз открывает её на шести утра и крутит до вечера.
@@ -172,12 +223,28 @@ export function ScheduleGrid({
                     slot={slot}
                     lane={lane}
                     cells={cells}
+                    booking={booked?.get(`${table.id}|${slot}`)}
                     nameOf={nameOf}
                     captionOf={captionOf}
                     colors={colors}
                     painting={painting}
                     brushValue={brushValue}
                     onPaint={onPaint}
+                    selecting={onRange !== undefined}
+                    selected={
+                      range !== null &&
+                      range.tableId === table.id &&
+                      slot >= range.from &&
+                      slot <= range.to
+                    }
+                    onSelectStart={() => setRange({ tableId: table.id, from: slot, to: slot })}
+                    onSelectTo={() =>
+                      setRange((current) =>
+                        current && current.tableId === table.id
+                          ? { ...current, to: slot }
+                          : current,
+                      )
+                    }
                   />
                 ))}
               </tr>
@@ -223,23 +290,33 @@ function GridCell({
   slot,
   lane,
   cells,
+  booking,
   nameOf,
   captionOf,
   colors,
   painting,
   brushValue,
   onPaint,
+  selecting,
+  selected,
+  onSelectStart,
+  onSelectTo,
 }: {
   table: ClubTable;
   slot: number;
   lane: string;
   cells: Cells;
+  booking: BookedCell | undefined;
   nameOf: (id: string) => string;
   captionOf: (value: CellValue) => string | null;
   colors: Map<string, PersonColor>;
   painting: { current: CellValue | null | undefined };
   brushValue: () => CellValue | null;
   onPaint: (tableId: string, slot: number, value: CellValue | null) => void;
+  selecting: boolean;
+  selected: boolean;
+  onSelectStart: () => void;
+  onSelectTo: () => void;
 }) {
   const value = cells.get(cellKey(lane, table.id, slot));
   const purposeLabel = value ? PURPOSE_LABEL.get(value.purpose) : 'свободно';
@@ -253,10 +330,7 @@ function GridCell({
   const above = cells.get(cellKey(lane, table.id, slot - 1));
   const startsHere =
     value !== undefined &&
-    (above === undefined ||
-      above.purpose !== value.purpose ||
-      above.coachId !== value.coachId ||
-      above.clientId !== value.clientId);
+    (above === undefined || above.purpose !== value.purpose || above.coachId !== value.coachId);
 
   const needsCoach = value?.purpose === 'TRAINING' && !personId;
 
@@ -274,8 +348,18 @@ function GridCell({
       <button
         type="button"
         aria-pressed={value !== undefined}
-        aria-label={`${table.label}, ${slotLabel(slot)} — ${[purposeLabel, caption, person].filter(Boolean).join(', ')}`}
-        title={[purposeLabel, caption, person].filter(Boolean).join(' · ')}
+        // Бронь кистью не трогают: за ней человек, цена и право на отмену.
+        disabled={booking !== undefined}
+        aria-label={
+          booking
+            ? `${table.label}, ${slotLabel(slot)} — бронь, ${booking.person}`
+            : `${table.label}, ${slotLabel(slot)} — ${[purposeLabel, caption, person].filter(Boolean).join(', ')}`
+        }
+        title={
+          booking
+            ? `Бронь · ${booking.person} — отменить или перенести можно на экране смены`
+            : [purposeLabel, caption, person].filter(Boolean).join(' · ')
+        }
         onPointerDown={(event) => {
           // Захват мешает pointerenter на соседних клетках: без снятия все
           // события уходили бы в первую. Проверка обязательна — снятие
@@ -284,31 +368,58 @@ function GridCell({
             event.currentTarget.releasePointerCapture(event.pointerId);
           }
 
+          if (selecting) {
+            onSelectStart();
+            return;
+          }
+
           const next = brushValue();
           const same =
             value !== undefined &&
             next !== null &&
             value.purpose === next.purpose &&
-            value.coachId === next.coachId &&
-            value.clientId === next.clientId;
+            value.coachId === next.coachId;
 
           painting.current = same ? null : next;
           onPaint(table.id, slot, painting.current);
         }}
-        onPointerEnter={() => {
+        onPointerEnter={(event) => {
+          if (selecting) {
+            // Кнопка мыши уже отпущена — значит, это просто наведение.
+            if (event.buttons > 0) onSelectTo();
+            return;
+          }
+
           if (painting.current !== undefined) {
             onPaint(table.id, slot, painting.current);
           }
         }}
-        style={background ? { background } : undefined}
+        style={background && !booking ? { background } : undefined}
         className={cn(
           'relative flex h-9 w-full items-center overflow-hidden pr-1.5 pl-7 text-left text-[0.8125rem] leading-none whitespace-nowrap transition-colors',
           // Подпись берёт обычный цвет текста: заливка по построению светлая на
           // светлой теме и тёмная на тёмной, и --text контрастен ей в обеих.
-          value ? 'text-text hover:brightness-110' : 'hover:bg-surface-sunken',
+          value && !booking ? 'text-text hover:brightness-110' : '',
+          !value && !booking && 'hover:bg-surface-sunken',
+          // Бронь — не краска расписания, а чужая договорённость: она
+          // заштрихована и не откликается на кисть.
+          booking && 'cursor-not-allowed bg-surface-sunken text-text-muted',
+          selected && 'ring-2 ring-inset ring-accent',
         )}
       >
-        {value && (
+        {booking && (
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-0 left-0 flex w-5 items-center justify-center text-[0.75rem] font-medium"
+            style={{ background: 'color-mix(in oklab, var(--text) 10%, transparent)' }}
+          >
+            Б
+          </span>
+        )}
+
+        {booking?.startsHere && <span className="truncate">{shortName(booking.person)}</span>}
+
+        {!booking && value && (
           // Буква назначения, а не вторая цветная полоса: цвет клетки занят
           // человеком, и второй цвет рядом с ним местами сливается.
           <span
@@ -320,7 +431,7 @@ function GridCell({
           </span>
         )}
 
-        {startsHere && (caption || person) && (
+        {!booking && startsHere && (caption || person) && (
           // Сначала чем занято, потом кто ведёт: администратор ищет в сетке
           // занятие, а тренера уже уточняет.
           <span className="truncate">
@@ -329,10 +440,10 @@ function GridCell({
             {person ? shortName(person) : ''}
           </span>
         )}
-        {startsHere && !caption && !person && value && !needsCoach && (
+        {!booking && startsHere && !caption && !person && value && !needsCoach && (
           <span className="text-text-muted">{purposeLabel}</span>
         )}
-        {startsHere && needsCoach && (
+        {!booking && startsHere && needsCoach && (
           // Тренировка без тренера не сохранится: сервер её отклонит. Лучше
           // сказать об этом в клетке, чем сообщением после «Сохранить».
           <span className="text-warning">нужен тренер</span>

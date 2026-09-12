@@ -249,16 +249,14 @@ export const ruleGroupKey = (rule: { tableId: string; weekday: Weekday }): strin
 const PURPOSES_WITHOUT_COACH: ClosurePurpose[] = ['RENT', 'ROBOT', 'TOURNAMENT', 'OTHER'];
 
 /**
- * Назначения, за которыми закрепляется клиент: он занял стол.
+ * Человек, закреплённый за окном, — только тренер.
  *
- * У тренировки и спарринга участников много, и один «закреплённый» ввёл бы в
- * заблуждение, поэтому там поле запрещено.
+ * Клиент за окном не закрепляется: время, занятое человеком, — это бронь
+ * стола, у которой есть цена, статус и отмена. Раньше у аренды здесь стоял
+ * «закреплённый арендатор», и человек считал себя записанным, ничего не имея.
  */
-const PURPOSES_WITH_CLIENT: ClosurePurpose[] = ['RENT', 'ROBOT'];
-
-/** Человек, закреплённый за окном, — тренер или клиент, смотря по назначению. */
 export function attachedPersonId(slot: ClosureSlot): string | null {
-  return (PURPOSES_WITH_CLIENT.includes(slot.purpose) ? slot.clientId : slot.coachId) ?? null;
+  return slot.coachId ?? null;
 }
 
 /**
@@ -269,17 +267,16 @@ export function attachedPersonId(slot: ClosureSlot): string | null {
  * тренером, но заводить его может и администратор, ещё не зная, кто именно
  * проведёт, поэтому тренер там необязателен.
  *
- * Аренда и робот закрепляются за клиентом — тоже необязательно: стол можно
- * занять до того, как известно, кто придёт.
+ * Аренда и робот не закрепляются ни за кем: окно только закрывает стол, а
+ * человека за столом держит бронь.
  */
 export function slotViolations(slot: ClosureSlot): string[] {
   const violations: string[] = [];
   const when = `${formatMinutes(slot.startMinute)}–${formatMinutes(slot.endMinute)}`;
-  // Клиент, не присланный вовсе, приходит как undefined, а не null. Без
+  // Поле, не присланное вовсе, приходит как undefined, а не null. Без
   // приведения «тренер у аренды запрещён» срабатывало бы на каждом окне, где
   // поле просто опустили.
   const coachId = slot.coachId ?? null;
-  const clientId = slot.clientId ?? null;
   const trainingTypeId = slot.trainingTypeId ?? null;
   const tournamentId = slot.tournamentId ?? null;
   const tournamentTypeId = slot.tournamentTypeId ?? null;
@@ -298,10 +295,6 @@ export function slotViolations(slot: ClosureSlot): string[] {
 
   if (PURPOSES_WITHOUT_COACH.includes(slot.purpose) && coachId !== null) {
     violations.push(`Окно ${when}: тренер указывается только для тренировки и спарринга`);
-  }
-
-  if (!PURPOSES_WITH_CLIENT.includes(slot.purpose) && clientId !== null) {
-    violations.push(`Окно ${when}: клиент закрепляется только за арендой и роботом`);
   }
 
   // От типа зависит цена, а «просто тренировка» в расписании не говорит

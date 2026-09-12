@@ -245,12 +245,9 @@ class ClosureSlotDto {
   @MaxLength(64)
   coachId: string | null;
 
-  /** Клиент, за которым закреплено время. Согласованность — там же. */
-  @IsOptional()
-  @ValidateIfNotNull()
-  @IsString()
-  @MaxLength(64)
-  clientId: string | null;
+  // Клиента у окна нет: время, занятое человеком, — это бронь стола, у
+  // которой есть цена, отмена и строка в «Моих записях». Присланный клиент
+  // отклоняется как лишнее поле (forbidNonWhitelisted).
 
   /** Тип тренировки. Согласованность с назначением — там же, в slotViolations. */
   @IsOptional()
