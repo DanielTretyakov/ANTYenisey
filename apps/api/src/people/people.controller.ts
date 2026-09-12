@@ -1,6 +1,8 @@
-import { Controller, Get, Param } from '@nestjs/common';
-import type { ClubPersonCard } from '@yenisey/types';
+import { Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import type { ClubPerson, ClubPersonCard, PlatformPersonLookup } from '@yenisey/types';
 import { PeopleService } from './people.service';
+import { PersonLookupQueryDto } from './dto/lookup.dto';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { ClubContext } from '../auth/club-context';
@@ -20,9 +22,34 @@ import type { ClubContext } from '../auth/club-context';
 export class PeopleController {
   constructor(private readonly people: PeopleService) {}
 
+  /**
+   * Найти человека на платформе по точной почте или телефону — приём «с порога».
+   *
+   * Ограничение частоты своё, жёстче общего: маршрут отвечает «такой человек
+   * есть», и без него перебор адресов стал бы способом узнать, кто
+   * зарегистрирован на платформе.
+   *
+   * Стоит ДО `:id`: иначе «lookup» уехал бы в него идентификатором.
+   */
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Get('lookup')
+  lookup(
+    @CurrentClub() club: ClubContext,
+    @Query() query: PersonLookupQueryDto,
+  ): Promise<PlatformPersonLookup> {
+    return this.people.lookup(club.tenantId, query);
+  }
+
   /** Человек целиком: кто он в клубе, сводка, записи и визиты — одним запросом. */
   @Get(':id')
   card(@CurrentClub() club: ClubContext, @Param('id') userId: string): Promise<ClubPersonCard> {
     return this.people.card(club.tenantId, userId);
+  }
+
+  /** Привязать найденного человека к клубу. Повтор — то же состояние, не ошибка. */
+  @Post(':id/attach')
+  @HttpCode(200)
+  attach(@CurrentClub() club: ClubContext, @Param('id') userId: string): Promise<ClubPerson> {
+    return this.people.attach(club.tenantId, userId);
   }
 }

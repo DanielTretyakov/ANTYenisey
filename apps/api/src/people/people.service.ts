@@ -1,8 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import type { ClubPersonCard, ClubPersonEntry } from '@yenisey/types';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import type { ClubPerson, ClubPersonCard, ClubPersonEntry, PlatformPersonLookup } from '@yenisey/types';
+import { shortName } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { AttendanceService } from '../attendance/attendance.service';
 import { formatBirthDate } from '../auth/birth-date';
+import { MembershipService } from '../club/membership.service';
 import { chargeOf } from '../desk/revenue';
 import { EntriesService } from '../entries/entries.service';
 import { personSummary } from './person-summary';
@@ -28,7 +30,96 @@ export class PeopleService {
     private readonly prisma: PrismaService,
     private readonly entries: EntriesService,
     private readonly attendance: AttendanceService,
+    private readonly membership: MembershipService,
   ) {}
+
+  /**
+   * Найти человека на платформе по точной почте или точному телефону.
+   *
+   * Так принимают новичка «с порога» (ТЗ → «Оплата и политика отмены»):
+   * человек регистрируется сам — учётку за него никто не заводит и пароля его
+   * не знает, — а администратор находит его и привязывает к клубу.
+   *
+   * Ровно одно поле за раз и только целиком: по куску почты можно было бы
+   * перебрать людей чужих клубов, а это чужие персональные данные. Пока
+   * человек не в клубе, имя отдаётся сокращённым — убедиться, что нашёлся
+   * нужный, этого хватает, собрать базу перебором — нет.
+   */
+  async lookup(
+    tenantId: string,
+    query: { email?: string; phone?: string },
+  ): Promise<PlatformPersonLookup> {
+    const filled = [query.email, query.phone].filter(Boolean);
+
+    if (filled.length !== 1) {
+      throw new BadRequestException('Ищите либо по почте, либо по телефону — целиком');
+    }
+
+    // Двое, а не один: телефон в схеме НЕ уникален — семья с одним номером
+    // на всех законна, — и молча взять первого значило бы привязать к клубу
+    // не того человека, а потом писать ему чужие визиты и списания.
+    const users = await this.prisma.user.findMany({
+      where: {
+        // Почта сравнивается без учёта регистра: человек диктует её вслух, и
+        // «Ivanov@» с «ivanov@» — один и тот же адрес.
+        ...(query.email ? { email: { equals: query.email, mode: 'insensitive' as const } } : {}),
+        ...(query.phone ? { phone: query.phone } : {}),
+        // Отключённый на платформе и анонимизированный не находятся: первому
+        // вход закрыт вовсе, у второго персональные данные затёрты.
+        deactivatedAt: null,
+        anonymizedAt: null,
+      },
+      select: {
+        id: true,
+        fullName: true,
+        memberships: { where: { tenantId }, select: { tenantId: true } },
+      },
+      take: 2,
+    });
+
+    if (users.length === 0) {
+      return { found: false, ambiguous: false, person: null };
+    }
+
+    if (users.length > 1) {
+      return { found: true, ambiguous: true, person: null };
+    }
+
+    const user = users[0]!;
+    const member = user.memberships.length > 0;
+
+    return {
+      found: true,
+      ambiguous: false,
+      person: { id: user.id, name: member ? user.fullName : shortName(user.fullName), member },
+    };
+  }
+
+  /**
+   * Привязать человека к клубу.
+   *
+   * Тем же кодом, что и первая запись: `MembershipService.ensureClient`
+   * заводит привязку и анкету клиента одной транзакцией. Второй путь завёл бы
+   * членство без анкеты — то есть человека, который не может ни на что
+   * записаться.
+   *
+   * Идемпотентно: второе нажатие — то же намерение, и отвечать на него надо
+   * тем же состоянием, а не ошибкой.
+   */
+  async attach(tenantId: string, userId: string): Promise<ClubPerson> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deactivatedAt: null, anonymizedAt: null },
+      select: { id: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Человек не найден на платформе');
+    }
+
+    await this.membership.ensureClient(tenantId, userId);
+
+    return (await this.card(tenantId, userId)).person;
+  }
 
   async card(tenantId: string, userId: string): Promise<ClubPersonCard> {
     const membership = await this.prisma.tenantMembership.findFirst({

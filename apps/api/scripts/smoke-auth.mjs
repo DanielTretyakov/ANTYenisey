@@ -1641,6 +1641,80 @@ async function main() {
     r = await asAdmin(yesterdayDesk);
     assert('визит виден в смене своего дня', (r.body?.visits ?? []).some((item) => item.id === visitId));
 
+    console.log('=== 22е. Новичок «с порога»: поиск и привязка');
+    // Человек регистрируется сам — учётку за него никто не заводит. У стойки
+    // администратор находит его по ТОЧНОЙ почте или телефону и привязывает.
+    // Телефон свой: он в схеме не уникален, и с общим номером поиск по
+    // телефону законно отвечает «несколько человек» — это проверяется ниже.
+    const walkInOwnPhone = `+7999${String(RUN).slice(-7)}`;
+    r = await post(
+      '/auth/register',
+      registration({ tenantSlug: undefined, phone: walkInOwnPhone }),
+    );
+    check('человек зарегистрировался сам, вне клуба', 201, r.status);
+    const walkInId = r.body?.user?.id ?? '';
+    const walkInEmail = r.body?.user?.email ?? '';
+    const walkInPhone = r.body?.user?.phone ?? '';
+
+    const lookup = (query) => asAdmin(`/clubs/yenisey/people/lookup?${query}`);
+
+    r = await call(`/clubs/yenisey/people/lookup?email=${encodeURIComponent(walkInEmail)}`, {
+      headers: { Authorization: `Bearer ${access}` },
+    });
+    check('поиск клиенту закрыт', 403, r.status);
+
+    r = await lookup(`email=${encodeURIComponent(walkInEmail.slice(0, 8))}`);
+    check('кусок почты — не почта', 400, r.status);
+
+    r = await lookup(`email=${encodeURIComponent(walkInEmail)}&phone=${encodeURIComponent(walkInPhone)}`);
+    check('два поля сразу отклонены', 400, r.status);
+
+    r = await lookup('email=nekto-takogo-net@example.com');
+    check('поиск незнакомого', 200, r.status);
+    assert('незнакомый не найден', r.body?.found === false && r.body?.person === null);
+
+    r = await lookup(`email=${encodeURIComponent(walkInEmail.toUpperCase())}`);
+    check('почта ищется без учёта регистра', 200, r.status);
+    assert('найден и ещё не в клубе', r.body?.person?.id === walkInId && r.body?.person?.member === false);
+    assert(
+      'до привязки имя сокращено — не собрать базу перебором',
+      /^\S+ \S\.$/.test(r.body?.person?.name ?? ''),
+    );
+
+    r = await lookup(`phone=${encodeURIComponent(walkInPhone)}`);
+    assert('свой телефон находит того же человека', r.body?.person?.id === walkInId);
+
+    // Телефон в схеме не уникален: у семьи он один на всех, и выбрать за
+    // администратора, кто из них нужен, нельзя.
+    r = await lookup('phone=%2B79991234567');
+    assert(
+      'общий телефон отвечает «несколько человек», а не первым попавшимся',
+      r.body?.found === true && r.body?.ambiguous === true && r.body?.person === null,
+    );
+
+    r = await asAdmin(`/clubs/yenisey/people/${walkInId}`);
+    check('карточка чужого платформе человека закрыта', 404, r.status);
+
+    r = await asAdmin(`/clubs/yenisey/people/${walkInId}/attach`, { method: 'POST' });
+    check('привязан к клубу', 200, r.status);
+    assert('привязан клиентом', r.body?.role === 'CLIENT' && r.body?.id === walkInId);
+
+    r = await asAdmin(`/clubs/yenisey/people/${walkInId}/attach`, { method: 'POST' });
+    check('повторная привязка — то же состояние, а не ошибка', 200, r.status);
+
+    r = await lookup(`email=${encodeURIComponent(walkInEmail)}`);
+    assert(
+      'своего клуба человек виден полным именем',
+      r.body?.person?.member === true && !/\S\.$/.test(r.body?.person?.name ?? ''),
+    );
+
+    r = await asAdmin(`/clubs/yenisey/people/${walkInId}`);
+    check('карточка привязанного открылась', 200, r.status);
+    assert('история у новичка пуста', (r.body?.entries ?? []).length === 0);
+
+    r = await asAdmin('/clubs/yenisey/people/net-takogo/attach', { method: 'POST' });
+    check('привязать несуществующего нельзя', 404, r.status);
+
     console.log('=== 22д. Карточка клиента');
     const cardPath = `/clubs/yenisey/people/${seatedId}`;
 

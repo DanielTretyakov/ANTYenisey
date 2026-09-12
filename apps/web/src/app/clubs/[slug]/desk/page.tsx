@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
+  ClubPerson,
   DeskBooking,
   DeskDay,
   DeskEvent,
@@ -16,6 +17,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { BookingDialog } from './BookingDialog';
 import { MarkedBlock } from './MarkedBlock';
+import { NewClientDialog } from './NewClientDialog';
 import { PendingBlock } from './PendingBlock';
 import { VisitDialog } from './VisitDialog';
 import { inputClassName } from '@/components/ui/Field';
@@ -68,6 +70,9 @@ export default function DeskPage() {
   const [error, setError] = useState<string | null>(null);
   const [seating, setSeating] = useState(false);
   const [visiting, setVisiting] = useState(false);
+  const [newClient, setNewClient] = useState(false);
+  /** Кого вносить визитом — заполняется после привязки новичка «с порога». */
+  const [visitFor, setVisitFor] = useState<ClubPerson | null>(null);
 
   useEffect(() => {
     if (session.status === 'anonymous') {
@@ -193,6 +198,9 @@ export default function DeskPage() {
 
         {day && hall && (
           <span className="ml-auto flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => setNewClient(true)}>
+              Новый клиент
+            </Button>
             <Button variant="secondary" onClick={() => setVisiting(true)}>
               Внести визит
             </Button>
@@ -201,12 +209,30 @@ export default function DeskPage() {
         )}
       </div>
 
+      {newClient && (
+        <NewClientDialog
+          onClose={() => setNewClient(false)}
+          onAttached={(person) => {
+            // Привязали — сразу предлагаем внести визит: человек стоит у
+            // стойки, и ради этого он и подошёл.
+            setNewClient(false);
+            setVisitFor(person);
+            setVisiting(true);
+          }}
+        />
+      )}
+
       {visiting && day && (
         <VisitDialog
           day={day}
-          onClose={() => setVisiting(false)}
+          person={visitFor}
+          onClose={() => {
+            setVisiting(false);
+            setVisitFor(null);
+          }}
           onCreated={() => {
             setVisiting(false);
+            setVisitFor(null);
             load();
           }}
         />

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PeopleController } from './people.controller';
 import { PeopleService } from './people.service';
 import { AttendanceModule } from '../attendance/attendance.module';
+import { ClubModule } from '../club/club.module';
 import { EntriesModule } from '../entries/entries.module';
 
 /**
@@ -12,9 +13,12 @@ import { EntriesModule } from '../entries/entries.module';
  * мелочах, потом в деньгах.
  *
  * `AttendanceModule` — ради подписей «кто отметил» и визитов с порога.
+ *
+ * `ClubModule` — ради `MembershipService`: пришедшего с порога привязывает к
+ * клубу тот же код, что и первая запись.
  */
 @Module({
-  imports: [AttendanceModule, EntriesModule],
+  imports: [AttendanceModule, ClubModule, EntriesModule],
   controllers: [PeopleController],
   providers: [PeopleService],
 })

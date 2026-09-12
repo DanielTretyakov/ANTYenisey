@@ -20,16 +20,22 @@ import { useClubApi } from '@/lib/useClubApi';
  */
 export function VisitDialog({
   day,
+  person = null,
   onClose,
   onCreated,
 }: {
   day: DeskDay;
+  /**
+   * Кого вносим, если он уже известен: сразу после привязки новичка «с
+   * порога» искать его снова в том же окне — лишнее движение у стойки.
+   */
+  person?: ClubPerson | null;
   onClose: () => void;
   onCreated: () => void;
 }) {
   const club = useClubApi();
 
-  const [client, setClient] = useState<ClubPerson | null>(null);
+  const [client, setClient] = useState<ClubPerson | null>(person);
   const [date, setDate] = useState(day.date);
   // Сегодня — «сейчас»: чаще всего вносят того, кто только что вошёл.
   const [time, setTime] = useState(formatMinute(day.nowMinute ?? 18 * 60));

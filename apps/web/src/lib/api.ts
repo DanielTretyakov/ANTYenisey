@@ -19,6 +19,7 @@ import type {
   ClubPeoplePage,
   ClubPeopleQuery,
   ClubPersonCard,
+  PlatformPersonLookup,
   ClubPerson,
   ClubSettings,
   ClubTable,
@@ -324,6 +325,25 @@ export function clubApi(slug: string = TENANT_SLUG) {
 
     /** Карточка человека: кто он в клубе, сводка, записи и визиты — одним запросом. */
     person: (id: string): Promise<ClubPersonCard> => authorized(`${club}/people/${id}`),
+
+    /**
+     * Найти человека на платформе по ТОЧНОЙ почте или телефону.
+     *
+     * Частичного поиска здесь нет: администратор ищет того, кто стоит перед
+     * ним и назвал свою почту, а не листает людей чужих клубов.
+     */
+    lookupPerson: (query: { email?: string; phone?: string }): Promise<PlatformPersonLookup> => {
+      const search = new URLSearchParams();
+
+      if (query.email) search.set('email', query.email);
+      if (query.phone) search.set('phone', query.phone);
+
+      return authorized(`${club}/people/lookup?${search.toString()}`);
+    },
+
+    /** Привязать найденного человека к клубу. Повтор — то же состояние. */
+    attachPerson: (id: string): Promise<ClubPerson> =>
+      authorized(`${club}/people/${id}/attach`, json('POST', {})),
 
     /** Повышение клиента до тренера и обратно. */
     changeRole: (userId: string, role: ClubPerson['role']): Promise<ClubPerson> =>
