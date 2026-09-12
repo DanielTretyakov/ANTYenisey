@@ -1,7 +1,7 @@
 // Prisma-схема платформы «Енисей» (Этап 1).
 // Реализует раздел docs/TZ.md → «Модель данных».
 //
-// Схема развёрнута на PostgreSQL 18 (29 таблиц), ограничения из
+// Схема развёрнута на PostgreSQL 18 (39 таблиц), ограничения из
 // prisma/constraints.sql накатываются миграцией, сценарии
 // prisma/tests/schema-tests.sql проходят — включая проверку, что база
 // физически не даёт смешать данные двух клубов.
@@ -210,6 +210,44 @@ enum AuditAction {
   CANCELLATION_POLICY_CHANGED
   ROLE_CHANGED
   CLIENT_ANONYMIZED // удаление персданных по требованию субъекта
+  RANK_VERIFIED // администратор клуба подтвердил спортивный разряд игрока
+  RANK_REJECTED // …или отклонил его, с причиной
+}
+
+/// Что за файл лежит в StoredFile. От вида зависят и лимит размера, и
+/// допустимые форматы, и то, кому файл отдаётся (см. constraints.sql, раздел 18).
+enum StoredFileKind {
+  AVATAR // аватар игрока: приведён к 512×512 WebP, метаданные выброшены
+  RANK_DOCUMENT // скан приказа о присвоении разряда: картинка или PDF
+}
+
+/// Уровень соревнования в достижении игрока.
+enum AchievementLevel {
+  INTERNATIONAL
+  NATIONAL // всероссийское
+  REGIONAL // краевое, областное
+  CITY
+  CLUB
+}
+
+/// Спортивный разряд или звание по ЕВСК. Порядок — от младшего к старшему.
+enum SportRankLevel {
+  YOUTH_3 // третий юношеский
+  YOUTH_2
+  YOUTH_1
+  SPORT_3 // третий спортивный
+  SPORT_2
+  SPORT_1
+  KMS // кандидат в мастера спорта
+  MS // мастер спорта
+  MSMK // мастер спорта международного класса
+}
+
+/// Проверка разряда клубом.
+enum SportRankStatus {
+  PENDING // заявлен игроком, ещё никто не смотрел — или игрок его поправил
+  VERIFIED
+  REJECTED
 }
 
 /// Тип юридического документа, который человек принимает.
@@ -497,6 +535,148 @@ model User {
   refreshTokens  RefreshToken[]
   // «Мои клубы» — отметка человека, а не клуба, поэтому висит на аккаунте.
   favouriteClubs UserClub[]
+
+  // Профиль игрока — тоже свойство человека, а не клуба: разряд не меняется
+  // от того, в каком зале человек сегодня играет.
+  playerProfile PlayerProfile?
+  achievements  Achievement[]
+  sportRank     SportRank?
+  files         StoredFile[]
+}
+
+// ---------------------------------------------------------------------------
+// Профиль игрока
+// ---------------------------------------------------------------------------
+//
+// ВНИМАНИЕ: расширение сверх ТЗ, решение владельца продукта от 12.09.2026. В
+// ТЗ у клиента есть только справочный рейтинг (ClientProfile.rating), а фото,
+// инвентарь и достижения описаны лишь у тренера.
+//
+// Всё здесь висит на User, а не на TenantMembership: аккаунт один на
+// платформу, и разряд, подтверждённый одним клубом, действует во всех.
+// Удаление каскадное — это персональные данные без денежных следов, и при
+// удалении учётки им оставаться незачем (152-ФЗ).
+
+/// Загруженный файл. Байты лежат в Postgres, за интерфейсом FileStorage:
+/// хостинга с объектным хранилищем пока нет, а переезд в S3 — это замена
+/// одного модуля, а не схемы связей.
+///
+/// Файл заменяется, а не копится: новый аватар — новая строка, старая
+/// удаляется в той же транзакции. У истории денег удаления нет, а у
+/// персональных данных оно обязано быть.
+model StoredFile {
+  id          String         @id @default(cuid())
+  ownerUserId String
+  owner       User           @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  kind        StoredFileKind
+
+  /// Тип определён по сигнатуре байтов, а не взят из заголовка запроса:
+  /// заголовок пишет клиент, и «image/png» на HTML-файле ничего не стоит.
+  contentType String
+  size        Int
+  /// SHA-256 содержимого, шестнадцатеричный. Проверка целостности при
+  /// переезде в объектное хранилище.
+  sha256      String
+  data        Bytes
+
+  createdAt DateTime @default(now())
+
+  avatarOf       PlayerProfile[] @relation("ProfileAvatar")
+  rankDocumentOf SportRank[]     @relation("RankDocument")
+
+  // Мишень составных ключей: аватар и приказ ссылаются на пару (файл,
+  // владелец), и база не примет чужой файл в своём профиле.
+  @@unique([id, ownerUserId])
+  @@index([ownerUserId])
+}
+
+/// Карточка игрока: аватар и инвентарь. Заполняет сам человек в «Кабинете».
+///
+/// Инвентарь — свободный текст: каталога оснований и накладок нет, и
+/// заводить его ради трёх полей незачем.
+model PlayerProfile {
+  userId String @id
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Ключ составной — (файл, этот же человек): чужой файл аватаром не станет.
+  ///
+  /// NoAction, а не Restrict: при удалении учётки каскад уносит и профиль, и
+  /// файл одним оператором, и Restrict остановил бы его на полпути, если бы
+  /// файл удалялся первым. NoAction проверяет связь в конце оператора, когда
+  /// профиля уже нет, — а удалить файл из-под живого профиля по-прежнему нельзя.
+  avatarFileId String?     @unique
+  avatar       StoredFile? @relation("ProfileAvatar", fields: [avatarFileId, userId], references: [id, ownerUserId], onDelete: NoAction)
+
+  blade          String? // основание
+  forehandRubber String? // накладка справа
+  backhandRubber String? // накладка слева
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Достижение — строка из списка, который игрок ведёт сам, без
+/// подтверждения. Результатов турниров система не хранит, поэтому
+/// достижения с турниров клуба сами сюда не попадают.
+model Achievement {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title String // «Первенство Красноярского края, мужской одиночный разряд»
+  /// Дата соревнования. DATE, а не отметка времени — по той же причине, что у
+  /// дня рождения: у неё нет часа.
+  date  DateTime         @db.Date
+  level AchievementLevel
+  /// Занятое место; пусто — «участие».
+  place Int?
+  note  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, date])
+}
+
+/// Спортивный разряд игрока и его проверка клубом.
+///
+/// Подтверждает администратор любого клуба, где человек состоит, и
+/// подтверждение действует на всей платформе с подписью «подтвердил клуб X».
+/// Правка разряда игроком возвращает его на проверку.
+model SportRank {
+  userId String         @id
+  user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rank   SportRankLevel
+
+  // Обоснование: номер и дата приказа вместе — либо скан приказа. Одно из
+  // двух обязательно (constraints.sql, раздел 18).
+  orderNumber String?
+  orderDate   DateTime? @db.Date
+
+  /// Скан приказа. Видят только сам человек и администраторы его клубов —
+  /// там паспортные данные и дата рождения.
+  documentFileId String?     @unique
+  document       StoredFile? @relation("RankDocument", fields: [documentFileId, userId], references: [id, ownerUserId], onDelete: NoAction)
+
+  status SportRankStatus @default(PENDING)
+
+  /// Кто и в каком клубе принял решение. Ключ составной и целится в
+  /// TenantMembership: база не примет проверяющего не из того клуба, который
+  /// значится в подписи. Что он там администратор, а игрок там состоит, —
+  /// проверяет сервис: это сравнение строк других таблиц.
+  reviewedByUserId   String?
+  reviewedInTenantId String?
+  reviewedBy         TenantMembership? @relation("RankReviews", fields: [reviewedByUserId, reviewedInTenantId], references: [userId, tenantId], onDelete: Restrict)
+  reviewedAt         DateTime?         @db.Timestamptz(3)
+  rejectionReason    String?
+
+  createdAt DateTime @default(now())
+  /// Версия для проверки «разряд не изменился, пока администратор смотрел
+  /// карточку»: решение принимается о том, что он видел, а не о том, что
+  /// игрок успел поправить за это время.
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([reviewedByUserId, reviewedInTenantId])
 }
 
 /// «Мои клубы»: избранное и заявленная принадлежность одновременно.
@@ -606,6 +786,9 @@ model TenantMembership {
   tableBookingsCreated           TableBooking[]           @relation("TableBookingAuthor")
   trainingBookingsCreated        TrainingBooking[]        @relation("TrainingBookingAuthor")
   tournamentRegistrationsCreated TournamentRegistration[] @relation("TournamentRegistrationAuthor")
+
+  // Разряды, проверенные этим администратором от имени этого клуба.
+  rankReviews SportRank[] @relation("RankReviews")
 
   // Первичный ключ и одновременно мишень всех составных FK клубных таблиц.
   @@id([userId, tenantId])

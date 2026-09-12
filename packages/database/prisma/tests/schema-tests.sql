@@ -3,7 +3,7 @@
 -- ради чего заведены.
 -- ---------------------------------------------------------------------------
 --
--- СТАТУС: прогнано на PostgreSQL 18 (12.09.2026) — 59 из 59 сценариев прошли.
+-- СТАТУС: прогнано на PostgreSQL 18 (12.09.2026) — 76 из 76 сценариев прошли.
 -- Дополнительно проверено, что отказы приходят именно от нужных ограничений,
 -- а не по случайной причине: exclusion-констрейнт даёт 23P01, составные
 -- внешние ключи — 23503, частичный уникальный индекс — 23505, check'и — 23514.
@@ -849,3 +849,146 @@ DO $$ BEGIN
   VALUES ('dc5','t1','ds1','tb1',1170,1200,'OTHER',now());
   RAISE NOTICE 'BF. Окно дня встык принято................ OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'BF. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- ---------------------------------------------------------------------------
+-- Профиль игрока (раздел 18 constraints.sql)
+-- ---------------------------------------------------------------------------
+--
+-- Файлы игроков: у u1 — аватар и скан приказа, у u2 — аватар. Байты
+-- условные: база проверяет размер, вид и владельца, а не содержимое.
+
+INSERT INTO "StoredFile" (id,"ownerUserId",kind,"contentType",size,sha256,data)
+VALUES ('f1','u1','AVATAR','image/webp',4,repeat('a',64),'\x52494646'::bytea),
+       ('f2','u1','RANK_DOCUMENT','application/pdf',5,repeat('b',64),'\x255044462d'::bytea),
+       ('f3','u2','AVATAR','image/webp',4,repeat('c',64),'\x52494646'::bytea);
+
+-- Общая проверка «отказ пришёл от нужного правила» для сценариев ниже:
+-- код ошибки и имя ограничения, а не просто факт отказа (см. оговорку в
+-- начале файла).
+CREATE FUNCTION pg_temp.expect(label text, statement text, want_code text, want_name text)
+RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE code text; cname text;
+BEGIN
+  EXECUTE statement;
+  RAISE NOTICE '%. ПРОВАЛ: база приняла то, что должна была отклонить', label;
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE, cname = CONSTRAINT_NAME;
+  IF code = want_code AND cname = want_name THEN
+    RAISE NOTICE '%. Отклонено правилом % ... OK (ожидалось)', label, want_name;
+  ELSE
+    RAISE NOTICE '%. ПРОВАЛ: отказ пришёл от % (%), ждали % (%)', label, code, cname, want_code, want_name;
+  END IF;
+END
+$fn$;
+
+-- BG. Размер в строке не совпадает с байтами: клиент прислал «4», а их пять.
+SELECT pg_temp.expect('BG',
+  $q$INSERT INTO "StoredFile" (id,"ownerUserId",kind,"contentType",size,sha256,data)
+     VALUES ('fx','u1','AVATAR','image/webp',4,repeat('a',64),'\x5249464600'::bytea)$q$,
+  '23514', 'StoredFile_size_matches_data');
+
+-- BH. SVG вместо скана приказа — исполняемый код в картинке.
+SELECT pg_temp.expect('BH',
+  $q$INSERT INTO "StoredFile" (id,"ownerUserId",kind,"contentType",size,sha256,data)
+     VALUES ('fx','u1','RANK_DOCUMENT','image/svg+xml',4,repeat('a',64),'\x3c737667'::bytea)$q$,
+  '23514', 'StoredFile_type_matches_kind');
+
+-- BI. Аватар больше мегабайта — значит, пережатие не сработало.
+SELECT pg_temp.expect('BI',
+  $q$INSERT INTO "StoredFile" (id,"ownerUserId",kind,"contentType",size,sha256,data)
+     VALUES ('fx','u1','AVATAR','image/webp',1048577,repeat('a',64),convert_to(repeat('a',1048577),'UTF8'))$q$,
+  '23514', 'StoredFile_size_within_limit');
+
+-- BJ. Чужой файл аватаром: составной ключ (файл, человек).
+SELECT pg_temp.expect('BJ',
+  $q$INSERT INTO "PlayerProfile" ("userId","avatarFileId","updatedAt") VALUES ('u1','f3',now())$q$,
+  '23503', 'PlayerProfile_avatarFileId_userId_fkey');
+
+-- BK. Свой файл аватаром — проходит.
+DO $$ BEGIN
+  INSERT INTO "PlayerProfile" ("userId","avatarFileId",blade,"updatedAt") VALUES ('u1','f1','Butterfly Viscaria',now());
+  RAISE NOTICE 'BK. Свой аватар принят....................... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'BK. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- BL. Удалить файл из-под живого профиля.
+SELECT pg_temp.expect('BL',
+  $q$DELETE FROM "StoredFile" WHERE id = 'f1'$q$,
+  '23503', 'PlayerProfile_avatarFileId_userId_fkey');
+
+-- BM. Пробелы вместо основания: пусто — это NULL.
+SELECT pg_temp.expect('BM',
+  $q$UPDATE "PlayerProfile" SET blade = '   ' WHERE "userId" = 'u1'$q$,
+  '23514', 'PlayerProfile_equipment_filled');
+
+-- BN. Нулевое место в достижении.
+SELECT pg_temp.expect('BN',
+  $q$INSERT INTO "Achievement" (id,"userId",title,date,level,place,"updatedAt")
+     VALUES ('a0','u1','Первенство края',DATE '2025-04-12','REGIONAL',0,now())$q$,
+  '23514', 'Achievement_place_positive');
+
+-- BO. Разряд без обоснования — ни приказа, ни скана.
+SELECT pg_temp.expect('BO',
+  $q$INSERT INTO "SportRank" ("userId",rank,"updatedAt") VALUES ('u1','KMS',now())$q$,
+  '23514', 'SportRank_justified');
+
+-- BP. Номер приказа без даты.
+SELECT pg_temp.expect('BP',
+  $q$INSERT INTO "SportRank" ("userId",rank,"orderNumber","updatedAt") VALUES ('u1','KMS','12-нг',now())$q$,
+  '23514', 'SportRank_order_complete');
+
+-- Разряды для сценариев проверки: у u1 — по скану, у тренера c1 — по приказу.
+INSERT INTO "SportRank" ("userId",rank,"documentFileId","updatedAt") VALUES ('u1','KMS','f2',now());
+INSERT INTO "SportRank" ("userId",rank,"orderNumber","orderDate","updatedAt")
+VALUES ('c1','SPORT_1','45-р',DATE '2024-11-01',now());
+
+-- BQ. «Подтверждён» без проверяющего.
+SELECT pg_temp.expect('BQ',
+  $q$UPDATE "SportRank" SET status = 'VERIFIED' WHERE "userId" = 'u1'$q$,
+  '23514', 'SportRank_review_matches_status');
+
+-- BR. Отказ без причины.
+SELECT pg_temp.expect('BR',
+  $q$UPDATE "SportRank" SET status = 'REJECTED', "reviewedByUserId" = 'c1', "reviewedInTenantId" = 't1',
+       "reviewedAt" = now() WHERE "userId" = 'u1'$q$,
+  '23514', 'SportRank_review_matches_status');
+
+-- BS. Проверяющий «из клуба», где его нет: u2 в клубе t1 не состоит (c1
+--     не годится — сценарий Y сделал его тренером и во втором клубе).
+SELECT pg_temp.expect('BS',
+  $q$UPDATE "SportRank" SET status = 'VERIFIED', "reviewedByUserId" = 'u2', "reviewedInTenantId" = 't1',
+       "reviewedAt" = now() WHERE "userId" = 'u1'$q$,
+  '23503', 'SportRank_reviewedByUserId_reviewedInTenantId_fkey');
+
+-- BT. Свой разряд: c1 подтверждает сам себе.
+SELECT pg_temp.expect('BT',
+  $q$UPDATE "SportRank" SET status = 'VERIFIED', "reviewedByUserId" = 'c1', "reviewedInTenantId" = 't1',
+       "reviewedAt" = now() WHERE "userId" = 'c1'$q$,
+  '23514', 'SportRank_not_self_review');
+
+-- BU. Разряд u1 подтверждает человек клуба t1 — проходит.
+DO $$ BEGIN
+  UPDATE "SportRank" SET status = 'VERIFIED', "reviewedByUserId" = 'c1', "reviewedInTenantId" = 't1',
+    "reviewedAt" = now() WHERE "userId" = 'u1';
+  RAISE NOTICE 'BU. Подтверждение разряда принято............ OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'BU. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- BV. Удаление учётки уносит профиль, разряд и файлы одним оператором.
+--     Ради этого связи с файлом — NO ACTION, а не RESTRICT: RESTRICT
+--     остановил бы каскад, если бы файл удалялся раньше профиля.
+DO $$ BEGIN
+  INSERT INTO "User" (id,email,phone,"birthDate","passwordHash","fullName","createdAt","updatedAt")
+  VALUES ('p1','p1@a.ru','+79990000009',DATE '2000-01-01','x','Удаляемый Игрок',now(),now());
+  INSERT INTO "StoredFile" (id,"ownerUserId",kind,"contentType",size,sha256,data)
+  VALUES ('pf1','p1','AVATAR','image/webp',4,repeat('d',64),'\x52494646'::bytea),
+         ('pf2','p1','RANK_DOCUMENT','application/pdf',5,repeat('e',64),'\x255044462d'::bytea);
+  INSERT INTO "PlayerProfile" ("userId","avatarFileId","updatedAt") VALUES ('p1','pf1',now());
+  INSERT INTO "SportRank" ("userId",rank,"documentFileId","updatedAt") VALUES ('p1','MS','pf2',now());
+  INSERT INTO "Achievement" (id,"userId",title,date,level,"updatedAt")
+  VALUES ('pa1','p1','Кубок города',DATE '2024-05-01','CITY',now());
+  DELETE FROM "User" WHERE id = 'p1';
+  IF EXISTS (SELECT 1 FROM "StoredFile" WHERE "ownerUserId" = 'p1') THEN
+    RAISE NOTICE 'BV. ПРОВАЛ: файлы пережили учётку';
+  ELSE
+    RAISE NOTICE 'BV. Учётка ушла вместе с профилем и файлами.. OK (ожидалось)';
+  END IF;
+EXCEPTION WHEN others THEN RAISE NOTICE 'BV. ПРОВАЛ: %', SQLERRM; END $$;
