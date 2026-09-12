@@ -9,6 +9,7 @@ import { markLabel, PHASE_LABELS } from '@/lib/attendance';
 import { cn } from '@/lib/cn';
 import { useClubApi } from '@/lib/useClubApi';
 import { MarkButtons } from './MarkButtons';
+import { PersonLink } from './PersonLink';
 import { clockIn, dateIn, momentIn } from './time';
 
 /**
@@ -68,7 +69,8 @@ function BookingItem({
 
       <span className="min-w-[12rem] flex-1">
         <span className="block text-[0.9375rem]">
-          {booking.client.fullName} · {booking.tableLabel}
+          <PersonLink userId={booking.client.userId}>{booking.client.fullName}</PersonLink> ·{' '}
+          {booking.tableLabel}
           {booking.hallId !== day.hallId ? ` · ${booking.hallName}` : ''}
         </span>
         <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[0.8125rem] text-text-muted">
@@ -125,7 +127,7 @@ function EventItem({
             className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.875rem]"
           >
             <span className="min-w-[12rem] flex-1">
-              {entry.fullName}{' '}
+              <PersonLink userId={entry.userId}>{entry.fullName}</PersonLink>{' '}
               <span className="text-[0.8125rem] text-text-subtle">{entry.phone}</span>
             </span>
 

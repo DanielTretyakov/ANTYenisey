@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import type { ClubPeoplePage, ClubPerson, Role } from '@yenisey/types';
@@ -247,6 +248,7 @@ function PersonRow({
   onError: (message: string) => void;
 }) {
   const club = useClubApi();
+  const slug = useClubSlug();
   const [pending, setPending] = useState(false);
 
   async function change(role: Role): Promise<void> {
@@ -266,7 +268,12 @@ function PersonRow({
   return (
     <tr className="border-b border-border last:border-0">
       <td className="py-2.5 pr-4 text-text">
-        {person.fullName}
+        <Link
+          href={`/clubs/${slug}/people/${person.id}`}
+          className="underline-offset-2 hover:text-text-accent hover:underline"
+        >
+          {person.fullName}
+        </Link>
         {person.deactivated && (
           <span className="ml-2 text-[0.75rem] tracking-[0.06em] text-text-subtle uppercase">
             отключён

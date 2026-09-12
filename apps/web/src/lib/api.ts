@@ -18,6 +18,7 @@ import type {
   FeedEvent,
   ClubPeoplePage,
   ClubPeopleQuery,
+  ClubPersonCard,
   ClubPerson,
   ClubSettings,
   ClubTable,
@@ -320,6 +321,9 @@ export function clubApi(slug: string = TENANT_SLUG) {
 
       return authorized(`${club}/people${search ? `?${search}` : ''}`);
     },
+
+    /** Карточка человека: кто он в клубе, сводка, записи и визиты — одним запросом. */
+    person: (id: string): Promise<ClubPersonCard> => authorized(`${club}/people/${id}`),
 
     /** Повышение клиента до тренера и обратно. */
     changeRole: (userId: string, role: ClubPerson['role']): Promise<ClubPerson> =>

@@ -1641,6 +1641,40 @@ async function main() {
     r = await asAdmin(yesterdayDesk);
     assert('визит виден в смене своего дня', (r.body?.visits ?? []).some((item) => item.id === visitId));
 
+    console.log('=== 22д. Карточка клиента');
+    const cardPath = `/clubs/yenisey/people/${seatedId}`;
+
+    r = await call(cardPath, { headers: { Authorization: `Bearer ${access}` } });
+    check('карточка клиенту закрыта', 403, r.status);
+
+    r = await asAdmin('/clubs/yenisey/people/net-takogo-cheloveka');
+    check('незнакомый человек', 404, r.status);
+
+    r = await asAdmin(cardPath);
+    check('карточка открыта администратору', 200, r.status);
+
+    const card = r.body;
+    assert('в карточке человек с телефоном', card?.person?.phone?.startsWith('+7') === true);
+    assert('роль в клубе — клиент', card?.person?.role === 'CLIENT');
+
+    // Сводка считается по тем же записям, что показаны ниже: две брони
+    // «пришёл» плюс визит с порога, одна неявка, одна отмена, одна впереди.
+    assert('визиты считают и брони, и порог', card?.summary?.visits === 3);
+    assert('неявка сосчитана', card?.summary?.noShows === 1);
+    assert('прощённая отмена поздней не считается',
+      card?.summary?.cancellations === 1 && card?.summary?.lateCancellations === 0);
+    assert('будущая бронь — предстоящая', card?.summary?.upcoming === 1);
+    assert('начислено больше нуля', Number.isInteger(card?.summary?.accrued) && card.summary.accrued > 0);
+    assert('последний визит известен', typeof card?.summary?.lastVisitAt === 'string');
+
+    const cardEntries = card?.entries ?? [];
+    assert('записи идут свежими сверху',
+      cardEntries.length > 1 && cardEntries[0].startsAt >= cardEntries[1].startsAt);
+    const cardMissed = cardEntries.find((item) => item.entryId === missedId);
+    assert('в карточке видно, кто и почему поставил отметку',
+      cardMissed?.mark?.reason === 'Стол сломался' && cardMissed?.mark?.auto === false);
+    assert('визит с порога в карточке отдельно', (card?.visits ?? []).some((item) => item.id === visitId));
+
     // Стол с бронями удалить нельзя — даже отменёнными: за бронями стоит
     // история платежей. Зал с таким столом, соответственно, тоже.
     r = await asAdmin(`/clubs/yenisey/tables/${seatTableId}`, { method: 'DELETE' });

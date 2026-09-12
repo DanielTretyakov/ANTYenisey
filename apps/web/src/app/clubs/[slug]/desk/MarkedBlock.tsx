@@ -9,6 +9,7 @@ import { ApiError } from '@/lib/api';
 import { correctionsFor, markedRows, markLabel, type Correction, type MarkedRow } from '@/lib/attendance';
 import { cn } from '@/lib/cn';
 import { useClubApi } from '@/lib/useClubApi';
+import { PersonLink } from './PersonLink';
 import { clockIn, momentIn } from './time';
 
 /**
@@ -47,7 +48,9 @@ export function MarkedBlock({ day, onChanged }: { day: DeskDay; onChanged: () =>
             <li key={`visit-${visit.id}`} className="flex flex-wrap items-center gap-x-5 gap-y-1 px-6 py-3.5">
               <Time at={visit.visitedAt} note="с порога" timezone={day.timezone} />
               <span className="min-w-[12rem] flex-1">
-                <span className="block text-[0.9375rem]">{visit.client.fullName}</span>
+                <span className="block text-[0.9375rem]">
+                  <PersonLink userId={visit.client.userId}>{visit.client.fullName}</PersonLink>
+                </span>
                 <span className="mt-0.5 block text-[0.8125rem] text-text-muted">
                   {[
                     'визит без брони',
@@ -79,7 +82,9 @@ function MarkedItem({ row, day, onChanged }: { row: MarkedRow; day: DeskDay; onC
         <Time at={row.startsAt} note={row.what} timezone={day.timezone} />
 
         <span className="min-w-[12rem] flex-1">
-          <span className="block text-[0.9375rem]">{row.person.fullName}</span>
+          <span className="block text-[0.9375rem]">
+            <PersonLink userId={row.person.userId}>{row.person.fullName}</PersonLink>
+          </span>
           <span className="mt-0.5 block text-[0.8125rem] text-text-muted">
             <span className={cn(row.status === 'ATTENDED' ? 'text-text-accent' : charged && 'text-warning')}>
               {markLabel(row.status, row.chargePercent)}

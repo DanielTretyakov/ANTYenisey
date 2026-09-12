@@ -427,6 +427,23 @@ export class AttendanceService {
     return visits.map(visitOf);
   }
 
+  /**
+   * Визиты человека с порога — для его карточки.
+   *
+   * Только `WALK_IN`: у визита по записи есть сама запись, и показывать их
+   * двумя строками в одной истории значило бы удвоить каждое занятие.
+   */
+  async walkInsOf(tenantId: string, clientId: string, take = 100): Promise<DeskVisit[]> {
+    const visits = await this.prisma.visitLog.findMany({
+      where: { tenantId, clientId, sourceType: VisitSourceType.WALK_IN },
+      select: VISIT_SELECT,
+      orderBy: { visitedAt: 'desc' },
+      take,
+    });
+
+    return visits.map(visitOf);
+  }
+
   // --- Политика клуба --------------------------------------------------------
 
   async policy(tenantId: string): Promise<ClubAttendancePolicy> {
