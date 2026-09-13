@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import type { BookingStatus, ClubPersonCard, ClubPersonEntry, Role } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
+import { PlayerReview } from '@/components/player/PlayerReview';
 import { Alert } from '@/components/ui/Alert';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { ApiError } from '@/lib/api';
@@ -110,6 +111,15 @@ export default function PersonPage() {
           </header>
 
           <Summary card={card} />
+
+          <PlayerReview
+            player={card.player}
+            personId={card.person.id}
+            personName={card.person.fullName}
+            self={session.status === 'ready' && session.user.id === card.person.id}
+            onChange={(player) => setCard((loaded) => (loaded ? { ...loaded, player } : loaded))}
+            onStale={load}
+          />
 
           <Card>
             <CardHeader

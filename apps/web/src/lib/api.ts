@@ -37,8 +37,14 @@ import type {
   MarkAttendanceRequest,
   MoveDeskBookingRequest,
   LoginRequest,
+  AchievementRequest,
+  PlayerProfile,
+  PublicPlayer,
   PublicTenant,
   PublicUser,
+  RankReviewRequest,
+  SportRankLevel,
+  UpdateEquipmentRequest,
   RecordVisitRequest,
   RegisterRequest,
   Tournament,
@@ -68,17 +74,20 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/**
+ * Запрос к API без разбора ответа — для тех, кому нужны байты, а не JSON.
+ *
+ * Заголовок `Content-Type` здесь НЕ ставится: его ставит `json()` вместе с
+ * телом. Загрузке файла он навредил бы — браузер сам пишет
+ * `multipart/form-data` с границей частей, и чужой заголовок её затёр бы.
+ */
+async function send(path: string, init: RequestInit = {}): Promise<Response> {
   const response = await fetch(`${API_URL}/api${path}`, {
     ...init,
     // Без этого браузер не приложит httpOnly-куку с refresh-токеном: веб и API
     // живут на разных портах, а значит запрос кросс-доменный. Ответная кука по
     // той же причине не сохранилась бы, и обновление сессии молча ломается.
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...init.headers,
-    },
   });
 
   if (!response.ok) {
@@ -91,11 +100,19 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(message, response.status);
   }
 
+  return response;
+}
+
+async function readJson<T>(response: Response): Promise<T> {
   if (response.status === 204) {
     return undefined as T;
   }
 
   return (await response.json()) as T;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return readJson<T>(await send(path, init));
 }
 
 /**
@@ -112,11 +129,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
  * ожиданием.
  */
 async function authorized<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return readJson<T>(await authorizedResponse(path, init));
+}
+
+async function authorizedResponse(path: string, init: RequestInit = {}): Promise<Response> {
   const token = readAccessToken();
 
   if (token) {
     try {
-      return await request<T>(path, withToken(init, token));
+      return await send(path, withToken(init, token));
     } catch (cause) {
       if (!(cause instanceof ApiError) || cause.status !== 401) {
         throw cause;
@@ -126,7 +147,7 @@ async function authorized<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   const refreshed = await refreshOnce();
 
-  return request<T>(path, withToken(init, refreshed.accessToken));
+  return send(path, withToken(init, refreshed.accessToken));
 }
 
 /**
@@ -143,9 +164,13 @@ async function authorized<T>(path: string, init: RequestInit = {}): Promise<T> {
  * отвечает ему как анониму.
  */
 async function optionallyAuthorized<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return readJson<T>(await optionallyAuthorizedResponse(path, init));
+}
+
+async function optionallyAuthorizedResponse(path: string, init: RequestInit = {}): Promise<Response> {
   const token = readAccessToken() ?? (await refreshOnce().catch(() => null))?.accessToken;
 
-  return request<T>(path, token ? withToken(init, token) : init);
+  return send(path, token ? withToken(init, token) : init);
 }
 
 /**
@@ -191,7 +216,23 @@ function withToken(init: RequestInit, token: string): RequestInit {
 const json = (method: string, body: unknown): RequestInit => ({
   method,
   body: JSON.stringify(body),
+  headers: { 'Content-Type': 'application/json' },
 });
+
+/** Форма с файлом. Заголовок не ставится — см. `send`. */
+const form = (method: string, fields: Record<string, string>, file?: File | null): RequestInit => {
+  const body = new FormData();
+
+  for (const [key, value] of Object.entries(fields)) {
+    body.set(key, value);
+  }
+
+  if (file) {
+    body.set('file', file);
+  }
+
+  return { method, body };
+};
 
 /**
  * Маршруты уровня платформы: аккаунт, поиск клубов, мои клубы, мои записи.
@@ -257,7 +298,73 @@ export const api = {
    * пути отмены разошлись бы сначала в мелочах, потом в деньгах.
    */
   myBookings: (): Promise<BookingEntry[]> => authorized('/me/bookings'),
+
+  // --- Профиль игрока. Свойство человека, а не клуба: клуба в адресе нет.
+  myPlayer: (): Promise<PlayerProfile> => authorized('/me/player'),
+
+  updateEquipment: (patch: UpdateEquipmentRequest): Promise<PlayerProfile> =>
+    authorized('/me/player', json('PATCH', patch)),
+
+  /** Аватар заменяется целиком. Картинку пережимает сервер. */
+  setAvatar: (file: File): Promise<PlayerProfile> => authorized('/me/player/avatar', form('PUT', {}, file)),
+
+  removeAvatar: (): Promise<PlayerProfile> => authorized('/me/player/avatar', { method: 'DELETE' }),
+
+  addAchievement: (payload: AchievementRequest): Promise<PlayerProfile> =>
+    authorized('/me/player/achievements', json('POST', payload)),
+
+  updateAchievement: (id: string, payload: AchievementRequest): Promise<PlayerProfile> =>
+    authorized(`/me/player/achievements/${id}`, json('PATCH', payload)),
+
+  removeAchievement: (id: string): Promise<PlayerProfile> =>
+    authorized(`/me/player/achievements/${id}`, { method: 'DELETE' }),
+
+  /**
+   * Разряд одной формой: сам разряд, приказ и, если есть, скан. Правка
+   * возвращает разряд на проверку клубу.
+   */
+  setRank: (payload: SetRankPayload): Promise<PlayerProfile> =>
+    authorized(
+      '/me/player/rank',
+      form(
+        'PUT',
+        {
+          rank: payload.rank,
+          ...(payload.orderNumber ? { orderNumber: payload.orderNumber } : {}),
+          ...(payload.orderDate ? { orderDate: payload.orderDate } : {}),
+          ...(payload.removeDocument ? { removeDocument: 'true' } : {}),
+        },
+        payload.document,
+      ),
+    ),
+
+  removeRank: (): Promise<PlayerProfile> => authorized('/me/player/rank', { method: 'DELETE' }),
+
+  /**
+   * Публичная страница игрока. Открыта без входа, но от своего имени, когда
+   * есть от чьего: страницу игрока младше шестнадцати видят только он сам и
+   * администраторы его клубов.
+   */
+  player: (id: string): Promise<PublicPlayer> => optionallyAuthorized(`/players/${id}`),
+
+  /**
+   * Файл — байтами, а не адресом для `<img src>`. Картинка по адресу ушла бы
+   * без токена, а аватар ребёнка и скан приказа отдаются только тем, кому
+   * можно.
+   */
+  file: async (id: string): Promise<Blob> => (await optionallyAuthorizedResponse(`/files/${id}`)).blob(),
 };
+
+/** Что уходит в форму разряда. */
+export interface SetRankPayload {
+  rank: SportRankLevel;
+  orderNumber: string;
+  orderDate: string;
+  /** Новый скан; заменяет прежний. */
+  document: File | null;
+  /** Убрать прежний скан без замены. */
+  removeDocument: boolean;
+}
 
 /**
  * Маршруты одного клуба.
@@ -539,6 +646,13 @@ export function clubApi(slug: string = TENANT_SLUG) {
     /** Визит с порога или внесённый задним числом. */
     recordVisit: (payload: RecordVisitRequest): Promise<DeskVisit> =>
       authorized(`${club}/desk/visits`, json('POST', payload)),
+
+    /**
+     * Решение по разряду. `version` — то, что администратор видел: если игрок
+     * успел поправить разряд, сервер ответит 409, а не подтвердит непросмотренное.
+     */
+    reviewRank: (personId: string, payload: RankReviewRequest): Promise<PlayerProfile> =>
+      authorized(`${club}/people/${personId}/rank/review`, json('POST', payload)),
   };
 }
 

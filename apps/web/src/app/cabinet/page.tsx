@@ -7,6 +7,7 @@ import type { FavouriteClub, PublicUser } from '@yenisey/types';
 import { MAX_FAVOURITE_CLUBS } from '@yenisey/types';
 import { ClubMark } from '@/components/club/ClubMark';
 import { AppShell } from '@/components/layout/AppShell';
+import { PlayerEditor } from '@/components/player/PlayerEditor';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -14,7 +15,7 @@ import { api, ApiError } from '@/lib/api';
 import { useSession } from '@/lib/useSession';
 
 /**
- * Личный кабинет: профиль и мои клубы.
+ * Личный кабинет: профиль, профиль игрока и мои клубы.
  *
  * Списка записей здесь БОЛЬШЕ НЕТ — он уехал в раздел «Мои записи» целиком,
  * вместе с прошедшими и турнирами (ТЗ → «Мои записи»). Два списка записей в
@@ -41,6 +42,8 @@ export default function CabinetPage() {
       <h1 className="mb-7 text-[1.75rem]">Личный кабинет</h1>
 
       {user ? <Profile user={user} /> : <ProfileSkeleton />}
+
+      {user && <PlayerEditor user={user} />}
 
       {user && <MyClubs user={user} />}
     </AppShell>
