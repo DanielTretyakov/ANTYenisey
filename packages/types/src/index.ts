@@ -4,4 +4,5 @@ export * from './club';
 export * from './desk';
 export * from './names';
 export * from './platform';
+export * from './player';
 export * from './tenant';

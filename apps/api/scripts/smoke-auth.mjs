@@ -1877,6 +1877,7 @@ async function main() {
 
   await eventRegistration(asMe);
   await eventAttendance(asMe);
+  await playerProfile();
   await autoNoShow(asMe);
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
@@ -2320,6 +2321,368 @@ async function autoNoShow(asMe) {
     r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: original });
     check('сроки присутствия клуба возвращены', 200, r.status);
   }
+}
+
+/**
+ * Профиль игрока: аватар, инвентарь, достижения, разряд и его проверка клубом.
+ *
+ * Свои пробные учётки, а не общая `asMe`: нужны взрослый и ребёнок в
+ * «Енисее» и посторонний из другого клуба — у каждого свои права на чужой
+ * профиль. Картинки делает `sharp` из зависимостей API: JPEG с EXIF и
+ * координатами нужен настоящий, иначе проверять выброс метаданных не на чем.
+ */
+async function playerProfile() {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('\n=== 30. Профиль игрока — ПРОПУЩЕН (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 30. Профиль игрока: файлы, инвентарь, достижения');
+
+  const { default: sharp } = await import('sharp');
+
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+
+  /** multipart/form-data: `call` ставит JSON-заголовок, здесь он мешал бы. */
+  const upload = async (token, path, fields = {}, file = null, method = 'PUT') => {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(fields)) form.set(key, value);
+    if (file) form.set('file', new Blob([file.bytes], { type: file.type }), file.name);
+
+    const response = await fetch(`${API}${path}`, {
+      method,
+      body: form,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    const text = await response.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+    return { status: response.status, body };
+  };
+
+  /** Файл целиком — с заголовками и байтами. */
+  const download = async (token, id) => {
+    const response = await fetch(`${API}/files/${id}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    return { status: response.status, headers: response.headers, bytes: new Uint8Array(await response.arrayBuffer()) };
+  };
+
+  let r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const adminToken = r.body?.accessToken ?? '';
+  const asAdmin = as(adminToken);
+  r = await asAdmin('/auth/me');
+  const adminId = r.body?.id;
+
+  r = await post('/auth/register', registration({ lastName: 'Ракеткин', firstName: 'Игорь' }));
+  check('игрок заведён', 201, r.status);
+  const playerToken = r.body?.accessToken ?? '';
+  const playerId = r.body?.user?.id;
+  const asPlayer = as(playerToken);
+
+  r = await post('/auth/register', registration({ lastName: 'Юнцов', firstName: 'Коля', birthDate: '2014-03-01' }));
+  check('игрок младше 16 заведён', 201, r.status);
+  const minorToken = r.body?.accessToken ?? '';
+  const minorId = r.body?.user?.id;
+
+  r = await post('/auth/register', registration({ tenantSlug: 'sayany', lastName: 'Соседов' }));
+  check('игрок другого клуба заведён', 201, r.status);
+  const outsiderToken = r.body?.accessToken ?? '';
+  const outsiderId = r.body?.user?.id;
+
+  r = await call('/me/player');
+  check('свой профиль без входа', 401, r.status);
+
+  r = await asPlayer('/me/player');
+  check('свой профиль читается', 200, r.status);
+  assert('профиль пуст, взрослый — публичный',
+    r.body?.avatarFileId === null && r.body?.rank === null && r.body?.achievements?.length === 0 && r.body?.isPublic === true);
+
+  r = await asPlayer('/me/player', { method: 'PATCH', json: { blade: '  Butterfly Viscaria  ', forehandRubber: '   ' } });
+  check('инвентарь сохранён', 200, r.status);
+  assert('пробелы срезаны, пустое — null',
+    r.body?.equipment?.blade === 'Butterfly Viscaria' && r.body?.equipment?.forehandRubber === null);
+
+  r = await asPlayer('/me/player', { method: 'PATCH', json: { backhandRubber: 'Tenergy 05' } });
+  assert('PATCH не стирает то, о чём не спрашивали',
+    r.body?.equipment?.blade === 'Butterfly Viscaria' && r.body?.equipment?.backhandRubber === 'Tenergy 05');
+
+  r = await asPlayer('/me/player', { method: 'PATCH', json: { blade: 'x'.repeat(101) } });
+  check('основание длиннее 100 символов', 400, r.status);
+
+  console.log('=== 30а. Аватар');
+  const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+  r = await upload(playerToken, '/me/player/avatar', {}, { bytes: svg, type: 'image/svg+xml', name: 'a.svg' });
+  check('SVG аватаром не принимается', 400, r.status);
+
+  const html = new TextEncoder().encode('<!doctype html><script>alert(1)</script>');
+  r = await upload(playerToken, '/me/player/avatar', {}, { bytes: html, type: 'image/png', name: 'a.png' });
+  check('HTML под видом PNG не принимается', 400, r.status);
+
+  r = await upload(playerToken, '/me/player/avatar');
+  check('загрузка без файла', 400, r.status);
+
+  const tooBig = new Uint8Array(6 * 1024 * 1024);
+  tooBig.set([0xff, 0xd8, 0xff]);
+  r = await upload(playerToken, '/me/player/avatar', {}, { bytes: tooBig, type: 'image/jpeg', name: 'big.jpg' });
+  check('аватар больше 5 МБ', 400, r.status);
+
+  const huge = new Uint8Array(11 * 1024 * 1024);
+  r = await upload(playerToken, '/me/player/avatar', {}, { bytes: huge, type: 'image/jpeg', name: 'huge.jpg' });
+  check('файл больше 10 МБ обрывается на разборе', 413, r.status);
+  assert('и сообщение по-русски', /МБ/.test(String(r.body?.message ?? '')));
+
+  const photo = await sharp({ create: { width: 900, height: 600, channels: 3, background: { r: 30, g: 120, b: 90 } } })
+    .jpeg()
+    .withExif({
+      IFD0: { Make: 'Phone', Model: 'Camera' },
+      IFD3: { GPSLatitudeRef: 'N', GPSLatitude: '56/1 0/1 0/1', GPSLongitudeRef: 'E', GPSLongitude: '92/1 52/1 0/1' },
+    })
+    .toBuffer();
+  r = await upload(playerToken, '/me/player/avatar', {}, { bytes: photo, type: 'image/jpeg', name: 'me.jpg' });
+  check('фотография с телефона принята', 200, r.status);
+  const avatarId = r.body?.avatarFileId;
+  assert('у профиля появился аватар', typeof avatarId === 'string');
+
+  let file = await download(null, avatarId);
+  check('аватар взрослого открыт без входа', 200, file.status);
+  assert('отдан WebP', file.headers.get('content-type') === 'image/webp');
+  assert('браузеру запрещено угадывать тип', file.headers.get('x-content-type-options') === 'nosniff');
+  assert('открытый аватар кешируется', /public/.test(file.headers.get('cache-control') ?? ''));
+  const avatarMeta = await sharp(file.bytes).metadata();
+  assert('512×512', avatarMeta.width === 512 && avatarMeta.height === 512);
+  assert('EXIF с координатами выброшен', avatarMeta.exif === undefined);
+
+  const second = await sharp({ create: { width: 300, height: 300, channels: 3, background: '#fff' } }).png().toBuffer();
+  r = await upload(playerToken, '/me/player/avatar', {}, { bytes: second, type: 'image/png', name: 'me.png' });
+  check('аватар заменён', 200, r.status);
+  const secondAvatarId = r.body?.avatarFileId;
+  assert('новый файл — новый адрес', secondAvatarId && secondAvatarId !== avatarId);
+  file = await download(null, avatarId);
+  check('прежний аватар удалён вместе с заменой', 404, file.status);
+
+  console.log('=== 30б. Достижения');
+  r = await asPlayer('/me/player/achievements', {
+    method: 'POST',
+    json: { title: '  Первенство Красноярского края  ', date: '2025-04-12', level: 'REGIONAL', place: 2 },
+  });
+  check('достижение добавлено', 201, r.status);
+  const achievementId = r.body?.achievements?.[0]?.id;
+  assert('название без пробелов по краям', r.body?.achievements?.[0]?.title === 'Первенство Красноярского края');
+
+  r = await asPlayer('/me/player/achievements', {
+    method: 'POST',
+    json: { title: 'Кубок клуба', date: '2026-02-01', level: 'CLUB' },
+  });
+  assert('без места — «участие», свежие сверху',
+    r.body?.achievements?.[0]?.title === 'Кубок клуба' && r.body?.achievements?.[0]?.place === null);
+
+  r = await asPlayer('/me/player/achievements', {
+    method: 'POST',
+    json: { title: 'Турнир', date: '2025-04-12', level: 'CITY', place: 0 },
+  });
+  check('нулевое место', 400, r.status);
+
+  r = await asPlayer('/me/player/achievements', {
+    method: 'POST',
+    json: { title: 'Турнир', date: '2099-01-01', level: 'CITY' },
+  });
+  check('соревнование из будущего', 400, r.status);
+
+  r = await as(minorToken)(`/me/player/achievements/${achievementId}`, {
+    method: 'PATCH',
+    json: { title: 'Чужое', date: '2025-04-12', level: 'CITY' },
+  });
+  check('чужое достижение не находится', 404, r.status);
+
+  r = await asPlayer(`/me/player/achievements/${achievementId}`, {
+    method: 'PATCH',
+    json: { title: 'Первенство Красноярского края', date: '2025-04-12', level: 'REGIONAL', place: 1 },
+  });
+  check('своё достижение исправлено', 200, r.status);
+  assert('место поправилось', r.body?.achievements?.some((a) => a.id === achievementId && a.place === 1));
+
+  console.log('=== 30в. Разряд');
+  r = await upload(playerToken, '/me/player/rank', { rank: 'KMS' });
+  check('разряд без приказа и скана', 400, r.status);
+
+  r = await upload(playerToken, '/me/player/rank', { rank: 'KMS', orderNumber: '45-нг' });
+  check('номер приказа без даты', 400, r.status);
+
+  r = await upload(playerToken, '/me/player/rank', { rank: 'ZMS', orderNumber: '45-нг', orderDate: '2024-11-01' });
+  check('неизвестный разряд', 400, r.status);
+
+  r = await upload(playerToken, '/me/player/rank', { rank: 'KMS', orderNumber: '45-нг', orderDate: '2099-11-01' });
+  check('приказ из будущего', 400, r.status);
+
+  r = await upload(playerToken, '/me/player/rank', { rank: 'KMS', orderNumber: '45-нг', orderDate: '2024-11-01' });
+  check('разряд по приказу заявлен', 200, r.status);
+  assert('разряд на проверке', r.body?.rank?.status === 'PENDING' && r.body?.rank?.reviewedBy === null);
+  let version = r.body?.rank?.version;
+
+  const pdf = new TextEncoder().encode('%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n');
+  r = await upload(
+    playerToken,
+    '/me/player/rank',
+    { rank: 'KMS', orderNumber: '45-нг', orderDate: '2024-11-01' },
+    { bytes: pdf, type: 'application/pdf', name: 'prikaz.pdf' },
+  );
+  check('скан приказа приложен', 200, r.status);
+  const documentId = r.body?.rank?.document?.id;
+  assert('скан — PDF', r.body?.rank?.document?.contentType === 'application/pdf');
+  version = r.body?.rank?.version;
+
+  file = await download(null, documentId);
+  check('скан приказа без входа', 403, file.status);
+  file = await download(outsiderToken, documentId);
+  check('скан приказа постороннему', 403, file.status);
+  file = await download(minorToken, documentId);
+  check('скан приказа другому клиенту того же клуба', 403, file.status);
+  file = await download(playerToken, documentId);
+  check('скан приказа владельцу', 200, file.status);
+  assert('скан отдаётся вложением', /attachment/.test(file.headers.get('content-disposition') ?? ''));
+  assert('закрытый файл не кешируется', /no-store/.test(file.headers.get('cache-control') ?? ''));
+  assert('открытый напрямую — в песочнице', /sandbox/.test(file.headers.get('content-security-policy') ?? ''));
+  file = await download(adminToken, documentId);
+  check('скан приказа администратору клуба игрока', 200, file.status);
+
+  console.log('=== 30г. Проверка разряда клубом');
+  const reviewPath = `/clubs/yenisey/people/${playerId}/rank/review`;
+
+  r = await as(minorToken)(reviewPath, { method: 'POST', json: { decision: 'VERIFIED', version } });
+  check('клиент разряд не подтверждает', 403, r.status);
+
+  r = await asAdmin(reviewPath, { method: 'POST', json: { decision: 'REJECTED', version } });
+  check('отказ без причины', 400, r.status);
+
+  r = await asAdmin(reviewPath, { method: 'POST', json: { decision: 'VERIFIED', version: '2020-01-01T00:00:00.000Z' } });
+  check('решение по устаревшей версии', 409, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${outsiderId}/rank/review`, {
+    method: 'POST',
+    json: { decision: 'VERIFIED', version },
+  });
+  check('разряд игрока другого клуба', 404, r.status);
+
+  r = await asAdmin(reviewPath, { method: 'POST', json: { decision: 'VERIFIED', version } });
+  check('разряд подтверждён', 200, r.status);
+  assert('подпись клуба и проверяющего',
+    r.body?.rank?.status === 'VERIFIED' && r.body?.rank?.reviewedBy?.clubSlug === 'yenisey' && typeof r.body?.rank?.reviewedBy?.by === 'string');
+  const verifiedVersion = r.body?.rank?.version;
+
+  r = await asAdmin(reviewPath, { method: 'POST', json: { decision: 'VERIFIED', version: verifiedVersion } });
+  check('повторное подтверждение', 200, r.status);
+  assert('ничего не изменило', r.body?.rank?.version === verifiedVersion);
+
+  r = await call(`/players/${playerId}`);
+  check('публичная страница без входа', 200, r.status);
+  assert('имя сокращено', r.body?.name === 'Ракеткин И.');
+  assert('ни почты, ни телефона, ни даты рождения',
+    r.body && !('email' in r.body) && !('phone' in r.body) && !('birthDate' in r.body));
+  assert('разряд с подписью клуба, без приказа',
+    r.body?.rank?.status === 'VERIFIED' && typeof r.body?.rank?.verifiedBy?.clubName === 'string'
+      && r.body?.rank?.verifiedBy?.by === undefined && !('orderNumber' in (r.body?.rank ?? {})));
+
+  r = await upload(playerToken, '/me/player/rank', { rank: 'KMS', orderNumber: '45-нг', orderDate: '2024-11-01' });
+  check('та же правка разряда ещё раз', 200, r.status);
+  assert('подтверждение не сброшено', r.body?.rank?.status === 'VERIFIED');
+
+  r = await upload(playerToken, '/me/player/rank', { rank: 'MS', orderNumber: '45-нг', orderDate: '2024-11-01' });
+  check('разряд изменён игроком', 200, r.status);
+  assert('подтверждение сброшено, подпись снята', r.body?.rank?.status === 'PENDING' && r.body?.rank?.reviewedBy === null);
+  version = r.body?.rank?.version;
+
+  r = await asAdmin(reviewPath, { method: 'POST', json: { decision: 'VERIFIED', version: verifiedVersion } });
+  check('решение по разряду, который игрок успел поправить', 409, r.status);
+
+  r = await asAdmin(reviewPath, {
+    method: 'POST',
+    json: { decision: 'REJECTED', reason: 'Приказ о КМС, а заявлен МС', version },
+  });
+  check('разряд отклонён с причиной', 200, r.status);
+  assert('причина видна игроку', r.body?.rank?.rejectionReason === 'Приказ о КМС, а заявлен МС');
+  version = r.body?.rank?.version;
+
+  r = await asPlayer('/me/player');
+  assert('игрок видит отказ у себя', r.body?.rank?.status === 'REJECTED');
+
+  r = await call(`/players/${playerId}`);
+  assert('отклонённый разряд посторонним не показывается', r.body?.rank === null);
+
+  r = await asAdmin(reviewPath, { method: 'POST', json: { decision: 'VERIFIED', version } });
+  check('пересмотр отказа без причины', 400, r.status);
+
+  r = await asAdmin(reviewPath, {
+    method: 'POST',
+    json: { decision: 'VERIFIED', reason: 'Нашёлся приказ о МС', version },
+  });
+  check('пересмотр с причиной', 200, r.status);
+  assert('разряд подтверждён, причины отказа нет', r.body?.rank?.status === 'VERIFIED' && r.body?.rank?.rejectionReason === null);
+
+  r = await asAdmin(`/clubs/yenisey/people/${playerId}`);
+  check('карточка человека с профилем игрока', 200, r.status);
+  assert('в карточке разряд и скан', r.body?.player?.rank?.rank === 'MS' && r.body?.player?.rank?.document?.id === documentId);
+
+  // Свой разряд: администратор «Енисея» играет в «Енисее» же.
+  r = await upload(adminToken, '/me/player/rank', { rank: 'SPORT_1', orderNumber: 'смоук', orderDate: '2020-01-01' });
+  check('администратор заявил свой разряд', 200, r.status);
+  r = await asAdmin(`/clubs/yenisey/people/${adminId}/rank/review`, {
+    method: 'POST',
+    json: { decision: 'VERIFIED', version: r.body?.rank?.version },
+  });
+  check('свой разряд не подтверждается', 403, r.status);
+  r = await asAdmin('/me/player/rank', { method: 'DELETE' });
+  check('разряд администратора убран', 200, r.status);
+
+  console.log('=== 30д. Игрок младше 16');
+  const asMinor = as(minorToken);
+  r = await asMinor('/me/player');
+  assert('профиль ребёнка закрыт от посторонних', r.body?.isPublic === false);
+
+  r = await upload(minorToken, '/me/player/avatar', {}, { bytes: second, type: 'image/png', name: 'kid.png' });
+  check('ребёнок загрузил аватар', 200, r.status);
+  const minorAvatar = r.body?.avatarFileId;
+
+  r = await call(`/players/${minorId}`);
+  check('страница ребёнка без входа', 404, r.status);
+  r = await asPlayer(`/players/${minorId}`);
+  check('страница ребёнка постороннему', 404, r.status);
+  r = await asMinor(`/players/${minorId}`);
+  check('свою страницу ребёнок видит', 200, r.status);
+  assert('с пометкой «скрыта от посторонних»', r.body?.hiddenFromPublic === true);
+  r = await asAdmin(`/players/${minorId}`);
+  check('администратору клуба ребёнка страница видна', 200, r.status);
+
+  file = await download(null, minorAvatar);
+  check('аватар ребёнка без входа', 403, file.status);
+  file = await download(outsiderToken, minorAvatar);
+  check('аватар ребёнка постороннему', 403, file.status);
+  file = await download(adminToken, minorAvatar);
+  check('аватар ребёнка администратору его клуба', 200, file.status);
+  assert('и не кешируется', /no-store/.test(file.headers.get('cache-control') ?? ''));
+
+  console.log('=== 30е. Удаление');
+  r = await asPlayer('/me/player/avatar', { method: 'DELETE' });
+  check('аватар убран', 200, r.status);
+  assert('ссылки нет', r.body?.avatarFileId === null);
+  file = await download(null, secondAvatarId);
+  check('файл аватара удалён', 404, file.status);
+
+  r = await asPlayer(`/me/player/achievements/${achievementId}`, { method: 'DELETE' });
+  check('достижение удалено', 200, r.status);
+
+  r = await asPlayer('/me/player/rank', { method: 'DELETE' });
+  check('разряд удалён', 200, r.status);
+  assert('разряда нет', r.body?.rank === null);
+  file = await download(playerToken, documentId);
+  check('скан приказа удалён вместе с разрядом', 404, file.status);
+
+  r = await call('/players/net-takogo-igroka');
+  check('несуществующий игрок', 404, r.status);
 }
 
 main().catch((error) => {

@@ -4,6 +4,7 @@ import { PeopleService } from './people.service';
 import { AttendanceModule } from '../attendance/attendance.module';
 import { ClubModule } from '../club/club.module';
 import { EntriesModule } from '../entries/entries.module';
+import { PlayersModule } from '../players/players.module';
 
 /**
  * Карточка человека в клубе.
@@ -16,9 +17,12 @@ import { EntriesModule } from '../entries/entries.module';
  *
  * `ClubModule` — ради `MembershipService`: пришедшего с порога привязывает к
  * клубу тот же код, что и первая запись.
+ *
+ * `PlayersModule` — ради профиля игрока в карточке: разряд проверяет
+ * администратор, и смотрит он отсюда.
  */
 @Module({
-  imports: [AttendanceModule, ClubModule, EntriesModule],
+  imports: [AttendanceModule, ClubModule, EntriesModule, PlayersModule],
   controllers: [PeopleController],
   providers: [PeopleService],
 })

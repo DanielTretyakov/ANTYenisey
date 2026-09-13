@@ -13,6 +13,7 @@ import { EntriesModule } from './entries/entries.module';
 import { EventsModule } from './events/events.module';
 import { MeModule } from './me/me.module';
 import { PeopleModule } from './people/people.module';
+import { PlayersModule } from './players/players.module';
 import { parseDuration } from './auth/tokens';
 import { isLoopback } from './common/network';
 import { HealthController } from './health.controller';
@@ -63,6 +64,7 @@ import { validateEnv, type Env } from './config/env';
     DeskModule,
     AttendanceModule,
     PeopleModule,
+    PlayersModule,
     TenantsModule,
     EntriesModule,
     EventsModule,

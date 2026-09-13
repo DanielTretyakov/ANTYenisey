@@ -52,3 +52,12 @@ export function parseBirthDate(value: string, today: Date = new Date()): Date | 
 export function formatBirthDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
+
+/**
+ * Дата из прошлого — та же проверка, что у дня рождения: существующая дата, не
+ * раньше 1900 года и не позже сегодняшнего дня.
+ *
+ * Ей подчиняются дата приказа о разряде и дата соревнования в достижениях:
+ * приказ из будущего — опечатка так же, как и рождение в будущем.
+ */
+export const parsePastDate = parseBirthDate;

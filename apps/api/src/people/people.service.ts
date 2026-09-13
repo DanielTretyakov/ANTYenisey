@@ -7,6 +7,7 @@ import { formatBirthDate } from '../auth/birth-date';
 import { MembershipService } from '../club/membership.service';
 import { chargeOf } from '../desk/revenue';
 import { EntriesService } from '../entries/entries.service';
+import { PlayersService } from '../players/players.service';
 import { personSummary } from './person-summary';
 
 /** Сколько записей показывается в карточке. Дальше — в поиске по броням. */
@@ -31,6 +32,7 @@ export class PeopleService {
     private readonly entries: EntriesService,
     private readonly attendance: AttendanceService,
     private readonly membership: MembershipService,
+    private readonly players: PlayersService,
   ) {}
 
   /**
@@ -143,9 +145,10 @@ export class PeopleService {
       throw new NotFoundException('Человек не найден в этом клубе');
     }
 
-    const [entries, visits] = await Promise.all([
+    const [entries, visits, player] = await Promise.all([
       this.entries.listForUser(userId, tenantId),
       this.attendance.walkInsOf(tenantId, userId),
+      this.players.profile(userId),
     ]);
 
     // Подпись «кто отметил» — только у отмеченных: у остальных журналу нечего
@@ -194,6 +197,7 @@ export class PeopleService {
       ),
       entries: history,
       visits,
+      player,
     };
   }
 }

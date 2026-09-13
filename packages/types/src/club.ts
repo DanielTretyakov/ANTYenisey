@@ -14,6 +14,7 @@
 import type { Role } from './auth';
 import type { DeskMarkInfo, DeskVisit } from './desk';
 import type { BookingEntry } from './platform';
+import type { PlayerProfile } from './player';
 
 /**
  * Минимальный шаг брони стола. Набор закрытый: зал выбирает из вариантов,
@@ -457,6 +458,11 @@ export interface ClubPersonCard {
   entries: ClubPersonEntry[];
   /** Визиты с порога: они не записи и в `entries` не попадают. */
   visits: DeskVisit[];
+  /**
+   * Профиль игрока — целиком, со сканом приказа и причиной отказа: разряд
+   * проверяет администратор любого клуба человека, и смотрит он отсюда.
+   */
+  player: PlayerProfile;
 }
 
 /** Запись человека вместе с подписью того, кто поставил отметку. */
