@@ -3,7 +3,7 @@ import type { BookingEntry, ClubEvent } from '@yenisey/types';
 import type { ClubContext } from '../auth/club-context';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Public } from '../auth/decorators/public.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { Acting, ClientAction, type ActingClient } from '../guardianship/acting-client.guard';
 import { EventsService } from './events.service';
 
 /**
@@ -23,12 +23,14 @@ export class EventsController {
    * как заводят учётку.
    *
    * ClubContextGuard анонима пропускает и сам кладёт контекст клуба с пустым
-   * `userId` — отдельной ветки здесь не нужно.
+   * `userId` — отдельной ветки здесь не нужно. С `?for=` отметка «записан»
+   * считается для ребёнка вошедшего родителя.
    */
   @Public()
+  @ClientAction('read')
   @Get('events')
-  upcoming(@CurrentClub() club: ClubContext): Promise<ClubEvent[]> {
-    return this.events.listUpcoming(club.tenantId, club.userId || null);
+  upcoming(@CurrentClub() club: ClubContext, @Acting() acting: ActingClient | null): Promise<ClubEvent[]> {
+    return this.events.listUpcoming(club.tenantId, acting?.userId ?? null);
   }
 
   /**
@@ -38,28 +40,38 @@ export class EventsController {
    * `@Roles('CLIENT')` закрыл бы этот список тренеру, который забронировал
    * стол под спарринг.
    */
+  @ClientAction('read')
   @Get('events/mine')
-  mine(@CurrentClub() club: ClubContext): Promise<BookingEntry[]> {
-    return this.events.listMine(club.tenantId, club.userId);
+  mine(@CurrentClub() club: ClubContext, @Acting() acting: ActingClient): Promise<BookingEntry[]> {
+    return this.events.listMine(club.tenantId, acting.userId);
   }
 
   /**
    * Запись на турнир.
    *
-   * `@Roles('CLIENT')` здесь означает «не сотрудник этого клуба»: человек без
-   * привязки проходит как клиент, и запись заводит привязку сама.
+   * `@ClientAction()` здесь означает «клиент этого клуба — тот, за кого
+   * запись»: человек без привязки проходит как клиент, и запись заводит
+   * привязку сама; родитель записывает ребёнка младше 16 параметром `?for=`.
    */
-  @Roles('CLIENT')
+  @ClientAction()
   @Post('tournaments/:id/registration')
-  register(@CurrentClub() club: ClubContext, @Param('id') id: string): Promise<BookingEntry> {
-    return this.events.register(club.tenantId, club.userId, id);
+  register(
+    @CurrentClub() club: ClubContext,
+    @Acting() acting: ActingClient,
+    @Param('id') id: string,
+  ): Promise<BookingEntry> {
+    return this.events.register(club.tenantId, acting.userId, id);
   }
 
   /** Отмена возвращает саму запись: человек должен увидеть, сколько с него списалось. */
-  @Roles('CLIENT')
+  @ClientAction()
   @Delete('tournaments/:id/registration')
-  cancel(@CurrentClub() club: ClubContext, @Param('id') id: string): Promise<BookingEntry> {
-    return this.events.cancel(club.tenantId, club.userId, id);
+  cancel(
+    @CurrentClub() club: ClubContext,
+    @Acting() acting: ActingClient,
+    @Param('id') id: string,
+  ): Promise<BookingEntry> {
+    return this.events.cancel(club.tenantId, acting.userId, id);
   }
 
   /**
@@ -69,21 +81,23 @@ export class EventsController {
    * записи лежат в разных таблицах, и «мероприятие вообще» — понятие
    * интерфейса, а не базы. Идентификатор в адресе — сессии.
    */
-  @Roles('CLIENT')
+  @ClientAction()
   @Post('trainings/:id/booking')
   registerForTraining(
     @CurrentClub() club: ClubContext,
+    @Acting() acting: ActingClient,
     @Param('id') id: string,
   ): Promise<BookingEntry> {
-    return this.events.registerForTraining(club.tenantId, club.userId, id);
+    return this.events.registerForTraining(club.tenantId, acting.userId, id);
   }
 
-  @Roles('CLIENT')
+  @ClientAction()
   @Delete('trainings/:id/booking')
   cancelTraining(
     @CurrentClub() club: ClubContext,
+    @Acting() acting: ActingClient,
     @Param('id') id: string,
   ): Promise<BookingEntry> {
-    return this.events.cancelTraining(club.tenantId, club.userId, id);
+    return this.events.cancelTraining(club.tenantId, acting.userId, id);
   }
 }

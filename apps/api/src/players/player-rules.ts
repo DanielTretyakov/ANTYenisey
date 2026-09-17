@@ -21,6 +21,8 @@ export interface ProfileViewer {
    * целиком и скан приказа: разряд проверяют именно они.
    */
   managesOwner: boolean;
+  /** Родитель, который ведёт игрока, пока тому нет 16: он и ведёт его профиль. */
+  guardsOwner: boolean;
 }
 
 export interface ProfileOwner {
@@ -31,20 +33,24 @@ export interface ProfileOwner {
 /**
  * Видна ли страница игрока этому человеку.
  *
- * Сам игрок и администраторы его клубов видят её всегда, остальные — с
- * шестнадцати лет. Родитель появится здесь вместе с семейными аккаунтами.
+ * Сам игрок, его родитель и администраторы его клубов видят её всегда,
+ * остальные — с шестнадцати лет.
  */
 export function canSeeProfile(owner: ProfileOwner, viewer: ProfileViewer, today: Date): boolean {
   return (
-    viewer.viewerId === owner.ownerId || viewer.managesOwner || isProfilePublic(owner.birthDate, today)
+    viewer.viewerId === owner.ownerId ||
+    viewer.guardsOwner ||
+    viewer.managesOwner ||
+    isProfilePublic(owner.birthDate, today)
   );
 }
 
 /**
  * Можно ли отдать файл.
  *
- * Аватар — тем же, кому виден профиль. Скан приказа — только самому человеку
- * и администраторам его клубов, в любом возрасте: там паспортные данные.
+ * Аватар — тем же, кому виден профиль. Скан приказа — только самому человеку,
+ * его родителю и администраторам его клубов, в любом возрасте: там паспортные
+ * данные.
  */
 export function canReadFile(
   kind: 'AVATAR' | 'RANK_DOCUMENT',
@@ -56,7 +62,7 @@ export function canReadFile(
     return canSeeProfile(owner, viewer, today);
   }
 
-  return viewer.viewerId === owner.ownerId || viewer.managesOwner;
+  return viewer.viewerId === owner.ownerId || viewer.guardsOwner || viewer.managesOwner;
 }
 
 /**

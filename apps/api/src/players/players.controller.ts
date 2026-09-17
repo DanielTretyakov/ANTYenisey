@@ -17,10 +17,10 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
-import type { AccessTokenPayload, PlayerProfile, PublicPlayer } from '@yenisey/types';
+import type { PlayerProfile, PublicPlayer } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Acting, ClientAction, type ActingClient } from '../guardianship/acting-client.guard';
 import { Public } from '../auth/decorators/public.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { ClubContext } from '../auth/club-context';
@@ -41,53 +41,61 @@ const UPLOAD_LIMIT = { default: { limit: 20, ttl: 60_000 } };
 
 /**
  * Свой профиль игрока. Клуба в адресе нет: профиль — свойство человека, а не
- * клуба, и заполняет его только он сам.
+ * клуба. Заполняет его сам человек, а пока ему нет 16 — родитель, параметром
+ * `?for=<id ребёнка>`; сам ребёнок до 16 профиль только смотрит.
  */
 @Controller('me/player')
 export class MePlayerController {
   constructor(private readonly players: PlayersService) {}
 
+  @ClientAction('read')
   @Get()
-  profile(@CurrentUser() user: AccessTokenPayload): Promise<PlayerProfile> {
-    return this.players.profile(user.sub);
+  profile(@Acting() acting: ActingClient): Promise<PlayerProfile> {
+    return this.players.profile(acting.userId);
   }
 
   /** Инвентарь: основание и две накладки. */
+  @ClientAction()
   @Patch()
-  updateEquipment(@CurrentUser() user: AccessTokenPayload, @Body() dto: UpdateEquipmentDto): Promise<PlayerProfile> {
-    return this.players.updateEquipment(user.sub, dto);
+  updateEquipment(@Acting() acting: ActingClient, @Body() dto: UpdateEquipmentDto): Promise<PlayerProfile> {
+    return this.players.updateEquipment(acting.userId, dto);
   }
 
   /** Аватар — файлом в поле `file`. PUT: новый заменяет старый целиком. */
   @Throttle(UPLOAD_LIMIT)
+  @ClientAction()
   @Put('avatar')
   @UseInterceptors(SingleFileUpload)
-  setAvatar(@CurrentUser() user: AccessTokenPayload, @Req() request: AuthenticatedRequest): Promise<PlayerProfile> {
-    return this.players.setAvatar(user.sub, uploadedBytes(request));
+  setAvatar(@Acting() acting: ActingClient, @Req() request: AuthenticatedRequest): Promise<PlayerProfile> {
+    return this.players.setAvatar(acting.userId, uploadedBytes(request));
   }
 
+  @ClientAction()
   @Delete('avatar')
-  removeAvatar(@CurrentUser() user: AccessTokenPayload): Promise<PlayerProfile> {
-    return this.players.removeAvatar(user.sub);
+  removeAvatar(@Acting() acting: ActingClient): Promise<PlayerProfile> {
+    return this.players.removeAvatar(acting.userId);
   }
 
+  @ClientAction()
   @Post('achievements')
-  addAchievement(@CurrentUser() user: AccessTokenPayload, @Body() dto: AchievementDto): Promise<PlayerProfile> {
-    return this.players.addAchievement(user.sub, dto);
+  addAchievement(@Acting() acting: ActingClient, @Body() dto: AchievementDto): Promise<PlayerProfile> {
+    return this.players.addAchievement(acting.userId, dto);
   }
 
+  @ClientAction()
   @Patch('achievements/:id')
   updateAchievement(
-    @CurrentUser() user: AccessTokenPayload,
+    @Acting() acting: ActingClient,
     @Param('id') id: string,
     @Body() dto: AchievementDto,
   ): Promise<PlayerProfile> {
-    return this.players.updateAchievement(user.sub, id, dto);
+    return this.players.updateAchievement(acting.userId, id, dto);
   }
 
+  @ClientAction()
   @Delete('achievements/:id')
-  removeAchievement(@CurrentUser() user: AccessTokenPayload, @Param('id') id: string): Promise<PlayerProfile> {
-    return this.players.removeAchievement(user.sub, id);
+  removeAchievement(@Acting() acting: ActingClient, @Param('id') id: string): Promise<PlayerProfile> {
+    return this.players.removeAchievement(acting.userId, id);
   }
 
   /**
@@ -95,25 +103,27 @@ export class MePlayerController {
    * необязательно, скан в поле `file`. Одна правка — один сброс подтверждения.
    */
   @Throttle(UPLOAD_LIMIT)
+  @ClientAction()
   @Put('rank')
   @UseInterceptors(SingleFileUpload)
   setRank(
-    @CurrentUser() user: AccessTokenPayload,
+    @Acting() acting: ActingClient,
     @Body() dto: SetRankDto,
     @Req() request: AuthenticatedRequest,
   ): Promise<PlayerProfile> {
-    return this.players.setRank(user.sub, dto, uploadedBytes(request));
+    return this.players.setRank(acting.userId, dto, uploadedBytes(request));
   }
 
+  @ClientAction()
   @Delete('rank')
-  removeRank(@CurrentUser() user: AccessTokenPayload): Promise<PlayerProfile> {
-    return this.players.removeRank(user.sub);
+  removeRank(@Acting() acting: ActingClient): Promise<PlayerProfile> {
+    return this.players.removeRank(acting.userId);
   }
 }
 
 /**
  * Публичная страница игрока. Открыта без входа — с шестнадцати лет; младше
- * видят только сам игрок и администраторы его клубов.
+ * видят только сам игрок, его родитель и администраторы его клубов.
  */
 @Controller('players')
 export class PlayersController {
@@ -168,7 +178,7 @@ export class PlayerFilesController {
     const allowed = canReadFile(
       file.kind,
       { ownerId: owner.id, birthDate: owner.birthDate },
-      { viewerId, managesOwner: await this.access.managesOwner(viewerId, owner.id) },
+      await this.access.viewerOf(viewerId, owner.id),
       new Date(),
     );
 
@@ -183,7 +193,7 @@ export class PlayerFilesController {
     const open = file.kind === 'AVATAR' && canReadFile(
       file.kind,
       { ownerId: owner.id, birthDate: owner.birthDate },
-      { viewerId: null, managesOwner: false },
+      { viewerId: null, managesOwner: false, guardsOwner: false },
       new Date(),
     );
 

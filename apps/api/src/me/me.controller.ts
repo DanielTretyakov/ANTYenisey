@@ -2,6 +2,7 @@ import { Controller, Delete, Get, Param, Put } from '@nestjs/common';
 import type { AccessTokenPayload, BookingEntry, FavouriteClub, FeedEvent } from '@yenisey/types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { EntriesService } from '../entries/entries.service';
+import { Acting, ClientAction, type ActingClient } from '../guardianship/acting-client.guard';
 import { MeService } from './me.service';
 
 /**
@@ -59,9 +60,12 @@ export class MeController {
    * Отмены здесь нет намеренно. Каждая строка несёт код своего клуба, и
    * интерфейс отменяет её уже существующим клубным маршрутом. Второй путь
    * отмены разошёлся бы с первым — сначала в мелочах, потом в деньгах.
+   *
+   * С `?for=` — записи ребёнка вошедшего родителя, тем же сборщиком.
    */
+  @ClientAction('read')
   @Get('bookings')
-  bookings(@CurrentUser() user: AccessTokenPayload): Promise<BookingEntry[]> {
-    return this.entries.listForUser(user.sub);
+  bookings(@Acting() acting: ActingClient): Promise<BookingEntry[]> {
+    return this.entries.listForUser(acting.userId);
   }
 }

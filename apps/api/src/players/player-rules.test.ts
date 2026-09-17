@@ -25,9 +25,9 @@ describe('isProfilePublic', () => {
 describe('canSeeProfile и canReadFile', () => {
   const child = { ownerId: 'kid', birthDate: day('2014-01-01') };
   const adult = { ownerId: 'adult', birthDate: day('1990-01-01') };
-  const stranger = { viewerId: 'x', managesOwner: false };
-  const anonymous = { viewerId: null, managesOwner: false };
-  const admin = { viewerId: 'adm', managesOwner: true };
+  const stranger = { viewerId: 'x', managesOwner: false, guardsOwner: false };
+  const anonymous = { viewerId: null, managesOwner: false, guardsOwner: false };
+  const admin = { viewerId: 'adm', managesOwner: true, guardsOwner: false };
 
   it('взрослого видят все, даже без входа', () => {
     assert.equal(canSeeProfile(adult, anonymous, TODAY), true);
@@ -37,15 +37,22 @@ describe('canSeeProfile и canReadFile', () => {
   it('младше 16 — только сам и администраторы его клубов', () => {
     assert.equal(canSeeProfile(child, anonymous, TODAY), false);
     assert.equal(canSeeProfile(child, stranger, TODAY), false);
-    assert.equal(canSeeProfile(child, { viewerId: 'kid', managesOwner: false }, TODAY), true);
+    assert.equal(canSeeProfile(child, { viewerId: 'kid', managesOwner: false, guardsOwner: false }, TODAY), true);
     assert.equal(canSeeProfile(child, admin, TODAY), true);
     assert.equal(canReadFile('AVATAR', child, stranger, TODAY), false);
+  });
+
+  it('родитель видит страницу, аватар и скан приказа ребёнка', () => {
+    const parent = { viewerId: 'mom', managesOwner: false, guardsOwner: true };
+    assert.equal(canSeeProfile(child, parent, TODAY), true);
+    assert.equal(canReadFile('AVATAR', child, parent, TODAY), true);
+    assert.equal(canReadFile('RANK_DOCUMENT', child, parent, TODAY), true);
   });
 
   it('скан приказа не видит посторонний даже у взрослого', () => {
     assert.equal(canReadFile('RANK_DOCUMENT', adult, anonymous, TODAY), false);
     assert.equal(canReadFile('RANK_DOCUMENT', adult, stranger, TODAY), false);
-    assert.equal(canReadFile('RANK_DOCUMENT', adult, { viewerId: 'adult', managesOwner: false }, TODAY), true);
+    assert.equal(canReadFile('RANK_DOCUMENT', adult, { viewerId: 'adult', managesOwner: false, guardsOwner: false }, TODAY), true);
     assert.equal(canReadFile('RANK_DOCUMENT', adult, admin, TODAY), true);
   });
 });

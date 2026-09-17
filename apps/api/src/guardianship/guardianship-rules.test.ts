@@ -171,7 +171,7 @@ describe('decideRevoke', () => {
 });
 
 describe('decideActing', () => {
-  const base = { callerId: 'adult', callerBirthDate: ADULT, today: TODAY };
+  const base = { mode: 'write' as const, callerId: 'adult', callerBirthDate: ADULT, today: TODAY };
 
   it('взрослый действует сам', () => {
     assert.deepEqual(decideActing({ ...base, forId: null, guardianship: null, childBirthDate: null }), {
@@ -182,9 +182,38 @@ describe('decideActing', () => {
   });
 
   it('до 16 сам не записывается — и «за себя» через forId тоже', () => {
-    const kid = { callerId: 'kid', callerBirthDate: CHILD, today: TODAY, guardianship: null, childBirthDate: null };
+    const kid = {
+      mode: 'write' as const,
+      callerId: 'kid',
+      callerBirthDate: CHILD,
+      today: TODAY,
+      guardianship: null,
+      childBirthDate: null,
+    };
     assert.equal(decideActing({ ...kid, forId: null }).ok, false);
     assert.equal(decideActing({ ...kid, forId: 'kid' }).ok, false);
+  });
+
+  it('смотреть своё ребёнку можно — он отслеживает, куда его записали', () => {
+    assert.deepEqual(
+      decideActing({
+        mode: 'read',
+        callerId: 'kid',
+        callerBirthDate: CHILD,
+        forId: null,
+        guardianship: null,
+        childBirthDate: null,
+        today: TODAY,
+      }),
+      { ok: true, userId: 'kid', byGuardian: false },
+    );
+  });
+
+  it('смотреть чужое — так же нельзя, как менять', () => {
+    assert.equal(
+      decideActing({ ...base, mode: 'read', forId: 'kid', guardianship: null, childBirthDate: CHILD }).ok,
+      false,
+    );
   });
 
   it('родитель — за своего ребёнка младше 16', () => {

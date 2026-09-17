@@ -9,7 +9,7 @@ import { BookingService } from './booking.service';
 import { CreateBookingDto, QuoteQueryDto } from './dto/booking.dto';
 import { ClubService } from '../club/club.service';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { Acting, ClientAction, type ActingClient } from '../guardianship/acting-client.guard';
 import type { ClubContext } from '../auth/club-context';
 
 /**
@@ -19,7 +19,9 @@ import type { ClubContext } from '../auth/club-context';
  * ClubContextGuard. Подставить в адрес чужой клуб можно — и именно поэтому
  * роль читается из базы на каждый запрос, а не из токена.
  *
- * Сами брони закрыты ролью `CLIENT`. Это не формальность: бронь ссылается на
+ * Сами брони закрыты клиентским действием (`@ClientAction`): роль `CLIENT`
+ * проверяется у того, ЗА КОГО бронь, — родитель бронирует за ребёнка младше 16
+ * параметром `?for=`, а сам ребёнок до 16 не бронирует. Это не формальность: бронь ссылается на
  * `ClientProfile`, которого у администратора и тренера просто нет, и без
  * проверки запрос упал бы ошибкой внешнего ключа вместо внятного ответа.
  * Ручная бронь администратором и спарринг тренером — отдельные сценарии ТЗ со
@@ -71,19 +73,20 @@ export class BookingController {
     );
   }
 
-  @Roles('CLIENT')
+  @ClientAction()
   @Post('bookings')
   create(
     @CurrentClub() club: ClubContext,
+    @Acting() acting: ActingClient,
     @Body() dto: CreateBookingDto,
   ): Promise<ClientBooking> {
-    return this.booking.create(club.tenantId, club.userId, dto);
+    return this.booking.create(club.tenantId, acting.userId, dto);
   }
 
-  @Roles('CLIENT')
+  @ClientAction('read')
   @Get('bookings')
-  listMine(@CurrentClub() club: ClubContext): Promise<ClientBooking[]> {
-    return this.booking.listMine(club.tenantId, club.userId);
+  listMine(@CurrentClub() club: ClubContext, @Acting() acting: ActingClient): Promise<ClientBooking[]> {
+    return this.booking.listMine(club.tenantId, acting.userId);
   }
 
   /**
@@ -93,12 +96,13 @@ export class BookingController {
    * с него списалось по политике клуба, и получать это вторым запросом
    * незачем.
    */
-  @Roles('CLIENT')
+  @ClientAction()
   @Delete('bookings/:id')
   cancel(
     @CurrentClub() club: ClubContext,
+    @Acting() acting: ActingClient,
     @Param('id') bookingId: string,
   ): Promise<ClientBooking> {
-    return this.booking.cancel(club.tenantId, club.userId, bookingId);
+    return this.booking.cancel(club.tenantId, acting.userId, bookingId);
   }
 }

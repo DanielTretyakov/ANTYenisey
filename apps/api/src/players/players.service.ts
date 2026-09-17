@@ -109,7 +109,7 @@ export class PlayersService {
     const row = await this.load(playerId);
     const today = new Date();
     const owner = { ownerId: row.id, birthDate: row.birthDate };
-    const viewer = { viewerId, managesOwner: await this.access.managesOwner(viewerId, row.id) };
+    const viewer = await this.access.viewerOf(viewerId, row.id);
 
     if (!canSeeProfile(owner, viewer, today)) {
       throw new NotFoundException('Профиль игрока не найден');

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { FilesModule } from '../files/files.module';
+import { GuardianshipModule } from '../guardianship/guardianship.module';
 import { PlayerAccess } from './player-access.service';
 import {
   MePlayerController,
@@ -18,7 +19,7 @@ import { RankReviewService } from './rank-review.service';
  * смотрит профиль игрока и решает по разряду оттуда.
  */
 @Module({
-  imports: [FilesModule],
+  imports: [FilesModule, GuardianshipModule],
   controllers: [MePlayerController, PlayersController, PlayerFilesController, RankReviewController],
   providers: [PlayersService, PlayerAccess, RankReviewService],
   exports: [PlayersService],

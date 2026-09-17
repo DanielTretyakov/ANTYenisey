@@ -2385,7 +2385,8 @@ async function playerProfile() {
   const playerId = r.body?.user?.id;
   const asPlayer = as(playerToken);
 
-  r = await post('/auth/register', registration({ lastName: 'Юнцов', firstName: 'Коля', birthDate: '2014-03-01' }));
+  const minorEmail = `probe-${RUN}-minor-${Math.random().toString(36).slice(2, 6)}@example.com`;
+  r = await post('/auth/register', registration({ email: minorEmail, lastName: 'Юнцов', firstName: 'Коля', birthDate: '2014-03-01' }));
   check('игрок младше 16 заведён', 201, r.status);
   const minorToken = r.body?.accessToken ?? '';
   const minorId = r.body?.user?.id;
@@ -2494,7 +2495,7 @@ async function playerProfile() {
   });
   check('соревнование из будущего', 400, r.status);
 
-  r = await as(minorToken)(`/me/player/achievements/${achievementId}`, {
+  r = await as(outsiderToken)(`/me/player/achievements/${achievementId}`, {
     method: 'PATCH',
     json: { title: 'Чужое', date: '2025-04-12', level: 'CITY' },
   });
@@ -2645,13 +2646,29 @@ async function playerProfile() {
   assert('профиль ребёнка закрыт от посторонних', r.body?.isPublic === false);
 
   r = await upload(minorToken, '/me/player/avatar', {}, { bytes: second, type: 'image/png', name: 'kid.png' });
-  check('ребёнок загрузил аватар', 200, r.status);
+  check('до 16 профиль сам не правит — ведёт родитель', 403, r.status);
+
+  // Игрок-взрослый закрепляет ребёнка за собой: заявка, подтверждение самим
+  // ребёнком — и дальше ведёт его профиль параметром ?for=.
+  r = await asPlayer('/me/children/attach', { method: 'POST', json: { email: minorEmail } });
+  check('взрослый просит закрепить ребёнка', 200, r.status);
+  r = await asMinor('/me/guardianship/requests');
+  r = await asMinor(`/me/guardianship/requests/${r.body?.[0]?.id}/confirm`, { method: 'POST' });
+  check('ребёнок подтвердил', 204, r.status);
+
+  r = await upload(playerToken, `/me/player/avatar?for=${minorId}`, {}, { bytes: second, type: 'image/png', name: 'kid.png' });
+  check('родитель загрузил аватар ребёнку', 200, r.status);
   const minorAvatar = r.body?.avatarFileId;
+
+  r = await upload(outsiderToken, `/me/player/avatar?for=${minorId}`, {}, { bytes: second, type: 'image/png', name: 'kid.png' });
+  check('посторонний профиль ребёнка не правит', 403, r.status);
 
   r = await call(`/players/${minorId}`);
   check('страница ребёнка без входа', 404, r.status);
-  r = await asPlayer(`/players/${minorId}`);
+  r = await as(outsiderToken)(`/players/${minorId}`);
   check('страница ребёнка постороннему', 404, r.status);
+  r = await asPlayer(`/players/${minorId}`);
+  check('страница ребёнка — его родителю', 200, r.status);
   r = await asMinor(`/players/${minorId}`);
   check('свою страницу ребёнок видит', 200, r.status);
   assert('с пометкой «скрыта от посторонних»', r.body?.hiddenFromPublic === true);
@@ -2859,6 +2876,157 @@ async function family() {
 
   r = await asChild('/me/guardianship');
   assert('у ребёнка больше нет родителя', r.status === 200 && r.body === null);
+
+  console.log('=== 31б. Запись за ребёнка');
+
+  // Заводим ребёнка заново: прежнего только что отвязали.
+  const kidEmail = newEmail('kid2');
+  r = await asParent('/me/children', { method: 'POST', json: childForm({ email: kidEmail, firstName: 'Петя' }) });
+  check('второй ребёнок заведён', 201, r.status);
+  const kidId = r.body?.id;
+  r = await post('/auth/login', { email: kidEmail, password: PASSWORD });
+  const asKid = as(r.body?.accessToken ?? '');
+
+  r = await asAdmin('/clubs/yenisey/coaches');
+  const coachId = r.body?.[0]?.id;
+  r = await asAdmin('/clubs/yenisey/training-types');
+  const trainingTypeId = r.body?.[0]?.id;
+  r = await asAdmin('/clubs/yenisey/tournament-types');
+  const tournamentTypeId = r.body?.[0]?.id;
+
+  const soon = new Date(Date.now() + 9 * 24 * 3600_000);
+  const later = new Date(soon.getTime() + 90 * 60_000);
+
+  r = await asAdmin('/clubs/yenisey/tournaments', {
+    method: 'POST',
+    json: { tournamentTypeId, startsAt: soon.toISOString(), endsAt: later.toISOString() },
+  });
+  check('турнир для семьи заведён', 201, r.status);
+  const cupId = r.body?.id;
+
+  r = await asAdmin('/clubs/yenisey/training-sessions', {
+    method: 'POST',
+    json: { trainingTypeId, coachId, startsAt: soon.toISOString(), endsAt: later.toISOString(), capacity: 5 },
+  });
+  check('занятие для семьи заведено', 201, r.status);
+  const sessionId = r.body?.id;
+
+  r = await asKid(`/clubs/yenisey/tournaments/${cupId}/registration`, { method: 'POST' });
+  check('ребёнок сам на турнир не записывается', 403, r.status);
+  assert('и знает почему', String(r.body?.message ?? '').includes('родитель'));
+
+  r = await asKid(`/clubs/yenisey/tournaments/${cupId}/registration?for=${kidId}`, { method: 'POST' });
+  check('и «за себя» через for — тоже', 403, r.status);
+
+  r = await asStranger(`/clubs/yenisey/tournaments/${cupId}/registration?for=${kidId}`, { method: 'POST' });
+  check('посторонний за чужого ребёнка не записывает', 403, r.status);
+
+  r = await asParent(`/clubs/yenisey/tournaments/${cupId}/registration?for=${kidId}`, { method: 'POST' });
+  check('родитель записал ребёнка на турнир', 201, r.status);
+
+  r = await asParent(`/clubs/yenisey/trainings/${sessionId}/booking?for=${kidId}`, { method: 'POST' });
+  check('родитель записал ребёнка на занятие', 201, r.status);
+
+  r = await asKid('/me/bookings');
+  check('ребёнок видит свои записи', 200, r.status);
+  assert('обе записи — у ребёнка', (r.body ?? []).filter((e) => e.id === cupId || e.id === sessionId).length === 2);
+
+  r = await asParent('/me/bookings');
+  assert('у родителя в своих записях их нет', !(r.body ?? []).some((e) => e.id === cupId || e.id === sessionId));
+
+  r = await asParent(`/me/bookings?for=${kidId}`);
+  assert('родитель видит записи ребёнка', (r.body ?? []).filter((e) => e.id === cupId || e.id === sessionId).length === 2);
+
+  r = await asStranger(`/me/bookings?for=${kidId}`);
+  check('посторонний записей ребёнка не видит', 403, r.status);
+
+  r = await call(`/clubs/yenisey/events?for=${kidId}`);
+  check('за ребёнка без входа не смотрят', 401, r.status);
+
+  r = await asParent(`/clubs/yenisey/events?for=${kidId}`);
+  assert('в списке клуба отметка «записан» — за ребёнка',
+    (r.body ?? []).find((event) => event.id === cupId)?.registered === true);
+
+  r = await asParent('/clubs/yenisey/events');
+  assert('а за самого родителя — «не записан»',
+    (r.body ?? []).find((event) => event.id === cupId)?.registered === false);
+
+  r = await asKid(`/clubs/yenisey/tournaments/${cupId}/registration`, { method: 'DELETE' });
+  check('ребёнок сам не отменяет', 403, r.status);
+
+  r = await asParent(`/clubs/yenisey/tournaments/${cupId}/registration?for=${kidId}`, { method: 'DELETE' });
+  check('родитель отменил запись ребёнка', 200, r.status);
+
+  // --- Родитель — тренер клуба: пишет ребёнка как обычный родитель.
+  r = await post('/auth/register', registration({ lastName: 'Тренеров', firstName: 'Папа' }));
+  const coachParentId = r.body?.user?.id;
+  const asCoachParent = as(r.body?.accessToken ?? '');
+  r = await asAdmin(`/clubs/yenisey/people/${coachParentId}/role`, { method: 'PATCH', json: { role: 'COACH' } });
+  check('родитель стал тренером клуба', 200, r.status);
+
+  r = await asCoachParent('/me/children', { method: 'POST', json: childForm({ email: newEmail('coachkid'), lastName: 'Тренеров' }) });
+  check('тренер завёл ребёнка', 201, r.status);
+  const coachKidId = r.body?.id;
+
+  r = await asCoachParent(`/clubs/yenisey/tournaments/${cupId}/registration`, { method: 'POST' });
+  check('сам тренер клиентом не записывается', 403, r.status);
+
+  r = await asCoachParent(`/clubs/yenisey/tournaments/${cupId}/registration?for=${coachKidId}`, { method: 'POST' });
+  check('а ребёнка записывает как обычный родитель', 201, r.status);
+
+  // --- Граница 16 лет у самостоятельной записи.
+  r = await post('/auth/register', registration({ lastName: 'Именинник', birthDate: bornYearsAgo(16) }));
+  const asBirthday = as(r.body?.accessToken ?? '');
+  r = await asBirthday(`/clubs/yenisey/tournaments/${cupId}/registration`, { method: 'POST' });
+  check('в день шестнадцатилетия записывается сам', 201, r.status);
+
+  r = await post('/auth/register', registration({ lastName: 'Почтиименинник', birthDate: bornYearsAgo(16, 1) }));
+  const asAlmost = as(r.body?.accessToken ?? '');
+  r = await asAlmost(`/clubs/yenisey/tournaments/${cupId}/registration`, { method: 'POST' });
+  check('накануне — ещё нет', 403, r.status);
+
+  // --- Профиль игрока ребёнка ведёт родитель.
+  r = await asKid('/me/player');
+  check('ребёнок смотрит свой профиль', 200, r.status);
+
+  r = await asKid('/me/player', { method: 'PATCH', json: { blade: 'Детское' } });
+  check('ребёнок сам профиль не правит', 403, r.status);
+
+  r = await asParent(`/me/player?for=${kidId}`, { method: 'PATCH', json: { blade: 'Детское основание' } });
+  check('родитель ведёт профиль ребёнка', 200, r.status);
+  assert('правка легла ребёнку', r.body?.userId === kidId && r.body?.equipment?.blade === 'Детское основание');
+
+  r = await asStranger(`/me/player?for=${kidId}`);
+  check('посторонний профиль ребёнка не читает', 403, r.status);
+
+  const scanForm = new FormData();
+  scanForm.set('rank', 'YOUTH_1');
+  scanForm.set('file', new Blob([new TextEncoder().encode('%PDF-1.4\n%%EOF\n')], { type: 'application/pdf' }), 'prikaz.pdf');
+  const scanResponse = await fetch(`${API}/me/player/rank?for=${kidId}`, {
+    method: 'PUT',
+    body: scanForm,
+    headers: { Authorization: `Bearer ${parentToken}` },
+  });
+  check('родитель заявил разряд ребёнка со сканом', 200, scanResponse.status);
+  const scanId = (await scanResponse.json())?.rank?.document?.id;
+
+  r = await asParent(`/files/${scanId}`);
+  check('родитель видит скан приказа ребёнка', 200, r.status);
+  r = await asStranger(`/files/${scanId}`);
+  check('посторонний — нет', 403, r.status);
+
+  r = await asParent(`/players/${kidId}`);
+  check('страница ребёнка открыта родителю', 200, r.status);
+  r = await asStranger(`/players/${kidId}`);
+  check('и закрыта постороннему', 404, r.status);
+
+  // --- После отвязки ребёнок младше 16 по-прежнему не записывается сам.
+  r = await asParent(`/me/children/${kidId}`, { method: 'DELETE' });
+  check('родитель отвязал второго ребёнка', 204, r.status);
+  r = await asParent(`/clubs/yenisey/trainings/${sessionId}/booking?for=${kidId}`, { method: 'POST' });
+  check('отвязанного больше не записывает', 403, r.status);
+  r = await asKid(`/clubs/yenisey/tournaments/${cupId}/registration`, { method: 'POST' });
+  check('а сам он до 16 по-прежнему не записывается', 403, r.status);
 }
 
 main().catch((error) => {
