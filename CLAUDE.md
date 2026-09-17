@@ -263,6 +263,7 @@ pnpm --filter @yenisey/database verify
 - **Консоль в cp1251.** `print` с `₽`, эмодзи или длинным тире падает с `UnicodeEncodeError`, а `logging` молча теряет строку — скрипт успевает сделать работу и потерять результат на выводе. В Python-скриптах проекта ставь `PYTHONIOENCODING=utf-8` или перенастраивай `sys.stdout` первой строкой, а всем `basicConfig` задавай `encoding="utf-8"`.
 - **`core.autocrlf=true`.** Контрольные суммы вендоренных скиллов в `.claude/skills/` считаются по LF-байтам, поэтому в `.gitattributes` для них стоит `text eol=lf`. Без этого свежий чекаут даёт «stale snapshot» и скилл молча не грузится.
 - **TLS нестабилен.** `git push` периодически падает с `schannel: failed to receive handshake` — повторить. Проверяй код возврата именно `git`: `git push | tail -3` всегда вернёт 0.
+- **MCP-серверу нельзя давать `@latest`.** `npx -y chrome-devtools-mcp@latest` каждый запуск идёт в реестр npm и на этой машине стартует 39 секунд — при таймауте подключения MCP в 30 секунд сервер не поднимается никогда, а наружу видно только `CONNECT_TIMEOUT`. Пакет стоит глобально (`npm i -g chrome-devtools-mcp`), а в `.mcp.json` команда без версии: старт 1,4 секунды. Так же стоит поступать с любым новым stdio-сервером.
 - Образы с Docker Hub не тянутся (TLS-таймаут), Postgres установлен нативно.
 
 ## Язык
