@@ -383,6 +383,9 @@ function RankForm({ profile, onChange }: { profile: PlayerProfile; onChange: Upd
           <input
             ref={fileInput}
             type="file"
+            // Подпись полю нужна своя: Field связывает свой <label> только с
+            // собственным полем, а этому он отдал место через children.
+            aria-label={current?.document ? 'Новый скан приказа' : 'Скан приказа'}
             accept="image/jpeg,image/png,image/webp,application/pdf"
             className="block w-full text-[0.875rem] text-text-muted file:mr-3 file:rounded-control file:border file:border-border-strong file:bg-surface-raised file:px-3 file:py-1.5 file:text-[0.8125rem] file:text-text"
             onChange={(event) => {
