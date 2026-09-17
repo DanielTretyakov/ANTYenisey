@@ -141,10 +141,14 @@ function RankBlock({
       setAsking(null);
       setReason('');
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
-
       if (cause instanceof ApiError && cause.status === 409) {
+        // Свой текст, а не серверный: сервер советует «откройте карточку
+        // заново», а карточка перечитывается здесь же, сама. Человек видит
+        // уже новый разряд — и должен понять, что смотреть надо ещё раз.
+        setError('Игрок поправил разряд, пока вы смотрели. Карточка обновлена — проверьте и решите ещё раз.');
         onStale();
+      } else {
+        setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
       }
     } finally {
       setPending(null);
