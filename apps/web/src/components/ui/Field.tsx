@@ -24,7 +24,14 @@ type FieldProps = InputHTMLAttributes<HTMLInputElement> & {
   label: string;
   /** Поясняющая строка под полем: формат, ограничение, пример. */
   hint?: string;
-  /** Готовый контрол вместо <input> — для составных полей. */
+  /**
+   * Готовый контрол вместо <input> — для составных полей.
+   *
+   * Подпись связывается с ним, только если передан `id`, и этот же `id` стоит
+   * на самом контроле: иначе <label> висит ни с чем не связанным, и Chrome
+   * справедливо сообщает «No label associated with a form field». Подсказка
+   * тогда доступна контролу как `${id}-hint`.
+   */
   children?: ReactNode;
 };
 
@@ -36,7 +43,7 @@ export function Field({ label, hint, children, className, id, ...rest }: FieldPr
   return (
     <div className="mb-4">
       <label
-        htmlFor={children ? undefined : fieldId}
+        htmlFor={children ? id : fieldId}
         className="mb-1.5 block text-[0.8125rem] font-medium text-text-muted"
       >
         {label}

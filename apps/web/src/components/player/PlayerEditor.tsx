@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { AchievementLevel, PlayerAchievement, PlayerProfile, PublicUser, SportRankLevel } from '@yenisey/types';
 import { ACHIEVEMENT_LEVELS, SPORT_RANK_LEVELS } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
@@ -277,6 +277,7 @@ const RANK_OPTIONS = SPORT_RANK_LEVELS.map((value) => ({ value, label: RANK_TITL
 function RankForm({ profile, onChange }: { profile: PlayerProfile; onChange: Update }) {
   const current = profile.rank;
   const fileInput = useRef<HTMLInputElement>(null);
+  const scanId = useId();
 
   const [rank, setRank] = useState<SportRankLevel>(current?.rank ?? 'SPORT_3');
   const [orderNumber, setOrderNumber] = useState(current?.orderNumber ?? '');
@@ -377,15 +378,15 @@ function RankForm({ profile, onChange }: { profile: PlayerProfile; onChange: Upd
         </div>
 
         <Field
+          id={scanId}
           label={current?.document ? 'Новый скан приказа' : 'Скан приказа'}
           hint="JPEG, PNG, WebP или PDF до 10 МБ. Его видят только вы и администраторы ваших клубов."
         >
           <input
             ref={fileInput}
+            id={scanId}
+            aria-describedby={`${scanId}-hint`}
             type="file"
-            // Подпись полю нужна своя: Field связывает свой <label> только с
-            // собственным полем, а этому он отдал место через children.
-            aria-label={current?.document ? 'Новый скан приказа' : 'Скан приказа'}
             accept="image/jpeg,image/png,image/webp,application/pdf"
             className="block w-full text-[0.875rem] text-text-muted file:mr-3 file:rounded-control file:border file:border-border-strong file:bg-surface-raised file:px-3 file:py-1.5 file:text-[0.8125rem] file:text-text"
             onChange={(event) => {
