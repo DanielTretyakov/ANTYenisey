@@ -5,6 +5,7 @@ import { AttendanceModule } from '../attendance/attendance.module';
 import { ClubModule } from '../club/club.module';
 import { EntriesModule } from '../entries/entries.module';
 import { PlayersModule } from '../players/players.module';
+import { GuardianshipModule } from '../guardianship/guardianship.module';
 
 /**
  * Карточка человека в клубе.
@@ -22,7 +23,7 @@ import { PlayersModule } from '../players/players.module';
  * администратор, и смотрит он отсюда.
  */
 @Module({
-  imports: [AttendanceModule, ClubModule, EntriesModule, PlayersModule],
+  imports: [AttendanceModule, ClubModule, EntriesModule, PlayersModule, GuardianshipModule],
   controllers: [PeopleController],
   providers: [PeopleService],
 })

@@ -8,7 +8,9 @@ import {
 } from '@nestjs/common';
 import { ActorType, AuditAction, GuardianshipStatus, Prisma, Role } from '@yenisey/database';
 import type {
+  ClubPersonFamily,
   FamilyChild,
+  FamilyMember,
   FamilyNotice,
   GuardianshipRequestView,
   MyGuardian,
@@ -20,6 +22,7 @@ import { hashPassword } from '../auth/password';
 import type { AccountDto } from '../auth/dto/register.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  canBeGuardian,
   decideAnswer,
   decideCreateChild,
   decideRequest,
@@ -192,11 +195,7 @@ export class FamilyService {
    * Ответ один при любом исходе — см. REQUEST_NOTICE. Подтвердить её может
    * только сам ребёнок: знать его почту — не право им распоряжаться.
    */
-  async requestAttach(
-    guardianId: string,
-    email: string,
-    desk?: DeskContext,
-  ): Promise<FamilyNotice> {
+  async requestAttach(guardianId: string, email: string): Promise<FamilyNotice> {
     const today = new Date();
     const requester = await this.prisma.user.findUniqueOrThrow({
       where: { id: guardianId },
@@ -243,8 +242,7 @@ export class FamilyService {
             childUserId: target.id,
             guardianUserId: guardianId,
             status: GuardianshipStatus.PENDING,
-            createdByUserId: desk?.actorUserId ?? guardianId,
-            createdInTenantId: desk?.tenantId ?? null,
+            createdByUserId: guardianId,
           },
         })
         .catch((error: unknown) => {
@@ -311,6 +309,127 @@ export class FamilyService {
     }
 
     await this.revokeRow(row, { kind: 'club-admin' }, { byUserId: desk.actorUserId, reason, desk });
+  }
+
+  /**
+   * Администратор у стойки предлагает закрепить ребёнка из своего клуба за
+   * родителем из своего клуба.
+   *
+   * Заявка, а не закрепление: подтверждает всё равно сам ребёнок —
+   * администратор за него этого сделать не может (решение от 12.09.2026). В
+   * отличие от заявки по почте, здесь молчать незачем: оба человека клубу
+   * известны, и «уже закреплён» администратор должен услышать прямо.
+   *
+   * Что оба состоят в клубе, проверяет вызывающий маршрут.
+   */
+  async requestForChild(guardianId: string, childId: string, desk: DeskContext): Promise<void> {
+    const today = new Date();
+    const [guardian, child] = await Promise.all([
+      this.prisma.user.findUniqueOrThrow({ where: { id: guardianId }, select: { birthDate: true } }),
+      this.prisma.user.findUniqueOrThrow({
+        where: { id: childId },
+        select: {
+          birthDate: true,
+          guardianshipsAsChild: {
+            where: {
+              OR: [
+                { status: GuardianshipStatus.ACTIVE },
+                { status: GuardianshipStatus.PENDING, guardianUserId: guardianId },
+              ],
+            },
+            select: { status: true },
+          },
+        },
+      }),
+    ]);
+
+    if (guardianId === childId) {
+      throw new BadRequestException('Человек не может быть родителем самому себе');
+    }
+
+    if (!canBeGuardian(guardian.birthDate, today)) {
+      throw new BadRequestException('Вести ребёнка может взрослый — с 18 лет');
+    }
+
+    if (!isChild(child.birthDate, today)) {
+      throw new BadRequestException('С 16 лет человек записывается сам — закреплять его не нужно');
+    }
+
+    if (child.guardianshipsAsChild.some((row) => row.status === GuardianshipStatus.ACTIVE)) {
+      throw new ConflictException('Ребёнок уже закреплён за родителем — сначала снимите закрепление');
+    }
+
+    // Та же заявка уже ждёт ответа — повторное нажатие, а не ошибка.
+    if (child.guardianshipsAsChild.some((row) => row.status === GuardianshipStatus.PENDING)) {
+      return;
+    }
+
+    await this.prisma.guardianship.create({
+      data: {
+        childUserId: childId,
+        guardianUserId: guardianId,
+        status: GuardianshipStatus.PENDING,
+        createdByUserId: desk.actorUserId,
+        createdInTenantId: desk.tenantId,
+      },
+    });
+  }
+
+  /**
+   * Семья в карточке человека: кто его ведёт и кого ведёт он.
+   *
+   * Полные имена — только у людей этого клуба: у остальных «Фамилия И.», как
+   * при поиске у стойки. Опека, права по которой кончились (ребёнку 16),
+   * здесь уже не семья и не показывается.
+   */
+  async familyOf(userId: string, tenantId: string): Promise<ClubPersonFamily> {
+    const today = new Date();
+    const memberSelect = {
+      id: true,
+      fullName: true,
+      birthDate: true,
+      memberships: { where: { tenantId, deactivatedAt: null }, select: { tenantId: true } },
+    } satisfies Prisma.UserSelect;
+
+    const person = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: {
+        birthDate: true,
+        guardianshipsAsChild: {
+          where: { status: GuardianshipStatus.ACTIVE },
+          select: { status: true, guardian: { select: memberSelect } },
+        },
+        guardianshipsAsGuardian: {
+          where: { status: GuardianshipStatus.ACTIVE, child: { deactivatedAt: null, anonymizedAt: null } },
+          select: { status: true, child: { select: memberSelect } },
+        },
+      },
+    });
+
+    const member = (row: Prisma.UserGetPayload<{ select: typeof memberSelect }>): FamilyMember => {
+      const memberOfClub = row.memberships.length > 0;
+
+      return {
+        id: row.id,
+        name: memberOfClub ? row.fullName : shortName(row.fullName),
+        birthDate: formatBirthDate(row.birthDate),
+        memberOfClub,
+      };
+    };
+
+    const guardianRow = person.guardianshipsAsChild[0];
+
+    return {
+      isChild: isChild(person.birthDate, today),
+      canBeGuardian: canBeGuardian(person.birthDate, today),
+      guardian:
+        guardianRow && guardianHasRights(guardianRow.status, person.birthDate, today)
+          ? member(guardianRow.guardian)
+          : null,
+      children: person.guardianshipsAsGuardian
+        .filter((row) => guardianHasRights(row.status, row.child.birthDate, today))
+        .map((row) => member(row.child)),
+    };
   }
 
   /** Кто ведёт человека сейчас. Пусто — никто, или ему уже 16. */

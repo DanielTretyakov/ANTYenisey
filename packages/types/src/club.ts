@@ -14,6 +14,7 @@
 import type { Role } from './auth';
 import type { DeskMarkInfo, DeskVisit } from './desk';
 import type { BookingEntry } from './platform';
+import type { ClubPersonFamily } from './family';
 import type { PlayerProfile } from './player';
 
 /**
@@ -463,6 +464,8 @@ export interface ClubPersonCard {
    * проверяет администратор любого клуба человека, и смотрит он отсюда.
    */
   player: PlayerProfile;
+  /** Семья: кто ведёт человека, кого ведёт он. */
+  family: ClubPersonFamily;
 }
 
 /** Запись человека вместе с подписью того, кто поставил отметку. */

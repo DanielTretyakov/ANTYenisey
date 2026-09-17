@@ -53,3 +53,39 @@ export interface MyGuardian {
   /** «Фамилия И.». */
   name: string;
 }
+
+/** Человек из семьи в карточке у администратора. */
+export interface FamilyMember {
+  id: string;
+  /**
+   * Полное имя — если человек состоит в этом клубе, иначе «Фамилия И.»: чужой
+   * клуб полных имён не видит, как и при поиске человека у стойки.
+   */
+  name: string;
+  /** «2015-06-01». */
+  birthDate: string;
+  /** Состоит в этом клубе — тогда на него есть карточка. */
+  memberOfClub: boolean;
+}
+
+/** Семья в карточке человека у администратора. */
+export interface ClubPersonFamily {
+  /** Человеку нет 16: записывает за него родитель. */
+  isChild: boolean;
+  /** Человеку есть 18: может вести ребёнка. */
+  canBeGuardian: boolean;
+  /** Кто ведёт человека — если он ребёнок и закреплён. */
+  guardian: FamilyMember | null;
+  /** Кого ведёт человек. */
+  children: FamilyMember[];
+}
+
+/** Администратор предлагает закрепить ребёнка за родителем — подтвердит ребёнок. */
+export interface AttachGuardianRequest {
+  guardianId: string;
+}
+
+/** Клуб снимает закрепление — только с причиной. */
+export interface RevokeGuardianshipRequest {
+  reason: string;
+}

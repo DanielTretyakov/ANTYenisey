@@ -3027,6 +3027,112 @@ async function family() {
   check('отвязанного больше не записывает', 403, r.status);
   r = await asKid(`/clubs/yenisey/tournaments/${cupId}/registration`, { method: 'POST' });
   check('а сам он до 16 по-прежнему не записывается', 403, r.status);
+
+  console.log('=== 31в. Семья у стойки');
+
+  // Родитель-клиент «Енисея» — registration() регистрирует со страницы клуба.
+  r = await post('/auth/register', registration({ lastName: 'Стойкин', firstName: 'Андрей' }));
+  const deskParentId = r.body?.user?.id;
+  const asDeskParent = as(r.body?.accessToken ?? '');
+
+  r = await post('/auth/register', registration({ tenantSlug: undefined, lastName: 'Чужаков' }));
+  const outsiderParentId = r.body?.user?.id;
+
+  r = await post('/auth/register', registration({ lastName: 'Молодой', birthDate: bornYearsAgo(18, 1) }));
+  const youngParentId = r.body?.user?.id;
+
+  const deskChildEmail = newEmail('deskkid');
+  const deskChild = childForm({ email: deskChildEmail, lastName: 'Стойкин', firstName: 'Ваня', middleName: 'Андреевич' });
+
+  r = await asDeskParent(`/clubs/yenisey/people/${deskParentId}/children`, { method: 'POST', json: deskChild });
+  check('клиент ребёнка у стойки не заводит', 403, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${outsiderParentId}/children`, { method: 'POST', json: deskChild });
+  check('родителю не из клуба — не заводит', 404, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${youngParentId}/children`, { method: 'POST', json: deskChild });
+  check('семнадцатилетнему родителю — не заводит', 403, r.status);
+
+  r = await asAdmin(`/clubs/sayany/people/${deskParentId}/children`, { method: 'POST', json: deskChild });
+  check('администратор чужого клуба — не заводит', 403, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${deskParentId}/children`, { method: 'POST', json: deskChild });
+  check('администратор завёл ребёнка родителю у стойки', 201, r.status);
+  const deskChildId = r.body?.id;
+
+  r = await post('/auth/login', { email: deskChildEmail, password: PASSWORD });
+  check('ребёнок входит паролем, который задал родитель', 200, r.status);
+  const asDeskChild = as(r.body?.accessToken ?? '');
+
+  r = await asAdmin(`/clubs/yenisey/people/${deskChildId}`);
+  check('ребёнок сразу в клубе — карточка открывается', 200, r.status);
+  assert('в карточке ребёнка — родитель', r.body?.family?.isChild === true && r.body?.family?.guardian?.id === deskParentId);
+
+  r = await asAdmin(`/clubs/yenisey/people/${deskParentId}`);
+  assert('в карточке родителя — ребёнок', (r.body?.family?.children ?? []).some((child) => child.id === deskChildId));
+
+  r = await asDeskParent('/me/children');
+  assert('и у родителя в кабинете', (r.body ?? []).some((child) => child.id === deskChildId));
+
+  // --- Снять закрепление от имени клуба.
+  r = await asAdmin(`/clubs/yenisey/people/${deskChildId}/guardian/revoke`, { method: 'POST', json: { reason: '' } });
+  check('без причины — нельзя', 400, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${deskChildId}/guardian/revoke`, { method: 'POST', json: { reason: '   ' } });
+  check('из одних пробелов — тоже', 400, r.status);
+
+  r = await asDeskParent(`/clubs/yenisey/people/${deskChildId}/guardian/revoke`, { method: 'POST', json: { reason: 'Хочу' } });
+  check('клиент от имени клуба не снимает', 403, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${deskChildId}/guardian/revoke`, {
+    method: 'POST',
+    json: { reason: 'Родитель потерял доступ к учётке' },
+  });
+  check('клуб снял закрепление с причиной', 204, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${deskChildId}/guardian/revoke`, {
+    method: 'POST',
+    json: { reason: 'Ещё раз' },
+  });
+  check('снятое второй раз не снимается', 404, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${deskChildId}`);
+  assert('у ребёнка больше нет родителя', r.body?.family?.guardian === null);
+
+  // --- Заявка от администратора: подтверждает ребёнок.
+  r = await asAdmin(`/clubs/yenisey/people/${deskChildId}/guardian`, { method: 'POST', json: { guardianId: youngParentId } });
+  check('семнадцатилетнему заявку не предлагают', 400, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${deskChildId}/guardian`, { method: 'POST', json: { guardianId: outsiderParentId } });
+  check('родителю не из клуба — не предлагают', 404, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${deskChildId}/guardian`, { method: 'POST', json: { guardianId: deskParentId } });
+  check('администратор предложил закрепить', 204, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${deskChildId}/guardian`, { method: 'POST', json: { guardianId: deskParentId } });
+  check('повторное предложение — то же состояние', 204, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${deskChildId}`);
+  assert('до подтверждения ребёнок не закреплён', r.body?.family?.guardian === null);
+
+  r = await asDeskChild('/me/guardianship/requests');
+  const deskRequest = (r.body ?? [])[0];
+  assert('ребёнок видит одну заявку от родителя', (r.body ?? []).length === 1 && deskRequest?.guardianName === 'Стойкин А.');
+
+  r = await asAdmin(`/me/guardianship/requests/${deskRequest?.id}/confirm`, { method: 'POST' });
+  check('администратор за ребёнка не подтверждает', 404, r.status);
+
+  r = await asDeskChild(`/me/guardianship/requests/${deskRequest?.id}/confirm`, { method: 'POST' });
+  check('ребёнок подтвердил', 204, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${deskChildId}/guardian`, { method: 'POST', json: { guardianId: deskParentId } });
+  check('уже закреплённому — не предлагают', 409, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${deskParentId}`);
+  assert('ребёнок снова в карточке родителя', (r.body?.family?.children ?? []).some((child) => child.id === deskChildId));
+
+  r = await asAdmin(`/clubs/yenisey/people/${youngParentId}`);
+  assert('семнадцатилетний — не ребёнок и не родитель', r.body?.family?.isChild === false && r.body?.family?.canBeGuardian === false);
 }
 
 main().catch((error) => {

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { ClubPerson, ClubPersonCard, ClubPersonEntry, PlatformPersonLookup } from '@yenisey/types';
+import type { ClubPerson, ClubPersonCard, ClubPersonEntry, FamilyChild, PlatformPersonLookup } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { AttendanceService } from '../attendance/attendance.service';
@@ -7,6 +7,9 @@ import { formatBirthDate } from '../auth/birth-date';
 import { MembershipService } from '../club/membership.service';
 import { chargeOf } from '../desk/revenue';
 import { EntriesService } from '../entries/entries.service';
+import type { ClubContext } from '../auth/club-context';
+import type { AccountDto } from '../auth/dto/register.dto';
+import { FamilyService } from '../guardianship/family.service';
 import { PlayersService } from '../players/players.service';
 import { personSummary } from './person-summary';
 
@@ -33,7 +36,67 @@ export class PeopleService {
     private readonly attendance: AttendanceService,
     private readonly membership: MembershipService,
     private readonly players: PlayersService,
+    private readonly family: FamilyService,
   ) {}
+
+  /**
+   * Завести ребёнка родителю у стойки. Родитель — человек этого клуба: клуб
+   * заводит учётки детям тех, кого знает, а не кому угодно на платформе.
+   */
+  async createChild(
+    club: ClubContext,
+    guardianId: string,
+    dto: AccountDto,
+    ipAddress: string | null,
+  ): Promise<FamilyChild> {
+    await this.requireMember(club.tenantId, guardianId);
+
+    return this.family.createChild(guardianId, dto, {
+      tenantId: club.tenantId,
+      actorUserId: club.userId,
+      ipAddress,
+    });
+  }
+
+  /** Заявка на закрепление: и ребёнок, и родитель — люди этого клуба. */
+  async requestGuardian(club: ClubContext, childId: string, guardianId: string): Promise<void> {
+    await Promise.all([
+      this.requireMember(club.tenantId, childId),
+      this.requireMember(club.tenantId, guardianId),
+    ]);
+
+    await this.family.requestForChild(guardianId, childId, {
+      tenantId: club.tenantId,
+      actorUserId: club.userId,
+      ipAddress: null,
+    });
+  }
+
+  /** Снять закрепление ребёнка этого клуба — с причиной и строкой аудита. */
+  async revokeGuardian(club: ClubContext, childId: string, reason: string, ipAddress: string | null): Promise<void> {
+    await this.requireMember(club.tenantId, childId);
+
+    await this.family.revokeByClub(childId, reason, {
+      tenantId: club.tenantId,
+      actorUserId: club.userId,
+      ipAddress,
+    });
+  }
+
+  /**
+   * Человек состоит в клубе и не отключён в нём. Чужой клубу человек не
+   * находится — как и в карточке.
+   */
+  private async requireMember(tenantId: string, userId: string): Promise<void> {
+    const found = await this.prisma.tenantMembership.findFirst({
+      where: { tenantId, userId, deactivatedAt: null, user: { deactivatedAt: null, anonymizedAt: null } },
+      select: { userId: true },
+    });
+
+    if (!found) {
+      throw new NotFoundException('Человек не найден в этом клубе');
+    }
+  }
 
   /**
    * Найти человека на платформе по точной почте или точному телефону.
@@ -145,10 +208,11 @@ export class PeopleService {
       throw new NotFoundException('Человек не найден в этом клубе');
     }
 
-    const [entries, visits, player] = await Promise.all([
+    const [entries, visits, player, family] = await Promise.all([
       this.entries.listForUser(userId, tenantId),
       this.attendance.walkInsOf(tenantId, userId),
       this.players.profile(userId),
+      this.family.familyOf(userId, tenantId),
     ]);
 
     // Подпись «кто отметил» — только у отмеченных: у остальных журналу нечего
@@ -198,6 +262,7 @@ export class PeopleService {
       entries: history,
       visits,
       player,
+      family,
     };
   }
 }

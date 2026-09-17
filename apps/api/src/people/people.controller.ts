@@ -1,8 +1,10 @@
-import { Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Ip, Param, Post, Query } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import type { ClubPerson, ClubPersonCard, PlatformPersonLookup } from '@yenisey/types';
+import type { ClubPerson, ClubPersonCard, FamilyChild, PlatformPersonLookup } from '@yenisey/types';
 import { PeopleService } from './people.service';
 import { PersonLookupQueryDto } from './dto/lookup.dto';
+import { AttachGuardianDto, RevokeGuardianshipDto } from './dto/family.dto';
+import { AccountDto } from '../auth/dto/register.dto';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { ClubContext } from '../auth/club-context';
@@ -51,5 +53,43 @@ export class PeopleController {
   @HttpCode(200)
   attach(@CurrentClub() club: ClubContext, @Param('id') userId: string): Promise<ClubPerson> {
     return this.people.attach(club.tenantId, userId);
+  }
+
+  /**
+   * Завести ребёнка родителю `:id` у стойки — когда родитель не хочет
+   * разбираться с сайтом. Почту и пароль ребёнку задаёт родитель, который
+   * стоит рядом; учётка закрепляется сразу и привязывается к клубу.
+   */
+  @Post(':id/children')
+  createChild(
+    @CurrentClub() club: ClubContext,
+    @Param('id') guardianId: string,
+    @Body() dto: AccountDto,
+    @Ip() ip: string,
+  ): Promise<FamilyChild> {
+    return this.people.createChild(club, guardianId, dto, ip ?? null);
+  }
+
+  /** Предложить закрепить ребёнка `:id` за родителем из клуба. Подтверждает ребёнок. */
+  @Post(':id/guardian')
+  @HttpCode(204)
+  requestGuardian(
+    @CurrentClub() club: ClubContext,
+    @Param('id') childId: string,
+    @Body() dto: AttachGuardianDto,
+  ): Promise<void> {
+    return this.people.requestGuardian(club, childId, dto.guardianId);
+  }
+
+  /** Снять закрепление ребёнка `:id` — с причиной, в журнал аудита клуба. */
+  @Post(':id/guardian/revoke')
+  @HttpCode(204)
+  revokeGuardian(
+    @CurrentClub() club: ClubContext,
+    @Param('id') childId: string,
+    @Body() dto: RevokeGuardianshipDto,
+    @Ip() ip: string,
+  ): Promise<void> {
+    return this.people.revokeGuardian(club, childId, dto.reason, ip ?? null);
   }
 }
