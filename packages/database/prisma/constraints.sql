@@ -728,3 +728,79 @@ ALTER TABLE "SportRank"
 --
 -- «Достижение не из будущего» в CHECK не выражается: now() не IMMUTABLE
 -- (та же причина, что в разделе 17). Проверка — в сервисе.
+
+-- ---------------------------------------------------------------------------
+-- 19. Семья: закрепление ребёнка за родителем
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_guardianship. Расширение сверх ТЗ по решениям
+-- владельца от 12.09 и 17.09.2026. За строкой — право записывать чужого
+-- человека, отменять его записи и видеть его историю и скан приказа.
+
+-- Родитель один.
+--
+-- Уникальна только ДЕЙСТВУЮЩАЯ опека, а не любая строка по ребёнку: после
+-- снятия ребёнка законно закрепляют заново, а заявок бывает несколько — иначе
+-- посторонний, знающий почту ребёнка, первой заявкой занял бы место
+-- настоящего родителя. Подтверждение одной заявки закрывает остальные, а гонку
+-- двух подтверждений ловит этот индекс.
+CREATE UNIQUE INDEX "Guardianship_one_active_per_child"
+  ON "Guardianship" ("childUserId")
+  WHERE "status" = 'ACTIVE'::"GuardianshipStatus";
+
+-- Одна ждущая заявка от одного взрослого одному ребёнку: повторное нажатие —
+-- то же намерение, а не вторая строка в кабинете ребёнка.
+CREATE UNIQUE INDEX "Guardianship_one_pending_per_pair"
+  ON "Guardianship" ("childUserId", "guardianUserId")
+  WHERE "status" = 'PENDING'::"GuardianshipStatus";
+
+ALTER TABLE "Guardianship"
+  ADD CONSTRAINT "Guardianship_not_self"
+  CHECK ("childUserId" <> "guardianUserId");
+
+-- Состояние несёт свои отметки и не несёт чужих: подтверждённая — момент
+-- подтверждения, отклонённая — момент отказа, снятая — момент и того, кто
+-- снял. Заявка без ответа не несёт ничего.
+ALTER TABLE "Guardianship"
+  ADD CONSTRAINT "Guardianship_status_matches_times"
+  CHECK (
+    CASE "status"
+      WHEN 'PENDING' THEN "confirmedAt" IS NULL AND "rejectedAt" IS NULL
+                      AND "revokedAt" IS NULL AND "revokedByUserId" IS NULL
+      WHEN 'ACTIVE' THEN "confirmedAt" IS NOT NULL AND "rejectedAt" IS NULL
+                     AND "revokedAt" IS NULL AND "revokedByUserId" IS NULL
+      WHEN 'REJECTED' THEN "rejectedAt" IS NOT NULL AND "confirmedAt" IS NULL
+                       AND "revokedAt" IS NULL AND "revokedByUserId" IS NULL
+      WHEN 'REVOKED' THEN "confirmedAt" IS NOT NULL AND "revokedAt" IS NOT NULL
+                      AND "revokedByUserId" IS NOT NULL
+    END
+  );
+
+-- Клуб, снявший закрепление, называет того, кто снял, и объясняет почему:
+-- восстановления пароля нет, и отзыв клубом — выход для ребёнка, чей родитель
+-- потерял учётку, а не способ переписать семью без следа.
+--
+-- Клуб без человека пропускать нельзя: составной внешний ключ с одной пустой
+-- половиной Postgres не проверяет вовсе (MATCH SIMPLE).
+ALTER TABLE "Guardianship"
+  ADD CONSTRAINT "Guardianship_club_revoke_explained"
+  CHECK (
+    "revokedInTenantId" IS NULL
+    OR ("revokedByUserId" IS NOT NULL AND "revokeReason" IS NOT NULL)
+  );
+
+ALTER TABLE "Guardianship"
+  ADD CONSTRAINT "Guardianship_revoke_reason_filled"
+  CHECK ("revokeReason" IS NULL OR ("revokeReason" = btrim("revokeReason") AND char_length("revokeReason") BETWEEN 1 AND 500));
+
+-- Чего здесь НЕТ и почему.
+--
+-- Возраст — «ребёнку меньше 16», «родителю 18» — в CHECK не выражается: это
+-- сравнение с сегодняшним днём, а now() не IMMUTABLE (та же причина, что в
+-- разделах 17 и 18). Правила — guardianship-rules.ts, под тестами, и
+-- проверяются в момент каждого действия: в день шестнадцатилетия строка
+-- остаётся ACTIVE как история, а права кончаются сами.
+--
+-- Что снимающий от имени клуба там администратор, а ребёнок в этом клубе
+-- состоит, — сравнение строк других таблиц. Это держит сервис, а база держит
+-- главное: снимающий — человек именно того клуба, что записан.

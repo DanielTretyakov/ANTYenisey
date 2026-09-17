@@ -1,7 +1,7 @@
 // Prisma-схема платформы «Енисей» (Этап 1).
 // Реализует раздел docs/TZ.md → «Модель данных».
 //
-// Схема развёрнута на PostgreSQL 18 (39 таблиц), ограничения из
+// Схема развёрнута на PostgreSQL 18 (40 таблиц), ограничения из
 // prisma/constraints.sql накатываются миграцией, сценарии
 // prisma/tests/schema-tests.sql проходят — включая проверку, что база
 // физически не даёт смешать данные двух клубов.
@@ -212,6 +212,16 @@ enum AuditAction {
   CLIENT_ANONYMIZED // удаление персданных по требованию субъекта
   RANK_VERIFIED // администратор клуба подтвердил спортивный разряд игрока
   RANK_REJECTED // …или отклонил его, с причиной
+  CHILD_ACCOUNT_CREATED // администратор завёл учётку ребёнка родителю у стойки
+  GUARDIANSHIP_REVOKED // администратор снял закрепление ребёнка за родителем, с причиной
+}
+
+/// Закрепление ребёнка за родителем.
+enum GuardianshipStatus {
+  PENDING // заявка на чужую учётку ждёт ответа самого ребёнка
+  ACTIVE // родитель ведёт ребёнка — пока тому нет 16
+  REJECTED // ребёнок отказался, или заявку закрыло подтверждение другой
+  REVOKED // закрепление сняли: родитель или администратор клуба ребёнка
 }
 
 /// Что за файл лежит в StoredFile. От вида зависят и лимит размера, и
@@ -542,6 +552,76 @@ model User {
   achievements  Achievement[]
   sportRank     SportRank?
   files         StoredFile[]
+
+  // Семья: чьим ребёнком человек числится и чьим родителем.
+  guardianshipsAsChild    Guardianship[] @relation("GuardianshipChild")
+  guardianshipsAsGuardian Guardianship[] @relation("GuardianshipGuardian")
+  guardianshipsCreated    Guardianship[] @relation("GuardianshipCreatedBy")
+  guardianshipsRevoked    Guardianship[] @relation("GuardianshipRevokedBy")
+}
+
+// ---------------------------------------------------------------------------
+// Семья: родитель и ребёнок
+// ---------------------------------------------------------------------------
+
+/// Закрепление ребёнка за родителем.
+///
+/// ВНИМАНИЕ: расширение сверх ТЗ, решения владельца продукта от 12.09 и
+/// 17.09.2026. Пока ребёнку нет 16, родитель ведёт его: записывает, отменяет,
+/// видит историю, ведёт профиль игрока; ребёнок только смотрит. Учётки у обоих
+/// свои — с почтой и паролем: учёток без входа в продукте нет.
+///
+/// Висит на User, а не на клубе: ребёнок ходит в три клуба, а родитель у него
+/// один на все.
+///
+/// Строки не удаляются и не переписываются в новое состояние задним числом:
+/// это история прав на чужого человека. Возраст здесь не хранится и не
+/// проверяется — `now()` в CHECK не выражается, — права кончаются в день
+/// шестнадцатилетия сами (guardianship-rules.ts).
+model Guardianship {
+  id String @id @default(cuid())
+
+  childUserId    String
+  child          User   @relation("GuardianshipChild", fields: [childUserId], references: [id], onDelete: Cascade)
+  guardianUserId String
+  guardian       User   @relation("GuardianshipGuardian", fields: [guardianUserId], references: [id], onDelete: Cascade)
+
+  status GuardianshipStatus
+
+  /// Кто завёл: сам родитель — или администратор у стойки. NoAction, а не
+  /// Restrict: удаление учётки (только пробные, clean-probes) уносит её строки
+  /// каскадом по ребёнку или родителю одним оператором, а Restrict остановил
+  /// бы этот каскад на полпути (см. PlayerProfile.avatar).
+  createdByUserId String
+  createdBy       User   @relation("GuardianshipCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction)
+
+  /// Клуб, у стойки которого завели. Составной ключ на TenantMembership: база
+  /// не примет администратора не из того клуба. Пусто — завёл сам родитель.
+  createdInTenantId String?
+  createdInClub     TenantMembership? @relation("GuardianshipCreatedInClub", fields: [createdByUserId, createdInTenantId], references: [userId, tenantId], onDelete: Restrict)
+
+  confirmedAt DateTime? @db.Timestamptz(3)
+  rejectedAt  DateTime? @db.Timestamptz(3)
+
+  /// Кто снял закрепление: родитель — или администратор клуба ребёнка, тогда
+  /// с клубом и причиной (constraints.sql, раздел 19).
+  revokedAt         DateTime?         @db.Timestamptz(3)
+  revokedByUserId   String?
+  revokedBy         User?             @relation("GuardianshipRevokedBy", fields: [revokedByUserId], references: [id], onDelete: NoAction)
+  revokedInTenantId String?
+  revokedInClub     TenantMembership? @relation("GuardianshipRevokedInClub", fields: [revokedByUserId, revokedInTenantId], references: [userId, tenantId], onDelete: Restrict)
+  revokeReason      String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  // «Родитель один» и «одна заявка от одного взрослого» — частичными
+  // уникальными индексами в constraints.sql: обычный @@unique запретил бы
+  // закрепить ребёнка заново после снятия.
+  @@index([childUserId, status])
+  @@index([guardianUserId, status])
+  @@index([createdByUserId, createdInTenantId])
+  @@index([revokedByUserId, revokedInTenantId])
 }
 
 // ---------------------------------------------------------------------------
@@ -789,6 +869,10 @@ model TenantMembership {
 
   // Разряды, проверенные этим администратором от имени этого клуба.
   rankReviews SportRank[] @relation("RankReviews")
+
+  // Закрепления ребёнка за родителем, заведённые и снятые у стойки клуба.
+  guardianshipsCreatedInClub Guardianship[] @relation("GuardianshipCreatedInClub")
+  guardianshipsRevokedInClub Guardianship[] @relation("GuardianshipRevokedInClub")
 
   // Первичный ключ и одновременно мишень всех составных FK клубных таблиц.
   @@id([userId, tenantId])

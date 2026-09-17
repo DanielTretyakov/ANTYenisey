@@ -3,7 +3,7 @@
 -- ради чего заведены.
 -- ---------------------------------------------------------------------------
 --
--- СТАТУС: прогнано на PostgreSQL 18 (12.09.2026) — 76 из 76 сценариев прошли.
+-- СТАТУС: прогнано на PostgreSQL 18 (17.09.2026) — 87 из 87 сценариев прошли.
 -- Дополнительно проверено, что отказы приходят именно от нужных ограничений,
 -- а не по случайной причине: exclusion-констрейнт даёт 23P01, составные
 -- внешние ключи — 23503, частичный уникальный индекс — 23505, check'и — 23514.
@@ -992,3 +992,89 @@ DO $$ BEGIN
     RAISE NOTICE 'BV. Учётка ушла вместе с профилем и файлами.. OK (ожидалось)';
   END IF;
 EXCEPTION WHEN others THEN RAISE NOTICE 'BV. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- ---------------------------------------------------------------------------
+-- Семья (раздел 19 constraints.sql)
+-- ---------------------------------------------------------------------------
+--
+-- Дети k1 и k2. Взрослые — u1 (клиент t1 и t2), c1 (тренер t1 и t2), u2
+-- (только t2). Возраст база не проверяет — это правило сервиса.
+
+INSERT INTO "User" (id,email,phone,"birthDate","passwordHash","fullName","createdAt","updatedAt")
+VALUES ('k1','k1@a.ru','+79990000011',DATE '2015-06-01','x','Мячиков Петя',now(),now()),
+       ('k2','k2@a.ru','+79990000012',DATE '2014-02-02','x','Ракеткина Оля',now(),now());
+
+-- BW. Ребёнок сам себе родитель.
+SELECT pg_temp.expect('BW',
+  $q$INSERT INTO "Guardianship" (id,"childUserId","guardianUserId",status,"createdByUserId","confirmedAt","updatedAt")
+     VALUES ('g0','k1','k1','ACTIVE','k1',now(),now())$q$,
+  '23514', 'Guardianship_not_self');
+
+-- BX. Родитель u1 ведёт k1 — проходит.
+DO $$ BEGIN
+  INSERT INTO "Guardianship" (id,"childUserId","guardianUserId",status,"createdByUserId","confirmedAt","updatedAt")
+  VALUES ('g1','k1','u1','ACTIVE','u1',now(),now());
+  RAISE NOTICE 'BX. Действующая опека принята............... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'BX. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- BY. Второй действующий родитель у того же ребёнка.
+SELECT pg_temp.expect('BY',
+  $q$INSERT INTO "Guardianship" (id,"childUserId","guardianUserId",status,"createdByUserId","confirmedAt","updatedAt")
+     VALUES ('gx','k1','c1','ACTIVE','c1',now(),now())$q$,
+  '23505', 'Guardianship_one_active_per_child');
+
+-- BZ. Вторая ждущая заявка от того же взрослого тому же ребёнку.
+DO $$ BEGIN
+  INSERT INTO "Guardianship" (id,"childUserId","guardianUserId",status,"createdByUserId","updatedAt")
+  VALUES ('g2','k2','u1','PENDING','u1',now());
+EXCEPTION WHEN others THEN RAISE NOTICE 'BZ. ПРОВАЛ подготовки: %', SQLERRM; END $$;
+SELECT pg_temp.expect('BZ',
+  $q$INSERT INTO "Guardianship" (id,"childUserId","guardianUserId",status,"createdByUserId","updatedAt")
+     VALUES ('gx','k2','u1','PENDING','u1',now())$q$,
+  '23505', 'Guardianship_one_pending_per_pair');
+
+-- CA. Заявки от разных взрослых одному ребёнку — законны: иначе посторонний
+--     первой заявкой занял бы место настоящего родителя.
+DO $$ BEGIN
+  INSERT INTO "Guardianship" (id,"childUserId","guardianUserId",status,"createdByUserId","updatedAt")
+  VALUES ('g3','k2','c1','PENDING','c1',now());
+  RAISE NOTICE 'CA. Заявки от двух взрослых приняты.......... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'CA. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- CB. Действующая опека без момента подтверждения.
+SELECT pg_temp.expect('CB',
+  $q$UPDATE "Guardianship" SET status = 'ACTIVE' WHERE id = 'g3'$q$,
+  '23514', 'Guardianship_status_matches_times');
+
+-- CC. Снятая опека без того, кто снял.
+SELECT pg_temp.expect('CC',
+  $q$UPDATE "Guardianship" SET status = 'REVOKED', "revokedAt" = now() WHERE id = 'g1'$q$,
+  '23514', 'Guardianship_status_matches_times');
+
+-- CD. Клуб снял закрепление без причины.
+SELECT pg_temp.expect('CD',
+  $q$UPDATE "Guardianship" SET status = 'REVOKED', "revokedAt" = now(), "revokedByUserId" = 'c1',
+       "revokedInTenantId" = 't1' WHERE id = 'g1'$q$,
+  '23514', 'Guardianship_club_revoke_explained');
+
+-- CE. Снимает «от имени клуба» человек, которого в этом клубе нет: u2 в t1.
+SELECT pg_temp.expect('CE',
+  $q$UPDATE "Guardianship" SET status = 'REVOKED', "revokedAt" = now(), "revokedByUserId" = 'u2',
+       "revokedInTenantId" = 't1', "revokeReason" = 'Родитель потерял учётку' WHERE id = 'g1'$q$,
+  '23503', 'Guardianship_revokedByUserId_revokedInTenantId_fkey');
+
+-- CF. Завёл «у стойки» человек, которого в этом клубе нет.
+SELECT pg_temp.expect('CF',
+  $q$INSERT INTO "Guardianship" (id,"childUserId","guardianUserId",status,"createdByUserId","createdInTenantId","confirmedAt","updatedAt")
+     VALUES ('gx','k2','u2','ACTIVE','u2','t1',now(),now())$q$,
+  '23503', 'Guardianship_createdByUserId_createdInTenantId_fkey');
+
+-- CG. Клуб снимает закрепление с причиной — проходит; после этого ребёнка
+--     законно закрепляют заново.
+DO $$ BEGIN
+  UPDATE "Guardianship" SET status = 'REVOKED', "revokedAt" = now(), "revokedByUserId" = 'c1',
+    "revokedInTenantId" = 't1', "revokeReason" = 'Родитель потерял учётку' WHERE id = 'g1';
+  INSERT INTO "Guardianship" (id,"childUserId","guardianUserId",status,"createdByUserId","confirmedAt","updatedAt")
+  VALUES ('g4','k1','c1','ACTIVE','c1',now(),now());
+  RAISE NOTICE 'CG. Снято клубом и закреплено заново........ OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'CG. ПРОВАЛ: %', SQLERRM; END $$;
