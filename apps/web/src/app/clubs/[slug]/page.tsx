@@ -170,7 +170,10 @@ function Masthead({ tenant }: { tenant: PublicTenant | null }) {
   const places = tenant ? [tenant.city, ...tenant.otherCities].filter(Boolean).join(', ') : '';
 
   return (
-    <header className="flex items-center gap-5 py-12 sm:py-16">
+    // Перенос, а не сжатие: логотип клуба бывает шириной до 12rem, и на 360 px
+    // название рядом с ним не помещалось даже в две строки: слово
+    // «Енисей» в кавычках выходило за край экрана.
+    <header className="flex flex-wrap items-center gap-x-5 gap-y-4 py-12 sm:py-16">
       {tenant ? (
         <ClubMark club={tenant} size="lg" />
       ) : (
@@ -180,7 +183,7 @@ function Masthead({ tenant }: { tenant: PublicTenant | null }) {
       <div className="min-w-0">
         {tenant ? (
           <>
-            <h1 className="text-[1.75rem] leading-tight sm:text-[2.25rem]">{tenant.name}</h1>
+            <h1 className="text-[1.75rem] leading-tight [overflow-wrap:anywhere] sm:text-[2.25rem]">{tenant.name}</h1>
             {places && <p className="mt-1.5 text-[0.9375rem] text-text-muted">{places}</p>}
           </>
         ) : (

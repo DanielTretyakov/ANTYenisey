@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import type { ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { PlatformLogo } from '@/components/brand/PlatformLogo';
 import { HEADER_HEIGHT, HEADER_LOGO_HEIGHT } from '@/components/layout/metrics';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -76,8 +76,11 @@ export function SiteHeader({
 
         <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
           {actions}
-          {clubNav}
-          <AccountNav />
+          <div className="hidden items-center gap-3 sm:flex">
+            {clubNav}
+            <AccountNav />
+          </div>
+          <MobileMenu clubNav={clubNav} />
           <ThemeToggle />
         </div>
       </div>
@@ -132,6 +135,102 @@ function AccountNav() {
         Выйти
       </Button>
     </nav>
+  );
+}
+
+/**
+ * Разделы на узком экране — одной кнопкой меню.
+ *
+ * В строку на 400 px не помещаются даже три раздела аккаунта рядом с логотипом
+ * и темой, а с разделом клуба («Забронировать стол») шапка вылезала вправо на
+ * полторы сотни пикселей. Перенос на вторую строку нарушил бы неизменную
+ * высоту шапки, поэтому разделы уходят в выпадающую панель.
+ *
+ * Гостю меню не нужно: у него одна кнопка «Войти», и она помещается.
+ */
+function MobileMenu({ clubNav }: { clubNav?: ReactNode }) {
+  const session = useSession();
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const panelId = useId();
+
+  // Переход по ссылке из меню закрывает его: шапка общая и не перемонтируется.
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function onPointerDown(event: PointerEvent): void {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') setOpen(false);
+    }
+
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  if (session.status === 'loading') {
+    return <span className="h-11 w-11 sm:hidden" aria-hidden="true" />;
+  }
+
+  if (session.status === 'anonymous') {
+    return (
+      <div className="sm:hidden">
+        <AccountNav />
+      </div>
+    );
+  }
+
+  return (
+    <div ref={root} className="relative sm:hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-label="Меню"
+        title="Меню"
+        className="inline-flex h-11 w-11 items-center justify-center rounded-control text-text-muted transition-colors hover:bg-surface-sunken hover:text-text"
+      >
+        <svg
+          viewBox="0 0 20 20"
+          className="h-5 w-5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.6}
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          {open ? <path d="M5 5l10 10M15 5L5 15" /> : <path d="M3.5 6h13M3.5 10h13M3.5 14h13" />}
+        </svg>
+      </button>
+
+      {/* Панель скрывается, а не размонтируется: разделы внутри спрашивают
+          сессию сами, и при каждом открытии заново мигали бы заглушками. */}
+      <div
+        id={panelId}
+        // Те же группы ссылок, что и в строке на широком экране, — лишь
+        // развёрнутые в столбец.
+        className={cn(
+          'absolute top-full right-0 z-30 mt-2 w-60 gap-1 rounded-card border border-border bg-surface-raised p-2 shadow-lg',
+          '[&_a]:w-full [&_button]:w-full [&_button]:justify-start [&_button]:px-3 [&_button]:text-[0.875rem] [&_button]:font-normal',
+          '[&_nav]:flex-col [&_nav]:items-stretch [&_nav]:gap-1',
+          open ? 'grid' : 'hidden',
+        )}
+      >
+        {clubNav && <div className="border-b border-border pb-1">{clubNav}</div>}
+        <AccountNav />
+      </div>
+    </div>
   );
 }
 
