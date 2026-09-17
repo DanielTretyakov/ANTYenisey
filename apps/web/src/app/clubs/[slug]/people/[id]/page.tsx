@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import type { BookingStatus, ClubPersonCard, ClubPersonEntry, Role } from '@yenisey/types';
+import { fullYears } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { PlayerReview } from '@/components/player/PlayerReview';
 import { Alert } from '@/components/ui/Alert';
@@ -348,14 +349,9 @@ function shortDate(iso: string): string {
  * пересчитывать «2011 год» в голове администратору незачем.
  */
 function age(birthDate: string): string {
-  const born = new Date(`${birthDate}T00:00:00Z`);
-  const now = new Date();
-  let years = now.getUTCFullYear() - born.getUTCFullYear();
-  const passed =
-    now.getUTCMonth() > born.getUTCMonth() ||
-    (now.getUTCMonth() === born.getUTCMonth() && now.getUTCDate() >= born.getUTCDate());
-
-  if (!passed) years -= 1;
+  // Годы считает общий пакет — тот же, по которому сервер решает, записывается
+  // ли человек сам или за него пишет родитель.
+  const years = fullYears(new Date(`${birthDate}T00:00:00Z`), new Date());
 
   const mod100 = years % 100;
   const mod10 = years % 10;

@@ -4,30 +4,9 @@
  * Чистый модуль без относительных импортов: его гоняет `node --test`, а тот
  * требует расширение `.ts` в пути, которого не принимает сборка. Всё внешнее —
  * «сегодня», роль смотрящего, текущее состояние разряда — приходит
- * аргументами.
+ * аргументами. Общий пакет импортируется по имени, это не относительный путь.
  */
-
-/** Совпадает с `PUBLIC_PROFILE_AGE` из `@yenisey/types`, см. там же — почему. */
-export const PUBLIC_PROFILE_AGE = 16;
-
-/**
- * Полных лет на сегодня.
- *
- * Календарь — UTC: дата рождения хранится полночью UTC, а платформа не знает
- * одного часового пояса на всех. Профиль откроется в день рождения, самое
- * позднее через семь часов по красноярскому времени, — ради этого часовой пояс
- * человеку заводить незачем.
- *
- * Родившийся 29 февраля в невисокосный год становится старше 1 марта: 28
- * февраля его день ещё не наступил.
- */
-export function fullYears(birthDate: Date, today: Date): number {
-  const years = today.getUTCFullYear() - birthDate.getUTCFullYear();
-  const month = today.getUTCMonth() - birthDate.getUTCMonth();
-  const passed = month > 0 || (month === 0 && today.getUTCDate() >= birthDate.getUTCDate());
-
-  return passed ? years : years - 1;
-}
+import { fullYears, PUBLIC_PROFILE_AGE } from '@yenisey/types';
 
 export function isProfilePublic(birthDate: Date, today: Date): boolean {
   return fullYears(birthDate, today) >= PUBLIC_PROFILE_AGE;

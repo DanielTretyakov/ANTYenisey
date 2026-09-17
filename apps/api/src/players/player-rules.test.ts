@@ -6,32 +6,14 @@ import {
   cleanText,
   decideRankEdit,
   decideRankReview,
-  fullYears,
   isProfilePublic,
   type RankState,
 } from './player-rules.ts';
 
+// Полные годы проверяются в `guardianship-rules.test.ts`: считает их общий
+// пакет, а здесь только то, что профиль на них опирается.
 const day = (value: string) => new Date(`${value}T00:00:00Z`);
 const TODAY = new Date('2026-09-13T05:00:00Z');
-
-describe('fullYears', () => {
-  it('день рождения сегодня — уже исполнилось', () => {
-    assert.equal(fullYears(day('2010-09-13'), TODAY), 16);
-  });
-
-  it('завтра — ещё нет', () => {
-    assert.equal(fullYears(day('2010-09-14'), TODAY), 15);
-  });
-
-  it('29 февраля: в невисокосный год — с 1 марта', () => {
-    const born = day('2008-02-29');
-    assert.equal(fullYears(born, day('2025-02-28')), 16);
-    assert.equal(fullYears(born, day('2024-02-28')), 15);
-    assert.equal(fullYears(born, day('2024-02-29')), 16);
-    assert.equal(fullYears(born, day('2023-02-28')), 14);
-    assert.equal(fullYears(born, day('2023-03-01')), 15);
-  });
-});
 
 describe('isProfilePublic', () => {
   it('в день шестнадцатилетия профиль открывается', () => {

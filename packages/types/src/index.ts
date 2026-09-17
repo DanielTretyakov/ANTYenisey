@@ -1,3 +1,4 @@
+export * from './age';
 export * from './auth';
 export * from './booking';
 export * from './club';
