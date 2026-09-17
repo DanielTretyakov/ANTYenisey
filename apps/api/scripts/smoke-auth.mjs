@@ -1878,6 +1878,7 @@ async function main() {
   await eventRegistration(asMe);
   await eventAttendance(asMe);
   await playerProfile();
+  await family();
   await autoNoShow(asMe);
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
@@ -2683,6 +2684,181 @@ async function playerProfile() {
 
   r = await call('/players/net-takogo-igroka');
   check('несуществующий игрок', 404, r.status);
+}
+
+/**
+ * Семья: родитель ведёт ребёнка младше 16.
+ *
+ * Даты рождения считаются от сегодняшнего дня: граница «ровно 16 лет» и
+ * «ровно 18» должна проверяться в любой день прогона, а не в тот, когда секцию
+ * писали.
+ */
+async function family() {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('\n=== 31. Семья — ПРОПУЩЕНА (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 31. Семья: учётка ребёнка, заявки, пароль, отвязка');
+
+  /** Дата рождения того, кому `years` лет исполняется через `days` дней (0 — сегодня). */
+  const bornYearsAgo = (years, days = 0) => {
+    const now = new Date();
+    const date = new Date(Date.UTC(now.getUTCFullYear() - years, now.getUTCMonth(), now.getUTCDate() + days));
+    return date.toISOString().slice(0, 10);
+  };
+
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+
+  const newEmail = (tag) => `probe-${RUN}-${tag}-${Math.random().toString(36).slice(2, 6)}@example.com`;
+
+  let r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const asAdmin = as(r.body?.accessToken ?? '');
+
+  r = await post('/auth/register', registration({ lastName: 'Родителев', firstName: 'Олег' }));
+  check('родитель заведён', 201, r.status);
+  const parentToken = r.body?.accessToken ?? '';
+  const asParent = as(parentToken);
+
+  r = await post('/auth/register', registration({ lastName: 'Юнов', birthDate: bornYearsAgo(18, 1) }));
+  check('семнадцатилетний заведён', 201, r.status);
+  const asSeventeen = as(r.body?.accessToken ?? '');
+
+  r = await post('/auth/register', registration({ lastName: 'Посторонний' }));
+  const asStranger = as(r.body?.accessToken ?? '');
+
+  // --- Учётка ребёнка из кабинета родителя.
+  const childEmail = newEmail('kid');
+  const childForm = (over = {}) => ({
+    email: childEmail,
+    password: PASSWORD,
+    lastName: 'Родителев',
+    firstName: 'Коля',
+    middleName: 'Олегович',
+    phone: '+79991234567',
+    birthDate: bornYearsAgo(10),
+    ...over,
+  });
+
+  r = await call('/me/children', { method: 'POST', json: childForm() });
+  check('завести ребёнка без входа', 401, r.status);
+
+  r = await asSeventeen('/me/children', { method: 'POST', json: childForm({ email: newEmail('kid17') }) });
+  check('семнадцатилетний ребёнка не заводит', 403, r.status);
+
+  r = await asParent('/me/children', {
+    method: 'POST',
+    json: childForm({ email: newEmail('kid16'), birthDate: bornYearsAgo(16) }),
+  });
+  check('шестнадцатилетнему учётка ребёнка не нужна', 400, r.status);
+
+  r = await asParent('/me/children', { method: 'POST', json: childForm({ tenantSlug: 'yenisey' }) });
+  check('клуб в форме ребёнка — лишнее поле', 400, r.status);
+
+  r = await asParent('/me/children', { method: 'POST', json: childForm() });
+  check('ребёнок заведён и закреплён сразу', 201, r.status);
+  const childId = r.body?.id;
+  assert('до какого дня опека', r.body?.guardianUntil === bornYearsAgo(10).replace(/^\d{4}/, (y) => String(Number(y) + 16)));
+
+  r = await asParent('/me/children', { method: 'POST', json: childForm() });
+  check('та же почта второй раз', 409, r.status);
+  assert('подсказка про адрес с плюсом', String(r.body?.message ?? '').includes('+'));
+
+  r = await post('/auth/login', { email: childEmail, password: PASSWORD });
+  check('ребёнок входит своей учёткой', 200, r.status);
+  const childToken = r.body?.accessToken ?? '';
+  const childRefresh = r.body?.refreshToken ?? '';
+  const asChild = as(childToken);
+
+  r = await asChild('/me/guardianship');
+  check('ребёнок видит, кто его ведёт', 200, r.status);
+  assert('родитель — «Фамилия И.»', r.body?.name === 'Родителев О.');
+
+  r = await asParent('/me/children');
+  assert('ребёнок в списке родителя', (r.body ?? []).some((child) => child.id === childId));
+
+  // --- Заявка на существующую учётку.
+  const teenEmail = newEmail('teen');
+  r = await post('/auth/register', registration({ email: teenEmail, lastName: 'Самостоятельный', birthDate: bornYearsAgo(12) }));
+  check('ребёнок зарегистрировался сам', 201, r.status);
+  const asTeen = as(r.body?.accessToken ?? '');
+
+  r = await asStranger('/me/children/attach', { method: 'POST', json: { email: teenEmail } });
+  check('посторонний отправил заявку', 200, r.status);
+  const notice = r.body?.message;
+
+  r = await asParent('/me/children/attach', { method: 'POST', json: { email: teenEmail.toUpperCase() } });
+  check('родитель отправил заявку', 200, r.status);
+  assert('ответ тот же', r.body?.message === notice);
+
+  r = await asParent('/me/children/attach', { method: 'POST', json: { email: newEmail('nobody') } });
+  assert('на несуществующую почту — тот же ответ', r.status === 200 && r.body?.message === notice);
+
+  r = await asParent('/me/children/attach', { method: 'POST', json: { email: adminEmail } });
+  assert('на взрослого — тот же ответ', r.status === 200 && r.body?.message === notice);
+
+  r = await asSeventeen('/me/children/attach', { method: 'POST', json: { email: teenEmail } });
+  check('семнадцатилетний заявку не отправляет', 403, r.status);
+
+  r = await asTeen('/me/guardianship/requests');
+  check('ребёнок видит заявки', 200, r.status);
+  const requests = r.body ?? [];
+  assert('две заявки — от родителя и постороннего', requests.length === 2);
+  const parentRequest = requests.find((item) => item.guardianName === 'Родителев О.');
+
+  r = await asParent(`/me/guardianship/requests/${parentRequest?.id}/confirm`, { method: 'POST' });
+  check('родитель свою заявку подтвердить не может', 404, r.status);
+
+  r = await asAdmin(`/me/guardianship/requests/${parentRequest?.id}/confirm`, { method: 'POST' });
+  check('администратор подтвердить за ребёнка не может', 404, r.status);
+
+  r = await asTeen(`/me/guardianship/requests/${parentRequest?.id}/confirm`, { method: 'POST' });
+  check('ребёнок подтвердил заявку родителя', 204, r.status);
+
+  r = await asTeen(`/me/guardianship/requests/${parentRequest?.id}/confirm`, { method: 'POST' });
+  check('второе подтверждение', 409, r.status);
+
+  r = await asTeen('/me/guardianship/requests');
+  assert('заявка постороннего закрылась вместе с подтверждением', (r.body ?? []).length === 0);
+
+  r = await asParent('/me/children');
+  assert('у родителя двое детей', (r.body ?? []).length === 2);
+
+  r = await asStranger('/me/children');
+  assert('у постороннего — никого', (r.body ?? []).length === 0);
+
+  // --- Пароль ребёнку.
+  r = await asStranger(`/me/children/${childId}/password`, { method: 'POST', json: { password: 'novyi-parol-12345' } });
+  check('посторонний пароль ребёнку не меняет', 404, r.status);
+
+  r = await asParent(`/me/children/${childId}/password`, { method: 'POST', json: { password: 'korot7' } });
+  check('слишком короткий пароль', 400, r.status);
+
+  r = await asParent(`/me/children/${childId}/password`, { method: 'POST', json: { password: 'novyi-parol-12345' } });
+  check('родитель сменил пароль ребёнку', 204, r.status);
+
+  r = await post('/auth/refresh', { refreshToken: childRefresh });
+  check('старая сессия ребёнка погашена', 401, r.status);
+
+  r = await post('/auth/login', { email: childEmail, password: 'novyi-parol-12345' });
+  check('ребёнок входит с новым паролем', 200, r.status);
+
+  // --- Отвязка.
+  r = await asChild(`/me/children/${childId}`, { method: 'DELETE' });
+  check('ребёнок сам себя не отвязывает', 404, r.status);
+
+  r = await asParent(`/me/children/${childId}`, { method: 'DELETE' });
+  check('родитель отвязал ребёнка', 204, r.status);
+
+  r = await asParent(`/me/children/${childId}`, { method: 'DELETE' });
+  check('второй раз отвязывать некого', 404, r.status);
+
+  r = await asChild('/me/guardianship');
+  assert('у ребёнка больше нет родителя', r.status === 200 && r.body === null);
 }
 
 main().catch((error) => {

@@ -3,6 +3,7 @@ export * from './auth';
 export * from './booking';
 export * from './club';
 export * from './desk';
+export * from './family';
 export * from './names';
 export * from './platform';
 export * from './player';

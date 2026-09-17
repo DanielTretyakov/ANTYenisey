@@ -11,6 +11,7 @@ import { ClubModule } from './club/club.module';
 import { DeskModule } from './desk/desk.module';
 import { EntriesModule } from './entries/entries.module';
 import { EventsModule } from './events/events.module';
+import { GuardianshipModule } from './guardianship/guardianship.module';
 import { MeModule } from './me/me.module';
 import { PeopleModule } from './people/people.module';
 import { PlayersModule } from './players/players.module';
@@ -65,6 +66,7 @@ import { validateEnv, type Env } from './config/env';
     AttendanceModule,
     PeopleModule,
     PlayersModule,
+    GuardianshipModule,
     TenantsModule,
     EntriesModule,
     EventsModule,

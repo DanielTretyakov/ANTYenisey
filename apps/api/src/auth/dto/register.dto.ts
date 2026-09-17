@@ -15,19 +15,15 @@ const NAME_PATTERN = /^[А-Яа-яЁёA-Za-z][А-Яа-яЁёA-Za-z' -]*[А-Яа-
 const trimName = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : value;
 
-export class RegisterDto implements RegisterRequest {
-  /**
-   * Код клуба — необязательный: аккаунт заводится на платформе. Когда
-   * он всё же передан, человек пришёл со страницы клуба и сразу становится
-   * его клиентом.
-   */
-  @IsOptional()
-  @IsString()
-  @Matches(/^[a-z0-9-]{2,64}$/, {
-    message: 'tenantSlug: только строчные латинские буквы, цифры и дефис',
-  })
-  tenantSlug?: string;
-
+/**
+ * Данные учётки: кто человек и чем он входит.
+ *
+ * Отдельно от регистрации, потому что учётку заводит не только сам человек:
+ * родитель заводит её ребёнку, а администратор — ребёнку родителя у стойки.
+ * Правила имени, почты, пароля и телефона у всех одни, и вторая копия
+ * разошлась бы с первой на первой же правке.
+ */
+export class AccountDto implements Omit<RegisterRequest, 'tenantSlug'> {
   // Приводим к нижнему регистру до валидации и до запроса в базу: иначе
   // Ivan@club.ru и ivan@club.ru пройдут @@unique([tenantId, email]) как
   // разные адреса и станут двумя учётками одного человека.
@@ -87,4 +83,18 @@ export class RegisterDto implements RegisterRequest {
     message: 'birthDate: ожидается дата в виде 2001-05-17',
   })
   birthDate: string;
+}
+
+export class RegisterDto extends AccountDto implements RegisterRequest {
+  /**
+   * Код клуба — необязательный: аккаунт заводится на платформе. Когда
+   * он всё же передан, человек пришёл со страницы клуба и сразу становится
+   * его клиентом.
+   */
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-z0-9-]{2,64}$/, {
+    message: 'tenantSlug: только строчные латинские буквы, цифры и дефис',
+  })
+  tenantSlug?: string;
 }
