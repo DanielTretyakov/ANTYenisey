@@ -10,6 +10,7 @@ import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Field } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
+import { isChildBirthDate } from '@/lib/family';
 import { saveSession } from '@/lib/session';
 
 /**
@@ -50,6 +51,12 @@ function RegisterForm({ clubSlug }: { clubSlug: string | null }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [birthDate, setBirthDate] = useState('');
+
+  // Младше 16 регистрироваться можно — учётка ребёнку нужна, чтобы видеть свои
+  // записи, — но записывать его будет родитель. Сказать это надо до отправки,
+  // а не на первой же кнопке «Записаться».
+  const child = /^\d{4}-\d{2}-\d{2}$/.test(birthDate) && isChildBirthDate(birthDate);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -119,7 +126,16 @@ function RegisterForm({ clubSlug }: { clubSlug: string | null }) {
           autoComplete="bday"
           hint="Нужна для детских групп и возрастных турниров."
           required
+          value={birthDate}
+          onChange={(event) => setBirthDate(event.target.value)}
         />
+
+        {child && (
+          <Alert tone="info">
+            До 16 лет на занятия и турниры записывает родитель. Зарегистрироваться можно, а потом
+            попросите родителя закрепить вашу учётку у себя в кабинете — или администратора у стойки клуба.
+          </Alert>
+        )}
 
         <Field label="Электронная почта" name="email" type="email" autoComplete="email" required />
 

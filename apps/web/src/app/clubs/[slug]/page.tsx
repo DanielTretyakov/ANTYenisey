@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import type { BookingEntry, ClubEvent, PublicTenant } from '@yenisey/types';
 import { ClubMark } from '@/components/club/ClubMark';
+import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { WhenSpan } from '@/components/club/When';
 import { ClubNav } from '@/components/layout/ClubNav';
 import { SiteHeader } from '@/components/layout/SiteHeader';
@@ -15,10 +16,16 @@ import { cn } from '@/lib/cn';
 import { formatKopecks } from '@/lib/money';
 import { roleInClub } from '@/lib/membership';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
+import { usePersonSwitch } from '@/lib/usePersonSwitch';
 import { useSession } from '@/lib/useSession';
 
-/** Кем человек приходится этому клубу — с точки зрения кнопки «Записаться». */
-type Viewer = 'anonymous' | 'client' | 'staff';
+/**
+ * Кем человек приходится этому клубу — с точки зрения кнопки «Записаться».
+ *
+ * `child` — вошедшему нет 16, и он смотрит сам за себя: записывает его
+ * родитель или администратор у стойки.
+ */
+type Viewer = 'anonymous' | 'client' | 'staff' | 'child';
 
 /**
  * Страница клуба.
@@ -36,6 +43,8 @@ export default function ClubPage() {
   const slug = useClubSlug();
   const club = useClubApi();
   const session = useSession();
+  const family = usePersonSwitch();
+  const forPerson = family.forPerson;
 
   const [tenant, setTenant] = useState<PublicTenant | null>(null);
   const [events, setEvents] = useState<ClubEvent[] | null>(null);
@@ -52,12 +61,13 @@ export default function ClubPage() {
       );
   }, [slug]);
 
+  // С выбранным ребёнком отметка «записан» в списке — его, а не родителя.
   const loadEvents = useCallback(() => {
     club
-      .events()
+      .events(forPerson)
       .then(setEvents)
       .catch(() => setEvents([]));
-  }, [club]);
+  }, [club, forPerson]);
 
   useEffect(loadEvents, [loadEvents]);
 
@@ -71,7 +81,7 @@ export default function ClubPage() {
     }
 
     club
-      .myEvents()
+      .myEvents(forPerson)
       .then(setMine)
       .catch(() => setMine([]));
 
@@ -79,7 +89,7 @@ export default function ClubPage() {
       .myClubs()
       .then((clubs) => setFavourite(clubs.some((item) => item.slug === slug)))
       .catch(() => setFavourite(null));
-  }, [session.status, club, slug]);
+  }, [session.status, club, slug, forPerson]);
 
   /**
    * Кто смотрит на страницу.
@@ -92,13 +102,21 @@ export default function ClubPage() {
    *
    * Человек без привязки к клубу проходит как клиент: записаться может любой
    * пользователь платформы, вступать заранее не нужно.
+   *
+   * За выбранного ребёнка родитель — всегда клиент, даже если сам он тренер
+   * этого клуба: право на запись проверяется у того, за кого пишут (решение
+   * от 17.09.2026). Сотрудником ребёнка сервер всё равно не пропустит.
    */
   const viewer: Viewer =
     session.status !== 'ready'
       ? 'anonymous'
-      : (roleInClub(session.user, slug) ?? 'CLIENT') === 'CLIENT'
+      : forPerson
         ? 'client'
-        : 'staff';
+        : (roleInClub(session.user, slug) ?? 'CLIENT') !== 'CLIENT'
+          ? 'staff'
+          : family.selfIsChild
+            ? 'child'
+            : 'client';
 
   return (
     <div className="flex min-h-dvh flex-col bg-surface" style={clubAccent(tenant?.accentColor)}>
@@ -113,14 +131,28 @@ export default function ClubPage() {
           <FavouriteButton slug={slug} favourite={favourite} onChange={setFavourite} />
         )}
 
-        <MyEvents entries={mine} anonymous={session.status === 'anonymous'} />
+        <PersonSwitch
+          people={family.children}
+          selected={family.selected}
+          onChoose={family.choose}
+          className="-mt-6 mb-10"
+        />
+
+        <MyEvents
+          entries={mine}
+          anonymous={session.status === 'anonymous'}
+          whose={family.selected ? firstName(family.selected.fullName) : null}
+          forPerson={forPerson}
+          readOnly={family.selfIsChild}
+        />
 
         <Upcoming
           events={events}
           viewer={viewer}
+          forPerson={forPerson}
           onChanged={() => {
             loadEvents();
-            club.myEvents().then(setMine).catch(() => undefined);
+            club.myEvents(forPerson).then(setMine).catch(() => undefined);
           }}
         />
       </main>
@@ -216,8 +248,31 @@ function FavouriteButton({
   );
 }
 
-/** Мои мероприятия в этом клубе: записи на турниры и свои брони столов. */
-function MyEvents({ entries, anonymous }: { entries: BookingEntry[] | null; anonymous: boolean }) {
+/** «Родителев Коля Олегович» → «Коля». */
+function firstName(fullName: string): string {
+  return fullName.trim().split(/\s+/)[1] ?? fullName;
+}
+
+/**
+ * Мои мероприятия в этом клубе: записи на турниры и свои брони столов. С
+ * выбранным ребёнком — его.
+ */
+function MyEvents({
+  entries,
+  anonymous,
+  whose,
+  forPerson,
+  readOnly,
+}: {
+  entries: BookingEntry[] | null;
+  anonymous: boolean;
+  /** Имя выбранного ребёнка — тогда список его. */
+  whose: string | null;
+  /** Выбранный ребёнок — «Мои записи» открываются за него. */
+  forPerson: string | null;
+  /** Смотрит сам ребёнок младше 16: отменять он не может. */
+  readOnly: boolean;
+}) {
   if (anonymous) {
     return null;
   }
@@ -232,7 +287,7 @@ function MyEvents({ entries, anonymous }: { entries: BookingEntry[] | null; anon
 
   return (
     <section className="mb-16">
-      <SectionTitle>Мои мероприятия</SectionTitle>
+      <SectionTitle>{whose ? `Мероприятия: ${whose}` : 'Мои мероприятия'}</SectionTitle>
 
       {entries === null ? (
         <RowSkeleton />
@@ -261,8 +316,11 @@ function MyEvents({ entries, anonymous }: { entries: BookingEntry[] | null; anon
       )}
 
       <p className="mt-3 text-[0.8125rem] text-text-subtle">
-        Отменить запись и увидеть прошедшие можно в разделе{' '}
-        <Link href="/my-bookings" className="text-text-accent underline-offset-2 hover:underline">
+        {readOnly ? 'Прошедшие — в разделе' : 'Отменить запись и увидеть прошедшие можно в разделе'}{' '}
+        <Link
+          href={forPerson ? `/my-bookings?for=${forPerson}` : '/my-bookings'}
+          className="text-text-accent underline-offset-2 hover:underline"
+        >
           «Мои записи»
         </Link>
         .
@@ -275,10 +333,12 @@ function MyEvents({ entries, anonymous }: { entries: BookingEntry[] | null; anon
 function Upcoming({
   events,
   viewer,
+  forPerson,
   onChanged,
 }: {
   events: ClubEvent[] | null;
   viewer: Viewer;
+  forPerson: string | null;
   onChanged: () => void;
 }) {
   return (
@@ -300,6 +360,12 @@ function Upcoming({
         </p>
       )}
 
+      {viewer === 'child' && events && events.length > 0 && (
+        <p className="mb-4 text-[0.8125rem] text-text-subtle">
+          До 16 лет на мероприятия записывает родитель — или администратор клуба у стойки.
+        </p>
+      )}
+
       {events && events.length > 0 && (
         <ul className="border-t border-border">
           {/* Ключ из вида и идентификатора: занятия и турниры лежат в разных
@@ -307,7 +373,7 @@ function Upcoming({
               запрещено. */}
           {events.map((event) => (
             <li key={`${event.kind}-${event.id}`}>
-              <EventRow event={event} viewer={viewer} onChanged={onChanged} />
+              <EventRow event={event} viewer={viewer} forPerson={forPerson} onChanged={onChanged} />
             </li>
           ))}
         </ul>
@@ -319,10 +385,12 @@ function Upcoming({
 function EventRow({
   event,
   viewer,
+  forPerson,
   onChanged,
 }: {
   event: ClubEvent;
   viewer: Viewer;
+  forPerson: string | null;
   onChanged: () => void;
 }) {
   const club = useClubApi();
@@ -340,12 +408,12 @@ function EventRow({
     try {
       if (event.kind === 'TRAINING') {
         await (event.registered
-          ? club.cancelTrainingBooking(event.id)
-          : club.registerForTraining(event.id));
+          ? club.cancelTrainingBooking(event.id, forPerson)
+          : club.registerForTraining(event.id, forPerson));
       } else {
         await (event.registered
-          ? club.cancelTournamentRegistration(event.id)
-          : club.registerForTournament(event.id));
+          ? club.cancelTournamentRegistration(event.id, forPerson)
+          : club.registerForTournament(event.id, forPerson));
       }
 
       onChanged();

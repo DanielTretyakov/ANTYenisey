@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import type { BookingEntry, BookingStatus } from '@yenisey/types';
 import { ClubMark } from '@/components/club/ClubMark';
+import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { WhenSpan } from '@/components/club/When';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
@@ -12,6 +13,7 @@ import { Button } from '@/components/ui/Button';
 import { api, ApiError, clubApi } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { formatKopecks } from '@/lib/money';
+import { usePersonSwitch } from '@/lib/usePersonSwitch';
 import { useSession } from '@/lib/useSession';
 
 /**
@@ -24,10 +26,15 @@ import { useSession } from '@/lib/useSession';
  * Сюда же уехал список записей из личного кабинета — целиком, вместе с
  * прошедшими и с турнирами. Два списка записей в двух местах разошлись бы в
  * поведении отмены и в том, что каждый из них показывает.
+ *
+ * Родитель переключателем смотрит и отменяет записи своего ребёнка младше 16.
+ * Сам ребёнок свои записи видит, но отменять их не может: это делает родитель.
  */
 export default function MyBookingsPage() {
   const router = useRouter();
   const session = useSession();
+  const family = usePersonSwitch();
+  const forPerson = family.forPerson;
 
   const [entries, setEntries] = useState<BookingEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,13 +50,14 @@ export default function MyBookingsPage() {
       return;
     }
 
+    setEntries(null);
     api
-      .myBookings()
+      .myBookings(forPerson)
       .then(setEntries)
       .catch((cause: unknown) =>
         setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен'),
       );
-  }, [session.status]);
+  }, [session.status, forPerson]);
 
   const { upcoming, past } = useMemo(() => split(entries ?? []), [entries]);
 
@@ -63,7 +71,20 @@ export default function MyBookingsPage() {
 
   return (
     <AppShell>
-      <h1 className="mb-8 text-[1.75rem]">Мои записи</h1>
+      <h1 className="mb-8 text-[1.75rem]">
+        {family.selected ? `Записи: ${family.selected.fullName}` : 'Мои записи'}
+      </h1>
+
+      <PersonSwitch
+        people={family.children}
+        selected={family.selected}
+        onChoose={family.choose}
+        className="-mt-4 mb-8"
+      />
+
+      {family.selfIsChild && (
+        <Alert tone="info">Отменить запись до 16 лет может родитель — или администратор клуба.</Alert>
+      )}
 
       {error && <Alert>{error}</Alert>}
 
@@ -84,12 +105,21 @@ export default function MyBookingsPage() {
           <Group
             title="Ближайшие"
             groups={byClub(upcoming)}
+            forPerson={forPerson}
+            canCancel={!family.selfIsChild}
             onChanged={replace}
             onError={setError}
           />
 
           {past.length > 0 && (
-            <Group title="История" groups={byClub(past)} onChanged={replace} onError={setError} />
+            <Group
+              title="История"
+              groups={byClub(past)}
+              forPerson={forPerson}
+              canCancel={!family.selfIsChild}
+              onChanged={replace}
+              onError={setError}
+            />
           )}
         </>
       )}
@@ -107,11 +137,16 @@ export default function MyBookingsPage() {
 function Group({
   title,
   groups,
+  forPerson,
+  canCancel,
   onChanged,
   onError,
 }: {
   title: string;
   groups: [string, BookingEntry[]][];
+  /** Чьи записи: ребёнка — или свои. */
+  forPerson: string | null;
+  canCancel: boolean;
   onChanged: (entry: BookingEntry) => void;
   onError: (message: string) => void;
 }) {
@@ -139,7 +174,13 @@ function Group({
             <ul className="mt-3 border-t border-border">
               {list.map((entry) => (
                 <li key={entry.entryId}>
-                  <Row entry={entry} onChanged={onChanged} onError={onError} />
+                  <Row
+                    entry={entry}
+                    forPerson={forPerson}
+                    canCancel={canCancel}
+                    onChanged={onChanged}
+                    onError={onError}
+                  />
                 </li>
               ))}
             </ul>
@@ -184,10 +225,14 @@ function statusOf(entry: BookingEntry): string {
 
 function Row({
   entry,
+  forPerson,
+  canCancel,
   onChanged,
   onError,
 }: {
   entry: BookingEntry;
+  forPerson: string | null;
+  canCancel: boolean;
   onChanged: (entry: BookingEntry) => void;
   onError: (message: string) => void;
 }) {
@@ -210,10 +255,10 @@ function Row({
       // сам список.
       onChanged(
         entry.kind === 'TABLE'
-          ? toEntry(entry, await club.cancelBooking(entry.id))
+          ? toEntry(entry, await club.cancelBooking(entry.id, forPerson))
           : entry.kind === 'TRAINING'
-            ? await club.cancelTrainingBooking(entry.id)
-            : await club.cancelTournamentRegistration(entry.id),
+            ? await club.cancelTrainingBooking(entry.id, forPerson)
+            : await club.cancelTournamentRegistration(entry.id, forPerson),
       );
     } catch (cause) {
       onError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
@@ -247,7 +292,7 @@ function Row({
 
       {/* Можно ли отменить, решает сервер: его часы — часы клуба, а после
           начала запись не отменяется, а отмечается. */}
-      {entry.cancellable && (
+      {entry.cancellable && canCancel && (
         <Button variant="danger" size="sm" pending={pending} onClick={() => void cancel()}>
           Отменить
           {entry.cancelChargePercentNow ? ` (спишется ${entry.cancelChargePercentNow}%)` : ''}

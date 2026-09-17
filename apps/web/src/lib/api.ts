@@ -38,6 +38,11 @@ import type {
   MoveDeskBookingRequest,
   LoginRequest,
   AchievementRequest,
+  CreateChildRequest,
+  FamilyChild,
+  FamilyNotice,
+  GuardianshipRequestView,
+  MyGuardian,
   PlayerProfile,
   PublicPlayer,
   PublicTenant,
@@ -108,7 +113,11 @@ async function readJson<T>(response: Response): Promise<T> {
     return undefined as T;
   }
 
-  return (await response.json()) as T;
+  // Nest отдаёт `null` пустым телом со статусом 200 — «кто ведёт меня» у
+  // человека без родителя. `response.json()` на пустом теле падает.
+  const text = await response.text();
+
+  return (text ? JSON.parse(text) : null) as T;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -219,6 +228,20 @@ const json = (method: string, body: unknown): RequestInit => ({
   headers: { 'Content-Type': 'application/json' },
 });
 
+/**
+ * Адрес с `?for=<id ребёнка>` — действие за своего ребёнка младше 16.
+ *
+ * Пусто — человек действует сам. Решает, можно ли, сервер: он же проверяет,
+ * что это действительно ребёнок вошедшего и ему нет 16.
+ */
+function withFor(path: string, forPerson?: string | null): string {
+  if (!forPerson) {
+    return path;
+  }
+
+  return `${path}${path.includes('?') ? '&' : '?'}for=${encodeURIComponent(forPerson)}`;
+}
+
 /** Форма с файлом. Заголовок не ставится — см. `send`. */
 const form = (method: string, fields: Record<string, string>, file?: File | null): RequestInit => {
   const body = new FormData();
@@ -297,35 +320,40 @@ export const api = {
    * Отмена идёт клубным маршрутом — каждая строка несёт код своего клуба. Два
    * пути отмены разошлись бы сначала в мелочах, потом в деньгах.
    */
-  myBookings: (): Promise<BookingEntry[]> => authorized('/me/bookings'),
+  myBookings: (forPerson?: string | null): Promise<BookingEntry[]> =>
+    authorized(withFor('/me/bookings', forPerson)),
 
   // --- Профиль игрока. Свойство человека, а не клуба: клуба в адресе нет.
-  myPlayer: (): Promise<PlayerProfile> => authorized('/me/player'),
+  // Родитель ведёт профиль ребёнка тем же маршрутом с `forPerson`.
+  myPlayer: (forPerson?: string | null): Promise<PlayerProfile> =>
+    authorized(withFor('/me/player', forPerson)),
 
-  updateEquipment: (patch: UpdateEquipmentRequest): Promise<PlayerProfile> =>
-    authorized('/me/player', json('PATCH', patch)),
+  updateEquipment: (patch: UpdateEquipmentRequest, forPerson?: string | null): Promise<PlayerProfile> =>
+    authorized(withFor('/me/player', forPerson), json('PATCH', patch)),
 
   /** Аватар заменяется целиком. Картинку пережимает сервер. */
-  setAvatar: (file: File): Promise<PlayerProfile> => authorized('/me/player/avatar', form('PUT', {}, file)),
+  setAvatar: (file: File, forPerson?: string | null): Promise<PlayerProfile> =>
+    authorized(withFor('/me/player/avatar', forPerson), form('PUT', {}, file)),
 
-  removeAvatar: (): Promise<PlayerProfile> => authorized('/me/player/avatar', { method: 'DELETE' }),
+  removeAvatar: (forPerson?: string | null): Promise<PlayerProfile> =>
+    authorized(withFor('/me/player/avatar', forPerson), { method: 'DELETE' }),
 
-  addAchievement: (payload: AchievementRequest): Promise<PlayerProfile> =>
-    authorized('/me/player/achievements', json('POST', payload)),
+  addAchievement: (payload: AchievementRequest, forPerson?: string | null): Promise<PlayerProfile> =>
+    authorized(withFor('/me/player/achievements', forPerson), json('POST', payload)),
 
-  updateAchievement: (id: string, payload: AchievementRequest): Promise<PlayerProfile> =>
-    authorized(`/me/player/achievements/${id}`, json('PATCH', payload)),
+  updateAchievement: (id: string, payload: AchievementRequest, forPerson?: string | null): Promise<PlayerProfile> =>
+    authorized(withFor(`/me/player/achievements/${id}`, forPerson), json('PATCH', payload)),
 
-  removeAchievement: (id: string): Promise<PlayerProfile> =>
-    authorized(`/me/player/achievements/${id}`, { method: 'DELETE' }),
+  removeAchievement: (id: string, forPerson?: string | null): Promise<PlayerProfile> =>
+    authorized(withFor(`/me/player/achievements/${id}`, forPerson), { method: 'DELETE' }),
 
   /**
    * Разряд одной формой: сам разряд, приказ и, если есть, скан. Правка
    * возвращает разряд на проверку клубу.
    */
-  setRank: (payload: SetRankPayload): Promise<PlayerProfile> =>
+  setRank: (payload: SetRankPayload, forPerson?: string | null): Promise<PlayerProfile> =>
     authorized(
-      '/me/player/rank',
+      withFor('/me/player/rank', forPerson),
       form(
         'PUT',
         {
@@ -338,7 +366,35 @@ export const api = {
       ),
     ),
 
-  removeRank: (): Promise<PlayerProfile> => authorized('/me/player/rank', { method: 'DELETE' }),
+  removeRank: (forPerson?: string | null): Promise<PlayerProfile> =>
+    authorized(withFor('/me/player/rank', forPerson), { method: 'DELETE' }),
+
+  // --- Семья: родитель ведёт ребёнка младше 16.
+  myChildren: (): Promise<FamilyChild[]> => authorized('/me/children'),
+
+  /** Учётка ребёнку — закрепляется за родителем сразу. */
+  createChild: (payload: CreateChildRequest): Promise<FamilyChild> =>
+    authorized('/me/children', json('POST', payload)),
+
+  /** Заявка на существующую учётку. Ответ одинаковый при любом исходе. */
+  attachChild: (email: string): Promise<FamilyNotice> =>
+    authorized('/me/children/attach', json('POST', { email })),
+
+  /** Новый пароль ребёнку. Все его сессии гаснут. */
+  setChildPassword: (id: string, password: string): Promise<void> =>
+    authorized(`/me/children/${id}/password`, json('POST', { password })),
+
+  unlinkChild: (id: string): Promise<void> => authorized(`/me/children/${id}`, { method: 'DELETE' }),
+
+  /** Кто ведёт вошедшего. `null` — никто, или ему уже 16. */
+  myGuardian: (): Promise<MyGuardian | null> => authorized('/me/guardianship'),
+
+  guardianshipRequests: (): Promise<GuardianshipRequestView[]> =>
+    authorized('/me/guardianship/requests'),
+
+  /** Ответить на заявку может только сам ребёнок. */
+  answerGuardianshipRequest: (id: string, answer: 'confirm' | 'reject'): Promise<void> =>
+    authorized(`/me/guardianship/requests/${id}/${answer}`, { method: 'POST' }),
 
   /**
    * Публичная страница игрока. Открыта без входа, но от своего имени, когда
@@ -537,24 +593,26 @@ export function clubApi(slug: string = TENANT_SLUG) {
      * регистрации. Вошедшему приезжает ещё и отметка «я уже записан» — ради
      * неё запрос идёт от его имени, когда есть от чьего.
      */
-    events: (): Promise<ClubEvent[]> => optionallyAuthorized(`${club}/events`),
+    events: (forPerson?: string | null): Promise<ClubEvent[]> =>
+      optionallyAuthorized(withFor(`${club}/events`, forPerson)),
 
     /** Мои мероприятия в этом клубе: занятия, турниры и свои брони столов. */
-    myEvents: (): Promise<BookingEntry[]> => authorized(`${club}/events/mine`),
+    myEvents: (forPerson?: string | null): Promise<BookingEntry[]> =>
+      authorized(withFor(`${club}/events/mine`, forPerson)),
 
-    registerForTournament: (tournamentId: string): Promise<BookingEntry> =>
-      authorized(`${club}/tournaments/${tournamentId}/registration`, { method: 'POST' }),
+    registerForTournament: (tournamentId: string, forPerson?: string | null): Promise<BookingEntry> =>
+      authorized(withFor(`${club}/tournaments/${tournamentId}/registration`, forPerson), { method: 'POST' }),
 
     /** Отмена возвращает запись: человек должен увидеть, сколько с него списалось. */
-    cancelTournamentRegistration: (tournamentId: string): Promise<BookingEntry> =>
-      authorized(`${club}/tournaments/${tournamentId}/registration`, { method: 'DELETE' }),
+    cancelTournamentRegistration: (tournamentId: string, forPerson?: string | null): Promise<BookingEntry> =>
+      authorized(withFor(`${club}/tournaments/${tournamentId}/registration`, forPerson), { method: 'DELETE' }),
 
     /** Идентификатор — ЗАНЯТИЯ, а не строки записи: по нему же идёт отмена. */
-    registerForTraining: (sessionId: string): Promise<BookingEntry> =>
-      authorized(`${club}/trainings/${sessionId}/booking`, { method: 'POST' }),
+    registerForTraining: (sessionId: string, forPerson?: string | null): Promise<BookingEntry> =>
+      authorized(withFor(`${club}/trainings/${sessionId}/booking`, forPerson), { method: 'POST' }),
 
-    cancelTrainingBooking: (sessionId: string): Promise<BookingEntry> =>
-      authorized(`${club}/trainings/${sessionId}/booking`, { method: 'DELETE' }),
+    cancelTrainingBooking: (sessionId: string, forPerson?: string | null): Promise<BookingEntry> =>
+      authorized(withFor(`${club}/trainings/${sessionId}/booking`, forPerson), { method: 'DELETE' }),
 
     // --- Бронирование стола клиентом
     /** Залы с ценами и шагом брони — то же, что видит администратор в настройках. */
@@ -575,14 +633,15 @@ export function clubApi(slug: string = TENANT_SLUG) {
           `&durationMinutes=${durationMinutes}&withRobot=${withRobot}`,
       ),
 
-    createBooking: (payload: CreateBookingRequest): Promise<ClientBooking> =>
-      authorized(`${club}/booking/bookings`, json('POST', payload)),
+    createBooking: (payload: CreateBookingRequest, forPerson?: string | null): Promise<ClientBooking> =>
+      authorized(withFor(`${club}/booking/bookings`, forPerson), json('POST', payload)),
 
-    myBookings: (): Promise<ClientBooking[]> => authorized(`${club}/booking/bookings`),
+    myBookings: (forPerson?: string | null): Promise<ClientBooking[]> =>
+      authorized(withFor(`${club}/booking/bookings`, forPerson)),
 
     /** Отмена возвращает саму бронь: клиент должен увидеть, сколько с него списалось. */
-    cancelBooking: (id: string): Promise<ClientBooking> =>
-      authorized(`${club}/booking/bookings/${id}`, { method: 'DELETE' }),
+    cancelBooking: (id: string, forPerson?: string | null): Promise<ClientBooking> =>
+      authorized(withFor(`${club}/booking/bookings/${id}`, forPerson), { method: 'DELETE' }),
 
     // --- Рабочее место администратора
     /**
@@ -653,6 +712,19 @@ export function clubApi(slug: string = TENANT_SLUG) {
      */
     reviewRank: (personId: string, payload: RankReviewRequest): Promise<PlayerProfile> =>
       authorized(`${club}/people/${personId}/rank/review`, json('POST', payload)),
+
+    // --- Семья у стойки
+    /** Завести ребёнка родителю из клуба. Почту и пароль задаёт родитель рядом. */
+    createChildFor: (guardianId: string, payload: CreateChildRequest): Promise<FamilyChild> =>
+      authorized(`${club}/people/${guardianId}/children`, json('POST', payload)),
+
+    /** Предложить закрепить ребёнка за родителем. Подтвердит сам ребёнок. */
+    requestGuardian: (childId: string, guardianId: string): Promise<void> =>
+      authorized(`${club}/people/${childId}/guardian`, json('POST', { guardianId })),
+
+    /** Снять закрепление от имени клуба — только с причиной. */
+    revokeGuardian: (childId: string, reason: string): Promise<void> =>
+      authorized(`${club}/people/${childId}/guardian/revoke`, json('POST', { reason })),
   };
 }
 

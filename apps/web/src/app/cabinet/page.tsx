@@ -6,12 +6,16 @@ import { useEffect, useState } from 'react';
 import type { FavouriteClub, PublicUser } from '@yenisey/types';
 import { MAX_FAVOURITE_CLUBS } from '@yenisey/types';
 import { ClubMark } from '@/components/club/ClubMark';
+import { ChildFamilyCard, ParentFamilyCard } from '@/components/family/FamilyCards';
+import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { AppShell } from '@/components/layout/AppShell';
 import { PlayerEditor } from '@/components/player/PlayerEditor';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { api, ApiError } from '@/lib/api';
+import { canBeGuardianBirthDate, isChildBirthDate } from '@/lib/family';
+import { usePersonSwitch } from '@/lib/usePersonSwitch';
 import { useSession } from '@/lib/useSession';
 
 /**
@@ -24,10 +28,14 @@ import { useSession } from '@/lib/useSession';
  *
  * Роли в профиле тоже нет: она свойство пары «человек + клуб», а не человека.
  * Кем он в каком клубе является, видно в списке клубов ниже.
+ *
+ * Семья: взрослый видит «Моих детей» и переключателем ведёт профиль игрока
+ * ребёнка; ребёнок младше 16 свой профиль только смотрит и видит, кто его ведёт.
  */
 export default function CabinetPage() {
   const router = useRouter();
   const session = useSession();
+  const family = usePersonSwitch();
 
   useEffect(() => {
     if (session.status === 'anonymous') {
@@ -43,7 +51,35 @@ export default function CabinetPage() {
 
       {user ? <Profile user={user} /> : <ProfileSkeleton />}
 
-      {user && <PlayerEditor user={user} />}
+      {user && family.children.length > 0 && (
+        <PersonSwitch
+          people={family.children}
+          selected={family.selected}
+          onChoose={family.choose}
+          className="mt-8"
+        />
+      )}
+
+      {user &&
+        (family.selected ? (
+          <PlayerEditor key={family.selected.id} name={family.selected.fullName} forPerson={family.selected.id} />
+        ) : (
+          <PlayerEditor key="self" name={user.fullName} readOnly={isChildBirthDate(user.birthDate)} />
+        ))}
+
+      {user && canBeGuardianBirthDate(user.birthDate) && (
+        <ParentFamilyCard
+          user={user}
+          kids={family.children}
+          onChanged={family.reload}
+          onOpenProfile={(childId) => {
+            family.choose(childId);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        />
+      )}
+
+      {user && isChildBirthDate(user.birthDate) && <ChildFamilyCard />}
 
       {user && <MyClubs user={user} />}
     </AppShell>

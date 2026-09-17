@@ -9,6 +9,7 @@ import {
   type BookingQuote,
   type Hall,
 } from '@yenisey/types';
+import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -29,6 +30,7 @@ import {
 } from '@/lib/bookingGrid';
 import { cn } from '@/lib/cn';
 import { formatKopecks } from '@/lib/money';
+import { usePersonSwitch } from '@/lib/usePersonSwitch';
 import { useSession } from '@/lib/useSession';
 
 /** Что клиент выбрал в сетке: стол и начало отрезка. */
@@ -50,6 +52,7 @@ interface Pick {
 export default function BookingPage() {
   const router = useRouter();
   const session = useSession();
+  const family = usePersonSwitch();
 
   const club = useClubApi();
 
@@ -188,10 +191,11 @@ export default function BookingPage() {
         startsAt: instantAt(day.date, pick.startMinute, timezone),
         durationMinutes: chosenDuration,
         withRobot: withRobot && (hall?.hasRobotOption ?? false),
-      });
+      }, family.forPerson);
 
-      // Записи уехали из кабинета в «Мои записи» — там же и свежая бронь.
-      router.push('/my-bookings');
+      // Записи уехали из кабинета в «Мои записи» — там же и свежая бронь; за
+      // ребёнка — его записи.
+      router.push(family.forPerson ? `/my-bookings?for=${family.forPerson}` : '/my-bookings');
     } catch (cause: unknown) {
       setError(messageOf(cause));
       // Сетку перечитываем: «стол только что заняли» означает, что чужая бронь
@@ -206,6 +210,19 @@ export default function BookingPage() {
   return (
     <AppShell>
       <h1 className="mb-7 text-[1.75rem]">Забронировать стол</h1>
+
+      <PersonSwitch
+        people={family.children}
+        selected={family.selected}
+        onChoose={family.choose}
+        className="mb-6"
+      />
+
+      {family.selfIsChild && (
+        <Alert tone="info">
+          До 16 лет стол бронирует родитель — или администратор клуба у стойки. Свободное время посмотреть можно.
+        </Alert>
+      )}
 
       {error && <Alert>{error}</Alert>}
 
@@ -291,7 +308,7 @@ export default function BookingPage() {
             <Button
               onClick={() => void handleBook()}
               pending={pending}
-              disabled={chosenDuration === 0}
+              disabled={chosenDuration === 0 || family.selfIsChild}
             >
               Забронировать
             </Button>

@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import type { BookingStatus, ClubPersonCard, ClubPersonEntry, Role } from '@yenisey/types';
 import { fullYears } from '@yenisey/types';
+import { ClubFamilyBlock } from '@/components/family/ClubFamilyBlock';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { PlayerReview } from '@/components/player/PlayerReview';
 import { Alert } from '@/components/ui/Alert';
@@ -120,6 +121,13 @@ export default function PersonPage() {
             self={session.status === 'ready' && session.user.id === card.person.id}
             onChange={(player) => setCard((loaded) => (loaded ? { ...loaded, player } : loaded))}
             onStale={load}
+          />
+
+          <ClubFamilyBlock
+            personId={card.person.id}
+            personPhone={card.person.phone}
+            family={card.family}
+            onChanged={load}
           />
 
           <Card>

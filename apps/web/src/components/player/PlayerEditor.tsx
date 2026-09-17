@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import type { AchievementLevel, PlayerAchievement, PlayerProfile, PublicUser, SportRankLevel } from '@yenisey/types';
+import { createContext, useContext, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import type { AchievementLevel, PlayerAchievement, PlayerProfile, SportRankLevel } from '@yenisey/types';
 import { ACHIEVEMENT_LEVELS, SPORT_RANK_LEVELS } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -11,7 +11,7 @@ import { Field } from '@/components/ui/Field';
 import { Select } from '@/components/ui/Select';
 import { api, ApiError } from '@/lib/api';
 import { LEVEL_LABELS, RANK_TITLES } from '@/lib/player';
-import { AchievementRow, PlayerAvatar, RankLine } from './PlayerView';
+import { AchievementList, AchievementRow, EquipmentList, PlayerAvatar, RankLine } from './PlayerView';
 import { DocumentButton } from './DocumentButton';
 
 const MB = 1024 * 1024;
@@ -22,6 +22,15 @@ function messageOf(cause: unknown): string {
   return cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером';
 }
 
+/**
+ * За кого правится профиль: ребёнка младше 16 — или свой (null).
+ *
+ * Контекстом, а не параметром каждой формы: запрос за ребёнка делает каждая
+ * из пяти вложенных форм, и протаскивать один и тот же идентификатор сквозь
+ * все их свойства значило бы однажды забыть его в одной.
+ */
+const ForPerson = createContext<string | null>(null);
+
 /** Сегодня в виде «2026-09-13» — верхняя граница полей даты. */
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -30,32 +39,50 @@ function today(): string {
 /**
  * «Профиль игрока» в «Кабинете».
  *
- * Расширение сверх ТЗ (решение владельца от 12.09.2026). Заполняет его только
- * сам человек; клуб профиль не правит — он проверяет разряд.
+ * Расширение сверх ТЗ (решение владельца от 12.09.2026). Заполняет его сам
+ * человек, а пока ему нет 16 — родитель (`forPerson`); клуб профиль не правит —
+ * он проверяет разряд. Сам ребёнок младше 16 свой профиль только смотрит
+ * (`readOnly`).
  *
  * Каждый блок сохраняется сам по себе: аватар меняют раз в год, инвентарь —
  * раз в сезон, и общая кнопка «Сохранить всё» заставляла бы отправлять
  * нетронутое.
  */
-export function PlayerEditor({ user }: { user: PublicUser }) {
+export function PlayerEditor({
+  name,
+  forPerson = null,
+  readOnly = false,
+}: {
+  /** Полное имя владельца профиля — для инициалов на месте аватара. */
+  name: string;
+  /** Ребёнок, чей профиль ведёт родитель. */
+  forPerson?: string | null;
+  /** Ребёнок смотрит свой профиль: правит его родитель. */
+  readOnly?: boolean;
+}) {
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setProfile(null);
     api
-      .myPlayer()
+      .myPlayer(forPerson)
       .then(setProfile)
       .catch((cause: unknown) => setError(messageOf(cause)));
-  }, []);
+  }, [forPerson]);
+
+  const whose = forPerson ? 'его' : 'ваша';
 
   return (
     <Card className="mt-6 max-w-2xl">
       <CardHeader
-        title="Профиль игрока"
+        title={forPerson ? `Профиль игрока: ${name}` : 'Профиль игрока'}
         description={
-          profile && !profile.isPublic
-            ? 'До 16 лет ваша страница игрока видна только вам и администраторам ваших клубов.'
-            : 'Его видят все на вашей странице игрока — без телефона, почты и даты рождения, имя как в списках: «Фамилия И.».'
+          readOnly
+            ? 'Профиль ведёт родитель. До 16 лет страница видна только вам, родителю и администраторам ваших клубов.'
+            : profile && !profile.isPublic
+              ? `До 16 лет ${whose} страница игрока видна только ${forPerson ? 'ему, вам' : 'вам'} и администраторам ${forPerson ? 'его' : 'ваших'} клубов.`
+              : 'Его видят все на странице игрока — без телефона, почты и даты рождения, имя как в списках: «Фамилия И.».'
         }
       />
       <CardBody>
@@ -63,37 +90,72 @@ export function PlayerEditor({ user }: { user: PublicUser }) {
 
         {!profile && !error && <p className="text-[0.875rem] text-text-muted">Загружаю…</p>}
 
-        {profile && (
-          <div className="grid gap-9">
-            <AvatarBlock profile={profile} name={user.fullName} onChange={setProfile} />
+        {profile && readOnly && <PlayerSummary profile={profile} name={name} />}
 
-            <Block title="Инвентарь">
-              <EquipmentForm profile={profile} onChange={setProfile} />
-            </Block>
+        {profile && !readOnly && (
+          <ForPerson.Provider value={forPerson}>
+            <div className="grid gap-9">
+              <AvatarBlock profile={profile} name={name} onChange={setProfile} />
 
-            <Block
-              title="Спортивный разряд"
-              note="Разряд подтверждает администратор любого вашего клуба — и подтверждение видно везде."
-            >
-              <RankForm profile={profile} onChange={setProfile} />
-            </Block>
+              <Block title="Инвентарь">
+                <EquipmentForm profile={profile} onChange={setProfile} />
+              </Block>
 
-            <Block title="Достижения" note="Список ведёте вы сами, клуб его не проверяет.">
-              <AchievementsEditor profile={profile} onChange={setProfile} />
-            </Block>
-
-            <p className="text-[0.875rem]">
-              <Link
-                href={`/players/${profile.userId}`}
-                className="text-text-accent underline-offset-2 hover:underline"
+              <Block
+                title="Спортивный разряд"
+                note={`Разряд подтверждает администратор любого ${forPerson ? 'его' : 'вашего'} клуба — и подтверждение видно везде.`}
               >
-                Открыть мою страницу игрока →
-              </Link>
-            </p>
-          </div>
+                <RankForm profile={profile} onChange={setProfile} />
+              </Block>
+
+              <Block title="Достижения" note="Список ведёте вы сами, клуб его не проверяет.">
+                <AchievementsEditor profile={profile} onChange={setProfile} />
+              </Block>
+
+              <p className="text-[0.875rem]">
+                <Link
+                  href={`/players/${profile.userId}`}
+                  className="text-text-accent underline-offset-2 hover:underline"
+                >
+                  {forPerson ? 'Открыть страницу игрока →' : 'Открыть мою страницу игрока →'}
+                </Link>
+              </p>
+            </div>
+          </ForPerson.Provider>
         )}
       </CardBody>
     </Card>
+  );
+}
+
+/** Профиль только для чтения — ребёнок смотрит, что ведёт за него родитель. */
+function PlayerSummary({ profile, name }: { profile: PlayerProfile; name: string }) {
+  return (
+    <div className="grid gap-7">
+      <PlayerAvatar fileId={profile.avatarFileId} name={name} size="lg" />
+
+      <Block title="Инвентарь">
+        <EquipmentList equipment={profile.equipment} />
+      </Block>
+
+      <Block title="Спортивный разряд">
+        {profile.rank ? (
+          <RankLine rank={profile.rank} />
+        ) : (
+          <p className="text-[0.875rem] text-text-muted">Разряд не указан.</p>
+        )}
+      </Block>
+
+      <Block title="Достижения">
+        <AchievementList achievements={profile.achievements} />
+      </Block>
+
+      <p className="text-[0.875rem]">
+        <Link href={`/players/${profile.userId}`} className="text-text-accent underline-offset-2 hover:underline">
+          Открыть мою страницу игрока →
+        </Link>
+      </p>
+    </div>
   );
 }
 
@@ -108,6 +170,7 @@ function Block({ title, note, children }: { title: string; note?: string; childr
 }
 
 function AvatarBlock({ profile, name, onChange }: { profile: PlayerProfile; name: string; onChange: Update }) {
+  const forPerson = useContext(ForPerson);
   const input = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<'upload' | 'remove' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -137,7 +200,7 @@ function AvatarBlock({ profile, name, onChange }: { profile: PlayerProfile; name
       return;
     }
 
-    void run('upload', () => api.setAvatar(file));
+    void run('upload', () => api.setAvatar(file, forPerson));
   }
 
   return (
@@ -162,7 +225,7 @@ function AvatarBlock({ profile, name, onChange }: { profile: PlayerProfile; name
                 variant="ghost"
                 pending={pending === 'remove'}
                 disabled={pending !== null}
-                onClick={() => void run('remove', () => api.removeAvatar())}
+                onClick={() => void run('remove', () => api.removeAvatar(forPerson))}
               >
                 Убрать
               </Button>
@@ -193,6 +256,7 @@ function AvatarBlock({ profile, name, onChange }: { profile: PlayerProfile; name
 }
 
 function EquipmentForm({ profile, onChange }: { profile: PlayerProfile; onChange: Update }) {
+  const forPerson = useContext(ForPerson);
   const saved = profile.equipment;
   const [blade, setBlade] = useState(saved.blade ?? '');
   const [forehand, setForehand] = useState(saved.forehandRubber ?? '');
@@ -212,7 +276,7 @@ function EquipmentForm({ profile, onChange }: { profile: PlayerProfile; onChange
     setError(null);
 
     try {
-      const next = await api.updateEquipment({ blade, forehandRubber: forehand, backhandRubber: backhand });
+      const next = await api.updateEquipment({ blade, forehandRubber: forehand, backhandRubber: backhand }, forPerson);
       onChange(next);
       setBlade(next.equipment.blade ?? '');
       setForehand(next.equipment.forehandRubber ?? '');
@@ -268,13 +332,17 @@ function EquipmentForm({ profile, onChange }: { profile: PlayerProfile; onChange
   );
 }
 
-const RANK_OPTIONS = SPORT_RANK_LEVELS.map((value) => ({ value, label: RANK_TITLES[value] }));
+const RANK_OPTIONS = SPORT_RANK_LEVELS.map((value) => ({
+  value,
+  label: RANK_TITLES[value],
+}));
 
 /**
  * Разряд одной формой: сам разряд, приказ и скан. Любая настоящая правка
  * возвращает разряд на проверку — об этом форма говорит до нажатия, а не после.
  */
 function RankForm({ profile, onChange }: { profile: PlayerProfile; onChange: Update }) {
+  const forPerson = useContext(ForPerson);
   const current = profile.rank;
   const fileInput = useRef<HTMLInputElement>(null);
   const scanId = useId();
@@ -318,7 +386,18 @@ function RankForm({ profile, onChange }: { profile: PlayerProfile; onChange: Upd
     setError(null);
 
     try {
-      onChange(await api.setRank({ rank, orderNumber: orderNumber.trim(), orderDate, document: scan, removeDocument }));
+      onChange(
+        await api.setRank(
+          {
+            rank,
+            orderNumber: orderNumber.trim(),
+            orderDate,
+            document: scan,
+            removeDocument,
+          },
+          forPerson,
+        ),
+      );
       if (fileInput.current) fileInput.current.value = '';
     } catch (cause) {
       setError(messageOf(cause));
@@ -332,7 +411,7 @@ function RankForm({ profile, onChange }: { profile: PlayerProfile; onChange: Upd
     setError(null);
 
     try {
-      onChange(await api.removeRank());
+      onChange(await api.removeRank(forPerson));
       setConfirmRemove(false);
     } catch (cause) {
       setError(messageOf(cause));
@@ -380,7 +459,11 @@ function RankForm({ profile, onChange }: { profile: PlayerProfile; onChange: Upd
         <Field
           id={scanId}
           label={current?.document ? 'Новый скан приказа' : 'Скан приказа'}
-          hint="JPEG, PNG, WebP или PDF до 10 МБ. Его видят только вы и администраторы ваших клубов."
+          hint={
+            forPerson
+              ? 'JPEG, PNG, WebP или PDF до 10 МБ. Его видят только он, вы и администраторы его клубов.'
+              : 'JPEG, PNG, WebP или PDF до 10 МБ. Его видят только вы и администраторы ваших клубов.'
+          }
         >
           <input
             ref={fileInput}
@@ -413,12 +496,24 @@ function RankForm({ profile, onChange }: { profile: PlayerProfile; onChange: Upd
         </p>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="submit" size="sm" variant="secondary" pending={pending === 'save'} disabled={!dirty || pending !== null}>
+          <Button
+            type="submit"
+            size="sm"
+            variant="secondary"
+            pending={pending === 'save'}
+            disabled={!dirty || pending !== null}
+          >
             {current ? 'Сохранить разряд' : 'Заявить разряд'}
           </Button>
 
           {current && !confirmRemove && (
-            <Button type="button" size="sm" variant="ghost" disabled={pending !== null} onClick={() => setConfirmRemove(true)}>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={pending !== null}
+              onClick={() => setConfirmRemove(true)}
+            >
               Убрать разряд
             </Button>
           )}
@@ -426,7 +521,13 @@ function RankForm({ profile, onChange }: { profile: PlayerProfile; onChange: Upd
           {confirmRemove && (
             <>
               <span className="text-[0.8125rem] text-text-muted">Убрать разряд вместе со сканом?</span>
-              <Button type="button" size="sm" variant="danger" pending={pending === 'remove'} onClick={() => void remove()}>
+              <Button
+                type="button"
+                size="sm"
+                variant="danger"
+                pending={pending === 'remove'}
+                onClick={() => void remove()}
+              >
                 Да, убрать
               </Button>
               <Button type="button" size="sm" variant="ghost" onClick={() => setConfirmRemove(false)}>
@@ -441,6 +542,7 @@ function RankForm({ profile, onChange }: { profile: PlayerProfile; onChange: Upd
 }
 
 function AchievementsEditor({ profile, onChange }: { profile: PlayerProfile; onChange: Update }) {
+  const forPerson = useContext(ForPerson);
   const [editing, setEditing] = useState<string | 'new' | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -450,7 +552,7 @@ function AchievementsEditor({ profile, onChange }: { profile: PlayerProfile; onC
     setError(null);
 
     try {
-      onChange(await api.removeAchievement(id));
+      onChange(await api.removeAchievement(id, forPerson));
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
@@ -475,7 +577,7 @@ function AchievementsEditor({ profile, onChange }: { profile: PlayerProfile; onC
                   initial={achievement}
                   onCancel={() => setEditing(null)}
                   onSave={async (payload) => {
-                    onChange(await api.updateAchievement(achievement.id, payload));
+                    onChange(await api.updateAchievement(achievement.id, payload, forPerson));
                     setEditing(null);
                   }}
                 />
@@ -508,7 +610,7 @@ function AchievementsEditor({ profile, onChange }: { profile: PlayerProfile; onC
         <AchievementForm
           onCancel={() => setEditing(null)}
           onSave={async (payload) => {
-            onChange(await api.addAchievement(payload));
+            onChange(await api.addAchievement(payload, forPerson));
             setEditing(null);
           }}
         />
