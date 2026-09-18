@@ -139,9 +139,10 @@ export class PlayersController {
 /**
  * Раздача загруженных файлов.
  *
- * Здесь, а не в FilesModule: кому отдать файл, решают правила того, чей он, —
- * а файлы сейчас бывают только у игроков. Появится другой владелец — появится
- * и своя политика на вид файла.
+ * Здесь, а не в FilesModule: кому отдать файл, решают правила того, чей он.
+ * Видов файлов три — аватар, скан приказа и фотография тренера, — и последний
+ * отдаётся всем: карточка тренера публична. Станет видов больше — раздачу
+ * стоит вынести в FilesModule с политикой на вид; ради одной ветки рано.
  *
  * Открыт без входа, потому что аватар взрослого виден всем. Всё остальное
  * решает `canReadFile` по предъявленному токену, если он есть.
@@ -190,12 +191,14 @@ export class PlayerFilesController {
     // старый адрес всегда отдаёт одно и то же. Сутки, а не год: доступ к
     // файлу может закрыться — учётку отключили, — и чужой кеш не должен
     // раздавать его ещё год. Закрытое не кешируется вовсе.
-    const open = file.kind === 'AVATAR' && canReadFile(
-      file.kind,
-      { ownerId: owner.id, birthDate: owner.birthDate },
-      { viewerId: null, managesOwner: false, guardsOwner: false },
-      new Date(),
-    );
+    const open =
+      (file.kind === 'AVATAR' || file.kind === 'COACH_PHOTO') &&
+      canReadFile(
+        file.kind,
+        { ownerId: owner.id, birthDate: owner.birthDate },
+        { viewerId: null, managesOwner: false, guardsOwner: false },
+        new Date(),
+      );
 
     response.set({
       'Content-Type': file.contentType,

@@ -35,7 +35,9 @@ export class FileIntake {
     }
 
     try {
-      return kind === 'AVATAR'
+      // Фотография тренера проходит тем же путём, что аватар: квадрат 512×512
+      // в WebP, метаданные с координатами съёмки не переживают перекодирование.
+      return kind === 'AVATAR' || kind === 'COACH_PHOTO'
         ? { kind, contentType: 'image/webp', data: await normalizeAvatar(upload) }
         : { kind, contentType: checked.contentType, data: await normalizeDocumentImage(upload, checked.contentType) };
     } catch {

@@ -8,6 +8,7 @@ import { AttendanceModule } from './attendance/attendance.module';
 import { AuthModule } from './auth/auth.module';
 import { BookingModule } from './booking/booking.module';
 import { ClubModule } from './club/club.module';
+import { CoachesModule } from './coaches/coaches.module';
 import { DeskModule } from './desk/desk.module';
 import { EntriesModule } from './entries/entries.module';
 import { EventsModule } from './events/events.module';
@@ -66,6 +67,7 @@ import { validateEnv, type Env } from './config/env';
     AttendanceModule,
     PeopleModule,
     PlayersModule,
+    CoachesModule,
     GuardianshipModule,
     TenantsModule,
     EntriesModule,

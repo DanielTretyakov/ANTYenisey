@@ -50,14 +50,19 @@ export function canSeeProfile(owner: ProfileOwner, viewer: ProfileViewer, today:
  *
  * Аватар — тем же, кому виден профиль. Скан приказа — только самому человеку,
  * его родителю и администраторам его клубов, в любом возрасте: там паспортные
- * данные.
+ * данные. Фотография тренера — всем: карточка тренера публична, и возраста у
+ * неё нет, тренером человек становится взрослым.
  */
 export function canReadFile(
-  kind: 'AVATAR' | 'RANK_DOCUMENT',
+  kind: 'AVATAR' | 'RANK_DOCUMENT' | 'COACH_PHOTO',
   owner: ProfileOwner,
   viewer: ProfileViewer,
   today: Date,
 ): boolean {
+  if (kind === 'COACH_PHOTO') {
+    return true;
+  }
+
   if (kind === 'AVATAR') {
     return canSeeProfile(owner, viewer, today);
   }

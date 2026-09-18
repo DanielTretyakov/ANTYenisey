@@ -9,7 +9,7 @@
 export type StoredContentType = 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf';
 
 /** Вид файла — то же перечисление, что `StoredFileKind` в схеме. */
-export type FileKind = 'AVATAR' | 'RANK_DOCUMENT';
+export type FileKind = 'AVATAR' | 'RANK_DOCUMENT' | 'COACH_PHOTO';
 
 const MB = 1024 * 1024;
 
@@ -29,6 +29,19 @@ export const FILE_RULES: Record<FileKind, { maxInputBytes: number; accepts: read
     maxInputBytes: 10 * MB,
     accepts: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
   },
+  // Фотография в карточке тренера обрабатывается как аватар и PDF не
+  // принимает: её рисует страница, а не скачивает человек.
+  COACH_PHOTO: {
+    maxInputBytes: 5 * MB,
+    accepts: ['image/jpeg', 'image/png', 'image/webp'],
+  },
+};
+
+/** Отказ по формату — словами того, кто файл прикладывает. */
+const REJECTIONS: Record<FileKind, string> = {
+  AVATAR: 'Аватар — картинка JPEG, PNG или WebP',
+  RANK_DOCUMENT: 'Приказ — картинка JPEG, PNG, WebP или PDF',
+  COACH_PHOTO: 'Фотография — картинка JPEG, PNG или WebP',
 };
 
 /** Потолок любой загрузки: разбор запроса обрывается на нём, не дочитывая тело. */
@@ -94,13 +107,7 @@ export function checkUpload(
   const contentType = sniffContentType(bytes);
 
   if (!contentType || !rule.accepts.includes(contentType)) {
-    return {
-      ok: false,
-      message:
-        kind === 'AVATAR'
-          ? 'Аватар — картинка JPEG, PNG или WebP'
-          : 'Приказ — картинка JPEG, PNG, WebP или PDF',
-    };
+    return { ok: false, message: REJECTIONS[kind] };
   }
 
   return { ok: true, contentType };

@@ -2,6 +2,7 @@ export * from './age';
 export * from './auth';
 export * from './booking';
 export * from './club';
+export * from './coach';
 export * from './desk';
 export * from './family';
 export * from './names';
