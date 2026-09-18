@@ -14,6 +14,7 @@
 import type { Role } from './auth';
 import type { DeskMarkInfo, DeskVisit } from './desk';
 import type { BookingEntry } from './platform';
+import type { CoachProfile } from './coach';
 import type { ClubPersonFamily } from './family';
 import type { PlayerProfile } from './player';
 
@@ -466,6 +467,11 @@ export interface ClubPersonCard {
   player: PlayerProfile;
   /** Семья: кто ведёт человека, кого ведёт он. */
   family: ClubPersonFamily;
+  /**
+   * Карточка тренера — только у тренера этого клуба, и её правит отсюда
+   * администратор. У остальных пусто.
+   */
+  coach: CoachProfile | null;
 }
 
 /** Запись человека вместе с подписью того, кто поставил отметку. */

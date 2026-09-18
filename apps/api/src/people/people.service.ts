@@ -1,9 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Role } from '@yenisey/database';
 import type { ClubPerson, ClubPersonCard, ClubPersonEntry, FamilyChild, PlatformPersonLookup } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { AttendanceService } from '../attendance/attendance.service';
 import { formatBirthDate } from '../auth/birth-date';
+import { CoachesService } from '../coaches/coaches.service';
 import { MembershipService } from '../club/membership.service';
 import { chargeOf } from '../desk/revenue';
 import { EntriesService } from '../entries/entries.service';
@@ -37,6 +39,7 @@ export class PeopleService {
     private readonly membership: MembershipService,
     private readonly players: PlayersService,
     private readonly family: FamilyService,
+    private readonly coaches: CoachesService,
   ) {}
 
   /**
@@ -208,11 +211,14 @@ export class PeopleService {
       throw new NotFoundException('Человек не найден в этом клубе');
     }
 
-    const [entries, visits, player, family] = await Promise.all([
+    const [entries, visits, player, family, coach] = await Promise.all([
       this.entries.listForUser(userId, tenantId),
       this.attendance.walkInsOf(tenantId, userId),
       this.players.profile(userId),
       this.family.familyOf(userId, tenantId),
+      // Карточка тренера — только у тренера, и её может ещё не быть: роль
+      // могли назначить минуту назад.
+      membership.role === Role.COACH ? this.coaches.profileOrNull(tenantId, userId) : null,
     ]);
 
     // Подпись «кто отметил» — только у отмеченных: у остальных журналу нечего
@@ -263,6 +269,7 @@ export class PeopleService {
       visits,
       player,
       family,
+      coach,
     };
   }
 }

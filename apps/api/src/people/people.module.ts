@@ -3,6 +3,7 @@ import { PeopleController } from './people.controller';
 import { PeopleService } from './people.service';
 import { AttendanceModule } from '../attendance/attendance.module';
 import { ClubModule } from '../club/club.module';
+import { CoachesModule } from '../coaches/coaches.module';
 import { EntriesModule } from '../entries/entries.module';
 import { PlayersModule } from '../players/players.module';
 import { GuardianshipModule } from '../guardianship/guardianship.module';
@@ -21,9 +22,11 @@ import { GuardianshipModule } from '../guardianship/guardianship.module';
  *
  * `PlayersModule` — ради профиля игрока в карточке: разряд проверяет
  * администратор, и смотрит он отсюда.
+ *
+ * `CoachesModule` — ради карточки тренера: её правит администратор оттуда же.
  */
 @Module({
-  imports: [AttendanceModule, ClubModule, EntriesModule, PlayersModule, GuardianshipModule],
+  imports: [AttendanceModule, ClubModule, CoachesModule, EntriesModule, PlayersModule, GuardianshipModule],
   controllers: [PeopleController],
   providers: [PeopleService],
 })
