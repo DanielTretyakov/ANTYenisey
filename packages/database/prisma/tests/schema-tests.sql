@@ -3,7 +3,7 @@
 -- ради чего заведены.
 -- ---------------------------------------------------------------------------
 --
--- СТАТУС: прогнано на PostgreSQL 18 (17.09.2026) — 87 из 87 сценариев прошли.
+-- СТАТУС: прогнано на PostgreSQL 18 (18.09.2026) — 91 из 91 сценария прошли.
 -- Дополнительно проверено, что отказы приходят именно от нужных ограничений,
 -- а не по случайной причине: exclusion-констрейнт даёт 23P01, составные
 -- внешние ключи — 23503, частичный уникальный индекс — 23505, check'и — 23514.
@@ -1078,3 +1078,36 @@ DO $$ BEGIN
   VALUES ('g4','k1','c1','ACTIVE','c1',now(),now());
   RAISE NOTICE 'CG. Снято клубом и закреплено заново........ OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'CG. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- ---------------------------------------------------------------------------
+-- Карточка тренера (раздел 20 constraints.sql)
+-- ---------------------------------------------------------------------------
+--
+-- Тренер c1 в клубе t1. Карточка публична, и ошибка здесь видна всем.
+
+-- CH. Фотография тренера в PDF: карточку рисует браузер, и сервер приводит
+--     любую картинку к WebP.
+SELECT pg_temp.expect('CH',
+  $q$INSERT INTO "StoredFile" (id,"ownerUserId",kind,"contentType",size,sha256,data)
+     VALUES ('fx','c1','COACH_PHOTO','application/pdf',5,repeat('f',64),'\x255044462d'::bytea)$q$,
+  '23514', 'StoredFile_type_matches_kind');
+
+-- CI. Чужой файл фотографией тренера: составной ключ (файл, человек).
+DO $$ BEGIN
+  INSERT INTO "StoredFile" (id,"ownerUserId",kind,"contentType",size,sha256,data)
+  VALUES ('cf1','c1','COACH_PHOTO','image/webp',4,repeat('9',64),'\x52494646'::bytea);
+EXCEPTION WHEN others THEN RAISE NOTICE 'CI. ПРОВАЛ подготовки: %', SQLERRM; END $$;
+SELECT pg_temp.expect('CI',
+  $q$UPDATE "CoachProfile" SET "photoFileId" = 'f3' WHERE "userId" = 'c1' AND "tenantId" = 't1'$q$,
+  '23503', 'CoachProfile_photoFileId_userId_fkey');
+
+-- CJ. Своя фотография — проходит.
+DO $$ BEGIN
+  UPDATE "CoachProfile" SET "photoFileId" = 'cf1' WHERE "userId" = 'c1' AND "tenantId" = 't1';
+  RAISE NOTICE 'CJ. Своя фотография тренера принята........ OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'CJ. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- CK. Пробелы вместо достижений: пусто — это NULL.
+SELECT pg_temp.expect('CK',
+  $q$UPDATE "CoachProfile" SET achievements = '   ' WHERE "userId" = 'c1' AND "tenantId" = 't1'$q$,
+  '23514', 'CoachProfile_text_filled');

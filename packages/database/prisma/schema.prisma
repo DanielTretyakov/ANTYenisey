@@ -229,6 +229,7 @@ enum GuardianshipStatus {
 enum StoredFileKind {
   AVATAR // аватар игрока: приведён к 512×512 WebP, метаданные выброшены
   RANK_DOCUMENT // скан приказа о присвоении разряда: картинка или PDF
+  COACH_PHOTO // фотография в карточке тренера: обработана как аватар
 }
 
 /// Уровень соревнования в достижении игрока.
@@ -663,6 +664,7 @@ model StoredFile {
 
   avatarOf       PlayerProfile[] @relation("ProfileAvatar")
   rankDocumentOf SportRank[]     @relation("RankDocument")
+  coachPhotoOf   CoachProfile[]  @relation("CoachPhoto")
 
   // Мишень составных ключей: аватар и приказ ссылаются на пару (файл,
   // владелец), и база не примет чужой файл в своём профиле.
@@ -925,11 +927,20 @@ model CoachProfile {
   tenantId     String // вторая половина ключа привязки к клубу
   tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   membership   TenantMembership @relation(fields: [userId, tenantId], references: [userId, tenantId], onDelete: Cascade)
-  photoUrl     String?
+
+  /// Фотография лежит файлом, как аватар игрока, а не адресом: внешней ссылке
+  /// нечем подтвердить, что за ней картинка, а не что угодно ещё.
+  ///
+  /// Ключ составной — (файл, этот же человек), NoAction — по тем же причинам,
+  /// что расписаны у `PlayerProfile.avatarFileId`. Половина ключа — `userId`,
+  /// а не пара с клубом: файл принадлежит человеку, карточка — клубу.
+  photoFileId  String?          @unique
+  photo        StoredFile?      @relation("CoachPhoto", fields: [photoFileId, userId], references: [id, ownerUserId], onDelete: NoAction)
+
   achievements String?
   inventory    String?
   priceInfo    String?
-  socialLinks  Json? // ссылки на соцсети произвольной структуры
+  socialLinks  Json? // ссылки на соцсети: [{ label, url }]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

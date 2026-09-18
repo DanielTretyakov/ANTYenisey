@@ -620,6 +620,7 @@ ALTER TABLE "StoredFile"
     CASE "kind"
       WHEN 'AVATAR' THEN "size" <= 1048576
       WHEN 'RANK_DOCUMENT' THEN "size" <= 10485760
+      WHEN 'COACH_PHOTO' THEN "size" <= 1048576
     END
   );
 
@@ -631,6 +632,7 @@ ALTER TABLE "StoredFile"
     CASE "kind"
       WHEN 'AVATAR' THEN "contentType" = 'image/webp'
       WHEN 'RANK_DOCUMENT' THEN "contentType" IN ('image/jpeg', 'image/png', 'image/webp', 'application/pdf')
+      WHEN 'COACH_PHOTO' THEN "contentType" = 'image/webp'
     END
   );
 
@@ -804,3 +806,32 @@ ALTER TABLE "Guardianship"
 -- Что снимающий от имени клуба там администратор, а ребёнок в этом клубе
 -- состоит, — сравнение строк других таблиц. Это держит сервис, а база держит
 -- главное: снимающий — человек именно того клуба, что записан.
+
+-- ---------------------------------------------------------------------------
+-- 20. Карточка тренера
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_coach_profile. Карточка публична: её читают, не входя,
+-- и ошибка здесь видна всем, а не одному человеку.
+
+-- Пусто — это NULL, а не пустая строка: у «не заполнено» одно написание, иначе
+-- публичная страница рисует пустоту под заголовком. Границы длины — те же
+-- соображения, что у инвентаря игрока, только текст здесь связный, а не
+-- название модели.
+ALTER TABLE "CoachProfile"
+  ADD CONSTRAINT "CoachProfile_text_filled"
+  CHECK (
+    ("achievements" IS NULL OR ("achievements" = btrim("achievements") AND char_length("achievements") BETWEEN 1 AND 2000))
+    AND ("inventory" IS NULL OR ("inventory" = btrim("inventory") AND char_length("inventory") BETWEEN 1 AND 1000))
+    AND ("priceInfo" IS NULL OR ("priceInfo" = btrim("priceInfo") AND char_length("priceInfo") BETWEEN 1 AND 500))
+  );
+
+-- Чего здесь НЕТ и почему.
+--
+-- socialLinks — Json, и его структуру ([{ label, url }], только http(s), не
+-- больше десяти) держит coach-rules.ts под тестами. CHECK по jsonb выражается,
+-- но читается хуже правила и расходится с ним первым же изменением формы.
+--
+-- «Фото принадлежит тому же человеку» держит не CHECK, а составной внешний ключ
+-- (photoFileId, userId) → StoredFile (id, ownerUserId): чужой файл в карточку
+-- не положить. Размер и формат самого файла — раздел 18, ветка COACH_PHOTO.
