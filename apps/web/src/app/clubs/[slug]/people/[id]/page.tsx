@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import type { BookingStatus, ClubPersonCard, ClubPersonEntry, Role } from '@yenisey/types';
 import { fullYears } from '@yenisey/types';
+import { CoachCard } from '@/components/coach/CoachCard';
 import { ClubFamilyBlock } from '@/components/family/ClubFamilyBlock';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { PlayerReview } from '@/components/player/PlayerReview';
@@ -122,6 +123,15 @@ export default function PersonPage() {
             onChange={(player) => setCard((loaded) => (loaded ? { ...loaded, player } : loaded))}
             onStale={load}
           />
+
+          {card.coach && (
+            <CoachCard
+              coach={card.coach}
+              personId={card.person.id}
+              personName={card.person.fullName}
+              onChange={(coach) => setCard((loaded) => (loaded ? { ...loaded, coach } : loaded))}
+            />
+          )}
 
           <ClubFamilyBlock
             personId={card.person.id}

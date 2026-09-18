@@ -14,6 +14,10 @@ import type {
   ClubCoach,
   ClubEvent,
   ClubSearchQuery,
+  CoachGroup,
+  CoachProfile,
+  PublicCoach,
+  UpdateCoachProfileRequest,
   FavouriteClub,
   FeedEvent,
   ClubPeoplePage,
@@ -403,6 +407,9 @@ export const api = {
    */
   player: (id: string): Promise<PublicPlayer> => optionallyAuthorized(`/players/${id}`),
 
+  /** Публичная карточка тренера. Возраста у неё нет — открыта всем. */
+  coach: (id: string): Promise<PublicCoach> => optionallyAuthorized(`/coaches/${id}`),
+
   /**
    * Файл — байтами, а не адресом для `<img src>`. Картинка по адресу ушла бы
    * без токена, а аватар ребёнка и скан приказа отдаются только тем, кому
@@ -725,6 +732,35 @@ export function clubApi(slug: string = TENANT_SLUG) {
     /** Снять закрепление от имени клуба — только с причиной. */
     revokeGuardian: (childId: string, reason: string): Promise<void> =>
       authorized(`${club}/people/${childId}/guardian/revoke`, json('POST', { reason })),
+
+    // --- Карточка тренера. Она принадлежит клубу, а не человеку, поэтому клуб
+    // в адресе обязателен. Свою правит тренер, любую — администратор; методы
+    // разные только адресом, ответ один и тот же.
+    coachProfile: (): Promise<CoachProfile> => authorized(`${club}/coach`),
+
+    updateCoachProfile: (patch: UpdateCoachProfileRequest): Promise<CoachProfile> =>
+      authorized(`${club}/coach`, json('PATCH', patch)),
+
+    /** Фотография заменяется целиком. Картинку пережимает сервер. */
+    setCoachPhoto: (file: File): Promise<CoachProfile> =>
+      authorized(`${club}/coach/photo`, form('PUT', {}, file)),
+
+    removeCoachPhoto: (): Promise<CoachProfile> =>
+      authorized(`${club}/coach/photo`, { method: 'DELETE' }),
+
+    /** Свои занятия вместе с составом записавшихся. */
+    coachGroups: (): Promise<CoachGroup[]> => authorized(`${club}/coach/groups`),
+
+    // Правка чужой карточки администратором. `coaches()` выше — другое: это
+    // список тренеров для выбора в расписании.
+    updateCoachOf: (coachId: string, patch: UpdateCoachProfileRequest): Promise<CoachProfile> =>
+      authorized(`${club}/coaches/${coachId}`, json('PATCH', patch)),
+
+    setCoachPhotoOf: (coachId: string, file: File): Promise<CoachProfile> =>
+      authorized(`${club}/coaches/${coachId}/photo`, form('PUT', {}, file)),
+
+    removeCoachPhotoOf: (coachId: string): Promise<CoachProfile> =>
+      authorized(`${club}/coaches/${coachId}/photo`, { method: 'DELETE' }),
   };
 }
 
