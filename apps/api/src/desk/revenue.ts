@@ -21,6 +21,12 @@ export interface ChargeRow {
   status: BookingStatus;
   /** Процент списания, 0..100. Проставляется при отмене и при отметке. */
   chargeRatio: number | null;
+  /**
+   * Запись оплачена абонементом. Деньги за неё клуб получил при продаже
+   * абонемента, и второй раз в стоимости дня они не считаются. Процент у такой
+   * записи — судьба визита, а не доля цены.
+   */
+  prepaid?: boolean;
 }
 
 /**
@@ -37,6 +43,10 @@ export interface ChargeRow {
  * старые считаются полными — ТЗ списывает 100% и за визит, и за неявку.
  */
 export function chargeOf(row: ChargeRow): number {
+  if (row.prepaid) {
+    return 0;
+  }
+
   switch (row.status) {
     case 'BOOKED':
       return row.price;
