@@ -1878,6 +1878,7 @@ async function main() {
   await eventRegistration(asMe);
   await eventAttendance(asMe);
   await playerProfile();
+  await coachCard();
   await family();
   await autoNoShow(asMe);
 
@@ -2332,6 +2333,137 @@ async function autoNoShow(asMe) {
  * профиль. Картинки делает `sharp` из зависимостей API: JPEG с EXIF и
  * координатами нужен настоящий, иначе проверять выброс метаданных не на чем.
  */
+/**
+ * Карточка тренера: кто правит, что видно без входа, куда девается фото.
+ *
+ * Здесь проверяется ровно то, чего не видят типы: что маршруты закрыты ролью
+ * именно в этом клубе, что публичная страница и фотография отдаются анониму, и
+ * что негодный адрес соцсети не доезжает до базы.
+ */
+async function coachCard() {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('\n=== 32. Карточка тренера — ПРОПУЩЕН (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 32. Карточка тренера');
+
+  const { default: sharp } = await import('sharp');
+
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+
+  const upload = async (token, path) => {
+    const bytes = await sharp({
+      create: { width: 300, height: 300, channels: 3, background: { r: 20, g: 110, b: 90 } },
+    }).png().toBuffer();
+
+    const form = new FormData();
+    form.set('file', new Blob([bytes], { type: 'image/png' }), 'coach.png');
+
+    const response = await fetch(`${API}${path}`, {
+      method: 'PUT',
+      body: form,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    const text = await response.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+    return { status: response.status, body };
+  };
+
+  let r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const adminToken = r.body?.accessToken ?? '';
+  const asAdmin = as(adminToken);
+
+  r = await post('/auth/register', registration({ lastName: 'Тренеров', firstName: 'Павел' }));
+  check('будущий тренер заведён', 201, r.status);
+  const coachId = r.body?.user?.id;
+  const asCoach = as(r.body?.accessToken ?? '');
+
+  r = await post('/auth/register', registration({ lastName: 'Клиентов', firstName: 'Роман' }));
+  const asClient = as(r.body?.accessToken ?? '');
+
+  // Пока роль клиентская, кабинет тренера закрыт — и закрыт ролью, а не
+  // отсутствием карточки.
+  r = await asCoach('/clubs/yenisey/coach');
+  check('клиенту кабинет тренера закрыт', 403, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${coachId}/role`, { method: 'PATCH', json: { role: 'COACH' } });
+  check('роль тренера выдана', 200, r.status);
+
+  r = await asCoach('/clubs/yenisey/coach');
+  check('карточка завелась вместе с ролью', 200, r.status);
+  assert('и она пуста', r.body?.photoFileId === null && r.body?.achievements === null
+    && Array.isArray(r.body?.socialLinks) && r.body.socialLinks.length === 0);
+
+  r = await asCoach('/clubs/yenisey/coach', {
+    method: 'PATCH',
+    json: { achievements: '  Мастер спорта  ', priceInfo: 'от 1500 ₽' },
+  });
+  check('тренер правит свою карточку', 200, r.status);
+  assert('пробелы по краям срезаны', r.body?.achievements === 'Мастер спорта');
+  assert('о чём не спрашивали — не тронуто', r.body?.inventory === null);
+
+  r = await asCoach('/clubs/yenisey/coach', {
+    method: 'PATCH',
+    json: { socialLinks: [{ label: 'Сайт', url: 'javascript:alert(1)' }] },
+  });
+  check('адрес не http(s) отклонён', 400, r.status);
+
+  r = await asCoach('/clubs/yenisey/coach', {
+    method: 'PATCH',
+    json: { socialLinks: [{ label: 'ВКонтакте', url: 'https://vk.com/probe' }] },
+  });
+  check('ссылка сохранена', 200, r.status);
+  assert('ровно одна', r.body?.socialLinks?.length === 1);
+
+  r = await asClient(`/clubs/yenisey/coaches/${coachId}`, { method: 'PATCH', json: { priceInfo: 'даром' } });
+  check('клиент чужую карточку не правит', 403, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/coaches/${coachId}`, { method: 'PATCH', json: { priceInfo: 'от 1800 ₽' } });
+  check('администратор правит любую', 200, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${coachId}`);
+  assert('карточка тренера пришла вместе с карточкой человека', r.body?.coach?.priceInfo === 'от 1800 ₽');
+
+  r = await upload(null, `/clubs/yenisey/coach/photo`);
+  check('фото без входа не загрузить', 401, r.status);
+
+  r = await upload(adminToken, `/clubs/yenisey/coaches/${coachId}/photo`);
+  check('администратор грузит фото тренера', 200, r.status);
+  const photoId = r.body?.photoFileId;
+  assert('фото появилось в карточке', typeof photoId === 'string' && photoId.length > 0);
+
+  // Публичная страница и фотография — без входа: у карточки тренера возраста
+  // нет, и это главное её отличие от страницы игрока.
+  r = await call(`/coaches/${coachId}`);
+  check('публичная карточка открыта без входа', 200, r.status);
+  assert('имя сокращено до «Фамилия И.»', r.body?.name === 'Тренеров П.');
+  assert('клуб назван, других нет', r.body?.club?.slug === 'yenisey' && r.body?.otherClubs?.length === 0);
+
+  const photo = await fetch(`${API}/files/${photoId}`);
+  check('фотография отдаётся без входа', 200, photo.status);
+  assert('и она перекодирована в WebP', photo.headers.get('content-type') === 'image/webp');
+
+  r = await asCoach('/clubs/yenisey/coach/groups');
+  check('свои группы читаются', 200, r.status);
+  assert('впереди занятий нет', Array.isArray(r.body) && r.body.length === 0);
+
+  r = await asClient('/clubs/yenisey/coach/groups');
+  check('клиенту чужие группы закрыты', 403, r.status);
+
+  r = await call('/coaches/net-takogo-trenera');
+  check('несуществующий тренер — 404', 404, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/coaches/${coachId}/photo`, { method: 'DELETE' });
+  check('фото убрано', 200, r.status);
+  assert('и карточка о нём забыла', r.body?.photoFileId === null);
+}
+
 async function playerProfile() {
   const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
   const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
