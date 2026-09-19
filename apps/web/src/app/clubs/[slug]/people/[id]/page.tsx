@@ -7,6 +7,7 @@ import type { BookingStatus, ClubPersonCard, ClubPersonEntry, Role } from '@yeni
 import { fullYears } from '@yenisey/types';
 import { CoachCard } from '@/components/coach/CoachCard';
 import { ClubFamilyBlock } from '@/components/family/ClubFamilyBlock';
+import { ClubSubscriptionsBlock } from '@/components/subscriptions/ClubSubscriptionsBlock';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { PlayerReview } from '@/components/player/PlayerReview';
 import { Alert } from '@/components/ui/Alert';
@@ -114,6 +115,8 @@ export default function PersonPage() {
           </header>
 
           <Summary card={card} />
+
+          <ClubSubscriptionsBlock personId={card.person.id} subscriptions={card.subscriptions} onChanged={load} />
 
           <PlayerReview
             player={card.player}

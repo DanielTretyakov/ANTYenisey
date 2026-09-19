@@ -306,11 +306,19 @@ function Tiles({ day, pending }: { day: DeskDay; pending: { total: number; overd
         value={formatKopecks(day.money.total)}
         // Не «выручка»: платежей в системе нет, сумма сложена из копий цен на
         // момент записи. Назвать её кассой значит соврать в первой же строке.
-        note={
+        //
+        // Продажи абонементов — рядом, а не в сумме: абонемент — предоплата
+        // будущих визитов, и записи по нему в сумме дают ноль.
+        note={[
           day.money.cancelled > 0
             ? `из них ${formatKopecks(day.money.cancelled)} по отменам`
-            : 'по цене на момент записи'
-        }
+            : 'по цене на момент записи',
+          day.money.subscriptionSales.count > 0
+            ? `абонементов продано на ${formatKopecks(day.money.subscriptionSales.amount)}`
+            : '',
+        ]
+          .filter(Boolean)
+          .join(' · ')}
       />
 
       {day.today ? (

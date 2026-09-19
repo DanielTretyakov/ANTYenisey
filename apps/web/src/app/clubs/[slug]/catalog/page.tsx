@@ -4,11 +4,13 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
 import type {
   Role,
+  SubscriptionPlan,
   Tournament,
   TournamentType,
   TrainingSession,
   TrainingType,
 } from '@yenisey/types';
+import { SubscriptionPlansCard } from './SubscriptionPlansCard';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -40,6 +42,7 @@ export default function CatalogPage() {
   const [tournamentTypes, setTournamentTypes] = useState<TournamentType[]>([]);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
+  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -71,13 +74,15 @@ export default function CatalogPage() {
       club.tournamentTypes(),
       club.tournaments(),
       club.trainingSessions(),
+      club.subscriptionPlans(),
     ])
-      .then(([training, types, events, training_sessions]) => {
+      .then(([training, types, events, training_sessions, subscriptionPlans]) => {
         if (cancelled) return;
         setTrainingTypes(training);
         setTournamentTypes(types);
         setTournaments(events);
         setSessions(training_sessions);
+        setPlans(subscriptionPlans);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
@@ -114,6 +119,12 @@ export default function CatalogPage() {
             types={tournamentTypes}
             onChange={setTournamentTypes}
             onError={setError}
+          />
+          <SubscriptionPlansCard
+            plans={plans}
+            trainingTypes={trainingTypes}
+            tournamentTypes={tournamentTypes}
+            onChange={setPlans}
           />
           <TrainingSessionsCard sessions={sessions} onChange={setSessions} onError={setError} />
           <TournamentsCard tournaments={tournaments} onChange={setTournaments} onError={setError} />

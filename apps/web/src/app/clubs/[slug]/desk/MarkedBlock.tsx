@@ -87,7 +87,7 @@ function MarkedItem({ row, day, onChanged }: { row: MarkedRow; day: DeskDay; onC
           </span>
           <span className="mt-0.5 block text-[0.8125rem] text-text-muted">
             <span className={cn(row.status === 'ATTENDED' ? 'text-text-accent' : charged && 'text-warning')}>
-              {markLabel(row.status, row.chargePercent)}
+              {markLabel(row.status, row.chargePercent, row.bySubscription)}
             </span>
             {row.mark &&
               ` · ${row.mark.auto ? 'поставила система' : `отметил ${row.mark.by ?? '—'}`} ${momentIn(row.mark.at, day.timezone, day.date)}`}
@@ -141,7 +141,7 @@ function CorrectMark({
   onDone: () => void;
 }) {
   const club = useClubApi();
-  const options = correctionsFor(row.status, row.chargePercent, noShowPercent);
+  const options = correctionsFor(row.status, row.chargePercent, noShowPercent, row.bySubscription);
   const [choice, setChoice] = useState<Correction | null>(options[0] ?? null);
   const [reason, setReason] = useState('');
   const [pending, setPending] = useState(false);
@@ -243,8 +243,8 @@ function History({ row, timezone, date }: { row: MarkedRow; timezone: string; da
             <li key={index} className="text-text-muted">
               <span className="text-text">{momentIn(item.at, timezone, date)}</span>{' '}
               {item.auto ? 'система' : (item.by ?? '—')}:{' '}
-              {item.before ? markLabel(item.before.status, item.before.chargePercent) : '—'} →{' '}
-              {item.after ? markLabel(item.after.status, item.after.chargePercent) : '—'}
+              {item.before ? markLabel(item.before.status, item.before.chargePercent, row.bySubscription) : '—'} →{' '}
+              {item.after ? markLabel(item.after.status, item.after.chargePercent, row.bySubscription) : '—'}
               {item.reason && <span className="text-text-subtle"> · «{item.reason}»</span>}
             </li>
           ))}

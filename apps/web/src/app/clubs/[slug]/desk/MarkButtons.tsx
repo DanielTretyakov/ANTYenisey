@@ -21,11 +21,14 @@ export function MarkButtons({
   kind,
   entryId,
   noShowPercent,
+  bySubscription = false,
   onDone,
 }: {
   kind: AttendanceKind;
   entryId: string;
   noShowPercent: number;
+  /** Запись по абонементу: неявка сжигает визит, а не списывает процент. */
+  bySubscription?: boolean;
   onDone: () => void;
 }) {
   const club = useClubApi();
@@ -78,7 +81,9 @@ export function MarkButtons({
 
       {step === 'no-show' && (
         <>
-          <span className="text-text-muted">Списать {noShowPercent}% по политике клуба?</span>
+          <span className="text-text-muted">
+            {bySubscription ? 'Визит абонемента сгорит.' : `Списать ${noShowPercent}% по политике клуба?`}
+          </span>
           <Button
             size="sm"
             variant="danger"
@@ -88,7 +93,7 @@ export function MarkButtons({
             Да, неявка
           </Button>
           <Button size="sm" variant="secondary" disabled={pending} onClick={() => setStep('waive')}>
-            Без списания…
+            {bySubscription ? 'Вернуть визит…' : 'Без списания…'}
           </Button>
           {back}
         </>

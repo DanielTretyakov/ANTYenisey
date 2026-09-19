@@ -87,6 +87,17 @@ describe('markLabel', () => {
   it('неявка без процента — полная, как и считают деньги', () => {
     assert.equal(markLabel('NO_SHOW', null), 'неявка, списано 100%');
   });
+
+  it('у записи по абонементу процент — судьба визита, а не деньги', () => {
+    assert.equal(markLabel('NO_SHOW', 100, true), 'неявка, визит сгорел');
+    assert.equal(markLabel('NO_SHOW', 0, true), 'неявка, визит возвращён');
+  });
+
+  it('исправления у записи по абонементу говорят о визите', () => {
+    const labels = correctionsFor('ATTENDED', 100, 70, true).map((item) => item.label);
+
+    assert.deepEqual(labels, ['неявка, визит сгорит', 'неявка, вернуть визит']);
+  });
 });
 
 describe('correctionsFor', () => {

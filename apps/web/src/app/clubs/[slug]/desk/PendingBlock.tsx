@@ -136,11 +136,12 @@ function EventItem({
                 kind={event.kind}
                 entryId={entry.entryId}
                 noShowPercent={day.policy.noShowChargePercent}
+                bySubscription={entry.bySubscription}
                 onDone={onChanged}
               />
             ) : (
               <span className="text-[0.8125rem] text-text-muted">
-                {markLabel(entry.status, entry.chargePercent)}
+                {markLabel(entry.status, entry.chargePercent, entry.bySubscription)}
               </span>
             )}
           </li>

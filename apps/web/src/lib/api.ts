@@ -18,6 +18,11 @@ import type {
   CoachProfile,
   CoachStats,
   CoachStatsPeriod,
+  AdjustSubscriptionRequest,
+  ClientSubscription,
+  SubscriptionLedgerRow,
+  SubscriptionPlan,
+  SubscriptionPlanRequest,
   PublicCoach,
   UpdateCoachProfileRequest,
   FavouriteClub,
@@ -409,6 +414,10 @@ export const api = {
    */
   player: (id: string): Promise<PublicPlayer> => optionallyAuthorized(`/players/${id}`),
 
+  /** Свои абонементы по всем клубам; за ребёнка — с `forPerson`. */
+  mySubscriptions: (forPerson?: string | null): Promise<ClientSubscription[]> =>
+    authorized(withFor('/me/subscriptions', forPerson)),
+
   /** Публичная карточка тренера. Возраста у неё нет — открыта всем. */
   coach: (id: string): Promise<PublicCoach> => optionallyAuthorized(`/coaches/${id}`),
 
@@ -770,6 +779,31 @@ export function clubApi(slug: string = TENANT_SLUG) {
     /** Та же статистика глазами клуба — расчёт один. */
     coachStatsOf: (coachId: string, period: CoachStatsPeriod): Promise<CoachStats> =>
       authorized(`${club}/coaches/${coachId}/stats?period=${period}`),
+
+    // --- Абонементы. Тарифы заводит и правит администратор; продаёт он же, из
+    // карточки человека. Удаления тарифа нет: снятый с продажи не предлагается.
+    subscriptionPlans: (): Promise<SubscriptionPlan[]> => authorized(`${club}/subscription-plans`),
+
+    createSubscriptionPlan: (payload: SubscriptionPlanRequest): Promise<SubscriptionPlan> =>
+      authorized(`${club}/subscription-plans`, json('POST', payload)),
+
+    updateSubscriptionPlan: (id: string, payload: SubscriptionPlanRequest): Promise<SubscriptionPlan> =>
+      authorized(`${club}/subscription-plans/${id}`, json('PATCH', payload)),
+
+    /** Продать абонемент у стойки. Деньги принимаются вне системы. */
+    issueSubscription: (personId: string, planId: string): Promise<ClientSubscription> =>
+      authorized(`${club}/people/${personId}/subscriptions`, json('POST', { planId })),
+
+    /** Корректировка визитов или досрочное закрытие безлимита — с причиной. */
+    adjustSubscription: (
+      personId: string,
+      subscriptionId: string,
+      payload: AdjustSubscriptionRequest,
+    ): Promise<ClientSubscription> =>
+      authorized(`${club}/people/${personId}/subscriptions/${subscriptionId}/adjust`, json('POST', payload)),
+
+    subscriptionLedger: (personId: string, subscriptionId: string): Promise<SubscriptionLedgerRow[]> =>
+      authorized(`${club}/people/${personId}/subscriptions/${subscriptionId}/ledger`),
 
     // Правка чужой карточки администратором. `coaches()` выше — другое: это
     // список тренеров для выбора в расписании.

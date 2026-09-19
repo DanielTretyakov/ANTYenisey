@@ -46,12 +46,22 @@ export const PHASE_LABELS: Record<AttendancePhase, string> = {
   OVERDUE: 'просрочено',
 };
 
-/** Как назвать отметку, которая стоит у записи. */
-export function markLabel(status: BookingStatus, chargePercent: number | null): string {
+/**
+ * Как назвать отметку, которая стоит у записи.
+ *
+ * У записи по абонементу процент — не доля цены, а судьба визита: 100 —
+ * сгорел, 0 — возвращён. Писать «списано 100%» про запись, за которую денег
+ * не брали, значило бы напугать администратора несуществующей суммой.
+ */
+export function markLabel(status: BookingStatus, chargePercent: number | null, bySubscription = false): string {
   switch (status) {
     case 'ATTENDED':
       return 'пришёл';
     case 'NO_SHOW':
+      if (bySubscription) {
+        return chargePercent === 0 ? 'неявка, визит возвращён' : 'неявка, визит сгорел';
+      }
+
       // Процент — снимок в момент отметки. Пустой бывает только у строк,
       // отмеченных до появления отметки в продукте, и считается полным.
       return chargePercent === 0 ? 'неявка без списания' : `неявка, списано ${chargePercent ?? 100}%`;
@@ -80,16 +90,17 @@ export function correctionsFor(
   status: BookingStatus,
   chargePercent: number | null,
   noShowChargePercent: number,
+  bySubscription = false,
 ): Correction[] {
   const attended: Correction = { key: 'ATTENDED', label: 'пришёл', request: { status: 'ATTENDED' } };
   const noShow: Correction = {
     key: 'NO_SHOW',
-    label: `неявка, списать ${noShowChargePercent}%`,
+    label: bySubscription ? 'неявка, визит сгорит' : `неявка, списать ${noShowChargePercent}%`,
     request: { status: 'NO_SHOW' },
   };
   const waive: Correction = {
     key: 'WAIVE',
-    label: 'неявка без списания',
+    label: bySubscription ? 'неявка, вернуть визит' : 'неявка без списания',
     request: { status: 'NO_SHOW', waiveCharge: true },
   };
 
@@ -115,6 +126,8 @@ export interface MarkedRow {
   startsAt: string;
   status: BookingStatus;
   chargePercent: number | null;
+  /** Запись оплачена абонементом: процент — судьба визита. У брони стола — нет. */
+  bySubscription: boolean;
   mark: DeskMarkInfo | null;
 }
 
@@ -139,6 +152,7 @@ export function markedRows(day: Pick<DeskDay, 'bookings' | 'events'>): MarkedRow
       startsAt: booking.startsAt,
       status: booking.status,
       chargePercent: booking.chargePercent,
+      bySubscription: false,
       mark: booking.mark,
     });
   }
@@ -156,6 +170,7 @@ export function markedRows(day: Pick<DeskDay, 'bookings' | 'events'>): MarkedRow
         startsAt: event.startsAt,
         status: entry.status,
         chargePercent: entry.chargePercent,
+        bySubscription: entry.bySubscription,
         mark: entry.mark,
       });
     }
