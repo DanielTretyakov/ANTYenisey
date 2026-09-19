@@ -7,8 +7,10 @@ import {
   type BookingDay,
   type BookingDayTable,
   type BookingQuote,
+  type ClientBooking,
   type Hall,
 } from '@yenisey/types';
+import { WhenSpan } from '@/components/club/When';
 import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
@@ -17,7 +19,8 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
 import { ApiError } from '@/lib/api';
-import { useClubApi } from '@/lib/useClubApi';
+import { roleInClub } from '@/lib/membership';
+import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import {
   bookableDates,
   durationsFrom,
@@ -40,7 +43,7 @@ interface Pick {
 }
 
 /**
- * Бронь стола клиентом.
+ * Бронь стола клиентом — и спарринг тренером.
  *
  * Порядок экрана повторяет порядок решения: сначала зал, потом день, потом
  * время. Обратный — «выберите время, а потом посмотрим, в каком зале» — не
@@ -48,6 +51,12 @@ interface Pick {
  *
  * Цена показывается до подтверждения. Узнать сумму после того, как бронь уже
  * заведена, — не тот порядок, даже пока за ней не стоит холд.
+ *
+ * Тренер бронирует эту же страницу и этой же сеткой — так сказано в ТЗ
+ * («тем же механизмом бронирования, что и у клиента»). Отличается ровно три
+ * вещи: маршрут записи, отсутствие переключателя «действую за» (за ребёнка
+ * спарринг не берут) и то, что свои спарринги тренер видит здесь же — в «Мои
+ * записи» они не попадают, потому что это записи клиента, а не сотрудника.
  */
 export default function BookingPage() {
   const router = useRouter();
@@ -55,6 +64,11 @@ export default function BookingPage() {
   const family = usePersonSwitch();
 
   const club = useClubApi();
+  const slug = useClubSlug();
+
+  const role = session.status === 'ready' ? (roleInClub(session.user, slug) ?? 'CLIENT') : 'CLIENT';
+  const sparring = role === 'COACH';
+  const [sparrings, setSparrings] = useState<ClientBooking[] | null>(null);
 
   const [halls, setHalls] = useState<Hall[] | null>(null);
   const [hallId, setHallId] = useState('');
@@ -177,6 +191,33 @@ export default function BookingPage() {
     };
   }, [hallId, chosenDuration, withRobot, hall?.hasRobotOption, club]);
 
+  const loadSparrings = useCallback(() => {
+    if (!sparring) {
+      return;
+    }
+
+    club
+      .mySparrings()
+      .then(setSparrings)
+      .catch((cause: unknown) => setError(messageOf(cause)));
+  }, [club, sparring]);
+
+  useEffect(() => {
+    if (session.status === 'ready') loadSparrings();
+  }, [session.status, loadSparrings]);
+
+  async function handleCancelSparring(id: string): Promise<void> {
+    setError(null);
+
+    try {
+      await club.cancelSparring(id);
+      loadSparrings();
+      loadDay();
+    } catch (cause: unknown) {
+      setError(messageOf(cause));
+    }
+  }
+
   async function handleBook(): Promise<void> {
     if (!day || !pick || !timezone || chosenDuration === 0) {
       return;
@@ -185,13 +226,25 @@ export default function BookingPage() {
     setPending(true);
     setError(null);
 
+    const payload = {
+      tableId: pick.tableId,
+      startsAt: instantAt(day.date, pick.startMinute, timezone),
+      durationMinutes: chosenDuration,
+      withRobot: withRobot && (hall?.hasRobotOption ?? false),
+    };
+
     try {
-      await club.createBooking({
-        tableId: pick.tableId,
-        startsAt: instantAt(day.date, pick.startMinute, timezone),
-        durationMinutes: chosenDuration,
-        withRobot: withRobot && (hall?.hasRobotOption ?? false),
-      }, family.forPerson);
+      if (sparring) {
+        await club.createSparring(payload);
+        // Тренер остаётся здесь: его спарринги живут на этой же странице, а в
+        // «Мои записи» не попадают — там записи клиента.
+        setPick(null);
+        loadDay();
+        loadSparrings();
+        return;
+      }
+
+      await club.createBooking(payload, family.forPerson);
 
       // Записи уехали из кабинета в «Мои записи» — там же и свежая бронь; за
       // ребёнка — его записи.
@@ -209,16 +262,20 @@ export default function BookingPage() {
 
   return (
     <AppShell>
-      <h1 className="mb-7 text-[1.75rem]">Забронировать стол</h1>
+      <h1 className="mb-7 text-[1.75rem]">
+        {sparring ? 'Стол под спарринг' : 'Забронировать стол'}
+      </h1>
 
-      <PersonSwitch
-        people={family.children}
-        selected={family.selected}
-        onChoose={family.choose}
-        className="mb-6"
-      />
+      {!sparring && (
+        <PersonSwitch
+          people={family.children}
+          selected={family.selected}
+          onChoose={family.choose}
+          className="mb-6"
+        />
+      )}
 
-      {family.selfIsChild && (
+      {!sparring && family.selfIsChild && (
         <Alert tone="info">
           До 16 лет стол бронирует родитель — или администратор клуба у стойки. Свободное время посмотреть можно.
         </Alert>
@@ -308,10 +365,53 @@ export default function BookingPage() {
             <Button
               onClick={() => void handleBook()}
               pending={pending}
-              disabled={chosenDuration === 0 || family.selfIsChild}
+              disabled={chosenDuration === 0 || (!sparring && family.selfIsChild)}
             >
-              Забронировать
+              {sparring ? 'Взять стол' : 'Забронировать'}
             </Button>
+          </CardBody>
+        </Card>
+      )}
+
+      {sparring && (
+        <Card className="mt-6">
+          <CardHeader
+            title="Мои спарринги"
+            description="Стол занят на вас. С кем именно вы играете, платформа не спрашивает."
+          />
+          <CardBody>
+            {sparrings === null && <p className="text-[0.875rem] text-text-muted">Загружаем…</p>}
+            {sparrings?.length === 0 && (
+              <p className="text-[0.875rem] text-text-muted">Взятых столов пока нет.</p>
+            )}
+            {sparrings && sparrings.length > 0 && (
+              <ul className="divide-y divide-border">
+                {sparrings.map((booking) => (
+                  <li key={booking.id} className="flex flex-wrap items-start gap-x-6 gap-y-2 py-3 first:pt-0 last:pb-0">
+                    <WhenSpan startsAt={booking.startsAt} endsAt={booking.endsAt} />
+                    <span className="min-w-0 flex-1 text-[0.9375rem]">
+                      {booking.tableLabel}
+                      <span className="text-text-muted"> · {booking.hallName}</span>
+                      <span className="mt-0.5 block text-[0.8125rem] text-text-muted">
+                        {formatKopecks(booking.price)}
+                        {booking.status === 'CANCELLED' && ' · отменён'}
+                        {booking.status === 'NO_SHOW' && ' · неявка'}
+                        {booking.status === 'ATTENDED' && ' · состоялся'}
+                      </span>
+                    </span>
+                    {booking.status === 'BOOKED' && booking.cancelChargePercentNow !== null && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void handleCancelSparring(booking.id)}
+                      >
+                        Отменить
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </CardBody>
         </Card>
       )}

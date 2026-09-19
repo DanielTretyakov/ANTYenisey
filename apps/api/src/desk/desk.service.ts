@@ -93,6 +93,7 @@ const BOOKING_SELECT = {
   cancelledAt: true,
   chargeRatio: true,
   source: true,
+  isSparring: true,
   table: { select: { label: true, hallId: true, hall: { select: { name: true } } } },
   client: { select: { membership: PERSON_SELECT } },
   coach: { select: { membership: PERSON_SELECT } },
@@ -877,6 +878,7 @@ interface BookingRow {
   cancelledAt: Date | null;
   chargeRatio: number | null;
   source: BookingSource;
+  isSparring: boolean;
   table: { label: string; hallId: string; hall: { name: string } };
   client: { membership: PersonRow } | null;
   coach: { membership: PersonRow } | null;
@@ -912,6 +914,7 @@ function present(row: BookingWithPerson, view: View): DeskBooking {
     status: row.status,
     client: row.client,
     manual: row.source === 'MANUAL',
+    sparring: row.isSparring,
     createdBy: row.createdBy?.user.fullName ?? null,
     cancelledAt: row.cancelledAt?.toISOString() ?? null,
     chargePercent: row.chargeRatio,

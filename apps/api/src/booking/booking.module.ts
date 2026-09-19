@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { BookingController } from './booking.controller';
+import { BookingController, SparringController } from './booking.controller';
 import { BookingService } from './booking.service';
 import { OccupancyService } from './occupancy.service';
 import { ClubModule } from '../club/club.module';
@@ -15,7 +15,7 @@ import { ClubModule } from '../club/club.module';
  */
 @Module({
   imports: [ClubModule],
-  controllers: [BookingController],
+  controllers: [BookingController, SparringController],
   providers: [BookingService, OccupancyService],
   exports: [BookingService, OccupancyService],
 })

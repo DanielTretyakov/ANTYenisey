@@ -650,6 +650,16 @@ export function clubApi(slug: string = TENANT_SLUG) {
     cancelBooking: (id: string, forPerson?: string | null): Promise<ClientBooking> =>
       authorized(withFor(`${club}/booking/bookings/${id}`, forPerson), { method: 'DELETE' }),
 
+    // --- Спарринг: тот же стол теми же правилами, но берёт его тренер. Ученик
+    // в такой брони не записан — заполнено либо клиент, либо тренер.
+    createSparring: (payload: CreateBookingRequest): Promise<ClientBooking> =>
+      authorized(`${club}/coach/sparring`, json('POST', payload)),
+
+    mySparrings: (): Promise<ClientBooking[]> => authorized(`${club}/coach/sparring`),
+
+    cancelSparring: (id: string): Promise<ClientBooking> =>
+      authorized(`${club}/coach/sparring/${id}`, { method: 'DELETE' }),
+
     // --- Рабочее место администратора
     /**
      * День зала целиком: столы, брони, мероприятия, загрузка и деньги.

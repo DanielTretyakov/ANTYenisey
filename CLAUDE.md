@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 pnpm dev            # apps/api и apps/web в watch-режиме
 pnpm typecheck      # по всем пакетам
 pnpm test           # node --test
-pnpm smoke          # 676 сценариев против поднятого API и живого Postgres (нужны SMOKE_ADMIN_*)
+pnpm smoke          # 692 сценария против поднятого API и живого Postgres (нужны SMOKE_ADMIN_*)
 pnpm db:migrate     # prisma migrate dev
 pnpm db:studio
 pnpm db:create-admin -- --email a@club.ru --password "..." --name "Иванов Иван"
@@ -285,6 +285,15 @@ pnpm --filter @yenisey/database verify
   положены ни отметки, ни деньги — это работа администратора; зато положены
   полное имя и телефон: ему звонить ученику. Показываются только занятия,
   которые ещё не кончились.
+- **Спарринг — та же бронь стола, что у клиента**, с другим владельцем:
+  `BookingService.create` принимает `BookingOwner` (`client` или `coach`), и
+  второго пути бронирования нет. Отличия ровно три: у тренера не заводится
+  `ClientProfile`, ставится `isSparring`, и маршрут лежит в
+  `clubs/:slug/coach/sparring` под `@Roles('COACH')`. Ученик в брони не
+  записан — `TableBooking` несёт либо клиента, либо тренера.
+- **Спарринг не попадает в «Мои записи».** `EntriesService` собирает записи
+  КЛИЕНТА; спарринг — работа сотрудника, и тренер видит его на странице брони.
+  Если однажды понадобится в ленте — это отдельное решение, а не недосмотр.
 - **Ссылки на соцсети — только http(s)**, и это правило, а не `@IsUrl`:
   `javascript:` в адресе выполнится у посетителя публичной страницы. Разбор —
   `coach-rules.ts` под тестами, и он же молча отбрасывает негодное, пришедшее

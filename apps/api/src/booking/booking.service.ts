@@ -80,6 +80,20 @@ interface BookingRow {
 type Tier = { minMinutesBeforeStart: number; chargePercent: number };
 
 /**
+ * Кто стоит за бронью.
+ *
+ * Их ровно двое, и это не «роль», а владелец строки: у клиента заполнен
+ * `clientId`, у тренера — `coachId` с пометкой спарринга. Заполнено всегда
+ * одно из двух — это держит CHECK `TableBooking_client_xor_coach`.
+ */
+export type BookingOwner = { kind: 'client' | 'coach'; userId: string };
+
+/** Условие «эта бронь принадлежит ему» — одно на чтение, отмену и список. */
+function ownedBy(owner: BookingOwner) {
+  return owner.kind === 'client' ? { clientId: owner.userId } : { coachId: owner.userId };
+}
+
+/**
  * Самостоятельная онлайн-аренда стола клиентом.
  *
  * Четвёртый сценарий ТЗ: клиент бронирует сам, без подтверждения
@@ -178,7 +192,7 @@ export class BookingService {
    */
   async create(
     tenantId: string,
-    clientId: string,
+    owner: BookingOwner,
     dto: CreateBookingRequest,
   ): Promise<ClientBooking> {
     const table = await this.prisma.table.findFirst({
@@ -222,11 +236,18 @@ export class BookingService {
     const endsAt = new Date(startsAt.getTime() + dto.durationMinutes * 60_000);
     const price = quote(table.hall, dto.durationMinutes, dto.withRobot).price;
 
-    // Привязка к клубу заводится здесь, перед первой бронью. По ТЗ
-    // записаться может любой пользователь платформы, вступать в клуб не нужно, —
-    // но бронь ссылается на ClientProfile, а тот — на TenantMembership. Без
-    // этого шага первая же бронь новичка падала бы ошибкой внешнего ключа.
-    await this.membership.ensureClient(tenantId, clientId);
+    if (owner.kind === 'client') {
+      // Привязка к клубу заводится здесь, перед первой бронью. По ТЗ
+      // записаться может любой пользователь платформы, вступать в клуб не нужно, —
+      // но бронь ссылается на ClientProfile, а тот — на TenantMembership. Без
+      // этого шага первая же бронь новичка падала бы ошибкой внешнего ключа.
+      await this.membership.ensureClient(tenantId, owner.userId);
+    } else {
+      // Тренер в клубе уже состоит — иначе ClubContextGuard не дал бы ему сюда
+      // войти, — но карточки у него может не быть: её заводит смена роли, а
+      // роли выдавались и до того, как карточка появилась.
+      await this.assertCoach(tenantId, owner.userId);
+    }
 
     let created: BookingRow;
 
@@ -235,7 +256,9 @@ export class BookingService {
         data: {
           tenantId,
           tableId: table.id,
-          clientId,
+          ...(owner.kind === 'client'
+            ? { clientId: owner.userId }
+            : { coachId: owner.userId, isSparring: true }),
           withRobot: dto.withRobot,
           startsAt,
           endsAt,
@@ -259,10 +282,10 @@ export class BookingService {
     return this.present(created, await this.tiers(tenantId));
   }
 
-  /** Брони клиента: свежие сверху. */
-  async listMine(tenantId: string, clientId: string): Promise<ClientBooking[]> {
+  /** Свои брони: свежие сверху. У тренера это его спарринги. */
+  async listMine(tenantId: string, owner: BookingOwner): Promise<ClientBooking[]> {
     const bookings = await this.prisma.tableBooking.findMany({
-      where: { tenantId, clientId },
+      where: { tenantId, ...ownedBy(owner) },
       select: BOOKING_SELECT,
       orderBy: { startsAt: 'desc' },
     });
@@ -287,9 +310,9 @@ export class BookingService {
    * числом и платил позднюю отмену по ступеням политики вместо неявки. После
    * начала бронь только отмечается — присутствием или неявкой.
    */
-  async cancel(tenantId: string, clientId: string, bookingId: string): Promise<ClientBooking> {
+  async cancel(tenantId: string, owner: BookingOwner, bookingId: string): Promise<ClientBooking> {
     const booking = await this.prisma.tableBooking.findFirst({
-      where: { id: bookingId, tenantId, clientId },
+      where: { id: bookingId, tenantId, ...ownedBy(owner) },
       select: BOOKING_SELECT,
     });
 
@@ -361,6 +384,17 @@ export class BookingService {
       where: { tenantId },
       select: { minMinutesBeforeStart: true, chargePercent: true },
     });
+  }
+
+  private async assertCoach(tenantId: string, coachId: string): Promise<void> {
+    const coach = await this.prisma.coachProfile.findUnique({
+      where: { userId_tenantId: { userId: coachId, tenantId } },
+      select: { userId: true },
+    });
+
+    if (!coach) {
+      throw new NotFoundException('Карточка тренера не найдена');
+    }
   }
 
   private async hall(tenantId: string, hallId: string) {

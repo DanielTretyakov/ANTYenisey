@@ -10,6 +10,7 @@ import { CreateBookingDto, QuoteQueryDto } from './dto/booking.dto';
 import { ClubService } from '../club/club.service';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Acting, ClientAction, type ActingClient } from '../guardianship/acting-client.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import type { ClubContext } from '../auth/club-context';
 
 /**
@@ -80,13 +81,13 @@ export class BookingController {
     @Acting() acting: ActingClient,
     @Body() dto: CreateBookingDto,
   ): Promise<ClientBooking> {
-    return this.booking.create(club.tenantId, acting.userId, dto);
+    return this.booking.create(club.tenantId, { kind: 'client', userId: acting.userId }, dto);
   }
 
   @ClientAction('read')
   @Get('bookings')
   listMine(@CurrentClub() club: ClubContext, @Acting() acting: ActingClient): Promise<ClientBooking[]> {
-    return this.booking.listMine(club.tenantId, acting.userId);
+    return this.booking.listMine(club.tenantId, { kind: 'client', userId: acting.userId });
   }
 
   /**
@@ -103,6 +104,43 @@ export class BookingController {
     @Acting() acting: ActingClient,
     @Param('id') bookingId: string,
   ): Promise<ClientBooking> {
-    return this.booking.cancel(club.tenantId, acting.userId, bookingId);
+    return this.booking.cancel(club.tenantId, { kind: 'client', userId: acting.userId }, bookingId);
+  }
+}
+
+/**
+ * Спарринг: стол, который тренер берёт под занятие с учеником.
+ *
+ * Третий сценарий ТЗ — «стандартная аренда стола, инициированная тренером тем
+ * же механизмом бронирования, что и у клиента, с пометкой „спарринг“». Тем же
+ * механизмом буквально: те же залы, та же сетка, тот же расчёт цены и те же
+ * правила отмены — отличается только владелец строки.
+ *
+ * Ученик в такой брони не записан вовсе: заполнено либо `clientId`, либо
+ * `coachId`, и это держит CHECK. Кто именно играет с тренером — вопрос к
+ * тренеру, а не к платформе; попытка записать сюда ещё и клиента означала бы
+ * вторую бронь на тот же стол.
+ *
+ * Адрес — в клубном пространстве тренера (`/coach/...`), рядом с его карточкой
+ * и группами; логика при этом остаётся в модуле брони, где ей и место.
+ */
+@Roles('COACH')
+@Controller('clubs/:slug/coach/sparring')
+export class SparringController {
+  constructor(private readonly booking: BookingService) {}
+
+  @Post()
+  create(@CurrentClub() club: ClubContext, @Body() dto: CreateBookingDto): Promise<ClientBooking> {
+    return this.booking.create(club.tenantId, { kind: 'coach', userId: club.userId }, dto);
+  }
+
+  @Get()
+  listMine(@CurrentClub() club: ClubContext): Promise<ClientBooking[]> {
+    return this.booking.listMine(club.tenantId, { kind: 'coach', userId: club.userId });
+  }
+
+  @Delete(':id')
+  cancel(@CurrentClub() club: ClubContext, @Param('id') bookingId: string): Promise<ClientBooking> {
+    return this.booking.cancel(club.tenantId, { kind: 'coach', userId: club.userId }, bookingId);
   }
 }

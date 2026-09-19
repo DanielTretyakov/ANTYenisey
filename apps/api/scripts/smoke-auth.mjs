@@ -1879,6 +1879,7 @@ async function main() {
   await eventAttendance(asMe);
   await playerProfile();
   await coachCard();
+  await sparring();
   await family();
   await autoNoShow(asMe);
 
@@ -2333,6 +2334,122 @@ async function autoNoShow(asMe) {
  * профиль. Картинки делает `sharp` из зависимостей API: JPEG с EXIF и
  * координатами нужен настоящий, иначе проверять выброс метаданных не на чем.
  */
+/**
+ * Спарринг: стол, который берёт тренер.
+ *
+ * Здесь проверяется то, чего не видят типы: что маршрут закрыт всем, кроме
+ * тренера, что бронь занимает стол наравне с клиентской, что ученик в ней не
+ * записан и что на смене она приходит с пометкой.
+ */
+async function sparring() {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('\n=== 33. Спарринг — ПРОПУЩЕН (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 33. Спарринг тренера');
+
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+
+  let r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const asAdmin = as(r.body?.accessToken ?? '');
+
+  r = await post('/auth/register', registration({ lastName: 'Спаррингов', firstName: 'Илья' }));
+  const coachId = r.body?.user?.id;
+  const asCoach = as(r.body?.accessToken ?? '');
+
+  r = await post('/auth/register', registration({ lastName: 'Игроков', firstName: 'Семён' }));
+  const asClient = as(r.body?.accessToken ?? '');
+
+  // Клиенту этот маршрут закрыт и до, и после того, как у кого-то появится
+  // роль тренера: решает роль, а не наличие карточки.
+  r = await asClient('/clubs/yenisey/coach/sparring');
+  check('клиенту спарринг закрыт', 403, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${coachId}/role`, { method: 'PATCH', json: { role: 'COACH' } });
+  check('роль тренера выдана', 200, r.status);
+
+  r = await asCoach('/clubs/yenisey/booking/halls');
+  const hall = (r.body ?? []).find((item) => item.bookingStep);
+  assert('тренер видит залы клуба', hall !== undefined);
+
+  // Свободное время ищется в сетке, а не выдумывается: у зала свой пояс и своё
+  // расписание, и «завтра в 12:00» может быть закрыто шаблоном недели.
+  const date = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+  r = await asCoach(`/clubs/yenisey/booking/halls/${hall?.id}/days/${date}`);
+  check('сетка дня открыта тренеру', 200, r.status);
+
+  const table = (r.body?.tables ?? [])[0];
+  const step = r.body?.stepMinutes ?? 30;
+  const free = freeMinute(table?.busy ?? [], r.body?.earliestMinute ?? 0, step, 60);
+
+  if (!table || free === null) {
+    console.log('  ПРОПУЩЕНО: в этот день нет свободного часа — сценарий не показателен');
+    return;
+  }
+
+  // Минуты сетки — местные, в поясе ЗАЛА. Перевод в момент времени повторяет
+  // веб: собрать «наивное» время и подогнать его двумя проходами.
+  const payload = {
+    tableId: table.tableId,
+    startsAt: instantAt(date, free, hall.timezone),
+    durationMinutes: 60,
+    withRobot: false,
+  };
+
+  r = await asClient('/clubs/yenisey/coach/sparring', { method: 'POST', json: payload });
+  check('клиент спарринг не заводит', 403, r.status);
+
+  r = await asCoach('/clubs/yenisey/coach/sparring', { method: 'POST', json: payload });
+  check('тренер взял стол', 201, r.status);
+  const sparringId = r.body?.id;
+  assert('цена посчитана сервером', typeof r.body?.price === 'number' && r.body.price > 0);
+
+  r = await asCoach('/clubs/yenisey/coach/sparring');
+  assert('спарринг в своём списке', (r.body ?? []).some((b) => b.id === sparringId));
+
+  // Занятое тренером время занято для всех: разводит их exclusion-констрейнт,
+  // а не проверка в коде.
+  r = await asClient('/clubs/yenisey/booking/bookings', { method: 'POST', json: payload });
+  check('клиент на это время не влезет', 400, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/desk/bookings?from=${date}`);
+  const seen = (r.body ?? []).find((b) => b.id === sparringId);
+  assert('на смене видно как спарринг', seen?.sparring === true);
+  assert('и за столом — тренер', seen?.client?.fullName?.startsWith('Спаррингов') === true);
+
+  // Тренер — не клиент, и в клиентских списках его спарринга нет.
+  r = await asCoach('/me/bookings');
+  check('тренеру «мои записи» открыты как чтение', 200, r.status);
+  assert('но спарринга там нет', !(r.body ?? []).some((e) => e.id === sparringId));
+
+  r = await asCoach(`/clubs/yenisey/coach/sparring/${sparringId}`, { method: 'DELETE' });
+  check('тренер отменил спарринг', 200, r.status);
+  assert('процент списания записан', typeof r.body?.chargePercent === 'number');
+
+  r = await asClient('/clubs/yenisey/booking/bookings', { method: 'POST', json: payload });
+  check('после отмены время снова свободно', 201, r.status);
+}
+
+/** Первая минута сетки, где подряд свободно `needed` минут. */
+function freeMinute(busy, earliest, step, needed) {
+  const CLOSE = 24 * 60;
+
+  for (let minute = Math.max(earliest, 10 * 60); minute + needed <= CLOSE; minute += step) {
+    const clash = busy.some((span) => minute < span.endMinute && span.startMinute < minute + needed);
+
+    if (!clash) {
+      return minute;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Карточка тренера: кто правит, что видно без входа, куда девается фото.
  *

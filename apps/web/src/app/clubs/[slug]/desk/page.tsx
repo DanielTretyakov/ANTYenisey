@@ -747,7 +747,7 @@ function bookingRow(booking: DeskBooking): Row {
     key: `booking-${booking.id}`,
     bookingId: booking.id,
     at: booking.startsAt,
-    note: booking.withRobot ? 'робот' : 'аренда',
+    note: booking.sparring ? 'спарринг' : booking.withRobot ? 'робот' : 'аренда',
     title: `${booking.client.fullName} · ${booking.tableLabel}`,
     subtitle: [
       booking.client.phone,

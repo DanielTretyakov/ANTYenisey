@@ -18,6 +18,7 @@ const booking = (over: Partial<DeskBooking> = {}): DeskBooking => ({
   status: 'BOOKED',
   client: person,
   manual: false,
+  sparring: false,
   createdBy: null,
   cancelledAt: null,
   chargePercent: null,
