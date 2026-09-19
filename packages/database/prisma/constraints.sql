@@ -826,6 +826,23 @@ ALTER TABLE "CoachProfile"
     AND ("priceInfo" IS NULL OR ("priceInfo" = btrim("priceInfo") AND char_length("priceInfo") BETWEEN 1 AND 500))
   );
 
+-- Фотография не должна мешать удалению учётки.
+--
+-- Prisma выражает связь как NO ACTION — этого хватает профилю игрока: он
+-- прямой потомок учётки и исчезает в той же волне каскада, что и файл.
+-- Карточка тренера висит на членстве в клубе, на уровень глубже, и проверка
+-- ссылки на файл срабатывала раньше, чем каскад доходил до карточки.
+--
+-- Отложенная проверка сдвигает её на конец транзакции, когда карточки уже нет.
+-- Забрать живое фото из-под живой карточки по-прежнему нельзя — проверка не
+-- отменена, а перенесена.
+ALTER TABLE "CoachProfile" DROP CONSTRAINT "CoachProfile_photoFileId_userId_fkey";
+
+ALTER TABLE "CoachProfile" ADD CONSTRAINT "CoachProfile_photoFileId_userId_fkey"
+  FOREIGN KEY ("photoFileId", "userId") REFERENCES "StoredFile"("id", "ownerUserId")
+  ON DELETE NO ACTION ON UPDATE CASCADE
+  DEFERRABLE INITIALLY DEFERRED;
+
 -- Чего здесь НЕТ и почему.
 --
 -- socialLinks — Json, и его структуру ([{ label, url }], только http(s), не

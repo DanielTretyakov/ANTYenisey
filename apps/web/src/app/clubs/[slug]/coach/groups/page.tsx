@@ -7,7 +7,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { ApiError } from '@/lib/api';
-import { useClubApi } from '@/lib/useClubApi';
+import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 
 /**
  * «Мои группы» — занятия тренера вместе с составом.
@@ -20,6 +20,7 @@ import { useClubApi } from '@/lib/useClubApi';
  */
 export default function CoachGroupsPage() {
   const club = useClubApi();
+  const slug = useClubSlug();
   const [groups, setGroups] = useState<CoachGroup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,7 +40,7 @@ export default function CoachGroupsPage() {
   }, [club]);
 
   return (
-    <AppShell>
+    <AppShell clubSlug={slug}>
       <h1 className="mb-6 text-[2rem] leading-tight">Мои группы</h1>
 
       {error && <Alert tone="warning">{error}</Alert>}

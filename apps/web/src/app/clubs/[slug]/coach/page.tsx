@@ -8,7 +8,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { ApiError } from '@/lib/api';
-import { useClubApi } from '@/lib/useClubApi';
+import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { useSession } from '@/lib/useSession';
 
 /**
@@ -20,6 +20,7 @@ import { useSession } from '@/lib/useSession';
  */
 export default function MyCoachCardPage() {
   const club = useClubApi();
+  const slug = useClubSlug();
   const session = useSession();
   const [profile, setProfile] = useState<CoachProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +52,7 @@ export default function MyCoachCardPage() {
   const name = session.status === 'ready' ? (session.user?.fullName ?? 'Тренер') : 'Тренер';
 
   return (
-    <AppShell>
+    <AppShell clubSlug={slug}>
       <h1 className="mb-6 text-[2rem] leading-tight">Моя карточка</h1>
 
       {error && <Alert tone="warning">{error}</Alert>}

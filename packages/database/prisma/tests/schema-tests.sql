@@ -3,7 +3,7 @@
 -- ради чего заведены.
 -- ---------------------------------------------------------------------------
 --
--- СТАТУС: прогнано на PostgreSQL 18 (18.09.2026) — 91 из 91 сценария прошли.
+-- СТАТУС: прогнано на PostgreSQL 18 (19.09.2026) — 92 из 92 сценариев прошли.
 -- Дополнительно проверено, что отказы приходят именно от нужных ограничений,
 -- а не по случайной причине: exclusion-констрейнт даёт 23P01, составные
 -- внешние ключи — 23503, частичный уникальный индекс — 23505, check'и — 23514.
@@ -1093,13 +1093,31 @@ SELECT pg_temp.expect('CH',
   '23514', 'StoredFile_type_matches_kind');
 
 -- CI. Чужой файл фотографией тренера: составной ключ (файл, человек).
-DO $$ BEGIN
-  INSERT INTO "StoredFile" (id,"ownerUserId",kind,"contentType",size,sha256,data)
-  VALUES ('cf1','c1','COACH_PHOTO','image/webp',4,repeat('9',64),'\x52494646'::bytea);
-EXCEPTION WHEN others THEN RAISE NOTICE 'CI. ПРОВАЛ подготовки: %', SQLERRM; END $$;
-SELECT pg_temp.expect('CI',
-  $q$UPDATE "CoachProfile" SET "photoFileId" = 'f3' WHERE "userId" = 'c1' AND "tenantId" = 't1'$q$,
-  '23503', 'CoachProfile_photoFileId_userId_fkey');
+--
+--     Не через pg_temp.expect: связь отложена до конца транзакции (раздел 20),
+--     и отказ приходит на COMMIT, а не на самом операторе. Здесь проверка
+--     возвращается к немедленной — иначе сценарий не поймал бы её вовсе.
+--
+--     Свой файл заводится отдельным оператором, а не внутри блока: блок с
+--     EXCEPTION — это подтранзакция, и отказ унёс бы вставку вместе с собой,
+--     а он нужен следующему сценарию.
+INSERT INTO "StoredFile" (id,"ownerUserId",kind,"contentType",size,sha256,data)
+VALUES ('cf1','c1','COACH_PHOTO','image/webp',4,repeat('9',64),'\x52494646'::bytea);
+
+DO $$
+DECLARE code text; cname text;
+BEGIN
+  SET CONSTRAINTS "CoachProfile_photoFileId_userId_fkey" IMMEDIATE;
+  UPDATE "CoachProfile" SET "photoFileId" = 'f3' WHERE "userId" = 'c1' AND "tenantId" = 't1';
+  RAISE NOTICE 'CI. ПРОВАЛ: база приняла чужой файл фотографией';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE, cname = CONSTRAINT_NAME;
+  IF code = '23503' AND cname = 'CoachProfile_photoFileId_userId_fkey' THEN
+    RAISE NOTICE 'CI. Отклонено правилом CoachProfile_photoFileId_userId_fkey ... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'CI. ПРОВАЛ: отказ пришёл от % (%)', code, cname;
+  END IF;
+END $$;
 
 -- CJ. Своя фотография — проходит.
 DO $$ BEGIN
@@ -1111,3 +1129,26 @@ EXCEPTION WHEN others THEN RAISE NOTICE 'CJ. ПРОВАЛ: %', SQLERRM; END $$;
 SELECT pg_temp.expect('CK',
   $q$UPDATE "CoachProfile" SET achievements = '   ' WHERE "userId" = 'c1' AND "tenantId" = 't1'$q$,
   '23514', 'CoachProfile_text_filled');
+
+-- CL. Удаление учётки уносит карточку тренера вместе с фотографией.
+--
+--     То же, что BV у игрока, но путь длиннее: карточка висит на членстве в
+--     клубе, а не прямо на учётке. Обычной NO ACTION здесь мало — проверка
+--     ссылки на файл срабатывает раньше, чем каскад доходит до карточки, —
+--     поэтому связь отложена до конца транзакции (раздел 20).
+DO $$ BEGIN
+  INSERT INTO "User" (id,email,phone,"birthDate","passwordHash","fullName","createdAt","updatedAt")
+  VALUES ('c9','c9@a.ru','+79990000098',DATE '1990-01-01','x','Удаляемый Тренер',now(),now());
+  INSERT INTO "TenantMembership" ("userId","tenantId",role,"createdAt","updatedAt")
+  VALUES ('c9','t1','COACH',now(),now());
+  INSERT INTO "CoachProfile" ("userId","tenantId","createdAt","updatedAt") VALUES ('c9','t1',now(),now());
+  INSERT INTO "StoredFile" (id,"ownerUserId",kind,"contentType",size,sha256,data)
+  VALUES ('c9f','c9','COACH_PHOTO','image/webp',4,repeat('1',64),'\x52494646'::bytea);
+  UPDATE "CoachProfile" SET "photoFileId" = 'c9f' WHERE "userId" = 'c9' AND "tenantId" = 't1';
+  DELETE FROM "User" WHERE id = 'c9';
+  IF EXISTS (SELECT 1 FROM "StoredFile" WHERE "ownerUserId" = 'c9') THEN
+    RAISE NOTICE 'CL. ПРОВАЛ: фото пережило учётку';
+  ELSE
+    RAISE NOTICE 'CL. Учётка ушла вместе с карточкой и фото.. OK (ожидалось)';
+  END IF;
+EXCEPTION WHEN others THEN RAISE NOTICE 'CL. ПРОВАЛ: %', SQLERRM; END $$;
