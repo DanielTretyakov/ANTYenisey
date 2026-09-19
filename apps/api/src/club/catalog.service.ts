@@ -110,7 +110,7 @@ export class CatalogService {
       where: { id, tenantId },
       select: {
         id: true,
-        _count: { select: { closureRules: true, dayClosures: true, sessions: true } },
+        _count: { select: { closureRules: true, dayClosures: true, sessions: true, subscriptionPlans: true } },
       },
     });
 
@@ -124,6 +124,12 @@ export class CatalogService {
       throw new ConflictException(
         'На этот тип ссылается расписание — его можно только снять с продажи, но не удалить',
       );
+    }
+
+    // Связь тарифа с типом стоит на Restrict: без этой проверки удаление
+    // упало бы ошибкой внешнего ключа, то есть ответом 500 вместо объяснения.
+    if (type._count.subscriptionPlans > 0) {
+      throw new ConflictException('Этот тип входит в тариф абонемента — сначала уберите его из тарифа');
     }
 
     await this.prisma.trainingType.delete({ where: { id } });
@@ -238,7 +244,7 @@ export class CatalogService {
   async deleteTournamentType(tenantId: string, id: string): Promise<void> {
     const type = await this.prisma.tournamentType.findFirst({
       where: { id, tenantId },
-      select: { id: true, _count: { select: { tournaments: true } } },
+      select: { id: true, _count: { select: { tournaments: true, subscriptionPlans: true } } },
     });
 
     if (!type) {
@@ -249,6 +255,11 @@ export class CatalogService {
       throw new ConflictException(
         'По этому типу уже заведены турниры — его можно только снять с продажи',
       );
+    }
+
+    // Та же причина, что у типа тренировки: связь с тарифом — Restrict.
+    if (type._count.subscriptionPlans > 0) {
+      throw new ConflictException('Этот тип входит в тариф абонемента — сначала уберите его из тарифа');
     }
 
     await this.prisma.tournamentType.delete({ where: { id } });

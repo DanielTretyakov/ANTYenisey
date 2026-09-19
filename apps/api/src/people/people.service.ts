@@ -13,6 +13,7 @@ import type { ClubContext } from '../auth/club-context';
 import type { AccountDto } from '../auth/dto/register.dto';
 import { FamilyService } from '../guardianship/family.service';
 import { PlayersService } from '../players/players.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { personSummary } from './person-summary';
 
 /** Сколько записей показывается в карточке. Дальше — в поиске по броням. */
@@ -40,6 +41,7 @@ export class PeopleService {
     private readonly players: PlayersService,
     private readonly family: FamilyService,
     private readonly coaches: CoachesService,
+    private readonly subscriptions: SubscriptionsService,
   ) {}
 
   /**
@@ -211,7 +213,7 @@ export class PeopleService {
       throw new NotFoundException('Человек не найден в этом клубе');
     }
 
-    const [entries, visits, player, family, coach] = await Promise.all([
+    const [entries, visits, player, family, coach, subscriptions] = await Promise.all([
       this.entries.listForUser(userId, tenantId),
       this.attendance.walkInsOf(tenantId, userId),
       this.players.profile(userId),
@@ -219,6 +221,7 @@ export class PeopleService {
       // Карточка тренера — только у тренера, и её может ещё не быть: роль
       // могли назначить минуту назад.
       membership.role === Role.COACH ? this.coaches.profileOrNull(tenantId, userId) : null,
+      this.subscriptions.forCard(tenantId, userId),
     ]);
 
     // Подпись «кто отметил» — только у отмеченных: у остальных журналу нечего
@@ -270,6 +273,7 @@ export class PeopleService {
       player,
       family,
       coach,
+      subscriptions,
     };
   }
 }

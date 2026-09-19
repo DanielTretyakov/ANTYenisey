@@ -16,6 +16,7 @@ import { GuardianshipModule } from './guardianship/guardianship.module';
 import { MeModule } from './me/me.module';
 import { PeopleModule } from './people/people.module';
 import { PlayersModule } from './players/players.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { parseDuration } from './auth/tokens';
 import { isLoopback } from './common/network';
 import { HealthController } from './health.controller';
@@ -68,6 +69,7 @@ import { validateEnv, type Env } from './config/env';
     PeopleModule,
     PlayersModule,
     CoachesModule,
+    SubscriptionsModule,
     GuardianshipModule,
     TenantsModule,
     EntriesModule,

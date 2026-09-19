@@ -8,4 +8,5 @@ export * from './family';
 export * from './names';
 export * from './platform';
 export * from './player';
+export * from './subscription';
 export * from './tenant';

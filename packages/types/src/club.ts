@@ -17,6 +17,7 @@ import type { BookingEntry } from './platform';
 import type { CoachProfile } from './coach';
 import type { ClubPersonFamily } from './family';
 import type { PlayerProfile } from './player';
+import type { ClientSubscription } from './subscription';
 
 /**
  * Минимальный шаг брони стола. Набор закрытый: зал выбирает из вариантов,
@@ -472,6 +473,11 @@ export interface ClubPersonCard {
    * администратор. У остальных пусто.
    */
   coach: CoachProfile | null;
+  /**
+   * Абонементы человека в этом клубе — действующие сверху. Продаёт и
+   * корректирует их администратор отсюда же.
+   */
+  subscriptions: ClientSubscription[];
 }
 
 /** Запись человека вместе с подписью того, кто поставил отметку. */

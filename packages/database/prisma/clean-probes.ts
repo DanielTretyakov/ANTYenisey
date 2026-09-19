@@ -100,12 +100,14 @@ async function main(): Promise<void> {
   // удаляет.
   await prisma.trainingBooking.deleteMany({ where: { clientId: { in: ids } } });
   await prisma.tournamentRegistration.deleteMany({ where: { clientId: { in: ids } } });
-  await prisma.clientProfile.deleteMany({ where: { userId: { in: ids } } });
 
   const coached = await removeProbeCoaching(ids);
 
-  // Абонементы — после записей: запись ссылается на абонемент своего клиента.
+  // Абонементы — после записей (запись ссылается на абонемент своего клиента)
+  // и до анкеты (абонемент ссылается на анкету).
   const subscriptions = await prisma.subscription.deleteMany({ where: { clientId: { in: ids } } });
+
+  await prisma.clientProfile.deleteMany({ where: { userId: { in: ids } } });
 
   const removed = await prisma.user.deleteMany({ where });
 
