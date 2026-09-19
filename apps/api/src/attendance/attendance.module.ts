@@ -3,6 +3,7 @@ import { AttendanceController } from './attendance.controller';
 import { AttendanceService } from './attendance.service';
 import { AutoNoShowJob } from './auto-no-show.job';
 import { ClubModule } from '../club/club.module';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 /**
  * Отметка присутствия.
@@ -16,9 +17,12 @@ import { ClubModule } from '../club/club.module';
  *
  * `AutoNoShowJob` живёт здесь же: неявку от джобы пишут те же функции, что и
  * неявку от администратора, — второй путь записи разошёлся бы с первым.
+ *
+ * `SubscriptionsModule` — ради визитов абонемента: прощённая неявка
+ * возвращает визит в той же транзакции, что меняет отметку.
  */
 @Module({
-  imports: [ClubModule],
+  imports: [ClubModule, SubscriptionsModule],
   controllers: [AttendanceController],
   providers: [AttendanceService, AutoNoShowJob],
   exports: [AttendanceService],

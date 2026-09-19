@@ -8,22 +8,30 @@ import { ActorType, AuditAction, LedgerReason, Prisma } from '@yenisey/database'
 import type {
   ClientSubscription,
   LedgerReasonView,
+  PaidBySubscription,
   SubscriptionLedgerRow,
   SubscriptionPlan,
 } from '@yenisey/types';
 import { MembershipService } from '../club/membership.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AdjustSubscriptionDto, SubscriptionPlanDto } from './dto/subscription.dto';
-import { lockSubscription, writeLedger } from './subscription-ledger';
+import { lockSubscription, writeLedger, type LockedSubscription } from './subscription-ledger';
 import {
   cleanNote,
   decideAdjustment,
   decideClose,
+  decideLedger,
+  decideMove,
   decidePlanCoverage,
   expiryOf,
   isActive,
+  pickSubscription,
   type Decision,
+  type EventFacts,
 } from './subscription-rules';
+
+/** К какой записи относится движение по визитам. */
+export type EntryLink = { trainingBookingId: string } | { tournamentRegistrationId: string };
 
 /**
  * Пояс, если у клуба ещё нет ни одного зала. Тот же, что стоит по умолчанию у
@@ -351,6 +359,187 @@ export class SubscriptionsService {
     });
 
     return this.one(tenantId, clientId, subscriptionId);
+  }
+
+  // --- Списание -----------------------------------------------------------
+
+  /**
+   * Подобрать абонемент, который заплатит за запись, — под блокировкой.
+   *
+   * Зовётся ВНУТРИ транзакции записи, после блокировки её занятия: порядок
+   * блокировок везде один — запись или занятие, потом абонемент. Подходящие
+   * абонементы блокируются все сразу и по возрастанию id: две записи одного
+   * человека на разные занятия иначе могли бы взять их в разном порядке и
+   * ждать друг друга вечно. Выбирается уже из заблокированных — остаток,
+   * прочитанный до блокировки, мог устареть.
+   */
+  async reserveInTx(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    clientId: string,
+    event: EventFacts,
+  ): Promise<LockedSubscription | null> {
+    const candidates = await tx.subscription.findMany({
+      where: {
+        tenantId,
+        clientId,
+        AND: [
+          { OR: [{ expiresAt: null }, { expiresAt: { gt: event.startsAt } }] },
+          { OR: [{ remainingVisits: null }, { remainingVisits: { gt: 0 } }] },
+        ],
+        plan:
+          event.kind === 'TRAINING'
+            ? { coveredTrainingTypes: { some: { trainingTypeId: event.typeId } } }
+            : { coveredTournamentTypes: { some: { tournamentTypeId: event.typeId } } },
+      },
+      select: { id: true },
+    });
+
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    const ids = candidates.map((row) => row.id);
+    const locked = await tx.$queryRaw<LockedSubscription[]>`
+      SELECT "id", "clientId", "remainingVisits", "expiresAt"
+      FROM "Subscription"
+      WHERE "id" IN (${Prisma.join(ids)})
+      ORDER BY "id"
+      FOR UPDATE`;
+
+    // Покрытие уже отфильтровано запросом, поэтому правилам его подсказываем
+    // как «покрыто»: выбор решают срок и остаток под блокировкой.
+    const typeIds = { trainingTypeIds: [event.typeId], tournamentTypeIds: [event.typeId] };
+
+    return pickSubscription(
+      locked.map((sub) => ({ ...sub, ...typeIds })),
+      event,
+    );
+  }
+
+  /** Списать визит за только что созданную запись. Абонемент — из `reserveInTx`. */
+  async chargeInTx(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    sub: LockedSubscription,
+    link: EntryLink,
+  ): Promise<void> {
+    const move = fail(decideMove(sub.remainingVisits, -1));
+
+    await writeLedger(tx, {
+      tenantId,
+      subscriptionId: sub.id,
+      delta: move.delta,
+      balanceAfter: move.balanceAfter,
+      reason: LedgerReason.VISIT_CHARGED,
+      ...link,
+    });
+  }
+
+  /**
+   * Свести переход записи по абонементу в журнал: вернуть визит, списать
+   * снова или ничего.
+   *
+   * `before` и `after` — израсходован ли визит до и после перехода (см.
+   * `consumed`). Неявка после записи ничего не пишет: визит уже списан, это и
+   * значит «сгорел». Вызывается внутри той же транзакции, что меняет запись,
+   * уже после её обновления.
+   */
+  async settleInTx(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    subscriptionId: string,
+    before: boolean,
+    after: boolean,
+    link: EntryLink,
+  ): Promise<void> {
+    const step = decideLedger(before, after);
+
+    if (step === null) {
+      return;
+    }
+
+    const sub = await lockSubscription(tx, tenantId, subscriptionId);
+
+    if (!sub) {
+      throw new NotFoundException('Абонемент записи не найден');
+    }
+
+    const move = fail(decideMove(sub.remainingVisits, step));
+
+    await writeLedger(tx, {
+      tenantId,
+      subscriptionId,
+      delta: move.delta,
+      balanceAfter: move.balanceAfter,
+      reason: step < 0 ? LedgerReason.VISIT_CHARGED : LedgerReason.VISIT_REFUNDED,
+      ...link,
+    });
+  }
+
+  /** Мягкое ли правило клуба: визит при отмене возвращается всегда. */
+  async softRule(tx: Prisma.TransactionClient, tenantId: string): Promise<boolean> {
+    const tenant = await tx.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { subscriptionBurnsOnNoShowOnly: true },
+    });
+
+    return tenant.subscriptionBurnsOnNoShowOnly;
+  }
+
+  /**
+   * Чем будет оплачена запись на каждое из мероприятий — для кнопки «Записаться».
+   *
+   * Без блокировок и одним запросом на все мероприятия: это подсказка, а не
+   * обещание. Настоящий выбор делает `reserveInTx` в момент записи — и если
+   * за это время визиты кончились, запись честно пойдёт по цене.
+   */
+  async payWithFor(
+    tenantId: string,
+    clientId: string,
+    events: readonly (EventFacts & { id: string })[],
+  ): Promise<Map<string, PaidBySubscription>> {
+    const subs = await this.prisma.subscription.findMany({
+      where: {
+        tenantId,
+        clientId,
+        OR: [{ remainingVisits: null }, { remainingVisits: { gt: 0 } }],
+      },
+      select: {
+        id: true,
+        clientId: true,
+        remainingVisits: true,
+        expiresAt: true,
+        plan: {
+          select: {
+            name: true,
+            coveredTrainingTypes: { select: { trainingTypeId: true } },
+            coveredTournamentTypes: { select: { tournamentTypeId: true } },
+          },
+        },
+      },
+    });
+
+    const facts = subs.map((sub) => ({
+      id: sub.id,
+      remainingVisits: sub.remainingVisits,
+      expiresAt: sub.expiresAt,
+      planName: sub.plan.name,
+      trainingTypeIds: sub.plan.coveredTrainingTypes.map((row) => row.trainingTypeId),
+      tournamentTypeIds: sub.plan.coveredTournamentTypes.map((row) => row.tournamentTypeId),
+    }));
+
+    const result = new Map<string, PaidBySubscription>();
+
+    for (const event of events) {
+      const chosen = pickSubscription(facts, event);
+
+      if (chosen) {
+        result.set(event.id, { subscriptionId: chosen.id, planName: chosen.planName });
+      }
+    }
+
+    return result;
   }
 
   // --- Чтение --------------------------------------------------------------

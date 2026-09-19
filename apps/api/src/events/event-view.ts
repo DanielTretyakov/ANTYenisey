@@ -33,6 +33,7 @@ export const TOURNAMENT_EVENT_SELECT = {
   id: true,
   startsAt: true,
   endsAt: true,
+  tournamentTypeId: true,
   tournamentType: { select: { name: true, ratingLabel: true, price: true } },
   registrations: {
     where: { status: BookingStatus.BOOKED },
@@ -46,6 +47,7 @@ export const TRAINING_EVENT_SELECT = {
   startsAt: true,
   endsAt: true,
   capacity: true,
+  trainingTypeId: true,
   trainingType: { select: { name: true, price: true } },
   coach: { select: { membership: { select: { user: { select: { fullName: true } } } } } },
   bookings: {
@@ -84,6 +86,9 @@ export function tournamentEvent(row: TournamentRow, userId: string | null): Club
     endsAt: row.endsAt.toISOString(),
     subtitle: null,
     price: row.tournamentType.price,
+    // Чем оплатит смотрящий, решает страница клуба — ей известен человек, за
+    // которого действуют. Лента и прочие списки абонементов не касаются.
+    payWith: null,
     registeredCount: row.registrations.length,
     // Лимита мест у турнира нет: в схеме он несёт только дату и тип, и ТЗ
     // ограничения не требует. Число записавшихся показывается справочно.
@@ -105,6 +110,7 @@ export function trainingEvent(row: TrainingRow, userId: string | null): ClubEven
     endsAt: row.endsAt.toISOString(),
     subtitle: `Тренер: ${shortName(row.coach.membership.user.fullName)}`,
     price: row.trainingType.price,
+    payWith: null,
     registeredCount: row.bookings.length,
     capacity: row.capacity,
     // Не уходит в минус: опустить лимит ниже числа записавшихся сервис не даёт,

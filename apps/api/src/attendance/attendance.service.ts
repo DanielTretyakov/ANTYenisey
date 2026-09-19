@@ -22,6 +22,8 @@ import type {
 } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { MembershipService } from '../club/membership.service';
+import { consumed } from '../subscriptions/subscription-rules';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { decideMark, type AttendancePolicy } from './attendance-rules';
 
 /**
@@ -85,6 +87,8 @@ export interface LoadedEntry {
   clientId: string | null;
   /** Тренер занятия или спарринга — ложится в визит клиента. */
   coachId: string | null;
+  /** Абонемент, которым оплачена запись. У записи по цене и у стола — пусто. */
+  subscriptionId: string | null;
 }
 
 /** Правила присутствия клуба вместе с процентом неявки. */
@@ -98,6 +102,7 @@ export class AttendanceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly membership: MembershipService,
+    private readonly subscriptions: SubscriptionsService,
   ) {}
 
   // --- Отметка ---------------------------------------------------------------
@@ -199,7 +204,14 @@ export class AttendanceService {
     context: { now: Date; noShowChargePercent: number },
   ): Promise<AttendanceResult> {
     const entry = await this.lockEntry(tx, tenantId, kind, entryId);
-    const decision = decideMark(entry, request, context);
+
+    // У записи по абонементу процент — судьба визита, а не доля цены: неявка
+    // означает «визит израсходован» — 100, а не процент политики клуба.
+    // Прощённая неявка по-прежнему 0: визит возвращается.
+    const decision = decideMark(entry, request, {
+      ...context,
+      noShowChargePercent: entry.subscriptionId ? 100 : context.noShowChargePercent,
+    });
 
     if (!decision.ok) {
       throw new BadRequestException(decision.error);
@@ -219,6 +231,20 @@ export class AttendanceService {
       status: decision.status,
       chargeRatio: decision.chargeRatio,
     });
+
+    // Визит абонемента — в той же транзакции и после записи: блокировки идут
+    // в одном порядке везде. Прощённая неявка вернёт визит, снятое прощение
+    // спишет снова; обычная неявка журнал не трогает — визит уже списан.
+    if (entry.subscriptionId && kind !== 'TABLE') {
+      await this.subscriptions.settleInTx(
+        tx,
+        tenantId,
+        entry.subscriptionId,
+        consumed(entry),
+        consumed({ status: decision.status, chargeRatio: decision.chargeRatio }),
+        kind === 'TRAINING' ? { trainingBookingId: entryId } : { tournamentRegistrationId: entryId },
+      );
+    }
 
     await this.writeVisit(tx, tenantId, kind, entry, decision.status === 'ATTENDED', actor.userId);
 
@@ -517,7 +543,8 @@ export class AttendanceService {
           },
         });
 
-        return { id, ...row };
+        // Аренда стола абонементом в этой фазе не оплачивается.
+        return { id, ...row, subscriptionId: null };
       }
 
       case 'TRAINING': {
@@ -527,6 +554,7 @@ export class AttendanceService {
             status: true,
             chargeRatio: true,
             clientId: true,
+            subscriptionId: true,
             session: { select: { startsAt: true, endsAt: true, coachId: true } },
           },
         });
@@ -536,6 +564,7 @@ export class AttendanceService {
           status: row.status,
           chargeRatio: row.chargeRatio,
           clientId: row.clientId,
+          subscriptionId: row.subscriptionId,
           ...row.session,
         };
       }
@@ -547,6 +576,7 @@ export class AttendanceService {
             status: true,
             chargeRatio: true,
             clientId: true,
+            subscriptionId: true,
             tournament: { select: { startsAt: true, endsAt: true } },
           },
         });
@@ -556,6 +586,7 @@ export class AttendanceService {
           status: row.status,
           chargeRatio: row.chargeRatio,
           clientId: row.clientId,
+          subscriptionId: row.subscriptionId,
           coachId: null,
           ...row.tournament,
         };

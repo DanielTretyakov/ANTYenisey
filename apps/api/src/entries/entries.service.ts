@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { BookingStatus } from '@yenisey/database';
-import type { BookingEntry } from '@yenisey/types';
+import type { BookingEntry, ClubRef, PaidBySubscription } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
 import { cancellationOpen, cancellationPercent } from '../booking/availability';
 import { PrismaService } from '../prisma/prisma.service';
+import { subscriptionCancelRatio } from '../subscriptions/subscription-rules';
 
 /**
  * Записи человека: аренда столов, занятия и турниры одним списком.
@@ -54,6 +55,7 @@ export class EntriesService {
           status: true,
           chargeRatio: true,
           tenant: CLUB_SELECT,
+          subscription: SUBSCRIPTION_SELECT,
           session: {
             select: {
               id: true,
@@ -75,6 +77,7 @@ export class EntriesService {
           status: true,
           chargeRatio: true,
           tenant: CLUB_SELECT,
+          subscription: SUBSCRIPTION_SELECT,
           tournament: {
             select: {
               id: true,
@@ -93,7 +96,9 @@ export class EntriesService {
         id: booking.id,
         entryId: booking.id,
         kind: 'TABLE' as const,
-        club: booking.tenant,
+        club: clubOf(booking.tenant),
+        softRule: booking.tenant.subscriptionBurnsOnNoShowOnly,
+        paidBy: null,
         title: booking.withRobot ? 'Аренда стола с роботом' : 'Аренда стола',
         subtitle: `${booking.table.hall.name}, ${booking.table.label}`,
         startsAt: booking.startsAt.toISOString(),
@@ -109,7 +114,9 @@ export class EntriesService {
         id: booking.session.id,
         entryId: booking.id,
         kind: 'TRAINING' as const,
-        club: booking.tenant,
+        club: clubOf(booking.tenant),
+        softRule: booking.tenant.subscriptionBurnsOnNoShowOnly,
+        paidBy: paidByOf(booking.subscription),
         title: booking.session.trainingType.name,
         subtitle: `Тренер: ${shortName(booking.session.coach.membership.user.fullName)}`,
         startsAt: booking.session.startsAt.toISOString(),
@@ -125,7 +132,9 @@ export class EntriesService {
         id: registration.tournament.id,
         entryId: registration.id,
         kind: 'TOURNAMENT' as const,
-        club: registration.tenant,
+        club: clubOf(registration.tenant),
+        softRule: registration.tenant.subscriptionBurnsOnNoShowOnly,
+        paidBy: paidByOf(registration.subscription),
         title: titleOf(
           registration.tournament.tournamentType.name,
           registration.tournament.tournamentType.ratingLabel,
@@ -137,23 +146,32 @@ export class EntriesService {
         status: registration.status,
         chargeRatio: registration.chargeRatio,
       })),
-    ].map(({ chargeRatio, ...entry }) => {
+    ].map(({ chargeRatio, softRule, ...entry }) => {
       const cancellable =
         entry.status === BookingStatus.BOOKED && cancellationOpen(new Date(entry.startsAt), new Date());
+
+      // Сколько спишется при отмене прямо сейчас — вопрос, на который человек
+      // должен получить ответ ДО нажатия кнопки, а не после. Ступени берутся
+      // по клубу записи: политика отмены у каждого клуба своя.
+      const percentNow = cancellable
+        ? cancellationPercent(tiers.get(entry.club.slug) ?? [], minutesUntil(new Date(entry.startsAt)))
+        : null;
+
+      // У записи по абонементу отмена стоит не денег, а визита: вернётся он
+      // или сгорит — по тому же правилу, что применит сама отмена.
+      const byVisit = entry.paidBy !== null;
 
       return {
         ...entry,
         chargePercent: chargeRatio,
         cancellable,
-        // Сколько спишется при отмене прямо сейчас — вопрос, на который человек
-        // должен получить ответ ДО нажатия кнопки, а не после. Ступени берутся
-        // по клубу записи: политика отмены у каждого клуба своя.
-        cancelChargePercentNow: cancellable
-          ? cancellationPercent(
-              tiers.get(entry.club.slug) ?? [],
-              minutesUntil(new Date(entry.startsAt)),
-            )
-          : null,
+        cancelChargePercentNow: byVisit ? null : percentNow,
+        cancelOutcome:
+          byVisit && percentNow !== null
+            ? subscriptionCancelRatio(softRule, percentNow) === 100
+              ? ('BURN' as const)
+              : ('REFUND' as const)
+            : null,
       };
     });
 
@@ -208,10 +226,25 @@ function titleOf(name: string, ratingLabel: string | null): string {
   return ratingLabel && !name.includes(ratingLabel) ? `${name} (${ratingLabel})` : name;
 }
 
-/** Клуб записи: минимум, которого хватает, чтобы его назвать и открыть. */
+/**
+ * Клуб записи: минимум, которого хватает, чтобы его назвать и открыть, —
+ * плюс его правило абонемента, чтобы ответить, что будет с визитом при отмене.
+ */
 const CLUB_SELECT = {
-  select: { slug: true, name: true, accentColor: true },
+  select: { slug: true, name: true, accentColor: true, subscriptionBurnsOnNoShowOnly: true },
 } as const;
+
+const SUBSCRIPTION_SELECT = {
+  select: { id: true, plan: { select: { name: true } } },
+} as const;
+
+function clubOf(tenant: ClubRef): ClubRef {
+  return { slug: tenant.slug, name: tenant.name, accentColor: tenant.accentColor };
+}
+
+function paidByOf(sub: { id: string; plan: { name: string } } | null): PaidBySubscription | null {
+  return sub ? { subscriptionId: sub.id, planName: sub.plan.name } : null;
+}
 
 /** Сколько минут осталось до момента. Отрицательное — момент уже прошёл. */
 function minutesUntil(instant: Date): number {

@@ -16,6 +16,8 @@ import {
 import { MembershipService } from '../club/membership.service';
 import { EntriesService } from '../entries/entries.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { consumed, subscriptionCancelRatio } from '../subscriptions/subscription-rules';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 /**
  * Мероприятия клуба и запись на них: занятия и турниры одним списком.
@@ -36,6 +38,7 @@ export class EventsService {
     private readonly prisma: PrismaService,
     private readonly entries: EntriesService,
     private readonly membership: MembershipService,
+    private readonly subscriptions: SubscriptionsService,
   ) {}
 
   /**
@@ -62,10 +65,29 @@ export class EventsService {
       }),
     ]);
 
+    // Чем оплатит запись тот, за кого действуют: абонементом или по цене.
+    // Одним запросом на весь список — это подсказка у кнопки, а не обещание.
+    const payWith = userId
+      ? await this.subscriptions.payWithFor(tenantId, userId, [
+          ...tournaments.map((row) => ({
+            id: row.id,
+            kind: 'TOURNAMENT' as const,
+            typeId: row.tournamentTypeId,
+            startsAt: row.startsAt,
+          })),
+          ...sessions.map((row) => ({
+            id: row.id,
+            kind: 'TRAINING' as const,
+            typeId: row.trainingTypeId,
+            startsAt: row.startsAt,
+          })),
+        ])
+      : new Map();
+
     const events: ClubEvent[] = [
       ...tournaments.map((row) => tournamentEvent(row, userId)),
       ...sessions.map((row) => trainingEvent(row, userId)),
-    ];
+    ].map((event) => ({ ...event, payWith: payWith.get(event.id) ?? null }));
 
     // Общая сортировка по времени: человек смотрит на неделю клуба целиком, а
     // не отдельно на занятия и отдельно на турниры.
@@ -93,6 +115,7 @@ export class EventsService {
       select: {
         id: true,
         startsAt: true,
+        tournamentTypeId: true,
         tournamentType: { select: { price: true, isActive: true } },
       },
     });
@@ -114,17 +137,35 @@ export class EventsService {
     let entryId: string;
 
     try {
-      ({ id: entryId } = await this.prisma.tournamentRegistration.create({
-        select: { id: true },
-        data: {
-          tenantId,
-          tournamentId: tournament.id,
-          clientId: userId,
-          // Копия цены на момент записи: поднятый через месяц прайс не должен
-          // переписывать то, о чём клуб уже договорился с человеком.
-          priceAtBooking: tournament.tournamentType.price,
-        },
-      }));
+      // Транзакция — ради абонемента: запись и списание визита либо вместе,
+      // либо никак. Повторная запись (P2002) откатывает и списание.
+      entryId = await this.prisma.$transaction(async (tx) => {
+        const sub = await this.subscriptions.reserveInTx(tx, tenantId, userId, {
+          kind: 'TOURNAMENT',
+          typeId: tournament.tournamentTypeId,
+          startsAt: tournament.startsAt,
+        });
+
+        const created = await tx.tournamentRegistration.create({
+          select: { id: true },
+          data: {
+            tenantId,
+            tournamentId: tournament.id,
+            clientId: userId,
+            // Копия цены на момент записи: поднятый через месяц прайс не должен
+            // переписывать то, о чём клуб уже договорился с человеком. Пишется
+            // и при оплате абонементом — иначе стоимость визита не восстановить.
+            priceAtBooking: tournament.tournamentType.price,
+            subscriptionId: sub?.id ?? null,
+          },
+        });
+
+        if (sub) {
+          await this.subscriptions.chargeInTx(tx, tenantId, sub, { tournamentRegistrationId: created.id });
+        }
+
+        return created.id;
+      });
     } catch (error) {
       // Повторную запись ловит частичный уникальный индекс из constraints.sql.
       // Частичный он намеренно: записаться заново после собственной отмены —
@@ -172,6 +213,7 @@ export class EventsService {
       select: {
         id: true,
         startsAt: true,
+        trainingTypeId: true,
         trainingType: { select: { price: true, isActive: true } },
       },
     });
@@ -215,6 +257,13 @@ export class EventsService {
           throw new ConflictException('На это занятие мест больше нет');
         }
 
+        // Абонемент — после блокировки занятия: порядок блокировок везде один.
+        const sub = await this.subscriptions.reserveInTx(tx, tenantId, userId, {
+          kind: 'TRAINING',
+          typeId: session.trainingTypeId,
+          startsAt: session.startsAt,
+        });
+
         const created = await tx.trainingBooking.create({
           data: {
             tenantId,
@@ -222,9 +271,14 @@ export class EventsService {
             clientId: userId,
             // Копия цены на момент записи — по той же причине, что у турнира.
             priceAtBooking: session.trainingType.price,
+            subscriptionId: sub?.id ?? null,
           },
           select: { id: true },
         });
+
+        if (sub) {
+          await this.subscriptions.chargeInTx(tx, tenantId, sub, { trainingBookingId: created.id });
+        }
 
         return created.id;
       });
@@ -257,7 +311,7 @@ export class EventsService {
   async cancel(tenantId: string, userId: string, tournamentId: string): Promise<BookingEntry> {
     const registration = await this.prisma.tournamentRegistration.findFirst({
       where: { tenantId, tournamentId, clientId: userId, status: BookingStatus.BOOKED },
-      select: { id: true, tournament: { select: { startsAt: true } } },
+      select: { id: true, subscriptionId: true, tournament: { select: { startsAt: true } } },
     });
 
     if (!registration) {
@@ -268,16 +322,27 @@ export class EventsService {
       throw new BadRequestException('Турнир уже начался — отменить запись нельзя');
     }
 
-    await this.cancelEntry(
-      this.prisma.tournamentRegistration.updateMany({
-        where: { id: registration.id, status: BookingStatus.BOOKED },
-        data: {
-          status: BookingStatus.CANCELLED,
-          cancelledAt: new Date(),
-          chargeRatio: await this.chargeFor(tenantId, registration.tournament.startsAt),
-        },
-      }),
-    );
+    await this.prisma.$transaction(async (tx) => {
+      const ratio = await this.cancelRatio(tx, tenantId, registration.tournament.startsAt, registration.subscriptionId);
+
+      await this.cancelEntry(
+        tx.tournamentRegistration.updateMany({
+          where: { id: registration.id, status: BookingStatus.BOOKED },
+          data: { status: BookingStatus.CANCELLED, cancelledAt: new Date(), chargeRatio: ratio },
+        }),
+      );
+
+      if (registration.subscriptionId) {
+        await this.subscriptions.settleInTx(
+          tx,
+          tenantId,
+          registration.subscriptionId,
+          true,
+          consumed({ status: 'CANCELLED', chargeRatio: ratio }),
+          { tournamentRegistrationId: registration.id },
+        );
+      }
+    });
 
     return this.entryFor(tenantId, userId, registration.id);
   }
@@ -296,7 +361,7 @@ export class EventsService {
   ): Promise<BookingEntry> {
     const booking = await this.prisma.trainingBooking.findFirst({
       where: { tenantId, sessionId, clientId: userId, status: BookingStatus.BOOKED },
-      select: { id: true, session: { select: { startsAt: true } } },
+      select: { id: true, subscriptionId: true, session: { select: { startsAt: true } } },
     });
 
     if (!booking) {
@@ -310,16 +375,27 @@ export class EventsService {
       throw new BadRequestException('Занятие уже началось — отменить запись нельзя');
     }
 
-    await this.cancelEntry(
-      this.prisma.trainingBooking.updateMany({
-        where: { id: booking.id, status: BookingStatus.BOOKED },
-        data: {
-          status: BookingStatus.CANCELLED,
-          cancelledAt: new Date(),
-          chargeRatio: await this.chargeFor(tenantId, booking.session.startsAt),
-        },
-      }),
-    );
+    await this.prisma.$transaction(async (tx) => {
+      const ratio = await this.cancelRatio(tx, tenantId, booking.session.startsAt, booking.subscriptionId);
+
+      await this.cancelEntry(
+        tx.trainingBooking.updateMany({
+          where: { id: booking.id, status: BookingStatus.BOOKED },
+          data: { status: BookingStatus.CANCELLED, cancelledAt: new Date(), chargeRatio: ratio },
+        }),
+      );
+
+      if (booking.subscriptionId) {
+        await this.subscriptions.settleInTx(
+          tx,
+          tenantId,
+          booking.subscriptionId,
+          true,
+          consumed({ status: 'CANCELLED', chargeRatio: ratio }),
+          { trainingBookingId: booking.id },
+        );
+      }
+    });
 
     return this.entryFor(tenantId, userId, booking.id);
   }
@@ -344,13 +420,33 @@ export class EventsService {
    * Считается СЕЙЧАС и записывается в строку: политика клуба может измениться
    * завтра, и тогда уже закрытая запись задним числом сменила бы условия.
    */
-  private async chargeFor(tenantId: string, startsAt: Date): Promise<number> {
-    const tiers = await this.prisma.cancellationTier.findMany({
+  private async chargeFor(tx: Prisma.TransactionClient, tenantId: string, startsAt: Date): Promise<number> {
+    const tiers = await tx.cancellationTier.findMany({
       where: { tenantId },
       select: { minMinutesBeforeStart: true, chargePercent: true },
     });
 
     return cancellationPercent(tiers, Math.floor((startsAt.getTime() - Date.now()) / 60_000));
+  }
+
+  /**
+   * Процент отмены. У записи по абонементу он означает судьбу визита, а не
+   * долю цены: при мягком правиле клуба визит возвращается всегда, при
+   * строгом — сгорает целиком, если ступень политики назначила хоть что-то.
+   */
+  private async cancelRatio(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    startsAt: Date,
+    subscriptionId: string | null,
+  ): Promise<number> {
+    const percent = await this.chargeFor(tx, tenantId, startsAt);
+
+    if (!subscriptionId) {
+      return percent;
+    }
+
+    return subscriptionCancelRatio(await this.subscriptions.softRule(tx, tenantId), percent);
   }
 
   /**

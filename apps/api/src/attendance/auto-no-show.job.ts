@@ -194,12 +194,17 @@ export class AutoNoShowJob implements OnApplicationBootstrap, OnModuleDestroy {
     policy: AttendancePolicy,
     now: Date,
   ): Promise<boolean> {
+    // У записи по абонементу процент — судьба визита: неявка значит «визит
+    // израсходован», 100. Журнал абонемента не трогается вовсе — визит списан
+    // ещё при записи, «сгорел» это и значит.
+    const ratio = entry.subscriptionId ? 100 : percent;
+
     return this.prisma.$transaction(async (tx) => {
       const updated = await this.attendance.updateEntry(
         tx,
         kind,
         entry.id,
-        { status: BookingStatus.NO_SHOW, chargeRatio: percent, autoNoShowAppliedAt: now },
+        { status: BookingStatus.NO_SHOW, chargeRatio: ratio, autoNoShowAppliedAt: now },
         BookingStatus.BOOKED,
       );
 
@@ -220,7 +225,7 @@ export class AutoNoShowJob implements OnApplicationBootstrap, OnModuleDestroy {
           entityType: ENTITY_TYPE[kind],
           entityId: entry.id,
           before: { status: BookingStatus.BOOKED, chargeRatio: entry.chargeRatio },
-          after: { status: BookingStatus.NO_SHOW, chargeRatio: percent },
+          after: { status: BookingStatus.NO_SHOW, chargeRatio: ratio },
           reason: `Присутствие не отмечено за ${formatDelay(policy.autoNoShowAfterMinutes)} после окончания`,
         },
       });
@@ -256,7 +261,7 @@ export class AutoNoShowJob implements OnApplicationBootstrap, OnModuleDestroy {
           take: BATCH,
         });
 
-        return rows;
+        return rows.map((row) => ({ ...row, subscriptionId: null }));
       }
 
       case 'TRAINING': {
@@ -267,6 +272,7 @@ export class AutoNoShowJob implements OnApplicationBootstrap, OnModuleDestroy {
             status: true,
             chargeRatio: true,
             clientId: true,
+            subscriptionId: true,
             session: { select: { startsAt: true, endsAt: true, coachId: true } },
           },
           take: BATCH,
@@ -283,6 +289,7 @@ export class AutoNoShowJob implements OnApplicationBootstrap, OnModuleDestroy {
             status: true,
             chargeRatio: true,
             clientId: true,
+            subscriptionId: true,
             tournament: { select: { startsAt: true, endsAt: true } },
           },
           take: BATCH,
