@@ -74,11 +74,14 @@ function expected(row: ChargeRow): boolean {
  * Разбивка важнее итога: сам по себе итог не объясняет ничего, а «турниров на
  * 12 000» объясняет, почему день выглядит именно так.
  */
-export function moneyOf(rows: {
-  tables: readonly ChargeRow[];
-  trainings: readonly ChargeRow[];
-  tournaments: readonly ChargeRow[];
-}): DeskMoney {
+export function moneyOf(
+  rows: {
+    tables: readonly ChargeRow[];
+    trainings: readonly ChargeRow[];
+    tournaments: readonly ChargeRow[];
+  },
+  subscriptionSales: { count: number; amount: number } = { count: 0, amount: 0 },
+): DeskMoney {
   const tables = sum(rows.tables);
   const trainings = sum(rows.trainings);
   const tournaments = sum(rows.tournaments);
@@ -93,6 +96,7 @@ export function moneyOf(rows: {
     cancelled: all
       .filter((row) => row.status === 'CANCELLED')
       .reduce((total, row) => total + chargeOf(row), 0),
+    subscriptionSales,
   };
 }
 

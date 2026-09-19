@@ -87,7 +87,21 @@ describe('moneyOf', () => {
       total: 0,
       count: 0,
       cancelled: 0,
+      subscriptionSales: { count: 0, amount: 0 },
     });
+  });
+
+  it('продажи абонементов стоят рядом с итогом, а не в нём', () => {
+    // Итог — стоимость оказанных услуг, а абонемент — предоплата будущих:
+    // сложить их значило бы посчитать одни деньги дважды.
+    const money = moneyOf(
+      { tables: [], trainings: [row({ price: 70_000, prepaid: true })], tournaments: [] },
+      { count: 1, amount: 500_000 },
+    );
+
+    assert.equal(money.total, 0);
+    assert.equal(money.count, 1);
+    assert.deepEqual(money.subscriptionSales, { count: 1, amount: 500_000 });
   });
 
   /**

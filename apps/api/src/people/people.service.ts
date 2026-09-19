@@ -263,6 +263,8 @@ export class PeopleService {
             price: entry.price,
             status: entry.status,
             chargeRatio: entry.chargePercent,
+            // Запись по абонементу начислений не несёт: деньги пришли продажей.
+            prepaid: entry.paidBy !== null,
           }),
         })),
         visits,

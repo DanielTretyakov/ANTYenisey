@@ -67,12 +67,16 @@ const PERSON_SELECT = {
   select: { user: { select: { id: true, fullName: true, phone: true } } },
 } as const;
 
-/** Поля записи, из которых считаются деньги. Одни и те же у всех трёх видов. */
+/**
+ * Поля записи на занятие или турнир, из которых считаются деньги. Абонемент —
+ * потому что запись по нему денег дня не приносит: они пришли продажей.
+ */
 const CHARGE_SELECT = {
   id: true,
   status: true,
   priceAtBooking: true,
   chargeRatio: true,
+  subscriptionId: true,
 } as const;
 
 /**
@@ -160,6 +164,7 @@ type EntryRow = {
   status: BookingStatus;
   priceAtBooking: number;
   chargeRatio: number | null;
+  subscriptionId: string | null;
   client: { membership: PersonRow };
 };
 
@@ -209,7 +214,7 @@ export class DeskService {
     const dayStart = instantAt(date, 0, timezone);
     const dayEnd = instantAt(date, CLOSE_MINUTE, timezone);
 
-    const [events, names, pendingRows, visits, unplaced] = await Promise.all([
+    const [events, names, pendingRows, visits, unplaced, sales] = await Promise.all([
       this.eventRows(tenantId, {
         sessionIds: slots.map((slot) => slot.trainingSessionId),
         tournamentIds: slots.map((slot) => slot.tournamentId),
@@ -220,6 +225,13 @@ export class DeskService {
       // по клубу за местные сутки зала.
       this.attendance.visitsBetween(tenantId, dayStart, dayEnd),
       this.unplacedRows(tenantId, dayStart, dayEnd),
+      // Продажи абонементов — тоже по клубу, а не по залу: продают у стойки,
+      // а стойка к столу не привязана. Сутки — местные сутки этого зала.
+      this.prisma.subscription.aggregate({
+        where: { tenantId, purchasedAt: { gte: dayStart, lt: dayEnd } },
+        _count: { _all: true },
+        _sum: { priceAtPurchase: true },
+      }),
     ]);
 
     // Неотмеченное этого дня — в «Требует отметки», даже если оно старше
@@ -289,11 +301,14 @@ export class DeskService {
       // Деньги считаются по КОПИЯМ цен на момент записи, а не по цене типа:
       // поднятый на прошлой неделе прайс не должен задним числом переписывать
       // то, о чём клуб уже договорился с клиентом.
-      money: moneyOf({
-        tables: bookings.map(charge),
-        trainings: events.sessions.flatMap((session) => session.bookings.map(charge)),
-        tournaments: events.tournaments.flatMap((tournament) => tournament.registrations.map(charge)),
-      }),
+      money: moneyOf(
+        {
+          tables: bookings.map(charge),
+          trainings: events.sessions.flatMap((session) => session.bookings.map(charge)),
+          tournaments: events.tournaments.flatMap((tournament) => tournament.registrations.map(charge)),
+        },
+        { count: sales._count._all, amount: sales._sum.priceAtPurchase ?? 0 },
+      ),
 
       policy: {
         noShowChargePercent: policy.noShowChargePercent,
@@ -991,6 +1006,7 @@ const participant = (row: EntryRow, view: View): DeskParticipant => ({
   entryId: row.id,
   status: row.status,
   chargePercent: row.chargeRatio,
+  bySubscription: row.subscriptionId !== null,
   mark: view.marks.get(row.id) ?? null,
 });
 
@@ -1014,10 +1030,12 @@ const charge = (row: {
   priceAtBooking: number;
   status: BookingStatus;
   chargeRatio: number | null;
+  subscriptionId?: string | null;
 }): ChargeRow => ({
   price: row.priceAtBooking,
   status: row.status,
   chargeRatio: row.chargeRatio,
+  prepaid: (row.subscriptionId ?? null) !== null,
 });
 
 function isId(value: string | null): value is string {

@@ -33,6 +33,7 @@ const participant = (over: Partial<DeskParticipant> = {}): DeskParticipant => ({
   entryId: 'e1',
   status: 'BOOKED',
   chargePercent: null,
+  bySubscription: false,
   mark: null,
   ...over,
 });
