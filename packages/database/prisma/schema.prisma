@@ -876,6 +876,10 @@ model TenantMembership {
   guardianshipsCreatedInClub Guardianship[] @relation("GuardianshipCreatedInClub")
   guardianshipsRevokedInClub Guardianship[] @relation("GuardianshipRevokedInClub")
 
+  // Абонементы, проданные этим сотрудником, и его ручные корректировки баланса.
+  subscriptionsSold  Subscription[]       @relation("SubscriptionSeller")
+  ledgerEntriesAdded SubscriptionLedger[] @relation("SubscriptionLedgerAuthor")
+
   // Первичный ключ и одновременно мишень всех составных FK клубных таблиц.
   @@id([userId, tenantId])
   @@index([tenantId, role])
@@ -1034,6 +1038,14 @@ model TrainingBooking {
   // оплате абонементом — иначе стоимость визита не восстановить вообще.
   priceAtBooking Int
 
+  /// Абонемент, которым оплачена запись. Пусто — запись по цене.
+  ///
+  /// Ключ по трём полям: абонемент обязан принадлежать клиенту ЭТОЙ записи.
+  /// У записи по абонементу chargeRatio — судьба визита: 0 — возвращён,
+  /// 100 — израсходован (CHECK), а не доля цены.
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId, clientId, tenantId], references: [id, clientId, tenantId], onDelete: Restrict)
+
   cancelledAt DateTime? @db.Timestamptz(3)
   chargeRatio Int? // процент списания по политике отмены клуба (0..100)
   paymentId   String?   @unique
@@ -1139,6 +1151,10 @@ model TournamentRegistration {
   /// source = MANUAL, см. TableBooking.createdByUserId.
   createdByUserId String?
   createdBy       TenantMembership? @relation("TournamentRegistrationAuthor", fields: [createdByUserId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
+  /// Абонемент, которым оплачена регистрация, — см. TrainingBooking.subscriptionId.
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId, clientId, tenantId], references: [id, clientId, tenantId], onDelete: Restrict)
 
   priceAtBooking Int // копия цены участия на момент регистрации, копейки
 
@@ -1511,7 +1527,10 @@ model SubscriptionPlan {
   tenant       Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   name         String
   visitsCount  Int? // сколько визитов покрывает тариф; null = безлимит
-  durationDays Int // срок действия абонемента в днях
+  // Срок в днях, до конца местного дня последнего из них; null = бессрочно
+  // (детский абонемент «Енисея»). Так же, как визиты: null — «без предела»,
+  // а не магический ноль. Безлимит без срока запрещён CHECK'ом.
+  durationDays Int?
   price        Int // копейки
 
   // Покрывает ли тариф аренду стола. Отдельным флагом, а не связью: столы —
@@ -1583,17 +1602,33 @@ model Subscription {
   plan     SubscriptionPlan @relation(fields: [planId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
   remainingVisits Int? // текущий остаток визитов; null = безлимит
-  purchasedAt     DateTime  @default(now())
-  expiresAt       DateTime? @db.Timestamptz(3)
+  purchasedAt     DateTime  @default(now()) @db.Timestamptz(3)
+  expiresAt       DateTime? @db.Timestamptz(3) // null = бессрочно
+
+  /// Цена на момент продажи, копейки. Снимок, как priceAtBooking у записи:
+  /// поднятый завтра прайс не переписывает то, за что клиент уже заплатил.
+  priceAtPurchase Int
+
+  /// Кто продал у стойки. Продажа — это деньги, прошедшие мимо системы, и
+  /// «кто принял 49 000 ₽» должно иметь ответ. У онлайн-покупки автора нет,
+  /// зато есть платёж: CHECK требует одно из двух.
+  issuedByUserId String?
+  issuedBy       TenantMembership? @relation("SubscriptionSeller", fields: [issuedByUserId, tenantId], references: [userId, tenantId], onDelete: Restrict)
 
   // Платёж за покупку самого абонемента. Раньше эти деньги в схеме оседать
   // было негде: клиент платил 49 000 ₽, а следа не оставалось.
   paymentId String?  @unique
   payment   Payment? @relation("SubscriptionPurchase", fields: [paymentId], references: [id], onDelete: Restrict)
 
-  ledger SubscriptionLedger[]
+  ledger                  SubscriptionLedger[]
+  trainingBookings        TrainingBooking[]
+  tournamentRegistrations TournamentRegistration[]
 
   @@unique([id, tenantId])
+  // Мишень составного ключа записи: запись оплачивается абонементом ЕЁ ЖЕ
+  // клиента. Без клиента в ключе родитель, записывая ребёнка, мог бы
+  // заплатить своим абонементом — и база бы это приняла.
+  @@unique([id, clientId, tenantId])
   @@index([tenantId, clientId])
 }
 
@@ -1623,10 +1658,19 @@ model SubscriptionLedger {
   tableBookingId String?
   tableBooking   TableBooking? @relation(fields: [tableBookingId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
-  createdByUserId String? // кто инициировал, если это ручная корректировка админа
-  createdAt       DateTime @default(now())
+  // Кто инициировал: продавец при покупке, администратор при корректировке.
+  // У движений по записи пусто — их вызывает сама запись.
+  createdByUserId String?
+  createdBy       TenantMembership? @relation("SubscriptionLedgerAuthor", fields: [createdByUserId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
+  /// Причина ручной корректировки — обязательна у неё (CHECK).
+  note String?
+
+  createdAt DateTime @default(now())
 
   @@index([tenantId, subscriptionId])
+  @@index([trainingBookingId])
+  @@index([tournamentRegistrationId])
 }
 
 // ---------------------------------------------------------------------------

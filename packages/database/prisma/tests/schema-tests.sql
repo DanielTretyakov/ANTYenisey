@@ -3,7 +3,7 @@
 -- ради чего заведены.
 -- ---------------------------------------------------------------------------
 --
--- СТАТУС: прогнано на PostgreSQL 18 (19.09.2026) — 92 из 92 сценариев прошли.
+-- СТАТУС: прогнано на PostgreSQL 18 (19.09.2026) — 105 из 105 сценариев прошли.
 -- Дополнительно проверено, что отказы приходят именно от нужных ограничений,
 -- а не по случайной причине: exclusion-констрейнт даёт 23P01, составные
 -- внешние ключи — 23503, частичный уникальный индекс — 23505, check'и — 23514.
@@ -1152,3 +1152,128 @@ DO $$ BEGIN
     RAISE NOTICE 'CL. Учётка ушла вместе с карточкой и фото.. OK (ожидалось)';
   END IF;
 EXCEPTION WHEN others THEN RAISE NOTICE 'CL. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- ---------------------------------------------------------------------------
+-- Абонементы (раздел 21 constraints.sql)
+-- ---------------------------------------------------------------------------
+--
+-- Клиенты u1 и u3 клуба t1, продаёт c1 (членство t1 — роли FK не проверяет).
+-- Тариф sp1 — клуба t1, sp2 — клуба t2.
+
+INSERT INTO "User" (id,email,phone,"birthDate","passwordHash","fullName","createdAt","updatedAt")
+VALUES ('u3','u3@a.ru','+79990000013',DATE '1995-01-01','x','Сидоров Семён',now(),now());
+INSERT INTO "TenantMembership" ("userId","tenantId",role,"createdAt","updatedAt")
+VALUES ('u3','t1','CLIENT',now(),now());
+INSERT INTO "ClientProfile" ("userId","tenantId","createdAt","updatedAt") VALUES ('u3','t1',now(),now());
+
+INSERT INTO "SubscriptionPlan" (id,"tenantId",name,"visitsCount","durationDays",price,"updatedAt")
+VALUES ('sp1','t1','Первая подача',5,30,500000,now()),
+       ('sp2','t2','Чужой тариф',5,30,500000,now());
+
+INSERT INTO "Subscription" (id,"tenantId","clientId","planId","remainingVisits","priceAtPurchase","issuedByUserId","expiresAt")
+VALUES ('s1','t1','u1','sp1',5,500000,'c1',now() + interval '30 days');
+
+-- CM. Безлимит без срока: вечный абонемент клуб не продаёт, а опечатка — продаёт.
+SELECT pg_temp.expect('CM',
+  $q$INSERT INTO "SubscriptionPlan" (id,"tenantId",name,"visitsCount","durationDays",price,"updatedAt")
+     VALUES ('spx','t1','Вечный',NULL,NULL,100,now())$q$,
+  '23514', 'SubscriptionPlan_terms_sane');
+
+-- CN. Абонемент клуба t1 на тариф клуба t2.
+SELECT pg_temp.expect('CN',
+  $q$INSERT INTO "Subscription" (id,"tenantId","clientId","planId","remainingVisits","priceAtPurchase","issuedByUserId")
+     VALUES ('sx','t1','u1','sp2',5,500000,'c1')$q$,
+  '23503', 'Subscription_planId_tenantId_fkey');
+
+-- CO. Абонемент ниоткуда: ни продавца, ни онлайн-платежа.
+SELECT pg_temp.expect('CO',
+  $q$INSERT INTO "Subscription" (id,"tenantId","clientId","planId","remainingVisits","priceAtPurchase")
+     VALUES ('sx','t1','u1','sp1',5,500000)$q$,
+  '23514', 'Subscription_has_origin');
+
+-- CP. Остаток ниже нуля.
+SELECT pg_temp.expect('CP',
+  $q$UPDATE "Subscription" SET "remainingVisits" = -1 WHERE id = 's1'$q$,
+  '23514', 'Subscription_visits_non_negative');
+
+-- CQ. Запись u3 оплачена абонементом u1 — то, от чего составной ключ и
+--     заведён: родитель платит за ребёнка ЕГО абонементом, а не своим.
+SELECT pg_temp.expect('CQ',
+  $q$INSERT INTO "TrainingBooking" (id,"tenantId","sessionId","clientId","priceAtBooking","subscriptionId","updatedAt")
+     VALUES ('tbx','t1','ts1','u3',70000,'s1',now())$q$,
+  '23503', 'TrainingBooking_subscriptionId_clientId_tenantId_fkey');
+
+-- CR. Своя запись своим абонементом и списание визита — проходят.
+DO $$ BEGIN
+  INSERT INTO "TrainingBooking" (id,"tenantId","sessionId","clientId","priceAtBooking","subscriptionId","updatedAt")
+  VALUES ('tbs1','t1','ts1','u1',70000,'s1',now());
+  INSERT INTO "SubscriptionLedger" (id,"tenantId","subscriptionId",delta,"balanceAfter",reason,"trainingBookingId")
+  VALUES ('lg1','t1','s1',-1,4,'VISIT_CHARGED','tbs1');
+  RAISE NOTICE 'CR. Запись абонементом и списание приняты.. OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'CR. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- CS. Половина визита: у записи по абонементу процент — только 0 или 100.
+SELECT pg_temp.expect('CS',
+  $q$UPDATE "TrainingBooking" SET status = 'CANCELLED', "cancelledAt" = now(), "chargeRatio" = 50 WHERE id = 'tbs1'$q$,
+  '23514', 'TrainingBooking_subscription_ratio');
+
+-- CT. Возврат с минусом.
+SELECT pg_temp.expect('CT',
+  $q$INSERT INTO "SubscriptionLedger" (id,"tenantId","subscriptionId",delta,"balanceAfter",reason,"trainingBookingId")
+     VALUES ('lgx','t1','s1',-1,3,'VISIT_REFUNDED','tbs1')$q$,
+  '23514', 'SubscriptionLedger_delta_matches_reason');
+
+-- CU. Сгорание строкой журнала: «сгорел» выводится из статуса записи, а
+--     строка осталась бы ложью, стоило клубу исправить неявку.
+SELECT pg_temp.expect('CU',
+  $q$INSERT INTO "SubscriptionLedger" (id,"tenantId","subscriptionId",delta,"balanceAfter",reason,"trainingBookingId")
+     VALUES ('lgx','t1','s1',0,4,'VISIT_BURNED','tbs1')$q$,
+  '23514', 'SubscriptionLedger_delta_matches_reason');
+
+-- CV. Корректировка без причины.
+SELECT pg_temp.expect('CV',
+  $q$INSERT INTO "SubscriptionLedger" (id,"tenantId","subscriptionId",delta,"balanceAfter",reason,"createdByUserId")
+     VALUES ('lgx','t1','s1',-4,0,'ADMIN_ADJUSTMENT','c1')$q$,
+  '23514', 'SubscriptionLedger_adjustment_explained');
+
+-- CW. Правка строки журнала абонементов.
+DO $$
+DECLARE code text;
+BEGIN
+  UPDATE "SubscriptionLedger" SET delta = 0 WHERE id = 'lg1';
+  RAISE NOTICE 'CW. ПРОВАЛ: строку журнала абонементов переписали!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+  IF code = '23001' THEN
+    RAISE NOTICE 'CW. Правка журнала абонементов отклонена... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'CW. ПРОВАЛ: отказ пришёл от %', code;
+  END IF;
+END $$;
+
+-- CX. Удаление строки журнала без флага уборки.
+DO $$
+DECLARE code text;
+BEGIN
+  DELETE FROM "SubscriptionLedger" WHERE id = 'lg1';
+  RAISE NOTICE 'CX. ПРОВАЛ: строку журнала абонементов удалили!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+  IF code = '23001' THEN
+    RAISE NOTICE 'CX. Удаление без флага уборки отклонено... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'CX. ПРОВАЛ: отказ пришёл от %', code;
+  END IF;
+END $$;
+
+-- CY. Уборка смоука с флагом удаляет — иначе пробные записи, на которые
+--     журнал ссылается с Restrict, не убрать никогда.
+DO $$ BEGIN
+  PERFORM set_config('yenisey.purge_probes', 'on', true);
+  DELETE FROM "SubscriptionLedger" WHERE id = 'lg1';
+  IF EXISTS (SELECT 1 FROM "SubscriptionLedger" WHERE id = 'lg1') THEN
+    RAISE NOTICE 'CY. ПРОВАЛ: строка пережила уборку';
+  ELSE
+    RAISE NOTICE 'CY. Уборка с флагом удаляет журнал......... OK (ожидалось)';
+  END IF;
+EXCEPTION WHEN others THEN RAISE NOTICE 'CY. ПРОВАЛ: %', SQLERRM; END $$;

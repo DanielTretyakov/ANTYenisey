@@ -57,6 +57,9 @@ async function main(): Promise<void> {
   // Порядок важен: на связях стоит onDelete: Restrict, база не даст удалить
   // пользователя, пока на него ссылаются сессии и профиль.
   await prisma.refreshToken.deleteMany({ where: { userId: { in: ids } } });
+  // Журнал абонементов — раньше всего: он ссылается и на записи, и на
+  // абонементы, а удалять его база разрешает только под флагом уборки.
+  await purgeProbeLedger(ids);
   // Визиты — раньше броней и записей: визит ссылается на запись, по которой
   // отмечен, и на связи стоит Restrict.
   //
@@ -101,6 +104,9 @@ async function main(): Promise<void> {
 
   const coached = await removeProbeCoaching(ids);
 
+  // Абонементы — после записей: запись ссылается на абонемент своего клиента.
+  const subscriptions = await prisma.subscription.deleteMany({ where: { clientId: { in: ids } } });
+
   const removed = await prisma.user.deleteMany({ where });
 
   // Сами мероприятия, ради которых смоук эти записи и заводил.
@@ -133,8 +139,40 @@ async function main(): Promise<void> {
     `Убрано мероприятий смоука: занятий ${sessions.count + coached.sessions}, турниров ${tournaments.count}`,
   );
   console.log(`Убрано спаррингов пробных тренеров: ${coached.sparrings}`);
+  console.log(`Убрано абонементов пробных клиентов: ${subscriptions.count}`);
 
   await removeProbeRooms();
+}
+
+// Префикс, который смоук ставит своим тарифам. Шире брать нельзя: скрипт не
+// должен уметь снести настоящие тарифы клуба.
+const PROBE_PLAN_PREFIX = 'Тариф проверки ';
+
+/**
+ * Журнал абонементов, которого касались пробные учётки.
+ *
+ * Журнал — только вставки, и это держит триггер; DELETE он пропускает лишь
+ * под `SET LOCAL yenisey.purge_probes = 'on'` в той же транзакции. Флаг
+ * локальный: закончилась транзакция — закончилось и разрешение.
+ *
+ * Сюда попадают строки абонементов пробных клиентов и строки по записям,
+ * которые уборка удалит: записи пробных клиентов и любые записи на занятиях
+ * пробных тренеров (см. removeProbeCoaching).
+ */
+async function purgeProbeLedger(ids: string[]): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('yenisey.purge_probes', 'on', true)`;
+    await tx.subscriptionLedger.deleteMany({
+      where: {
+        OR: [
+          { subscription: { clientId: { in: ids } } },
+          { trainingBooking: { clientId: { in: ids } } },
+          { trainingBooking: { session: { coachId: { in: ids } } } },
+          { tournamentRegistration: { clientId: { in: ids } } },
+        ],
+      },
+    });
+  });
 }
 
 /**
@@ -196,7 +234,13 @@ async function removeProbeRooms(): Promise<void> {
     where: { name: { startsWith: PROBE_HALL_PREFIX }, tables: { none: {} } },
   });
 
-  console.log(`Убрано залов смоука: ${halls.count}, столов: ${tables.count}`);
+  // Тарифы смоука — те, по которым не осталось ни одного абонемента. Связки с
+  // типами уходят каскадом вместе с тарифом.
+  const plans = await prisma.subscriptionPlan.deleteMany({
+    where: { name: { startsWith: PROBE_PLAN_PREFIX }, subscriptions: { none: {} } },
+  });
+
+  console.log(`Убрано залов смоука: ${halls.count}, столов: ${tables.count}, тарифов: ${plans.count}`);
 }
 
 main()
