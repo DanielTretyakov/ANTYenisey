@@ -2579,6 +2579,49 @@ async function coachCard() {
   r = await asAdmin(`/clubs/yenisey/coaches/${coachId}/photo`, { method: 'DELETE' });
   check('фото убрано', 200, r.status);
   assert('и карточка о нём забыла', r.body?.photoFileId === null);
+
+  // --- Статистика. Арифметику держат юнит-тесты `coach-stats.test.ts`, здесь —
+  // доступ и то, что запрос к базе складывается в согласованные цифры.
+  r = await asCoach('/clubs/yenisey/coach/stats');
+  check('своя статистика читается', 200, r.status);
+  assert('по умолчанию — за 90 дней', r.body?.period === 90);
+  assert('у нового тренера занятий нет, и средние пусты',
+    r.body?.sessions === 0 && r.body?.attendanceRate === null && r.body?.averageFill === null);
+
+  r = await asCoach('/clubs/yenisey/coach/stats?period=17');
+  check('произвольный срок отклонён', 400, r.status);
+
+  r = await asClient('/clubs/yenisey/coach/stats');
+  check('клиенту статистика тренера закрыта', 403, r.status);
+
+  r = await asClient(`/clubs/yenisey/coaches/${coachId}/stats`);
+  check('и чужая — тоже', 403, r.status);
+
+  r = await asAdmin('/clubs/yenisey/coaches/net-takogo-trenera/stats');
+  check('статистика не-тренера — 404, а не пустые цифры', 404, r.status);
+
+  // На тренере с историей (сид и прошлые прогоны) — не конкретные числа, а
+  // то, что они сходятся друг с другом.
+  r = await asAdmin('/clubs/yenisey/coaches');
+  let seasoned = null;
+
+  for (const coach of r.body ?? []) {
+    const stats = (await asAdmin(`/clubs/yenisey/coaches/${coach.id}/stats?period=0`)).body;
+
+    if (stats?.sessions > 0) {
+      seasoned = stats;
+      break;
+    }
+  }
+
+  if (seasoned) {
+    assert('записи сходятся: пришли + неявки + отмены + без отметки',
+      seasoned.attended + seasoned.noShows + seasoned.cancelled + seasoned.unmarked === seasoned.entries);
+    assert('посещаемость в пределах 0..100 или пуста',
+      seasoned.attendanceRate === null || (seasoned.attendanceRate >= 0 && seasoned.attendanceRate <= 100));
+  } else {
+    console.log('  ПРОПУЩЕНО: ни у одного тренера клуба нет проведённых занятий');
+  }
 }
 
 async function playerProfile() {

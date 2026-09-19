@@ -1,6 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Patch, Put, Req, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Put, Query, Req, UseInterceptors } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import type { CoachGroup, CoachProfile, PublicCoach } from '@yenisey/types';
+import type { CoachGroup, CoachProfile, CoachStats, PublicCoach } from '@yenisey/types';
 import type { ClubContext } from '../auth/club-context';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Public } from '../auth/decorators/public.decorator';
@@ -8,7 +8,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { SingleFileUpload, uploadedBytes } from '../files/single-file-upload.interceptor';
 import { CoachesService } from './coaches.service';
-import { UpdateCoachProfileDto } from './dto/coach.dto';
+import { CoachStatsQueryDto, UpdateCoachProfileDto } from './dto/coach.dto';
 
 /** Те же соображения, что у загрузки аватара: каждая — `sharp` на сотни миллисекунд. */
 const UPLOAD_LIMIT = { default: { limit: 20, ttl: 60_000 } };
@@ -52,6 +52,12 @@ export class MeCoachController {
   groups(@CurrentClub() club: ClubContext): Promise<CoachGroup[]> {
     return this.coaches.myGroups(club.tenantId, club.userId);
   }
+
+  /** Своя статистика по проведённым занятиям. */
+  @Get('stats')
+  stats(@CurrentClub() club: ClubContext, @Query() query: CoachStatsQueryDto): Promise<CoachStats> {
+    return this.coaches.stats(club.tenantId, club.userId, query.period ?? 90);
+  }
 }
 
 /**
@@ -89,6 +95,21 @@ export class CoachAdminController {
   @Delete('photo')
   removePhoto(@CurrentClub() club: ClubContext, @Param('id') coachId: string): Promise<CoachProfile> {
     return this.coaches.removePhoto(club.tenantId, coachId);
+  }
+
+  /**
+   * Статистика тренера глазами клуба — тот же расчёт, что видит он сам.
+   *
+   * ТЗ просит её в разделе CRM: «статистика посещаемости доступна и по
+   * каждому тренеру».
+   */
+  @Get('stats')
+  stats(
+    @CurrentClub() club: ClubContext,
+    @Param('id') coachId: string,
+    @Query() query: CoachStatsQueryDto,
+  ): Promise<CoachStats> {
+    return this.coaches.stats(club.tenantId, coachId, query.period ?? 90);
   }
 }
 

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { CoachGroup } from '@yenisey/types';
 import { WhenSpan } from '@/components/club/When';
+import { CoachStatsPanel } from '@/components/coach/CoachStatsPanel';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -44,6 +45,18 @@ export default function CoachGroupsPage() {
       <h1 className="mb-6 text-[2rem] leading-tight">Мои группы</h1>
 
       {error && <Alert tone="warning">{error}</Alert>}
+
+      {!error && (
+        <Card className="mb-6">
+          <CardHeader
+            title="Статистика"
+            description="По проведённым занятиям. Эти же цифры клуб видит в вашей карточке."
+          />
+          <CardBody>
+            <CoachStatsPanel load={club.coachStats} />
+          </CardBody>
+        </Card>
+      )}
 
       {groups?.length === 0 && (
         <Alert tone="info">Впереди занятий нет. Занятия ставит администратор в расписании зала.</Alert>

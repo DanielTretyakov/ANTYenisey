@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { BookingStatus, Prisma, StoredFileKind } from '@yenisey/database';
-import type { CoachGroup, CoachProfile, PublicCoach } from '@yenisey/types';
+import type { CoachGroup, CoachProfile, CoachStats, CoachStatsPeriod, PublicCoach } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
+import { coachStats, periodStart } from './coach-stats';
 import { FileIntake } from '../files/file-intake.service';
 import { FileStorage } from '../files/file-storage';
 import { PrismaService } from '../prisma/prisma.service';
@@ -223,6 +224,45 @@ export class CoachesService {
         phone: booking.client.membership.user.phone,
       })),
     }));
+  }
+
+  /**
+   * Статистика по своим занятиям.
+   *
+   * Тот же расчёт видит и тренер о себе, и клуб о тренере (ТЗ: «статистика
+   * посещаемости доступна и по каждому тренеру»). Второй расчёт рядом
+   * разошёлся бы с первым, и спорить они стали бы при разговоре о деньгах.
+   */
+  async stats(tenantId: string, coachId: string, period: CoachStatsPeriod): Promise<CoachStats> {
+    // Не тренер этого клуба — 404, а не пустая статистика: «занятий нет» по
+    // опечатке в адресе выглядело бы как настоящий ответ.
+    await this.load(tenantId, coachId);
+
+    const now = new Date();
+    const from = periodStart(period, now);
+
+    const sessions = await this.prisma.trainingSession.findMany({
+      where: {
+        tenantId,
+        coachId,
+        endsAt: { lte: now, ...(from ? { gte: from } : {}) },
+      },
+      select: {
+        endsAt: true,
+        capacity: true,
+        bookings: { select: { status: true } },
+      },
+    });
+
+    return coachStats(
+      sessions.map((session) => ({
+        endsAt: session.endsAt.toISOString(),
+        capacity: session.capacity,
+        entries: session.bookings.map((booking) => booking.status),
+      })),
+      period,
+      now,
+    );
   }
 
   private async load(tenantId: string, userId: string): Promise<CardRow> {

@@ -98,6 +98,9 @@ async function main(): Promise<void> {
   await prisma.trainingBooking.deleteMany({ where: { clientId: { in: ids } } });
   await prisma.tournamentRegistration.deleteMany({ where: { clientId: { in: ids } } });
   await prisma.clientProfile.deleteMany({ where: { userId: { in: ids } } });
+
+  const coached = await removeProbeCoaching(ids);
+
   const removed = await prisma.user.deleteMany({ where });
 
   // Сами мероприятия, ради которых смоук эти записи и заводил.
@@ -127,10 +130,43 @@ async function main(): Promise<void> {
 
   console.log(`Удалено тестовых пользователей: ${removed.count}`);
   console.log(
-    `Убрано мероприятий смоука: занятий ${sessions.count}, турниров ${tournaments.count}`,
+    `Убрано мероприятий смоука: занятий ${sessions.count + coached.sessions}, турниров ${tournaments.count}`,
   );
+  console.log(`Убрано спаррингов пробных тренеров: ${coached.sparrings}`);
 
   await removeProbeRooms();
+}
+
+/**
+ * То, что пробная учётка сделала ТРЕНЕРОМ: спарринги и занятия.
+ *
+ * Смоук выдаёт пробным учёткам роль тренера (карточка, спарринг), а сценарии
+ * расписания берут первого тренера клуба — и следующий прогон, если перед ним
+ * не убирали, вешает свои занятия на пробного. Без этой уборки удаление учётки
+ * упирается в `TrainingSession → CoachProfile` (Restrict), и падает вся уборка.
+ *
+ * Занятие, которое ведёт пробный тренер, — мусор смоука по построению: живое
+ * расписание клуба пробной учёткой не заводится. Поэтому оно убирается целиком,
+ * вместе с чужими записями на него, окнами расписания и визитами.
+ */
+async function removeProbeCoaching(ids: string[]): Promise<{ sessions: number; sparrings: number }> {
+  // Спарринги — брони, где за столом сам тренер. Клиента в них нет, поэтому
+  // уборка броней по clientId их не находит.
+  const sparrings = await prisma.tableBooking.deleteMany({ where: { coachId: { in: ids } } });
+
+  const sessionIds = (
+    await prisma.trainingSession.findMany({ where: { coachId: { in: ids } }, select: { id: true } })
+  ).map((session) => session.id);
+
+  // Визиты ссылаются и на запись, и на тренера — оба раза с Restrict.
+  await prisma.visitLog.deleteMany({
+    where: { OR: [{ coachId: { in: ids } }, { trainingBooking: { sessionId: { in: sessionIds } } }] },
+  });
+  await prisma.trainingBooking.deleteMany({ where: { sessionId: { in: sessionIds } } });
+  await prisma.dayClosure.deleteMany({ where: { trainingSessionId: { in: sessionIds } } });
+  const sessions = await prisma.trainingSession.deleteMany({ where: { id: { in: sessionIds } } });
+
+  return { sessions: sessions.count, sparrings: sparrings.count };
 }
 
 /**

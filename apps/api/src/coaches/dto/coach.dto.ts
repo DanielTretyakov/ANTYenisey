@@ -1,10 +1,24 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
 import {
+  COACH_STATS_PERIODS,
   MAX_COACH_SOCIAL_LINKS,
   type CoachSocialLink,
+  type CoachStatsPeriod,
   type UpdateCoachProfileRequest,
 } from '@yenisey/types';
+
+/**
+ * Срок статистики. Из адреса приходит строкой, поэтому сначала число, потом
+ * проверка по списку: произвольный срок («за 17 дней») ничего не объясняет и
+ * только множит варианты одной и той же цифры. Не прислан — 90 дней.
+ */
+export class CoachStatsQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsIn(COACH_STATS_PERIODS, { message: 'Срок — 30, 90 или 365 дней, либо 0 — за всё время' })
+  period?: CoachStatsPeriod;
+}
 
 /**
  * Ссылка на соцсеть. Что адрес — именно http(s), проверяет `parseSocialLinks`:

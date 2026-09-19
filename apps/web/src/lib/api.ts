@@ -16,6 +16,8 @@ import type {
   ClubSearchQuery,
   CoachGroup,
   CoachProfile,
+  CoachStats,
+  CoachStatsPeriod,
   PublicCoach,
   UpdateCoachProfileRequest,
   FavouriteClub,
@@ -760,6 +762,14 @@ export function clubApi(slug: string = TENANT_SLUG) {
 
     /** Свои занятия вместе с составом записавшихся. */
     coachGroups: (): Promise<CoachGroup[]> => authorized(`${club}/coach/groups`),
+
+    /** Своя статистика по проведённым занятиям. */
+    coachStats: (period: CoachStatsPeriod): Promise<CoachStats> =>
+      authorized(`${club}/coach/stats?period=${period}`),
+
+    /** Та же статистика глазами клуба — расчёт один. */
+    coachStatsOf: (coachId: string, period: CoachStatsPeriod): Promise<CoachStats> =>
+      authorized(`${club}/coaches/${coachId}/stats?period=${period}`),
 
     // Правка чужой карточки администратором. `coaches()` выше — другое: это
     // список тренеров для выбора в расписании.
