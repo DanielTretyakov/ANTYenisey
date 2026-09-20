@@ -1,4 +1,30 @@
+import type { BookingEntry } from '@yenisey/types';
+import { formatKopecks } from './money';
 import { plural } from './plural';
+
+/** Цена записи в строке: сумма — или «абонементом», если платил абонемент. */
+export function entryPriceLabel(entry: Pick<BookingEntry, 'price' | 'paidBy'>): string {
+  return entry.paidBy ? `абонементом «${entry.paidBy.planName}»` : formatKopecks(entry.price);
+}
+
+/**
+ * Подпись кнопки отмены: что человек потеряет, если отменит сейчас. У записи
+ * по абонементу — визит (вернётся или сгорит), у записи по цене — процент.
+ */
+export function cancelButtonLabel(
+  entry: Pick<BookingEntry, 'paidBy' | 'cancelOutcome' | 'cancelChargePercentNow'>,
+): string {
+  if (entry.paidBy) {
+    return entry.cancelOutcome === 'BURN' ? 'Отменить (визит сгорит)' : 'Отменить (визит вернётся)';
+  }
+
+  return entry.cancelChargePercentNow ? `Отменить (спишется ${entry.cancelChargePercentNow}%)` : 'Отменить';
+}
+
+/** Хвост статуса отменённой или пропущенной записи по абонементу. */
+export function visitFateLabel(chargePercent: number | null): string {
+  return chargePercent === 100 ? 'визит сгорел' : 'визит возвращён';
+}
 
 /**
  * Подписи абонементов — одинаковые в каталоге, в карточке человека и в

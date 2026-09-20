@@ -12,7 +12,7 @@ import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { api, ApiError, clubApi } from '@/lib/api';
 import { cn } from '@/lib/cn';
-import { formatKopecks } from '@/lib/money';
+import { cancelButtonLabel, entryPriceLabel, visitFateLabel } from '@/lib/subscriptions';
 import { usePersonSwitch } from '@/lib/usePersonSwitch';
 import { useSession } from '@/lib/useSession';
 
@@ -211,6 +211,11 @@ function statusOf(entry: BookingEntry): string {
     return entry.cancellable ? STATUS_LABELS.BOOKED : 'Ждёт отметки клуба';
   }
 
+  // У записи по абонементу процент — судьба визита, а не деньги.
+  if (entry.paidBy && (entry.status === 'CANCELLED' || entry.status === 'NO_SHOW')) {
+    return `${STATUS_LABELS[entry.status]}, ${visitFateLabel(entry.chargePercent)}`;
+  }
+
   if (entry.status === 'NO_SHOW' && entry.chargePercent === 0) {
     return 'Неявка, без списания';
   }
@@ -284,7 +289,7 @@ function Row({
         <span className="block text-[0.9375rem] text-text">{entry.title}</span>
         <span className="mt-0.5 block text-[0.8125rem] text-text-muted">
           {entry.subtitle ? `${entry.subtitle} · ` : ''}
-          {formatKopecks(entry.price)}
+          {entryPriceLabel(entry)}
         </span>
       </span>
 
@@ -294,8 +299,7 @@ function Row({
           начала запись не отменяется, а отмечается. */}
       {entry.cancellable && canCancel && (
         <Button variant="danger" size="sm" pending={pending} onClick={() => void cancel()}>
-          Отменить
-          {entry.cancelChargePercentNow ? ` (спишется ${entry.cancelChargePercentNow}%)` : ''}
+          {cancelButtonLabel(entry)}
         </Button>
       )}
     </div>

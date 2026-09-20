@@ -14,6 +14,7 @@ import { api, ApiError } from '@/lib/api';
 import { clubAccent } from '@/lib/clubTheme';
 import { cn } from '@/lib/cn';
 import { formatKopecks } from '@/lib/money';
+import { entryPriceLabel } from '@/lib/subscriptions';
 import { roleInClub } from '@/lib/membership';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { usePersonSwitch } from '@/lib/usePersonSwitch';
@@ -311,7 +312,7 @@ function MyEvents({
               </span>
 
               <span className="text-[0.875rem] whitespace-nowrap text-text-muted">
-                {formatKopecks(entry.price)}
+                {entryPriceLabel(entry)}
               </span>
             </li>
           ))}
@@ -452,7 +453,12 @@ function EventRow({
           )}
 
           <span className="mt-0.5 block text-[0.8125rem] text-text-muted">
-            {formatKopecks(event.price)} · {seatsLabel(event)}
+            {/* Подсказка, чем будет оплачена запись: абонементом — вместо цены.
+                Обещанием это не считается: выбор делается в момент записи. */}
+            {event.payWith && !event.registered
+              ? `${formatKopecks(event.price)} — абонементом «${event.payWith.planName}»`
+              : formatKopecks(event.price)}{' '}
+            · {seatsLabel(event)}
             {event.registeredCount > 0 && (
               <>
                 {' · '}

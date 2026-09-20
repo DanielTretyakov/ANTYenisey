@@ -10,6 +10,7 @@ import { ChildFamilyCard, ParentFamilyCard } from '@/components/family/FamilyCar
 import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { AppShell } from '@/components/layout/AppShell';
 import { PlayerEditor } from '@/components/player/PlayerEditor';
+import { MySubscriptions } from '@/components/subscriptions/MySubscriptions';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -66,6 +67,8 @@ export default function CabinetPage() {
         ) : (
           <PlayerEditor key="self" name={user.fullName} readOnly={isChildBirthDate(user.birthDate)} />
         ))}
+
+      {user && <MySubscriptions key={family.selected?.id ?? 'self'} forPerson={family.selected?.id ?? null} />}
 
       {user && canBeGuardianBirthDate(user.birthDate) && (
         <ParentFamilyCard
