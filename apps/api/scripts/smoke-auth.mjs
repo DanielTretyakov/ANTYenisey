@@ -1880,6 +1880,7 @@ async function main() {
   await playerProfile();
   await coachCard();
   await sparring();
+  await subscriptions();
   await family();
   await autoNoShow(asMe);
 
@@ -2334,6 +2335,193 @@ async function autoNoShow(asMe) {
  * профиль. Картинки делает `sharp` из зависимостей API: JPEG с EXIF и
  * координатами нужен настоящий, иначе проверять выброс метаданных не на чем.
  */
+/**
+ * Абонементы: продажа, списание визита при записи, возврат при отмене и
+ * судьба визита при неявке.
+ *
+ * Здесь проверяется то, чего не видят ни типы, ни юнит-тесты правил: что
+ * визит списывается в одной транзакции с записью, что гонка двух записей при
+ * одном визите разводится блокировкой, и что при неявке визит не возвращается,
+ * а при прощении — возвращается.
+ */
+async function subscriptions() {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('\n=== 34. Абонементы — ПРОПУЩЕНЫ (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 34. Абонементы');
+
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+
+  let r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const asAdmin = as(r.body?.accessToken ?? '');
+
+  r = await post('/auth/register', registration({ lastName: 'Абонементов', firstName: 'Роман' }));
+  const clientId = r.body?.user?.id;
+  const asClient = as(r.body?.accessToken ?? '');
+
+  r = await asAdmin('/clubs/yenisey/training-types');
+  const trainingTypeId = (r.body ?? [])[0]?.id;
+  r = await asAdmin('/clubs/yenisey/coaches');
+  const coachId = (r.body ?? [])[0]?.id;
+
+  if (!trainingTypeId || !coachId) {
+    console.log('  ПРОПУЩЕНО: в клубе нет типа тренировки или тренера');
+    return;
+  }
+
+  // --- Тариф
+  const planBody = {
+    // Имя с точным префиксом уборки («Тариф проверки ») — иначе тариф
+    // переживёт clean-probes и останется в клубе навсегда.
+    name: 'Тариф проверки визитов',
+    visitsCount: 1,
+    durationDays: 30,
+    price: 100000,
+    trainingTypeIds: [trainingTypeId],
+    tournamentTypeIds: [],
+  };
+
+  r = await asClient('/clubs/yenisey/subscription-plans', { method: 'POST', json: planBody });
+  check('клиент тарифы не заводит', 403, r.status);
+
+  r = await asAdmin('/clubs/yenisey/subscription-plans', {
+    method: 'POST',
+    json: { ...planBody, visitsCount: null, durationDays: null },
+  });
+  check('вечный безлимит отклонён', 400, r.status);
+
+  r = await asAdmin('/clubs/yenisey/subscription-plans', { method: 'POST', json: planBody });
+  check('тариф заведён', 201, r.status);
+  const planId = r.body?.id;
+
+  // --- Продажа
+  r = await asClient(`/clubs/yenisey/people/${clientId}/subscriptions`, { method: 'POST', json: { planId } });
+  check('клиент себе абонемент не продаёт', 403, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${clientId}/subscriptions`, { method: 'POST', json: { planId } });
+  check('абонемент продан', 201, r.status);
+  const subscriptionId = r.body?.id;
+  assert('визиты и срок сняты с тарифа', r.body?.remainingVisits === 1 && r.body?.expiresAt !== null);
+  assert('цена зафиксирована', r.body?.priceAtPurchase === 100000);
+
+  /** Остаток визитов глазами самого клиента: он же его и видит в кабинете. */
+  const remaining = async () => {
+    const mine = (await asClient('/me/subscriptions')).body ?? [];
+
+    return mine.find((item) => item.id === subscriptionId)?.remainingVisits;
+  };
+
+  // --- Запись: визит списывается вместе с ней
+  const startsAt = new Date(Date.now() + 5_000);
+  const endsAt = new Date(startsAt.getTime() + 60 * 60_000);
+  const session = async (capacity = 4) =>
+    (
+      await asAdmin('/clubs/yenisey/training-sessions', {
+        method: 'POST',
+        json: {
+          trainingTypeId,
+          coachId,
+          startsAt: startsAt.toISOString(),
+          endsAt: endsAt.toISOString(),
+          capacity,
+        },
+      })
+    ).body?.id;
+
+  const first = await session();
+  const second = await session();
+
+  r = await asClient(`/clubs/yenisey/events`);
+  const hint = (r.body ?? []).find((event) => event.id === first);
+  assert('подсказка у кнопки — абонементом', hint?.payWith?.subscriptionId === subscriptionId);
+
+  // Гонка: два параллельных запроса при одном визите. Один платит
+  // абонементом, второй — по цене; минуса на балансе не бывает.
+  const [one, two] = await Promise.all([
+    asClient(`/clubs/yenisey/trainings/${first}/booking`, { method: 'POST' }),
+    asClient(`/clubs/yenisey/trainings/${second}/booking`, { method: 'POST' }),
+  ]);
+
+  check('первая запись создана', 201, one.status);
+  check('вторая запись создана', 201, two.status);
+  const paid = [one, two].filter((response) => response.body?.paidBy !== null);
+  assert('абонементом оплачена ровно одна запись', paid.length === 1, `оплачено: ${paid.length}`);
+  assert('вторая пошла по цене', [one, two].some((response) => response.body?.paidBy === null));
+  assert('визитов не осталось', (await remaining()) === 0);
+
+  const bySub = paid[0];
+  assert('исход отмены — визит вернётся', bySub.body?.cancelOutcome === 'REFUND');
+  assert('процент отмены у абонемента не показывается', bySub.body?.cancelChargePercentNow === null);
+
+  // --- Отмена возвращает визит (мягкое правило клуба — по умолчанию)
+  r = await asClient(`/clubs/yenisey/trainings/${bySub.body.id}/booking`, { method: 'DELETE' });
+  check('запись абонементом отменена', 200, r.status);
+  assert('визит вернулся', (await remaining()) === 1);
+
+  // --- Неявка визит не возвращает, прощение — возвращает
+  r = await asClient(`/clubs/yenisey/trainings/${bySub.body.id}/booking`, { method: 'POST' });
+  check('записался снова', 201, r.status);
+  assert('визит снова списан', (await remaining()) === 0);
+
+  const entryId = r.body?.entryId;
+  await new Promise((resolve) => setTimeout(resolve, Math.max(startsAt.getTime() - Date.now() + 500, 0)));
+
+  r = await asAdmin(`/clubs/yenisey/desk/attendance/training/${entryId}`, { method: 'PUT', json: { status: 'NO_SHOW' } });
+  check('неявка отмечена', 200, r.status);
+  assert('процент неявки по абонементу — 100', r.body?.chargePercent === 100);
+  assert('визит не вернулся', (await remaining()) === 0);
+
+  r = await asAdmin(`/clubs/yenisey/desk/attendance/training/${entryId}`, {
+    method: 'PUT',
+    json: { status: 'NO_SHOW', waiveCharge: true, reason: 'Проверка прощения' },
+  });
+  check('неявка прощена', 200, r.status);
+  assert('визит вернулся', (await remaining()) === 1);
+
+  // --- Покрытие тарифа. Проверяется, ПОКА абонемент действует: у выбранного
+  // абонемента правило защищает купленное, а не тариф сам по себе.
+  r = await asAdmin(`/clubs/yenisey/subscription-plans/${planId}`, {
+    method: 'PATCH',
+    json: { ...planBody, trainingTypeIds: [] },
+  });
+  check('услугу из проданного тарифа не убрать', 409, r.status);
+
+  // --- Корректировка
+  r = await asAdmin(`/clubs/yenisey/people/${clientId}/subscriptions/${subscriptionId}/adjust`, {
+    method: 'POST',
+    json: { delta: -1, reason: '   ' },
+  });
+  check('корректировка без причины отклонена', 400, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${clientId}/subscriptions/${subscriptionId}/adjust`, {
+    method: 'POST',
+    json: { delta: -5, reason: 'Больше, чем есть' },
+  });
+  check('корректировка ниже нуля отклонена', 400, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${clientId}/subscriptions/${subscriptionId}/adjust`, {
+    method: 'POST',
+    json: { delta: -1, reason: 'Возврат абонемента' },
+  });
+  check('корректировка до нуля прошла', 201, r.status);
+  assert('остаток ноль', r.body?.remainingVisits === 0);
+
+  r = await asAdmin(`/clubs/yenisey/people/${clientId}/subscriptions/${subscriptionId}/ledger`);
+  const reasons = (r.body ?? []).map((row) => row.reason);
+  assert('в журнале нет строк «сгорел»', !reasons.includes('VISIT_BURNED'));
+  assert('журнал сошёлся с остатком', (r.body ?? []).reduce((sum, row) => sum + row.delta, 0) === 0);
+
+  // --- Изоляция клубов
+  r = await asAdmin(`/clubs/sayany/people/${clientId}/subscriptions`, { method: 'POST', json: { planId } });
+  assert('чужой клуб не отдаёт продажу', r.status === 403 || r.status === 404, `получено ${r.status}`);
+}
+
 /**
  * Спарринг: стол, который берёт тренер.
  *

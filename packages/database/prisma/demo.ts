@@ -38,6 +38,77 @@ const TRAININGS: { day: number; hour: number; type: string; capacity: number }[]
   { day: 5, hour: 19, type: 'Общая групповая тренировка', capacity: 12 },
 ];
 
+/**
+ * Тарифы абонементов «Енисея» — прайс из ТЗ (раздел «Прайс-лист»).
+ *
+ * В демо, а не в сиде: это цены конкретного клуба, а не устройство платформы,
+ * и у следующего клуба они будут свои. Цена в рублях — переводится в копейки
+ * при записи; `visits: null` — безлимит, `days: null` — бессрочно.
+ *
+ * Покрытие задаётся названиями услуг клуба: связка тарифа с типом ссылается
+ * на конкретный тип, а не на категорию.
+ */
+const PLANS: {
+  name: string;
+  trainings: string[];
+  tournaments: string[];
+  variants: { visits: number | null; days: number | null; price: number }[];
+}[] = [
+  {
+    name: 'Абонемент на детские тренировки',
+    trainings: ['Детская тренировка'],
+    tournaments: [],
+    // «Визиты бессрочны» — так в ТЗ: срока у этого тарифа нет вовсе.
+    variants: [
+      { visits: 8, days: null, price: 4_000 },
+      { visits: 12, days: null, price: 5_300 },
+      { visits: 16, days: null, price: 6_800 },
+      { visits: 20, days: null, price: 8_300 },
+      { visits: 30, days: null, price: 12_000 },
+      { visits: 45, days: null, price: 17_400 },
+      { visits: 60, days: null, price: 22_500 },
+      { visits: 80, days: null, price: 29_000 },
+      { visits: 100, days: null, price: 35_000 },
+    ],
+  },
+  {
+    name: 'Первая подача',
+    trainings: ['Первая подача (для начинающих)'],
+    tournaments: ['Клуб 50'],
+    variants: [
+      { visits: 5, days: 30, price: 2_700 },
+      { visits: 10, days: 30, price: 5_250 },
+      { visits: 20, days: 90, price: 10_200 },
+      { visits: 30, days: 90, price: 14_850 },
+      { visits: 45, days: 180, price: 21_600 },
+      { visits: 60, days: 180, price: 27_000 },
+      { visits: 80, days: 365, price: 33_600 },
+      { visits: 100, days: 365, price: 39_000 },
+    ],
+  },
+  {
+    name: 'Повышаем обороты',
+    trainings: ['Общая групповая тренировка'],
+    // Все типы турниров клуба; аренда стола этим тарифом пока не покрывается
+    // (флаги в схеме есть, правило — следующей фазой).
+    tournaments: ['Клуб 50', 'Клуб 100', 'Клуб 200', 'Клуб 300', 'Абсолют', 'Пятничное турне'],
+    variants: [
+      { visits: 5, days: 30, price: 3_150 },
+      { visits: 10, days: 30, price: 5_950 },
+      { visits: null, days: 30, price: 10_000 },
+      { visits: 15, days: 90, price: 8_600 },
+      { visits: 25, days: 90, price: 14_000 },
+      { visits: null, days: 90, price: 28_000 },
+      { visits: 35, days: 180, price: 19_000 },
+      { visits: 50, days: 180, price: 26_250 },
+      { visits: null, days: 180, price: 52_000 },
+      { visits: 70, days: 365, price: 35_500 },
+      { visits: 100, days: 365, price: 49_000 },
+      { visits: null, days: 365, price: 95_000 },
+    ],
+  },
+];
+
 /** Турниры по выходным — как их и проводит клуб. */
 const TOURNAMENTS: { day: number; hour: number; type: string }[] = [
   { day: 2, hour: 19, type: 'Пятничное турне' },
@@ -138,7 +209,9 @@ async function main(): Promise<void> {
     tournaments += 1;
   }
 
-  console.log(`Демо-данные: занятий ${sessions}, турниров ${tournaments}.`);
+  const plans = await seedPlans(tenant.id);
+
+  console.log(`Демо-данные: занятий ${sessions}, турниров ${tournaments}, тарифов абонементов ${plans}.`);
   console.log('Занятия и турниры в расписание зала НЕ ставятся: сетку рисует администратор.');
 }
 
@@ -222,6 +295,64 @@ function instantAt(daysAhead: number, hour: number, timezone: string): Date {
   if (shift < -12) shift += 24;
 
   return new Date(guess.getTime() - shift * HOUR);
+}
+
+/**
+ * Тарифы абонементов из прайса «Енисея».
+ *
+ * Идемпотентно, как и остальное демо: вариант опознаётся по тройке «название
+ * + визиты + срок». Покрытие заводится только для услуг, которые в клубе есть.
+ */
+async function seedPlans(tenantId: string): Promise<number> {
+  let created = 0;
+
+  for (const plan of PLANS) {
+    const trainingTypes = await prisma.trainingType.findMany({
+      where: { tenantId, name: { in: plan.trainings } },
+      select: { id: true },
+    });
+    const tournamentTypes = await prisma.tournamentType.findMany({
+      where: { tenantId, name: { in: plan.tournaments } },
+      select: { id: true },
+    });
+
+    for (const variant of plan.variants) {
+      const existing = await prisma.subscriptionPlan.findFirst({
+        where: {
+          tenantId,
+          name: plan.name,
+          visitsCount: variant.visits,
+          durationDays: variant.days,
+        },
+        select: { id: true },
+      });
+
+      if (existing) continue;
+
+      const row = await prisma.subscriptionPlan.create({
+        data: {
+          tenantId,
+          name: plan.name,
+          visitsCount: variant.visits,
+          durationDays: variant.days,
+          // Деньги в схеме — копейки, и прайс выше записан в рублях.
+          price: variant.price * 100,
+        },
+        select: { id: true },
+      });
+
+      await prisma.subscriptionPlanTrainingType.createMany({
+        data: trainingTypes.map((type) => ({ planId: row.id, trainingTypeId: type.id, tenantId })),
+      });
+      await prisma.subscriptionPlanTournamentType.createMany({
+        data: tournamentTypes.map((type) => ({ planId: row.id, tournamentTypeId: type.id, tenantId })),
+      });
+
+      created += 1;
+    }
+  }
+
+  return created;
 }
 
 main()
