@@ -7,7 +7,8 @@ import { Alert } from '@/components/ui/Alert';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { api, ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
-import { remainingLabel, validUntilLabel } from '@/lib/subscriptions';
+import { subscriptionAlert, type AlertLevel } from '@/lib/subscriptionAlert';
+import { remainingLabel, subscriptionAlertLabel, validUntilLabel } from '@/lib/subscriptions';
 
 /**
  * Абонементы в кабинете — по всем клубам сразу.
@@ -55,9 +56,10 @@ export function MySubscriptions({ forPerson }: { forPerson: string | null }) {
           <ul className="divide-y divide-border">
             {subscriptions.map((sub) => (
               <li key={sub.id} className={cn('py-3 first:pt-0 last:pb-0', !sub.active && 'text-text-subtle')}>
-                <p className="text-[0.9375rem] font-medium">
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.9375rem] font-medium">
                   {sub.planName}
-                  {!sub.active && <span className="ml-2 text-[0.8125rem] font-normal">· не действует</span>}
+                  {!sub.active && <span className="text-[0.8125rem] font-normal">· не действует</span>}
+                  <EndingBadge sub={sub} />
                 </p>
                 <p className="mt-0.5 text-[0.875rem] text-text-muted">
                   {remainingLabel(sub.remainingVisits)} · {validUntilLabel(sub.expiresAt)} ·{' '}
@@ -72,5 +74,32 @@ export function MySubscriptions({ forPerson }: { forPerson: string | null }) {
         )}
       </CardBody>
     </Card>
+  );
+}
+
+/** Цвет плашки по срочности: последний визит или день — тревожнее прочего. */
+const BADGE: Record<AlertLevel, string> = {
+  last: 'border-warning-border bg-warning-soft text-warning',
+  near: 'border-warning-border bg-warning-soft text-warning',
+  soon: 'border-border-accent bg-surface-accent-soft text-text-accent',
+};
+
+/**
+ * «Осталось всего 3 визита», «сегодня последний день».
+ *
+ * Плашка у самого абонемента, а не общим сообщением сверху: у человека их
+ * бывает несколько, и «что-то кончается» без указания чего — не подсказка.
+ */
+function EndingBadge({ sub }: { sub: ClientSubscription }) {
+  const alert = subscriptionAlert(sub, new Date());
+
+  if (!alert) {
+    return null;
+  }
+
+  return (
+    <span className={cn('rounded-full border px-2 py-px text-[0.75rem] font-normal', BADGE[alert.level])}>
+      {subscriptionAlertLabel(alert)}
+    </span>
   );
 }

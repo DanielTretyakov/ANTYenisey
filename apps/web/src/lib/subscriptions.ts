@@ -1,6 +1,7 @@
 import type { BookingEntry } from '@yenisey/types';
 import { formatKopecks } from './money';
 import { plural } from './plural';
+import type { SubscriptionAlert } from './subscriptionAlert';
 
 /** Цена записи в строке: сумма — или «абонементом», если платил абонемент. */
 export function entryPriceLabel(entry: Pick<BookingEntry, 'price' | 'paidBy'>): string {
@@ -49,6 +50,20 @@ export function remainingLabel(remainingVisits: number | null): string {
   return remainingVisits === null
     ? 'безлимит'
     : `осталось ${visitsLabel(remainingVisits)}`;
+}
+
+/**
+ * Плашка «абонемент кончается» словами. Решает о ней `subscriptionAlert`, а
+ * здесь только подпись: пороги — правило, а не текст, и живут отдельно.
+ */
+export function subscriptionAlertLabel(alert: SubscriptionAlert): string {
+  if (alert.kind === 'visits') {
+    return alert.visits <= 1 ? 'остался последний визит' : `осталось всего ${visitsLabel(alert.visits)}`;
+  }
+
+  return alert.days <= 1
+    ? 'сегодня последний день'
+    : `остаётся ${alert.days} ${plural(alert.days, 'день', 'дня', 'дней')}`;
 }
 
 /**

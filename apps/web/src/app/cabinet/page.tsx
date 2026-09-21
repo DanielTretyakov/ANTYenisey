@@ -68,7 +68,15 @@ export default function CabinetPage() {
           <PlayerEditor key="self" name={user.fullName} readOnly={isChildBirthDate(user.birthDate)} />
         ))}
 
-      {user && <MySubscriptions key={family.selected?.id ?? 'self'} forPerson={family.selected?.id ?? null} />}
+      {/* Ключ с приставкой: у соседнего PlayerEditor ключ «self», и совпадение
+          двух ключей в одном списке React считает ошибкой — он перестаёт
+          различать блоки и рисует один из них дважды. */}
+      {user && (
+        <MySubscriptions
+          key={`subscriptions:${family.selected?.id ?? 'self'}`}
+          forPerson={family.selected?.id ?? null}
+        />
+      )}
 
       {user && canBeGuardianBirthDate(user.birthDate) && (
         <ParentFamilyCard
