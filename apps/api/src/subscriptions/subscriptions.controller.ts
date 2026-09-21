@@ -55,7 +55,7 @@ export class PersonSubscriptionsController {
     @Param('id') clientId: string,
     @Body() dto: IssueSubscriptionDto,
   ): Promise<ClientSubscription> {
-    return this.subscriptions.issue(club.tenantId, clientId, dto.planId, { issuedBy: club.userId });
+    return this.subscriptions.issue(club.tenantId, clientId, dto.planId, { issuedBy: club.userId }, dto.hallId);
   }
 
   @Post(':subscriptionId/adjust')

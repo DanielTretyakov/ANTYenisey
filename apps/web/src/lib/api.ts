@@ -797,9 +797,14 @@ export function clubApi(slug: string = TENANT_SLUG) {
     updateSubscriptionPlan: (id: string, payload: SubscriptionPlanRequest): Promise<SubscriptionPlan> =>
       authorized(`${club}/subscription-plans/${id}`, json('PATCH', payload)),
 
-    /** Продать абонемент у стойки. Деньги принимаются вне системы. */
-    issueSubscription: (personId: string, planId: string): Promise<ClientSubscription> =>
-      authorized(`${club}/people/${personId}/subscriptions`, json('POST', { planId })),
+    /**
+     * Продать абонемент у стойки. Деньги принимаются вне системы.
+     *
+     * Зал продажи — не прихоть формы: по его поясу считается конец срока, и в
+     * его деньгах дня видна продажа. У клуба с одним залом не спрашивается.
+     */
+    issueSubscription: (personId: string, planId: string, hallId?: string): Promise<ClientSubscription> =>
+      authorized(`${club}/people/${personId}/subscriptions`, json('POST', { planId, hallId })),
 
     /** Корректировка визитов или досрочное закрытие безлимита — с причиной. */
     adjustSubscription: (

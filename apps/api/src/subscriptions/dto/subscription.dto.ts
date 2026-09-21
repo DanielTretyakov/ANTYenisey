@@ -62,6 +62,12 @@ export class IssueSubscriptionDto implements IssueSubscriptionRequest {
   @IsString()
   @MaxLength(64)
   planId: string;
+
+  /** Не прислан — клуб с одним залом; с несколькими сервис откажет. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  hallId?: string;
 }
 
 /** Корректировка визитов или досрочное закрытие безлимита — с причиной. */

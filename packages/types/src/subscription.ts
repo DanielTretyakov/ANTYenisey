@@ -74,6 +74,12 @@ export interface SubscriptionLedgerRow {
 
 export interface IssueSubscriptionRequest {
   planId: string;
+  /**
+   * Зал продажи. По его поясу считается конец срока, в его деньгах дня видна
+   * продажа. У клуба с одним залом не присылается — сервер подставит его сам;
+   * у клуба с несколькими обязателен.
+   */
+  hallId?: string;
 }
 
 /**

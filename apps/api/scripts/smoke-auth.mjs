@@ -2450,15 +2450,52 @@ async function subscriptions() {
     planId = r.body?.id;
   }
 
-  // --- Продажа
-  r = await asClient(`/clubs/yenisey/people/${clientId}/subscriptions`, { method: 'POST', json: { planId } });
+  // --- Продажа. Зал продажи задаёт и пояс, по которому кончится срок, и
+  // смену, в деньгах которой продажа видна.
+  r = await asAdmin('/clubs/yenisey/halls');
+  const halls = r.body ?? [];
+  const hallId = halls[0]?.id;
+
+  r = await asClient(`/clubs/yenisey/people/${clientId}/subscriptions`, { method: 'POST', json: { planId, hallId } });
   check('клиент себе абонемент не продаёт', 403, r.status);
 
-  r = await asAdmin(`/clubs/yenisey/people/${clientId}/subscriptions`, { method: 'POST', json: { planId } });
+  r = await asAdmin(`/clubs/yenisey/people/${clientId}/subscriptions`, {
+    method: 'POST',
+    json: { planId, hallId: 'net-takogo-zala' },
+  });
+  check('продажа в чужой зал отклонена', 404, r.status);
+
+  if (halls.length > 1) {
+    r = await asAdmin(`/clubs/yenisey/people/${clientId}/subscriptions`, { method: 'POST', json: { planId } });
+    check('без зала при нескольких залах — отказ', 400, r.status);
+  }
+
+  r = await asAdmin(`/clubs/yenisey/people/${clientId}/subscriptions`, {
+    method: 'POST',
+    json: { planId, hallId },
+  });
   check('абонемент продан', 201, r.status);
   const subscriptionId = r.body?.id;
   assert('визиты и срок сняты с тарифа', r.body?.remainingVisits === 1 && r.body?.expiresAt !== null);
   assert('цена зафиксирована', r.body?.priceAtPurchase === 100000);
+
+  // Деньги дня: продажа видна в зале продажи и только в нём. По клубу её
+  // показывала бы каждая смена, и одни деньги посчитались бы дважды.
+  const saleDate = dateIn(halls[0].timezone, 0);
+  r = await asAdmin(`/clubs/yenisey/desk/halls/${hallId}/days/${saleDate}`);
+  const money = r.body?.money;
+  assert('продажа попала в деньги своего зала', (money?.subscriptionSales?.count ?? 0) > 0);
+  assert(
+    'и осталась рядом с итогом услуг, а не внутри него',
+    money?.total === money?.tables + money?.trainings + money?.tournaments,
+  );
+
+  const otherHall = halls.find((hall) => hall.id !== hallId);
+
+  if (otherHall) {
+    r = await asAdmin(`/clubs/yenisey/desk/halls/${otherHall.id}/days/${dateIn(otherHall.timezone, 0)}`);
+    assert('в чужом зале этой продажи нет', (r.body?.money?.subscriptionSales?.count ?? 0) === 0);
+  }
 
   /** Остаток визитов глазами самого клиента: он же его и видит в кабинете. */
   const remaining = async () => {

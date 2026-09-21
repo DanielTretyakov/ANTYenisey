@@ -225,10 +225,11 @@ export class DeskService {
       // по клубу за местные сутки зала.
       this.attendance.visitsBetween(tenantId, dayStart, dayEnd),
       this.unplacedRows(tenantId, dayStart, dayEnd),
-      // Продажи абонементов — тоже по клубу, а не по залу: продают у стойки,
-      // а стойка к столу не привязана. Сутки — местные сутки этого зала.
+      // Продажи абонементов — по залу продажи (решение владельца от
+      // 20.09.2026). По клубу их показывала бы каждая смена, и одни деньги
+      // считались бы столько раз, сколько у клуба залов.
       this.prisma.subscription.aggregate({
-        where: { tenantId, purchasedAt: { gte: dayStart, lt: dayEnd } },
+        where: { tenantId, soldAtHallId: hallId, purchasedAt: { gte: dayStart, lt: dayEnd } },
         _count: { _all: true },
         _sum: { priceAtPurchase: true },
       }),

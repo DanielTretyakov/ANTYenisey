@@ -1257,8 +1257,9 @@ model Hall {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tables       Table[]
-  daySchedules HallDaySchedule[]
+  tables            Table[]
+  daySchedules      HallDaySchedule[]
+  subscriptionSales Subscription[]    @relation("SubscriptionSale")
 
   // Мишень для составных FK: стол не может попасть в зал чужого клуба.
   @@unique([id, tenantId])
@@ -1639,6 +1640,13 @@ model Subscription {
   /// зато есть платёж: CHECK требует одно из двух.
   issuedByUserId String?
   issuedBy       TenantMembership? @relation("SubscriptionSeller", fields: [issuedByUserId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
+  /// Зал продажи. По его поясу посчитан срок — «до конца последнего дня» у
+  /// залов в разных регионах наступает в разное время, — и в его же деньгах
+  /// дня продажа показана на смене. У клуба с одним залом подставляется он
+  /// сам, спрашивать не о чем.
+  soldAtHallId String?
+  soldAtHall   Hall?   @relation("SubscriptionSale", fields: [soldAtHallId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
   // Платёж за покупку самого абонемента. Раньше эти деньги в схеме оседать
   // было негде: клиент платил 49 000 ₽, а следа не оставалось.

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import type { ClientSubscription, SubscriptionLedgerRow, SubscriptionPlan } from '@yenisey/types';
+import type { ClientSubscription, Hall, SubscriptionLedgerRow, SubscriptionPlan } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -37,6 +37,10 @@ export function ClubSubscriptionsBlock({
   const club = useClubApi();
   const [plans, setPlans] = useState<SubscriptionPlan[] | null>(null);
   const [planId, setPlanId] = useState('');
+  // Залы нужны только продаже: по поясу зала считается конец срока, и в его
+  // деньгах дня видна продажа. У клуба с одним залом выбора нет — он и уйдёт.
+  const [halls, setHalls] = useState<Hall[]>([]);
+  const [hallId, setHallId] = useState('');
   const [selling, setSelling] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,9 +50,13 @@ export function ClubSubscriptionsBlock({
     setSelling(true);
 
     try {
-      const loaded = (await club.subscriptionPlans()).filter((plan) => plan.isActive);
-      setPlans(loaded);
-      setPlanId(loaded[0]?.id ?? '');
+      const [loaded, rooms] = await Promise.all([club.subscriptionPlans(), club.halls()]);
+      const active = loaded.filter((plan) => plan.isActive);
+
+      setPlans(active);
+      setPlanId(active[0]?.id ?? '');
+      setHalls(rooms);
+      setHallId(rooms[0]?.id ?? '');
     } catch (cause) {
       setError(messageOf(cause));
     }
@@ -60,7 +68,7 @@ export function ClubSubscriptionsBlock({
     setError(null);
 
     try {
-      await club.issueSubscription(personId, planId);
+      await club.issueSubscription(personId, planId, hallId || undefined);
       setSelling(false);
       onChanged();
     } catch (cause) {
@@ -113,6 +121,17 @@ export function ClubSubscriptionsBlock({
                   label: `${plan.name} — ${planTermsLabel(plan.visitsCount, plan.durationDays)}, ${formatKopecks(plan.price)}`,
                 }))}
               />
+              {/* Зал спрашивается, только когда их несколько: у клуба с одним
+                  залом это лишний выбор без единого варианта. */}
+              {halls.length > 1 && (
+                <Select
+                  label="Зал продажи"
+                  hint="По его часовому поясу кончится срок, и в его деньгах дня будет видна продажа."
+                  value={hallId}
+                  onChange={(event) => setHallId(event.target.value)}
+                  options={halls.map((hall) => ({ value: hall.id, label: hall.name }))}
+                />
+              )}
               {chosen && (
                 <p className="mb-4 text-[0.875rem] text-text-muted">
                   К оплате у стойки: <span className="text-text">{formatKopecks(chosen.price)}</span>. Деньги

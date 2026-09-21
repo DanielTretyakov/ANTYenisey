@@ -34,12 +34,6 @@ import {
 export type EntryLink = { trainingBookingId: string } | { tournamentRegistrationId: string };
 
 /**
- * Пояс, если у клуба ещё нет ни одного зала. Тот же, что стоит по умолчанию у
- * зала в схеме: клуб без залов занятий не проводит, и срок его абонемента
- * пока ни на что не влияет.
- */
-const FALLBACK_TIMEZONE = 'Asia/Krasnoyarsk';
-
 /** Откуда абонемент: продал сотрудник у стойки или оплачен онлайн. */
 export type IssueOrigin = { issuedBy: string } | { paymentId: string };
 
@@ -217,7 +211,13 @@ export class SubscriptionsService {
    * стойки, потом позовёт подтверждение онлайн-оплаты — с платежом вместо
    * продавца. Цена, визиты и срок снимаются с тарифа в момент продажи.
    */
-  async issue(tenantId: string, clientId: string, planId: string, origin: IssueOrigin): Promise<ClientSubscription> {
+  async issue(
+    tenantId: string,
+    clientId: string,
+    planId: string,
+    origin: IssueOrigin,
+    hallId?: string,
+  ): Promise<ClientSubscription> {
     const member = await this.prisma.tenantMembership.findUnique({
       where: { userId_tenantId: { userId: clientId, tenantId } },
       select: { deactivatedAt: true, user: { select: { deactivatedAt: true, anonymizedAt: true } } },
@@ -248,7 +248,7 @@ export class SubscriptionsService {
     // тренер тоже покупает абонемент, чтобы ходить на чужие группы.
     await this.membership.ensureClient(tenantId, clientId);
 
-    const timezone = await this.clubTimezone(tenantId);
+    const hall = await this.saleHall(tenantId, hallId);
     const now = new Date();
     const issuedBy = 'issuedBy' in origin ? origin.issuedBy : null;
 
@@ -260,8 +260,9 @@ export class SubscriptionsService {
           planId,
           remainingVisits: plan.visitsCount,
           purchasedAt: now,
-          expiresAt: expiryOf(now, plan.durationDays, timezone),
+          expiresAt: expiryOf(now, plan.durationDays, hall.timezone),
           priceAtPurchase: plan.price,
+          soldAtHallId: hall.id,
           issuedByUserId: issuedBy,
           paymentId: 'paymentId' in origin ? origin.paymentId : null,
         },
@@ -630,20 +631,46 @@ export class SubscriptionsService {
   }
 
   /**
-   * Пояс, по которому считается конец срока.
+   * Зал, в котором продан абонемент.
    *
-   * Пояс живёт у зала, а абонемент — клубный. Берётся основной зал клуба —
-   * заведённый первым. У «Енисея» все залы в одном поясе; когда появится клуб с
-   * залами в разных регионах, срок, возможно, придётся считать по залу продажи.
+   * По его поясу считается конец срока, и в его деньгах дня видна продажа
+   * (решение владельца от 20.09.2026). Пояс живёт у зала, а не у клуба, и у
+   * залов в разных регионах «до конца последнего дня» наступает в разное время.
+   *
+   * У клуба с одним залом спрашивать не о чем — он и подставляется. С
+   * несколькими зал обязателен: молча взять первый значило бы посчитать срок по
+   * чужим часам и показать выручку не той стойке.
    */
-  private async clubTimezone(tenantId: string): Promise<string> {
-    const hall = await this.prisma.hall.findFirst({
+  private async saleHall(tenantId: string, hallId: string | undefined): Promise<{ id: string; timezone: string }> {
+    if (hallId) {
+      const hall = await this.prisma.hall.findFirst({
+        where: { id: hallId, tenantId },
+        select: { id: true, timezone: true },
+      });
+
+      if (!hall) {
+        throw new NotFoundException('Зал не найден');
+      }
+
+      return hall;
+    }
+
+    const halls = await this.prisma.hall.findMany({
       where: { tenantId },
       orderBy: { createdAt: 'asc' },
-      select: { timezone: true },
+      select: { id: true, timezone: true },
+      take: 2,
     });
 
-    return hall?.timezone ?? FALLBACK_TIMEZONE;
+    if (halls.length === 0) {
+      throw new BadRequestException('У клуба нет ни одного зала — срок абонемента считать не по чему');
+    }
+
+    if (halls.length > 1) {
+      throw new BadRequestException('Укажите зал продажи');
+    }
+
+    return halls[0]!;
   }
 }
 
