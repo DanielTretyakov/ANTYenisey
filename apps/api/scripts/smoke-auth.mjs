@@ -2665,9 +2665,16 @@ async function sparring() {
   check('тренеру «мои записи» открыты как чтение', 200, r.status);
   assert('но спарринга там нет', !(r.body ?? []).some((e) => e.id === sparringId));
 
+  // Деньги спарринга: заблаговременная отмена бесплатна, неявка стоит всей
+  // аренды. Клубная политика отмены к тренеру не применяется — у неё другой
+  // адресат (решение владельца от 20.09.2026).
+  r = await asCoach('/clubs/yenisey/coach/sparring');
+  const mine = (r.body ?? []).find((b) => b.id === sparringId);
+  assert('отмена спарринга обещана бесплатной', mine?.cancelChargePercentNow === 0);
+
   r = await asCoach(`/clubs/yenisey/coach/sparring/${sparringId}`, { method: 'DELETE' });
   check('тренер отменил спарринг', 200, r.status);
-  assert('процент списания записан', typeof r.body?.chargePercent === 'number');
+  assert('и не списано ничего', r.body?.chargePercent === 0);
 
   r = await asClient('/clubs/yenisey/booking/bookings', { method: 'POST', json: payload });
   check('после отмены время снова свободно', 201, r.status);

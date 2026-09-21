@@ -61,6 +61,7 @@ const BOOKING_SELECT = {
   status: true,
   cancelledAt: true,
   chargeRatio: true,
+  isSparring: true,
   table: { select: { label: true, hallId: true, hall: { select: { name: true } } } },
 } as const;
 
@@ -74,6 +75,7 @@ interface BookingRow {
   status: BookingStatus;
   cancelledAt: Date | null;
   chargeRatio: number | null;
+  isSparring: boolean;
   table: { label: string; hallId: string; hall: { name: string } };
 }
 
@@ -329,7 +331,7 @@ export class BookingService {
     }
 
     const tiers = await this.tiers(tenantId);
-    const percent = cancellationPercent(tiers, minutesUntil(booking.startsAt));
+    const percent = cancelPercentOf(booking, tiers);
 
     // Условие на статус — против гонки: вторая вкладка отменила бронь, пока
     // эта читала её живой, — и процент записался бы дважды, вторым поверх.
@@ -373,9 +375,7 @@ export class BookingService {
       // Сколько спишется при отмене прямо сейчас — вопрос, на который клиент
       // должен получить ответ ДО нажатия кнопки, а не после.
       cancelChargePercentNow:
-        booking.status === BookingStatus.BOOKED
-          ? cancellationPercent(tiers, minutesUntil(booking.startsAt))
-          : null,
+        booking.status === BookingStatus.BOOKED ? cancelPercentOf(booking, tiers) : null,
     };
   }
 
@@ -474,4 +474,15 @@ function parseInstant(value: string): Date {
   }
 
   return parsed;
+}
+
+/**
+ * Сколько списать при отмене этой брони.
+ *
+ * У спарринга — ничего: заблаговременная отмена тренеру бесплатна (решение
+ * владельца от 20.09.2026). Деньги с него клуб берёт только за неявку, и берёт
+ * целиком — это делает отметка присутствия, а не отмена.
+ */
+function cancelPercentOf(booking: Pick<BookingRow, 'isSparring' | 'startsAt'>, tiers: readonly Tier[]): number {
+  return booking.isSparring ? 0 : cancellationPercent(tiers, minutesUntil(booking.startsAt));
 }

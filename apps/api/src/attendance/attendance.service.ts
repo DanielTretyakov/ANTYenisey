@@ -94,6 +94,17 @@ export interface LoadedEntry {
 /** Правила присутствия клуба вместе с процентом неявки. */
 export type ClubAttendancePolicy = AttendancePolicy & { noShowChargePercent: number };
 
+/**
+ * Спарринг ли это — то есть стол, за которым тренер, а не клиент.
+ *
+ * Отдельной функцией, потому что спрашивают в двух местах: при отметке и в
+ * джобе автонеявки. У записи на занятие тренер тоже заполнен — там он ведёт
+ * группу, — поэтому вид записи в условии обязателен.
+ */
+export function sparringOf(kind: AttendanceKind, entry: Pick<LoadedEntry, 'coachId'>): boolean {
+  return kind === 'TABLE' && entry.coachId !== null;
+}
+
 /** Сколько отметок принимает один пакет «отметить всех пришедшими». */
 export const MAX_BATCH = 100;
 
@@ -208,9 +219,14 @@ export class AttendanceService {
     // У записи по абонементу процент — судьба визита, а не доля цены: неявка
     // означает «визит израсходован» — 100, а не процент политики клуба.
     // Прощённая неявка по-прежнему 0: визит возвращается.
+    //
+    // У спарринга неявка стоит всей аренды (решение владельца от 20.09.2026):
+    // стол простоял занятым по вине тренера, и политика неявки КЛИЕНТА к нему
+    // отношения не имеет. Заблаговременная отмена спарринга при этом бесплатна
+    // — её считает `cancelPercentOf` в `booking.service.ts`.
     const decision = decideMark(entry, request, {
       ...context,
-      noShowChargePercent: entry.subscriptionId ? 100 : context.noShowChargePercent,
+      noShowChargePercent: entry.subscriptionId || sparringOf(kind, entry) ? 100 : context.noShowChargePercent,
     });
 
     if (!decision.ok) {

@@ -49,6 +49,21 @@ describe('personSummary', () => {
     assert.equal(summary.lateCancellations, 1);
   });
 
+  it('сгоревший визит — тоже поздняя отмена, хотя денег за ней нет', () => {
+    const summary = personSummary(
+      [
+        entry({ status: 'CANCELLED', charged: 0, burnedVisit: true }),
+        entry({ status: 'CANCELLED', charged: 0, burnedVisit: false }),
+      ],
+      [],
+      NOW,
+    );
+
+    assert.equal(summary.cancellations, 2);
+    assert.equal(summary.lateCancellations, 1);
+    assert.equal(summary.accrued, 0, 'абонемент денег не приносит');
+  });
+
   it('начислено складывается по неявкам и отменам тоже', () => {
     const summary = personSummary(
       [

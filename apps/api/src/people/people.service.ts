@@ -266,6 +266,9 @@ export class PeopleService {
             // Запись по абонементу начислений не несёт: деньги пришли продажей.
             prepaid: entry.paidBy !== null,
           }),
+          // Поздняя отмена по абонементу денег не стоит, но визит сжигает —
+          // и считается наравне с денежной.
+          burnedVisit: entry.paidBy !== null && entry.chargePercent === 100,
         })),
         visits,
         new Date(),

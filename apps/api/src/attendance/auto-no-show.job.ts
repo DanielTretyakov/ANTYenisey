@@ -11,7 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { parseDuration } from '../auth/tokens';
 import { attendanceJobEnabled, type Env } from '../config/env';
 import { decideAutoNoShow, type AttendancePolicy } from './attendance-rules';
-import { AttendanceService, ENTITY_TYPE, type LoadedEntry } from './attendance.service';
+import { AttendanceService, ENTITY_TYPE, sparringOf, type LoadedEntry } from './attendance.service';
 
 /** Сколько записей одного вида берётся за раз. */
 const BATCH = 200;
@@ -197,7 +197,11 @@ export class AutoNoShowJob implements OnApplicationBootstrap, OnModuleDestroy {
     // У записи по абонементу процент — судьба визита: неявка значит «визит
     // израсходован», 100. Журнал абонемента не трогается вовсе — визит списан
     // ещё при записи, «сгорел» это и значит.
-    const ratio = entry.subscriptionId ? 100 : percent;
+    //
+    // У спарринга — тоже 100, но по другой причине: неявка тренера стоит клубу
+    // всей аренды стола. Порог у джобы и у администратора один, иначе одна и та
+    // же неявка стоила бы разного в зависимости от того, кто успел раньше.
+    const ratio = entry.subscriptionId || sparringOf(kind, entry) ? 100 : percent;
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await this.attendance.updateEntry(
