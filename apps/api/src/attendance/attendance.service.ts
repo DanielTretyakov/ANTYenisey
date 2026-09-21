@@ -24,7 +24,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MembershipService } from '../club/membership.service';
 import { consumed } from '../subscriptions/subscription-rules';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
-import { decideMark, type AttendancePolicy } from './attendance-rules';
+import { decideMark, noShowRatio, type AttendancePolicy } from './attendance-rules';
 
 /**
  * Отметка присутствия: пришёл, не пришёл, визит с порога.
@@ -94,16 +94,6 @@ export interface LoadedEntry {
 /** Правила присутствия клуба вместе с процентом неявки. */
 export type ClubAttendancePolicy = AttendancePolicy & { noShowChargePercent: number };
 
-/**
- * Спарринг ли это — то есть стол, за которым тренер, а не клиент.
- *
- * Отдельной функцией, потому что спрашивают в двух местах: при отметке и в
- * джобе автонеявки. У записи на занятие тренер тоже заполнен — там он ведёт
- * группу, — поэтому вид записи в условии обязателен.
- */
-export function sparringOf(kind: AttendanceKind, entry: Pick<LoadedEntry, 'coachId'>): boolean {
-  return kind === 'TABLE' && entry.coachId !== null;
-}
 
 /** Сколько отметок принимает один пакет «отметить всех пришедшими». */
 export const MAX_BATCH = 100;
@@ -216,17 +206,12 @@ export class AttendanceService {
   ): Promise<AttendanceResult> {
     const entry = await this.lockEntry(tx, tenantId, kind, entryId);
 
-    // У записи по абонементу процент — судьба визита, а не доля цены: неявка
-    // означает «визит израсходован» — 100, а не процент политики клуба.
-    // Прощённая неявка по-прежнему 0: визит возвращается.
-    //
-    // У спарринга неявка стоит всей аренды (решение владельца от 20.09.2026):
-    // стол простоял занятым по вине тренера, и политика неявки КЛИЕНТА к нему
-    // отношения не имеет. Заблаговременная отмена спарринга при этом бесплатна
-    // — её считает `cancelPercentOf` в `booking.service.ts`.
+    // Сколько стоит неявка — решает `noShowRatio`: у абонемента и у спарринга
+    // она стоит 100, и по разным причинам (см. правило). Прощённая неявка
+    // по-прежнему 0 — это решает уже `decideMark`.
     const decision = decideMark(entry, request, {
       ...context,
-      noShowChargePercent: entry.subscriptionId || sparringOf(kind, entry) ? 100 : context.noShowChargePercent,
+      noShowChargePercent: noShowRatio(kind, entry, context.noShowChargePercent),
     });
 
     if (!decision.ok) {
