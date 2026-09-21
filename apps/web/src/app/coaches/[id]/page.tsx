@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { PublicCoach } from '@yenisey/types';
-import { CoachCardBody } from '@/components/coach/CoachView';
+import { CoachCardBody, CoachPricesView } from '@/components/coach/CoachView';
 import { AppShell } from '@/components/layout/AppShell';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { Alert } from '@/components/ui/Alert';
@@ -17,8 +17,8 @@ import { api, ApiError } from '@/lib/api';
  * сервер сюда не отдаёт. Возрастного ограничения, в отличие от страницы
  * игрока, здесь нет: тренером человек становится взрослым.
  *
- * Клуба в адресе нет, а карточка принадлежит клубу: показывается самая свежая,
- * остальные клубы перечисляются рядом.
+ * Карточка одна на все клубы, а цены у каждого клуба свои — поэтому клубы
+ * перечислены отдельным блоком, каждый со своей стоимостью занятий.
  */
 export default function CoachPage() {
   const params = useParams<{ id: string }>();
@@ -52,30 +52,44 @@ export default function CoachPage() {
               <p className="text-[0.75rem] tracking-[0.1em] text-text-subtle uppercase">Тренер</p>
               <h1 className="mt-1 text-[2rem] leading-tight break-words">{coach.name}</h1>
               <p className="mt-1.5 text-[0.9375rem] text-text-muted">
-                <Link href={`/clubs/${coach.club.slug}`} className="text-text-accent underline-offset-2 hover:underline">
-                  {coach.club.name}
-                </Link>
-                {coach.otherClubs.length > 0 && (
-                  <>
-                    {' · также тренирует в '}
-                    {coach.otherClubs.map((other, index) => (
-                      <span key={other.slug}>
-                        {index > 0 && ', '}
-                        <Link
-                          href={`/clubs/${other.slug}`}
-                          className="text-text-accent underline-offset-2 hover:underline"
-                        >
-                          {other.name}
-                        </Link>
-                      </span>
-                    ))}
-                  </>
-                )}
+                {'Тренер в клубах: '}
+                {coach.clubs.map((club, index) => (
+                  <span key={club.slug}>
+                    {index > 0 && ', '}
+                    <Link
+                      href={`/clubs/${club.slug}`}
+                      className="text-text-accent underline-offset-2 hover:underline"
+                    >
+                      {club.name}
+                    </Link>
+                  </span>
+                ))}
               </p>
             </div>
           </header>
 
           <CoachCardBody card={coach} />
+
+          {/* Цены — по клубу: в соседнем у того же тренера они другие, и общая
+              строка «1500 ₽» ввела бы в заблуждение. */}
+          <section>
+            <h3 className="mb-3 text-[0.9375rem] font-medium">Стоимость занятий</h3>
+            <ul className="grid gap-4">
+              {coach.clubs.map((club) => (
+                <li key={club.slug} className="rounded-card border border-border bg-surface-raised px-5 py-4">
+                  <Link
+                    href={`/clubs/${club.slug}`}
+                    className="text-[0.9375rem] font-medium text-text-accent underline-offset-2 hover:underline"
+                  >
+                    {club.name}
+                  </Link>
+                  <div className="mt-1.5">
+                    <CoachPricesView prices={club} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
         </div>
       )}
     </AppShell>

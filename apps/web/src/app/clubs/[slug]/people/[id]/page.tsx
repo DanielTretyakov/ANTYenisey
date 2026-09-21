@@ -128,12 +128,7 @@ export default function PersonPage() {
           />
 
           {card.coach && (
-            <CoachCard
-              coach={card.coach}
-              personId={card.person.id}
-              personName={card.person.fullName}
-              onChange={(coach) => setCard((loaded) => (loaded ? { ...loaded, coach } : loaded))}
-            />
+            <CoachCard coach={card.coach} personId={card.person.id} personName={card.person.fullName} />
           )}
 
           <ClubFamilyBlock

@@ -1,42 +1,32 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useMemo } from 'react';
-import type { CoachProfile, CoachStatsPeriod } from '@yenisey/types';
+import { useCallback } from 'react';
+import type { CoachInClub, CoachStatsPeriod } from '@yenisey/types';
+import { PlayerAvatar } from '@/components/player/PlayerView';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { useClubApi } from '@/lib/useClubApi';
-import { CoachEditor, type CoachActions } from './CoachEditor';
+import { CoachCardBody, CoachPricesView } from './CoachView';
 import { CoachStatsPanel } from './CoachStatsPanel';
 
 /**
- * Карточка тренера в карточке человека — для администратора.
+ * Карточка тренера в карточке человека — для администратора, только чтение.
  *
- * В отличие от профиля игрока, который клуб только читает, карточку тренера
- * администратор правит: так сказано в ТЗ («заполняет и редактирует сам тренер
- * либо admin/owner»). Тренер, у которого нет времени между группами,
- * рассказывает о себе администратору, а тот заполняет.
+ * Править её клуб больше не может (решение владельца от 20.09.2026, отступление
+ * от ТЗ): карточка одна на все клубы, где человек тренирует, и правка из
+ * «Енисея» меняла бы то, что о себе рассказывает тренер соседнему клубу.
+ * Клубное здесь — цены и статистика этого клуба.
  */
 export function CoachCard({
   coach,
   personId,
   personName,
-  onChange,
 }: {
-  coach: CoachProfile;
+  coach: CoachInClub;
   personId: string;
   personName: string;
-  onChange: (coach: CoachProfile) => void;
 }) {
   const club = useClubApi();
-
-  const actions = useMemo<CoachActions>(
-    () => ({
-      update: (patch) => club.updateCoachOf(personId, patch),
-      setPhoto: (file) => club.setCoachPhotoOf(personId, file),
-      removePhoto: () => club.removeCoachPhotoOf(personId),
-    }),
-    [club, personId],
-  );
 
   const loadStats = useCallback(
     (period: CoachStatsPeriod) => club.coachStatsOf(personId, period),
@@ -47,10 +37,23 @@ export function CoachCard({
     <Card>
       <CardHeader
         title="Карточка тренера"
-        description="Публичная страница: её видят все, не входя. Правит сам тренер или клуб."
+        description="Публичная страница: её видят все, не входя. Заполняет её сам тренер — она одна на все его клубы."
       />
       <CardBody className="grid gap-7">
-        <CoachEditor profile={coach} name={personName} actions={actions} onChange={onChange} />
+        <div className="flex flex-wrap items-start gap-5">
+          <PlayerAvatar fileId={coach.card.photoFileId} name={personName} size="lg" />
+          <div className="min-w-[12rem] flex-1">
+            <CoachCardBody card={coach.card} />
+          </div>
+        </div>
+
+        <section>
+          <h3 className="mb-2 text-[0.9375rem] font-medium">Стоимость занятий в клубе</h3>
+          <CoachPricesView prices={coach.prices} />
+          <p className="mt-2 text-[0.8125rem] text-text-subtle">
+            Цены тренер указывает сам в разделе «Моя карточка» — в каждом клубе свои.
+          </p>
+        </section>
 
         <section>
           <h3 className="mb-3.5 text-[0.9375rem] font-medium">Статистика занятий</h3>

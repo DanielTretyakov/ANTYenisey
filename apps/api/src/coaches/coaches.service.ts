@@ -1,36 +1,49 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { BookingStatus, Prisma, StoredFileKind } from '@yenisey/database';
-import type { CoachGroup, CoachProfile, CoachStats, CoachStatsPeriod, PublicCoach } from '@yenisey/types';
+import type {
+  CoachCard,
+  CoachGroup,
+  CoachInClub,
+  CoachPrices,
+  CoachStats,
+  CoachStatsPeriod,
+  PublicCoach,
+} from '@yenisey/types';
 import { shortName } from '@yenisey/types';
 import { coachStats, periodStart } from './coach-stats';
 import { FileIntake } from '../files/file-intake.service';
 import { FileStorage } from '../files/file-storage';
 import { PrismaService } from '../prisma/prisma.service';
-import { checkText, parseSocialLinks, readSocialLinks } from './coach-rules';
-import type { UpdateCoachProfileDto } from './dto/coach.dto';
+import { checkPriceNote, checkText, parseSocialLinks, readSocialLinks } from './coach-rules';
+import type { UpdateCoachCardDto, UpdateCoachPricesDto } from './dto/coach.dto';
 
 const CARD_SELECT = {
   userId: true,
   photoFileId: true,
   achievements: true,
   inventory: true,
-  priceInfo: true,
   socialLinks: true,
-  tenant: { select: { name: true, slug: true } },
-  membership: { select: { user: { select: { fullName: true } } } },
+} satisfies Prisma.CoachCardSelect;
+
+type CardRow = Prisma.CoachCardGetPayload<{ select: typeof CARD_SELECT }>;
+
+const PRICES_SELECT = {
+  groupPrice: true,
+  individualPrice: true,
+  priceNote: true,
 } satisfies Prisma.CoachProfileSelect;
 
-type CardRow = Prisma.CoachProfileGetPayload<{ select: typeof CARD_SELECT }>;
-
 /**
- * Карточка тренера: фотография, достижения, инвентарь, стоимость, соцсети.
+ * Карточка тренера и его цены.
  *
- * Карточка принадлежит КЛУБУ, а не человеку: ключ — пара «человек + клуб».
- * Поэтому все маршруты правки идут через `clubs/:slug/...`, и один тренер в
- * двух клубах ведёт две карточки с разной ценой.
+ * Карточка ОДНА на человека и общая для всех клубов (решение владельца от
+ * 20.09.2026): фотография, достижения, инвентарь и соцсети не меняются от
+ * того, в каком зале человек сегодня тренирует. Заполняет её только он сам —
+ * клуб карточку не правит, в отличие от того, что написано в ТЗ.
  *
- * Правит её сам тренер или администратор его клуба — оба через одни и те же
- * методы, разница только в том, чей `userId` пришёл.
+ * Клубным осталось то, что у клубов действительно разное: цены за групповую и
+ * индивидуальную тренировку. Они живут у пары «тренер + клуб», и правит их
+ * тренер в разделе этого клуба.
  */
 @Injectable()
 export class CoachesService {
@@ -40,76 +53,26 @@ export class CoachesService {
     private readonly intake: FileIntake,
   ) {}
 
-  /** Карточка тренера этого клуба. Нет пары «человек + клуб» — нет карточки. */
-  async profile(tenantId: string, userId: string): Promise<CoachProfile> {
-    return toProfile(await this.load(tenantId, userId));
-  }
+  // --- Карточка (одна на человека) -----------------------------------------
 
   /**
-   * Карточка для карточки человека у администратора: её может не быть, и это
-   * не ошибка — человек мог стать тренером минуту назад.
+   * Своя карточка. Её может ещё не быть — это не ошибка, тренер просто её не
+   * открывал: отдаётся пустая, чтобы форме было что показать.
    */
-  async profileOrNull(tenantId: string, userId: string): Promise<CoachProfile | null> {
-    const row = await this.prisma.coachProfile.findUnique({
-      where: { userId_tenantId: { userId, tenantId } },
-      select: CARD_SELECT,
-    });
+  async card(userId: string): Promise<CoachCard> {
+    await this.assertCoach(userId);
 
-    return row ? toProfile(row) : null;
+    const row = await this.prisma.coachCard.findUnique({ where: { userId }, select: CARD_SELECT });
+
+    return row ? toCard(row) : emptyCard(userId);
   }
 
-  /**
-   * Публичная страница тренера.
-   *
-   * Клуба в адресе нет, а карточек у человека столько, сколько клубов, где он
-   * тренирует, — показывается самая свежая, остальные клубы перечисляются
-   * рядом. Пока клуб на платформе один, второй карточки не бывает; когда
-   * клубов станет много, страницу стоит перевести на адрес с клубом.
-   *
-   * Отключённый в клубе или на платформе не показывается вовсе: 404, а не
-   * пустая карточка.
-   */
-  async publicProfile(userId: string): Promise<PublicCoach> {
-    const rows = await this.prisma.coachProfile.findMany({
-      where: {
-        userId,
-        membership: {
-          deactivatedAt: null,
-          user: { deactivatedAt: null, anonymizedAt: null },
-        },
-      },
-      select: CARD_SELECT,
-      orderBy: { updatedAt: 'desc' },
-    });
+  async updateCard(userId: string, dto: UpdateCoachCardDto): Promise<CoachCard> {
+    await this.assertCoach(userId);
 
-    const [row, ...others] = rows;
+    const fields: Prisma.CoachCardUpdateInput = {};
 
-    if (!row) {
-      throw new NotFoundException('Карточка тренера не найдена');
-    }
-
-    return {
-      id: row.userId,
-      // «Фамилия И.», как в списке мероприятий клуба: полные имена в браузер
-      // не уходят даже с публичной страницы.
-      name: shortName(row.membership.user.fullName),
-      photoFileId: row.photoFileId,
-      achievements: row.achievements,
-      inventory: row.inventory,
-      priceInfo: row.priceInfo,
-      socialLinks: readSocialLinks(row.socialLinks),
-      club: row.tenant,
-      otherClubs: others.map((other) => other.tenant),
-    };
-  }
-
-  /** Текстовые поля и ссылки. PATCH не стирает то, о чём его не спрашивали. */
-  async update(tenantId: string, userId: string, dto: UpdateCoachProfileDto): Promise<CoachProfile> {
-    await this.load(tenantId, userId);
-
-    const fields: Prisma.CoachProfileUpdateInput = {};
-
-    for (const field of ['achievements', 'inventory', 'priceInfo'] as const) {
+    for (const field of ['achievements', 'inventory'] as const) {
       if (dto[field] === undefined) {
         continue;
       }
@@ -135,20 +98,21 @@ export class CoachesService {
       fields.socialLinks = links.links as unknown as Prisma.InputJsonValue;
     }
 
-    await this.prisma.coachProfile.update({
-      where: { userId_tenantId: { userId, tenantId } },
-      data: fields,
+    await this.prisma.coachCard.upsert({
+      where: { userId },
+      create: { ...(fields as Prisma.CoachCardUncheckedCreateInput), userId },
+      update: fields,
     });
 
-    return this.profile(tenantId, userId);
+    return this.card(userId);
   }
 
   /**
    * Новая фотография. Старая удаляется в той же транзакции — в карточке она
    * одна, и прежний снимок хранить незачем.
    */
-  async setPhoto(tenantId: string, userId: string, upload: Uint8Array | undefined): Promise<CoachProfile> {
-    await this.load(tenantId, userId);
+  async setPhoto(userId: string, upload: Uint8Array | undefined): Promise<CoachCard> {
+    await this.assertCoach(userId);
 
     // Перекодирование — до транзакции: sharp думает сотни миллисекунд.
     const prepared = await this.intake.prepare('COACH_PHOTO', upload);
@@ -161,27 +125,122 @@ export class CoachesService {
         data: prepared.data,
       });
 
-      await tx.coachProfile.update({
-        where: { userId_tenantId: { userId, tenantId } },
-        data: { photoFileId: file.id },
+      await tx.coachCard.upsert({
+        where: { userId },
+        create: { userId, photoFileId: file.id },
+        update: { photoFileId: file.id },
       });
 
       await this.storage.prune(tx, { ownerUserId: userId, kind: StoredFileKind.COACH_PHOTO, keepId: file.id });
     });
 
-    return this.profile(tenantId, userId);
+    return this.card(userId);
   }
 
-  async removePhoto(tenantId: string, userId: string): Promise<CoachProfile> {
-    await this.load(tenantId, userId);
+  async removePhoto(userId: string): Promise<CoachCard> {
+    await this.assertCoach(userId);
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.coachProfile.updateMany({ where: { userId, tenantId }, data: { photoFileId: null } });
+      await tx.coachCard.updateMany({ where: { userId }, data: { photoFileId: null } });
       await this.storage.prune(tx, { ownerUserId: userId, kind: StoredFileKind.COACH_PHOTO, keepId: null });
     });
 
-    return this.profile(tenantId, userId);
+    return this.card(userId);
   }
+
+  // --- Цены (свои в каждом клубе) ------------------------------------------
+
+  async prices(tenantId: string, userId: string): Promise<CoachPrices> {
+    return this.loadPrices(tenantId, userId);
+  }
+
+  async updatePrices(tenantId: string, userId: string, dto: UpdateCoachPricesDto): Promise<CoachPrices> {
+    await this.loadPrices(tenantId, userId);
+
+    const note = checkPriceNote(dto.priceNote);
+
+    if (!note.ok) {
+      throw new BadRequestException(note.message);
+    }
+
+    await this.prisma.coachProfile.update({
+      where: { userId_tenantId: { userId, tenantId } },
+      data: {
+        groupPrice: dto.groupPrice ?? null,
+        individualPrice: dto.individualPrice ?? null,
+        priceNote: note.value,
+      },
+    });
+
+    return this.loadPrices(tenantId, userId);
+  }
+
+  /** Карточка и цены этого клуба — для карточки человека у администратора. */
+  async inClub(tenantId: string, userId: string): Promise<CoachInClub | null> {
+    const prices = await this.prisma.coachProfile.findUnique({
+      where: { userId_tenantId: { userId, tenantId } },
+      select: PRICES_SELECT,
+    });
+
+    if (!prices) {
+      return null;
+    }
+
+    const row = await this.prisma.coachCard.findUnique({ where: { userId }, select: CARD_SELECT });
+
+    return { card: row ? toCard(row) : emptyCard(userId), prices };
+  }
+
+  /**
+   * Публичная страница тренера.
+   *
+   * Карточка одна, клубов может быть несколько — они перечисляются со своими
+   * ценами. Отключённый в клубе в список не попадает; отключённый на
+   * платформе не показывается вовсе.
+   */
+  async publicProfile(userId: string): Promise<PublicCoach> {
+    const person = await this.prisma.user.findFirst({
+      where: { id: userId, deactivatedAt: null, anonymizedAt: null },
+      select: {
+        fullName: true,
+        coachCard: { select: CARD_SELECT },
+        memberships: {
+          where: { role: 'COACH', deactivatedAt: null, coachProfile: { isNot: null } },
+          select: {
+            tenant: { select: { name: true, slug: true } },
+            coachProfile: { select: PRICES_SELECT },
+          },
+          orderBy: { tenant: { name: 'asc' } },
+        },
+      },
+    });
+
+    if (!person || person.memberships.length === 0) {
+      throw new NotFoundException('Карточка тренера не найдена');
+    }
+
+    const card = person.coachCard ? toCard(person.coachCard) : emptyCard(userId);
+
+    return {
+      id: userId,
+      // «Фамилия И.», как в списке мероприятий клуба: полные имена в браузер
+      // не уходят даже с публичной страницы.
+      name: shortName(person.fullName),
+      photoFileId: card.photoFileId,
+      achievements: card.achievements,
+      inventory: card.inventory,
+      socialLinks: card.socialLinks,
+      clubs: person.memberships.map((membership) => ({
+        name: membership.tenant.name,
+        slug: membership.tenant.slug,
+        groupPrice: membership.coachProfile?.groupPrice ?? null,
+        individualPrice: membership.coachProfile?.individualPrice ?? null,
+        priceNote: membership.coachProfile?.priceNote ?? null,
+      })),
+    };
+  }
+
+  // --- Группы и статистика (клубные) ---------------------------------------
 
   /**
    * Занятия тренера вместе с составом — те, что ещё не кончились.
@@ -227,16 +286,17 @@ export class CoachesService {
   }
 
   /**
-   * Статистика по своим занятиям.
+   * Статистика по своим занятиям В ЭТОМ клубе.
    *
    * Тот же расчёт видит и тренер о себе, и клуб о тренере (ТЗ: «статистика
-   * посещаемости доступна и по каждому тренеру»). Второй расчёт рядом
-   * разошёлся бы с первым, и спорить они стали бы при разговоре о деньгах.
+   * посещаемости доступна и по каждому тренеру»). Клубная она намеренно:
+   * администратору «Енисея» незачем видеть, как тот же человек отработал в
+   * соседнем клубе.
    */
   async stats(tenantId: string, coachId: string, period: CoachStatsPeriod): Promise<CoachStats> {
     // Не тренер этого клуба — 404, а не пустая статистика: «занятий нет» по
     // опечатке в адресе выглядело бы как настоящий ответ.
-    await this.load(tenantId, coachId);
+    await this.loadPrices(tenantId, coachId);
 
     const now = new Date();
     const from = periodStart(period, now);
@@ -265,27 +325,49 @@ export class CoachesService {
     );
   }
 
-  private async load(tenantId: string, userId: string): Promise<CardRow> {
+  /** Тренер этого клуба — иначе цен у него здесь нет. */
+  private async loadPrices(tenantId: string, userId: string): Promise<CoachPrices> {
     const row = await this.prisma.coachProfile.findUnique({
       where: { userId_tenantId: { userId, tenantId } },
-      select: CARD_SELECT,
+      select: PRICES_SELECT,
     });
 
     if (!row) {
-      throw new NotFoundException('Карточка тренера не найдена');
+      throw new NotFoundException('Тренер не найден в этом клубе');
     }
 
     return row;
   }
+
+  /**
+   * Карточку заводит и правит только тренер — хотя бы одного клуба.
+   *
+   * Клуба в адресе у этих маршрутов нет (карточка платформенная), поэтому
+   * роль проверяется здесь: `RolesGuard` без клуба бессилен.
+   */
+  private async assertCoach(userId: string): Promise<void> {
+    const coach = await this.prisma.coachProfile.findFirst({
+      where: { userId, membership: { role: 'COACH', deactivatedAt: null } },
+      select: { userId: true },
+    });
+
+    if (!coach) {
+      throw new ForbiddenException('Карточка тренера — для тренеров клубов');
+    }
+  }
 }
 
-function toProfile(row: CardRow): CoachProfile {
+function toCard(row: CardRow): CoachCard {
   return {
     userId: row.userId,
     photoFileId: row.photoFileId,
     achievements: row.achievements,
     inventory: row.inventory,
-    priceInfo: row.priceInfo,
     socialLinks: readSocialLinks(row.socialLinks),
   };
+}
+
+/** Карточки ещё нет: форме нужно что-то показать, а тренеру — что заполнить. */
+function emptyCard(userId: string): CoachCard {
+  return { userId, photoFileId: null, achievements: null, inventory: null, socialLinks: [] };
 }

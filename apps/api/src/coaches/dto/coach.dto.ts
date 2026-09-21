@@ -1,11 +1,23 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsIn, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import {
   COACH_STATS_PERIODS,
   MAX_COACH_SOCIAL_LINKS,
   type CoachSocialLink,
   type CoachStatsPeriod,
-  type UpdateCoachProfileRequest,
+  type UpdateCoachCardRequest,
+  type UpdateCoachPricesRequest,
 } from '@yenisey/types';
 
 /**
@@ -36,10 +48,10 @@ export class CoachSocialLinkDto implements CoachSocialLink {
 }
 
 /**
- * Карточка тренера. Поле не прислано — не трогается; прислано пустым или
- * null — стирается, как в инвентаре игрока.
+ * Карточка тренера — одна на все клубы. Поле не прислано — не трогается;
+ * прислано пустым или null — стирается, как в инвентаре игрока.
  */
-export class UpdateCoachProfileDto implements UpdateCoachProfileRequest {
+export class UpdateCoachCardDto implements UpdateCoachCardRequest {
   @IsOptional()
   @IsString()
   @MaxLength(2000, { message: 'Достижения — не длиннее 2000 символов' })
@@ -51,14 +63,32 @@ export class UpdateCoachProfileDto implements UpdateCoachProfileRequest {
   inventory?: string | null;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(500, { message: 'Стоимость — не длиннее 500 символов' })
-  priceInfo?: string | null;
-
-  @IsOptional()
   @IsArray()
   @ArrayMaxSize(MAX_COACH_SOCIAL_LINKS, { message: `Ссылок — не больше ${MAX_COACH_SOCIAL_LINKS}` })
   @ValidateNested({ each: true })
   @Type(() => CoachSocialLinkDto)
   socialLinks?: CoachSocialLinkDto[];
+}
+
+/**
+ * Цены тренера в одном клубе, копейки. Пусто — цена не указана: у тренера
+ * может не быть, например, индивидуальных занятий.
+ */
+export class UpdateCoachPricesDto implements UpdateCoachPricesRequest {
+  @IsOptional()
+  @IsInt({ message: 'Цена — в копейках, целым числом' })
+  @Min(0, { message: 'Цена не бывает отрицательной' })
+  @Max(100_000_000, { message: 'Цена — не больше миллиона рублей' })
+  groupPrice: number | null;
+
+  @IsOptional()
+  @IsInt({ message: 'Цена — в копейках, целым числом' })
+  @Min(0, { message: 'Цена не бывает отрицательной' })
+  @Max(100_000_000, { message: 'Цена — не больше миллиона рублей' })
+  individualPrice: number | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300, { message: 'Примечание — не длиннее 300 символов' })
+  priceNote: string | null;
 }

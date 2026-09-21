@@ -14,7 +14,7 @@
 import type { Role } from './auth';
 import type { DeskMarkInfo, DeskVisit } from './desk';
 import type { BookingEntry } from './platform';
-import type { CoachProfile } from './coach';
+import type { CoachInClub } from './coach';
 import type { ClubPersonFamily } from './family';
 import type { PlayerProfile } from './player';
 import type { ClientSubscription } from './subscription';
@@ -472,7 +472,7 @@ export interface ClubPersonCard {
    * Карточка тренера — только у тренера этого клуба, и её правит отсюда
    * администратор. У остальных пусто.
    */
-  coach: CoachProfile | null;
+  coach: CoachInClub | null;
   /**
    * Абонементы человека в этом клубе — действующие сверху. Продаёт и
    * корректирует их администратор отсюда же.

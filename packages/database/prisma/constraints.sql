@@ -818,30 +818,31 @@ ALTER TABLE "Guardianship"
 -- публичная страница рисует пустоту под заголовком. Границы длины — те же
 -- соображения, что у инвентаря игрока, только текст здесь связный, а не
 -- название модели.
-ALTER TABLE "CoachProfile"
-  ADD CONSTRAINT "CoachProfile_text_filled"
+--
+-- Карточка одна на человека (решение владельца от 20.09.2026): у тренера, как
+-- и у игрока, один профиль на платформу.
+ALTER TABLE "CoachCard"
+  ADD CONSTRAINT "CoachCard_text_filled"
   CHECK (
     ("achievements" IS NULL OR ("achievements" = btrim("achievements") AND char_length("achievements") BETWEEN 1 AND 2000))
     AND ("inventory" IS NULL OR ("inventory" = btrim("inventory") AND char_length("inventory") BETWEEN 1 AND 1000))
-    AND ("priceInfo" IS NULL OR ("priceInfo" = btrim("priceInfo") AND char_length("priceInfo") BETWEEN 1 AND 500))
   );
 
--- Фотография не должна мешать удалению учётки.
---
--- Prisma выражает связь как NO ACTION — этого хватает профилю игрока: он
--- прямой потомок учётки и исчезает в той же волне каскада, что и файл.
--- Карточка тренера висит на членстве в клубе, на уровень глубже, и проверка
--- ссылки на файл срабатывала раньше, чем каскад доходил до карточки.
---
--- Отложенная проверка сдвигает её на конец транзакции, когда карточки уже нет.
--- Забрать живое фото из-под живой карточки по-прежнему нельзя — проверка не
--- отменена, а перенесена.
-ALTER TABLE "CoachProfile" DROP CONSTRAINT "CoachProfile_photoFileId_userId_fkey";
+-- Цены тренера — клубные: в соседнем клубе у того же человека другой прайс.
+-- Копейки, как и все деньги в схеме.
+ALTER TABLE "CoachProfile"
+  ADD CONSTRAINT "CoachProfile_prices_sane"
+  CHECK (
+    ("groupPrice" IS NULL OR "groupPrice" >= 0)
+    AND ("individualPrice" IS NULL OR "individualPrice" >= 0)
+    AND ("priceNote" IS NULL OR ("priceNote" = btrim("priceNote") AND char_length("priceNote") BETWEEN 1 AND 300))
+  );
 
-ALTER TABLE "CoachProfile" ADD CONSTRAINT "CoachProfile_photoFileId_userId_fkey"
-  FOREIGN KEY ("photoFileId", "userId") REFERENCES "StoredFile"("id", "ownerUserId")
-  ON DELETE NO ACTION ON UPDATE CASCADE
-  DEFERRABLE INITIALLY DEFERRED;
+-- Отложенной связи с фотографией здесь больше нет и не нужно: карточка стала
+-- прямым потомком учётки, и каскад уносит её вместе с файлом одной волной —
+-- ровно как у аватара игрока. Пока карточка висела на членстве в клубе, на
+-- уровень глубже, проверка срабатывала раньше каскада, и связь приходилось
+-- откладывать до конца транзакции.
 
 -- Чего здесь НЕТ и почему.
 --
@@ -951,21 +952,16 @@ ALTER TABLE "TournamentRegistration"
   ADD CONSTRAINT "TournamentRegistration_subscription_ratio"
   CHECK ("subscriptionId" IS NULL OR "chargeRatio" IS NULL OR "chargeRatio" IN (0, 100));
 
--- Журнал абонементов — только вставки.
+-- Журнал абонементов — только вставки, как журнал аудита, и без единого
+-- исключения (решение владельца от 20.09.2026).
 --
--- Как у журнала аудита, с одной оговоркой: DELETE пропускается, когда уборка
--- смоука явно попросила об этом (SET LOCAL yenisey.purge_probes = 'on').
--- Журнал ссылается на записи с Restrict, и без этого пробные записи было бы
--- не убрать никогда. Защита поэтому слабее, чем у AuditLog: кто может
--- выставить настройку сессии, тот может и удалить. Прикладной код этого не
--- делает — пишет журнал ровно одна функция и только вставками.
+-- За строкой журнала стоит спор о визитах: «у меня было десять» разрешается
+-- только им. Лазейка для уборки смоука здесь была и снята: пробные учётки с
+-- абонементами уборка теперь не удаляет и говорит об этом вслух, а смоук
+-- работает под одной постоянной учёткой, чтобы они не копились.
 CREATE FUNCTION "SubscriptionLedger_reject_change"() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
-  IF TG_OP = 'DELETE' AND current_setting('yenisey.purge_probes', true) = 'on' THEN
-    RETURN OLD;
-  END IF;
-
   RAISE EXCEPTION 'SubscriptionLedger — журнал только для вставок, % запрещён', TG_OP
     USING ERRCODE = '23001';
 END

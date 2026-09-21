@@ -1094,57 +1094,43 @@ SELECT pg_temp.expect('CH',
 
 -- CI. Чужой файл фотографией тренера: составной ключ (файл, человек).
 --
---     Не через pg_temp.expect: связь отложена до конца транзакции (раздел 20),
---     и отказ приходит на COMMIT, а не на самом операторе. Здесь проверка
---     возвращается к немедленной — иначе сценарий не поймал бы её вовсе.
---
---     Свой файл заводится отдельным оператором, а не внутри блока: блок с
---     EXCEPTION — это подтранзакция, и отказ унёс бы вставку вместе с собой,
---     а он нужен следующему сценарию.
+--     Карточка теперь одна на человека (CoachCard), а не на пару с клубом.
+INSERT INTO "CoachCard" ("userId","updatedAt") VALUES ('c1', now());
+
 INSERT INTO "StoredFile" (id,"ownerUserId",kind,"contentType",size,sha256,data)
 VALUES ('cf1','c1','COACH_PHOTO','image/webp',4,repeat('9',64),'\x52494646'::bytea);
 
-DO $$
-DECLARE code text; cname text;
-BEGIN
-  SET CONSTRAINTS "CoachProfile_photoFileId_userId_fkey" IMMEDIATE;
-  UPDATE "CoachProfile" SET "photoFileId" = 'f3' WHERE "userId" = 'c1' AND "tenantId" = 't1';
-  RAISE NOTICE 'CI. ПРОВАЛ: база приняла чужой файл фотографией';
-EXCEPTION WHEN others THEN
-  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE, cname = CONSTRAINT_NAME;
-  IF code = '23503' AND cname = 'CoachProfile_photoFileId_userId_fkey' THEN
-    RAISE NOTICE 'CI. Отклонено правилом CoachProfile_photoFileId_userId_fkey ... OK (ожидалось)';
-  ELSE
-    RAISE NOTICE 'CI. ПРОВАЛ: отказ пришёл от % (%)', code, cname;
-  END IF;
-END $$;
+SELECT pg_temp.expect('CI',
+  $q$UPDATE "CoachCard" SET "photoFileId" = 'f3' WHERE "userId" = 'c1'$q$,
+  '23503', 'CoachCard_photoFileId_userId_fkey');
 
 -- CJ. Своя фотография — проходит.
 DO $$ BEGIN
-  UPDATE "CoachProfile" SET "photoFileId" = 'cf1' WHERE "userId" = 'c1' AND "tenantId" = 't1';
+  UPDATE "CoachCard" SET "photoFileId" = 'cf1' WHERE "userId" = 'c1';
   RAISE NOTICE 'CJ. Своя фотография тренера принята........ OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'CJ. ПРОВАЛ: %', SQLERRM; END $$;
 
 -- CK. Пробелы вместо достижений: пусто — это NULL.
 SELECT pg_temp.expect('CK',
-  $q$UPDATE "CoachProfile" SET achievements = '   ' WHERE "userId" = 'c1' AND "tenantId" = 't1'$q$,
-  '23514', 'CoachProfile_text_filled');
+  $q$UPDATE "CoachCard" SET achievements = '   ' WHERE "userId" = 'c1'$q$,
+  '23514', 'CoachCard_text_filled');
+
+-- CK2. Отрицательная цена тренера в клубе.
+SELECT pg_temp.expect('CK2',
+  $q$UPDATE "CoachProfile" SET "groupPrice" = -1 WHERE "userId" = 'c1' AND "tenantId" = 't1'$q$,
+  '23514', 'CoachProfile_prices_sane');
 
 -- CL. Удаление учётки уносит карточку тренера вместе с фотографией.
 --
---     То же, что BV у игрока, но путь длиннее: карточка висит на членстве в
---     клубе, а не прямо на учётке. Обычной NO ACTION здесь мало — проверка
---     ссылки на файл срабатывает раньше, чем каскад доходит до карточки, —
---     поэтому связь отложена до конца транзакции (раздел 20).
+--     То же, что BV у игрока, и теперь ровно тем же способом: карточка —
+--     прямой потомок учётки, и NO ACTION хватает без отложенной проверки.
 DO $$ BEGIN
   INSERT INTO "User" (id,email,phone,"birthDate","passwordHash","fullName","createdAt","updatedAt")
   VALUES ('c9','c9@a.ru','+79990000098',DATE '1990-01-01','x','Удаляемый Тренер',now(),now());
-  INSERT INTO "TenantMembership" ("userId","tenantId",role,"createdAt","updatedAt")
-  VALUES ('c9','t1','COACH',now(),now());
-  INSERT INTO "CoachProfile" ("userId","tenantId","createdAt","updatedAt") VALUES ('c9','t1',now(),now());
+  INSERT INTO "CoachCard" ("userId","updatedAt") VALUES ('c9', now());
   INSERT INTO "StoredFile" (id,"ownerUserId",kind,"contentType",size,sha256,data)
   VALUES ('c9f','c9','COACH_PHOTO','image/webp',4,repeat('1',64),'\x52494646'::bytea);
-  UPDATE "CoachProfile" SET "photoFileId" = 'c9f' WHERE "userId" = 'c9' AND "tenantId" = 't1';
+  UPDATE "CoachCard" SET "photoFileId" = 'c9f' WHERE "userId" = 'c9';
   DELETE FROM "User" WHERE id = 'c9';
   IF EXISTS (SELECT 1 FROM "StoredFile" WHERE "ownerUserId" = 'c9') THEN
     RAISE NOTICE 'CL. ПРОВАЛ: фото пережило учётку';
@@ -1251,7 +1237,7 @@ EXCEPTION WHEN others THEN
   END IF;
 END $$;
 
--- CX. Удаление строки журнала без флага уборки.
+-- CX. Удаление строки журнала — запрещено всем и всегда.
 DO $$
 DECLARE code text;
 BEGIN
@@ -1260,20 +1246,25 @@ BEGIN
 EXCEPTION WHEN others THEN
   GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
   IF code = '23001' THEN
-    RAISE NOTICE 'CX. Удаление без флага уборки отклонено... OK (ожидалось)';
+    RAISE NOTICE 'CX. Удаление строки журнала отклонено...... OK (ожидалось)';
   ELSE
     RAISE NOTICE 'CX. ПРОВАЛ: отказ пришёл от %', code;
   END IF;
 END $$;
 
--- CY. Уборка смоука с флагом удаляет — иначе пробные записи, на которые
---     журнал ссылается с Restrict, не убрать никогда.
-DO $$ BEGIN
+-- CY. Настройка сессии журналу не указ: лазейка для уборки смоука была и
+--     снята по решению владельца от 20.09.2026.
+DO $$
+DECLARE code text;
+BEGIN
   PERFORM set_config('yenisey.purge_probes', 'on', true);
   DELETE FROM "SubscriptionLedger" WHERE id = 'lg1';
-  IF EXISTS (SELECT 1 FROM "SubscriptionLedger" WHERE id = 'lg1') THEN
-    RAISE NOTICE 'CY. ПРОВАЛ: строка пережила уборку';
+  RAISE NOTICE 'CY. ПРОВАЛ: настройка сессии открыла журнал!';
+EXCEPTION WHEN others THEN
+  GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+  IF code = '23001' THEN
+    RAISE NOTICE 'CY. Журнал закрыт и для уборки............. OK (ожидалось)';
   ELSE
-    RAISE NOTICE 'CY. Уборка с флагом удаляет журнал......... OK (ожидалось)';
+    RAISE NOTICE 'CY. ПРОВАЛ: отказ пришёл от %', code;
   END IF;
-EXCEPTION WHEN others THEN RAISE NOTICE 'CY. ПРОВАЛ: %', SQLERRM; END $$;
+END $$;

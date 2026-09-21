@@ -220,7 +220,7 @@ export class PeopleService {
       this.family.familyOf(userId, tenantId),
       // Карточка тренера — только у тренера, и её может ещё не быть: роль
       // могли назначить минуту назад.
-      membership.role === Role.COACH ? this.coaches.profileOrNull(tenantId, userId) : null,
+      membership.role === Role.COACH ? this.coaches.inClub(tenantId, userId) : null,
       this.subscriptions.forCard(tenantId, userId),
     ]);
 

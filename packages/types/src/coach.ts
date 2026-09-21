@@ -1,9 +1,9 @@
 /**
- * Карточка тренера: фотография, достижения, инвентарь, стоимость, соцсети.
+ * Карточка тренера: фотография, достижения, инвентарь, соцсети.
  *
- * В отличие от профиля игрока карточка принадлежит КЛУБУ, а не человеку:
- * ключ — пара «человек + клуб». Один тренер в двух клубах ведёт две карточки,
- * и цена за тренировку в них разная.
+ * Карточка ОДНА на человека и общая для всех клубов, где он тренирует, — как
+ * профиль игрока (решение владельца от 20.09.2026). Заполняет её только сам
+ * тренер. Клубным осталось то, что у клубов действительно разное, — цены.
  */
 
 /** Ссылка на соцсеть: подпись и адрес. Каталога сетей нет — их слишком много. */
@@ -15,26 +15,37 @@ export interface CoachSocialLink {
 /** Больше десяти ссылок — это уже не «контакты», а список ссылок. */
 export const MAX_COACH_SOCIAL_LINKS = 10;
 
-/** Карточка так, как её правят: сам тренер или администратор его клуба. */
-export interface CoachProfile {
+/** Карточка так, как её правит сам тренер. Одна на все клубы. */
+export interface CoachCard {
   userId: string;
   photoFileId: string | null;
   achievements: string | null;
   inventory: string | null;
-  priceInfo: string | null;
   socialLinks: CoachSocialLink[];
 }
 
 /** Поле не прислано — не трогается; прислано пустым — стирается. */
-export interface UpdateCoachProfileRequest {
+export interface UpdateCoachCardRequest {
   achievements?: string | null;
   inventory?: string | null;
-  priceInfo?: string | null;
   socialLinks?: CoachSocialLink[];
 }
 
-/** Клуб в публичной карточке: по slug открывается его страница. */
-export interface CoachClub {
+/**
+ * Цены тренера в ОДНОМ клубе, копейки. В соседнем клубе у того же человека
+ * они другие, поэтому живут не в карточке, а у пары «тренер + клуб».
+ */
+export interface CoachPrices {
+  groupPrice: number | null;
+  individualPrice: number | null;
+  /** Приписка к ценам: «первое занятие бесплатно». */
+  priceNote: string | null;
+}
+
+export type UpdateCoachPricesRequest = CoachPrices;
+
+/** Клуб в публичной карточке — вместе с ценами тренера в нём. */
+export interface CoachClub extends CoachPrices {
   name: string;
   slug: string;
 }
@@ -42,6 +53,9 @@ export interface CoachClub {
 /**
  * Публичная страница тренера. Ни телефона, ни почты — и имя в том же виде,
  * что в списке мероприятий клуба: «Фамилия И.».
+ *
+ * Карточка одна, а клубов может быть несколько: они перечислены со своими
+ * ценами, и адрес страницы клуба больше не несёт — карточка платформенная.
  */
 export interface PublicCoach {
   id: string;
@@ -49,12 +63,15 @@ export interface PublicCoach {
   photoFileId: string | null;
   achievements: string | null;
   inventory: string | null;
-  priceInfo: string | null;
   socialLinks: CoachSocialLink[];
-  /** Клуб, чья карточка показана. */
-  club: CoachClub;
-  /** Остальные клубы, где этот человек тренирует. Обычно пусто. */
-  otherClubs: CoachClub[];
+  /** Клубы, где человек тренирует, с ценами в каждом. */
+  clubs: CoachClub[];
+}
+
+/** Тренер клуба в карточке человека у администратора: карточка плюс цены. */
+export interface CoachInClub {
+  card: CoachCard;
+  prices: CoachPrices;
 }
 
 /**

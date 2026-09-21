@@ -24,10 +24,17 @@ const PROBE_HALL_PREFIX = 'Зал проверки ';
 const PROBE_TABLE_PREFIX = 'Стол проверки ';
 
 async function main(): Promise<void> {
-  const where = { email: { startsWith: PROBE_EMAIL_PREFIX } };
+  const users = await prisma.user.findMany({
+    where: { email: { startsWith: PROBE_EMAIL_PREFIX } },
+    select: { id: true, createdAt: true },
+  });
+  const found = users.map((user) => user.id);
 
-  const users = await prisma.user.findMany({ where, select: { id: true, createdAt: true } });
-  const ids = users.map((user) => user.id);
+  // Учётки, на которые ссылается журнал абонементов, не трогаются вовсе:
+  // журнал — только вставки, исключений из этого нет (см. ledgerLocked).
+  const locked = await ledgerLocked(found);
+  const ids = found.filter((id) => !locked.has(id));
+  const where = { email: { startsWith: PROBE_EMAIL_PREFIX }, id: { in: ids } };
 
   /**
    * Нижняя граница «своего» — момент появления самой ранней проверочной учётки.
@@ -45,8 +52,14 @@ async function main(): Promise<void> {
     null,
   );
 
+  if (locked.size > 0) {
+    console.log(
+      `Оставлено учёток: ${locked.size} — на них ссылается журнал абонементов, а он только на вставку.`,
+    );
+  }
+
   if (ids.length === 0) {
-    console.log('Тестовых пользователей не найдено.');
+    console.log('Тестовых пользователей к удалению не найдено.');
     // Залы и столы смоука убираются всё равно: они переживают уборку учёток
     // (стол с бронями удалить нельзя, пока брони не удалены), и после
     // повторного запуска остались бы висеть навсегда.
@@ -57,9 +70,6 @@ async function main(): Promise<void> {
   // Порядок важен: на связях стоит onDelete: Restrict, база не даст удалить
   // пользователя, пока на него ссылаются сессии и профиль.
   await prisma.refreshToken.deleteMany({ where: { userId: { in: ids } } });
-  // Журнал абонементов — раньше всего: он ссылается и на записи, и на
-  // абонементы, а удалять его база разрешает только под флагом уборки.
-  await purgeProbeLedger(ids);
   // Визиты — раньше броней и записей: визит ссылается на запись, по которой
   // отмечен, и на связи стоит Restrict.
   //
@@ -151,30 +161,60 @@ async function main(): Promise<void> {
 const PROBE_PLAN_PREFIX = 'Тариф проверки ';
 
 /**
- * Журнал абонементов, которого касались пробные учётки.
+ * Пробные учётки, которые убрать нельзя: на них ссылается журнал абонементов.
  *
- * Журнал — только вставки, и это держит триггер; DELETE он пропускает лишь
- * под `SET LOCAL yenisey.purge_probes = 'on'` в той же транзакции. Флаг
- * локальный: закончилась транзакция — закончилось и разрешение.
+ * Журнал — только вставки, как журнал аудита: ни UPDATE, ни DELETE база не
+ * принимает ни от кого и ни под каким флагом (решение владельца от 20.09.2026 —
+ * прежнее исключение для уборки снято). А раз строку журнала не удалить, то и
+ * запись, и абонемент, на которые она ссылается, останутся навсегда: связи
+ * стоят на Restrict.
  *
- * Сюда попадают строки абонементов пробных клиентов и строки по записям,
- * которые уборка удалит: записи пробных клиентов и любые записи на занятиях
- * пробных тренеров (см. removeProbeCoaching).
+ * Поэтому такие учётки не удаляются, а называются числом в отчёте — иначе
+ * уборка падала бы целиком на первой же из них. Смоук со своей стороны ведёт
+ * абонементы под одной и той же учёткой, так что растёт этот остаток не с
+ * каждым прогоном, а один раз.
  */
-async function purgeProbeLedger(ids: string[]): Promise<void> {
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('yenisey.purge_probes', 'on', true)`;
-    await tx.subscriptionLedger.deleteMany({
-      where: {
-        OR: [
-          { subscription: { clientId: { in: ids } } },
-          { trainingBooking: { clientId: { in: ids } } },
-          { trainingBooking: { session: { coachId: { in: ids } } } },
-          { tournamentRegistration: { clientId: { in: ids } } },
-        ],
-      },
-    });
+async function ledgerLocked(ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) {
+    return new Set();
+  }
+
+  const rows = await prisma.subscriptionLedger.findMany({
+    where: {
+      OR: [
+        { subscription: { clientId: { in: ids } } },
+        { trainingBooking: { clientId: { in: ids } } },
+        // Занятие пробного тренера уборка сносит целиком, вместе с чужими
+        // записями на него (removeProbeCoaching) — а строку журнала по такой
+        // записи не снесёт. Значит, и тренера трогать нельзя.
+        { trainingBooking: { session: { coachId: { in: ids } } } },
+        { tournamentRegistration: { clientId: { in: ids } } },
+      ],
+    },
+    select: {
+      subscription: { select: { clientId: true } },
+      trainingBooking: { select: { clientId: true, session: { select: { coachId: true } } } },
+      tournamentRegistration: { select: { clientId: true } },
+    },
   });
+
+  const probes = new Set(ids);
+  const locked = new Set<string>();
+
+  for (const row of rows) {
+    for (const id of [
+      row.subscription?.clientId,
+      row.trainingBooking?.clientId,
+      row.trainingBooking?.session.coachId,
+      row.tournamentRegistration?.clientId,
+    ]) {
+      if (id && probes.has(id)) {
+        locked.add(id);
+      }
+    }
+  }
+
+  return locked;
 }
 
 /**

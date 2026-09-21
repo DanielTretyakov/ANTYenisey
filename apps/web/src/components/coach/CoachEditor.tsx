@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, type FormEvent } from 'react';
-import type { CoachProfile, CoachSocialLink, UpdateCoachProfileRequest } from '@yenisey/types';
+import type { CoachCard, CoachSocialLink, UpdateCoachCardRequest } from '@yenisey/types';
 import { MAX_COACH_SOCIAL_LINKS } from '@yenisey/types';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { Alert } from '@/components/ui/Alert';
@@ -19,28 +19,27 @@ function messageOf(cause: unknown): string {
 /**
  * Чем править карточку.
  *
- * Свою тренер правит одними маршрутами, администратор чужую — другими, а
- * форма у них одна: разница только в адресе, и она остаётся здесь, у того,
- * кто форму открывает.
+ * Маршруты платформенные — карточка одна на все клубы, — но форма о них не
+ * знает: так её нетрудно будет открыть и с другого экрана.
  */
 export interface CoachActions {
-  update: (patch: UpdateCoachProfileRequest) => Promise<CoachProfile>;
-  setPhoto: (file: File) => Promise<CoachProfile>;
-  removePhoto: () => Promise<CoachProfile>;
+  update: (patch: UpdateCoachCardRequest) => Promise<CoachCard>;
+  setPhoto: (file: File) => Promise<CoachCard>;
+  removePhoto: () => Promise<CoachCard>;
 }
 
-/** Форма карточки тренера: фотография, три текста и ссылки. */
+/** Форма карточки тренера: фотография, два текста и ссылки. Цен здесь нет — они клубные. */
 export function CoachEditor({
   profile,
   name,
   actions,
   onChange,
 }: {
-  profile: CoachProfile;
+  profile: CoachCard;
   /** Чьё имя показать вместо фотографии, пока её нет. */
   name: string;
   actions: CoachActions;
-  onChange: (profile: CoachProfile) => void;
+  onChange: (profile: CoachCard) => void;
 }) {
   return (
     <div className="grid gap-8">
@@ -57,16 +56,16 @@ function PhotoBlock({
   actions,
   onChange,
 }: {
-  profile: CoachProfile;
+  profile: CoachCard;
   name: string;
   actions: CoachActions;
-  onChange: (profile: CoachProfile) => void;
+  onChange: (profile: CoachCard) => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<'upload' | 'remove' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function run(kind: 'upload' | 'remove', action: () => Promise<CoachProfile>): Promise<void> {
+  async function run(kind: 'upload' | 'remove', action: () => Promise<CoachCard>): Promise<void> {
     setPending(kind);
     setError(null);
 
@@ -155,13 +154,6 @@ const TEXTS = [
     max: 2000,
   },
   { key: 'inventory', label: 'Инвентарь', hint: 'Основание, накладки, мячи — свободным текстом.', rows: 3, max: 1000 },
-  {
-    key: 'priceInfo',
-    label: 'Стоимость занятий',
-    hint: 'Текстом, как рассказываете её при встрече: «Индивидуальное — от 1500 ₽».',
-    rows: 2,
-    max: 500,
-  },
 ] as const;
 
 function TextForm({
@@ -169,14 +161,13 @@ function TextForm({
   actions,
   onChange,
 }: {
-  profile: CoachProfile;
+  profile: CoachCard;
   actions: CoachActions;
-  onChange: (profile: CoachProfile) => void;
+  onChange: (profile: CoachCard) => void;
 }) {
   const [draft, setDraft] = useState(() => ({
     achievements: profile.achievements ?? '',
     inventory: profile.inventory ?? '',
-    priceInfo: profile.priceInfo ?? '',
   }));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -246,9 +237,9 @@ function LinksForm({
   actions,
   onChange,
 }: {
-  profile: CoachProfile;
+  profile: CoachCard;
   actions: CoachActions;
-  onChange: (profile: CoachProfile) => void;
+  onChange: (profile: CoachCard) => void;
 }) {
   const [links, setLinks] = useState<CoachSocialLink[]>(profile.socialLinks);
   const [pending, setPending] = useState(false);

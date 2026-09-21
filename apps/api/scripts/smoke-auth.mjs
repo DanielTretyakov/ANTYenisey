@@ -2361,17 +2361,57 @@ async function subscriptions() {
   let r = await post('/auth/login', { email: adminEmail, password: adminPassword });
   const asAdmin = as(r.body?.accessToken ?? '');
 
-  r = await post('/auth/register', registration({ lastName: 'Абонементов', firstName: 'Роман' }));
+  // Учётка абонементов — одна и та же во всех прогонах, в отличие от
+  // остальных разделов.
+  //
+  // Журнал абонементов не удаляется ничем и ни под каким флагом, а значит,
+  // клиент, на чьи записи он ссылается, остаётся в базе навсегда (см.
+  // `ledgerLocked` в clean-probes). Свежая учётка на каждый прогон копила бы
+  // такой несносимый остаток без предела — эта копится один раз.
+  const clientEmail = 'probe-subscriptions@example.com';
+
+  r = await post('/auth/register', registration({ email: clientEmail, lastName: 'Абонементов', firstName: 'Роман' }));
+
+  if (r.status === 409) {
+    r = await post('/auth/login', { email: clientEmail, password: PASSWORD });
+    check('учётка абонементов прошлых прогонов открыта', 200, r.status);
+  } else {
+    check('учётка абонементов заведена', 201, r.status);
+  }
+
   const clientId = r.body?.user?.id;
   const asClient = as(r.body?.accessToken ?? '');
 
+  // Остатки прошлых прогонов гасятся: подходящий абонемент выбирает сервер
+  // сам, и забытый визит увёл бы проверку на чужую строку.
+  for (const stale of (await asClient('/me/subscriptions')).body ?? []) {
+    if (stale.club?.slug === 'yenisey' && stale.remainingVisits > 0) {
+      await asAdmin(`/clubs/yenisey/people/${clientId}/subscriptions/${stale.id}/adjust`, {
+        method: 'POST',
+        json: { delta: -stale.remainingVisits, reason: 'Уборка перед проверкой' },
+      });
+    }
+  }
+
+  // Тренер занятий — тоже постоянный, и по той же причине: занятие, на которое
+  // записывались абонементом, уборка не снесёт, а значит, не снесёт и тренера.
+  // Первый попавшийся тренер клуба оставлял бы по такой учётке за прогон.
+  const coachEmail = 'probe-subscriptions-coach@example.com';
+
+  r = await post('/auth/register', registration({ email: coachEmail, lastName: 'Тренеров', firstName: 'Абонемент' }));
+
+  if (r.status === 409) {
+    r = await post('/auth/login', { email: coachEmail, password: PASSWORD });
+  }
+
+  const coachId = r.body?.user?.id;
+  await asAdmin(`/clubs/yenisey/people/${coachId}/role`, { method: 'PATCH', json: { role: 'COACH' } });
+
   r = await asAdmin('/clubs/yenisey/training-types');
   const trainingTypeId = (r.body ?? [])[0]?.id;
-  r = await asAdmin('/clubs/yenisey/coaches');
-  const coachId = (r.body ?? [])[0]?.id;
 
   if (!trainingTypeId || !coachId) {
-    console.log('  ПРОПУЩЕНО: в клубе нет типа тренировки или тренера');
+    console.log('  ПРОПУЩЕНО: в клубе нет типа тренировки');
     return;
   }
 
@@ -2396,9 +2436,19 @@ async function subscriptions() {
   });
   check('вечный безлимит отклонён', 400, r.status);
 
-  r = await asAdmin('/clubs/yenisey/subscription-plans', { method: 'POST', json: planBody });
-  check('тариф заведён', 201, r.status);
-  const planId = r.body?.id;
+  // Тариф, как и учётка, один на все прогоны: проданные по нему абонементы
+  // переживают уборку (журнал), а вместе с ними переживёт её и он сам.
+  r = await asAdmin('/clubs/yenisey/subscription-plans');
+  let planId = (r.body ?? []).find((plan) => plan.name === planBody.name)?.id;
+
+  if (planId) {
+    r = await asAdmin(`/clubs/yenisey/subscription-plans/${planId}`, { method: 'PATCH', json: planBody });
+    check('тариф прошлых прогонов подхвачен', 200, r.status);
+  } else {
+    r = await asAdmin('/clubs/yenisey/subscription-plans', { method: 'POST', json: planBody });
+    check('тариф заведён', 201, r.status);
+    planId = r.body?.id;
+  }
 
   // --- Продажа
   r = await asClient(`/clubs/yenisey/people/${clientId}/subscriptions`, { method: 'POST', json: { planId } });
@@ -2687,59 +2737,77 @@ async function coachCard() {
   r = await post('/auth/register', registration({ lastName: 'Тренеров', firstName: 'Павел' }));
   check('будущий тренер заведён', 201, r.status);
   const coachId = r.body?.user?.id;
-  const asCoach = as(r.body?.accessToken ?? '');
+  const coachToken = r.body?.accessToken ?? '';
+  const asCoach = as(coachToken);
 
   r = await post('/auth/register', registration({ lastName: 'Клиентов', firstName: 'Роман' }));
   const asClient = as(r.body?.accessToken ?? '');
 
-  // Пока роль клиентская, кабинет тренера закрыт — и закрыт ролью, а не
-  // отсутствием карточки.
-  r = await asCoach('/clubs/yenisey/coach');
-  check('клиенту кабинет тренера закрыт', 403, r.status);
+  // Карточка платформенная, но открыта не всем: тренером надо быть хотя бы в
+  // одном клубе. Клубный guard здесь бессилен — клуба в адресе нет.
+  r = await asCoach('/me/coach-card');
+  check('не тренеру карточка закрыта', 403, r.status);
 
   r = await asAdmin(`/clubs/yenisey/people/${coachId}/role`, { method: 'PATCH', json: { role: 'COACH' } });
   check('роль тренера выдана', 200, r.status);
 
-  r = await asCoach('/clubs/yenisey/coach');
-  check('карточка завелась вместе с ролью', 200, r.status);
+  r = await asCoach('/me/coach-card');
+  check('карточка открылась вместе с ролью', 200, r.status);
   assert('и она пуста', r.body?.photoFileId === null && r.body?.achievements === null
     && Array.isArray(r.body?.socialLinks) && r.body.socialLinks.length === 0);
 
-  r = await asCoach('/clubs/yenisey/coach', {
-    method: 'PATCH',
-    json: { achievements: '  Мастер спорта  ', priceInfo: 'от 1500 ₽' },
-  });
+  r = await asCoach('/me/coach-card', { method: 'PATCH', json: { achievements: '  Мастер спорта  ' } });
   check('тренер правит свою карточку', 200, r.status);
   assert('пробелы по краям срезаны', r.body?.achievements === 'Мастер спорта');
   assert('о чём не спрашивали — не тронуто', r.body?.inventory === null);
 
-  r = await asCoach('/clubs/yenisey/coach', {
+  r = await asCoach('/me/coach-card', {
     method: 'PATCH',
     json: { socialLinks: [{ label: 'Сайт', url: 'javascript:alert(1)' }] },
   });
   check('адрес не http(s) отклонён', 400, r.status);
 
-  r = await asCoach('/clubs/yenisey/coach', {
+  r = await asCoach('/me/coach-card', {
     method: 'PATCH',
     json: { socialLinks: [{ label: 'ВКонтакте', url: 'https://vk.com/probe' }] },
   });
   check('ссылка сохранена', 200, r.status);
   assert('ровно одна', r.body?.socialLinks?.length === 1);
 
-  r = await asClient(`/clubs/yenisey/coaches/${coachId}`, { method: 'PATCH', json: { priceInfo: 'даром' } });
-  check('клиент чужую карточку не правит', 403, r.status);
+  r = await asClient('/me/coach-card', { method: 'PATCH', json: { achievements: 'я тоже тренер' } });
+  check('клиенту карточка тренера не открывается вовсе', 403, r.status);
 
-  r = await asAdmin(`/clubs/yenisey/coaches/${coachId}`, { method: 'PATCH', json: { priceInfo: 'от 1800 ₽' } });
-  check('администратор правит любую', 200, r.status);
+  // --- Цены. Они клубные, в отличие от карточки, и правит их тоже сам тренер:
+  // администратору маршрута правки больше не существует.
+  r = await asCoach('/clubs/yenisey/coach/prices');
+  check('свои цены в клубе читаются', 200, r.status);
+  assert('и они не заданы', r.body?.groupPrice === null && r.body?.individualPrice === null);
+
+  r = await asCoach('/clubs/yenisey/coach/prices', {
+    method: 'PATCH',
+    json: { groupPrice: 60000, individualPrice: 150000, priceNote: '  первое занятие бесплатно  ' },
+  });
+  check('тренер задаёт цены клуба', 200, r.status);
+  assert('приписка обрезана по краям', r.body?.priceNote === 'первое занятие бесплатно');
+
+  r = await asCoach('/clubs/yenisey/coach/prices', { method: 'PATCH', json: { groupPrice: -1 } });
+  check('отрицательная цена отклонена', 400, r.status);
+
+  r = await asClient('/clubs/yenisey/coach/prices', { method: 'PATCH', json: { groupPrice: 1 } });
+  check('клиент цены тренера не правит', 403, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/coaches/${coachId}`, { method: 'PATCH', json: { achievements: 'за него' } });
+  check('администратор чужую карточку больше не правит', 404, r.status);
 
   r = await asAdmin(`/clubs/yenisey/people/${coachId}`);
-  assert('карточка тренера пришла вместе с карточкой человека', r.body?.coach?.priceInfo === 'от 1800 ₽');
+  assert('карточка тренера и цены клуба пришли вместе с карточкой человека',
+    r.body?.coach?.card?.achievements === 'Мастер спорта' && r.body?.coach?.prices?.groupPrice === 60000);
 
-  r = await upload(null, `/clubs/yenisey/coach/photo`);
+  r = await upload(null, '/me/coach-card/photo');
   check('фото без входа не загрузить', 401, r.status);
 
-  r = await upload(adminToken, `/clubs/yenisey/coaches/${coachId}/photo`);
-  check('администратор грузит фото тренера', 200, r.status);
+  r = await upload(coachToken, '/me/coach-card/photo');
+  check('тренер грузит своё фото', 200, r.status);
   const photoId = r.body?.photoFileId;
   assert('фото появилось в карточке', typeof photoId === 'string' && photoId.length > 0);
 
@@ -2748,7 +2816,8 @@ async function coachCard() {
   r = await call(`/coaches/${coachId}`);
   check('публичная карточка открыта без входа', 200, r.status);
   assert('имя сокращено до «Фамилия И.»', r.body?.name === 'Тренеров П.');
-  assert('клуб назван, других нет', r.body?.club?.slug === 'yenisey' && r.body?.otherClubs?.length === 0);
+  assert('клуб назван со своей ценой, и он один',
+    r.body?.clubs?.length === 1 && r.body.clubs[0]?.slug === 'yenisey' && r.body.clubs[0]?.groupPrice === 60000);
 
   const photo = await fetch(`${API}/files/${photoId}`);
   check('фотография отдаётся без входа', 200, photo.status);
@@ -2765,6 +2834,9 @@ async function coachCard() {
   check('несуществующий тренер — 404', 404, r.status);
 
   r = await asAdmin(`/clubs/yenisey/coaches/${coachId}/photo`, { method: 'DELETE' });
+  check('администратор чужое фото не убирает', 404, r.status);
+
+  r = await asCoach('/me/coach-card/photo', { method: 'DELETE' });
   check('фото убрано', 200, r.status);
   assert('и карточка о нём забыла', r.body?.photoFileId === null);
 

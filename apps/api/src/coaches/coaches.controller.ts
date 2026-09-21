@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Put, Query, Req, UseInterceptors } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import type { CoachGroup, CoachProfile, CoachStats, PublicCoach } from '@yenisey/types';
+import type { CoachCard, CoachGroup, CoachPrices, CoachStats, PublicCoach } from '@yenisey/types';
 import type { ClubContext } from '../auth/club-context';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Public } from '../auth/decorators/public.decorator';
@@ -8,43 +8,65 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { SingleFileUpload, uploadedBytes } from '../files/single-file-upload.interceptor';
 import { CoachesService } from './coaches.service';
-import { CoachStatsQueryDto, UpdateCoachProfileDto } from './dto/coach.dto';
+import { CoachStatsQueryDto, UpdateCoachCardDto, UpdateCoachPricesDto } from './dto/coach.dto';
 
 /** Те же соображения, что у загрузки аватара: каждая — `sharp` на сотни миллисекунд. */
 const UPLOAD_LIMIT = { default: { limit: 20, ttl: 60_000 } };
 
 /**
- * Своя карточка тренера и свои группы.
+ * Своя карточка тренера — одна на все клубы, поэтому клуба в адресе нет.
  *
- * Клуб в адресе обязателен: карточка принадлежит клубу, а не человеку, и роль
- * без клуба не спрашивается — её даёт `ClubContextGuard` по этому же адресу.
+ * Роль здесь не спрашивается guard'ом: без клуба ему нечего проверять.
+ * «Тренер хотя бы одного клуба» проверяет сервис; посторонний получает 403.
  */
-@Roles('COACH')
-@Controller('clubs/:slug/coach')
-export class MeCoachController {
+@Controller('me/coach-card')
+export class MeCoachCardController {
   constructor(private readonly coaches: CoachesService) {}
 
   @Get()
-  profile(@CurrentClub() club: ClubContext): Promise<CoachProfile> {
-    return this.coaches.profile(club.tenantId, club.userId);
+  card(@Req() request: AuthenticatedRequest): Promise<CoachCard> {
+    return this.coaches.card(request.user!.sub);
   }
 
   @Patch()
-  update(@CurrentClub() club: ClubContext, @Body() dto: UpdateCoachProfileDto): Promise<CoachProfile> {
-    return this.coaches.update(club.tenantId, club.userId, dto);
+  update(@Req() request: AuthenticatedRequest, @Body() dto: UpdateCoachCardDto): Promise<CoachCard> {
+    return this.coaches.updateCard(request.user!.sub, dto);
   }
 
   /** Фотография — файлом в поле `file`. PUT: новая заменяет старую целиком. */
   @Throttle(UPLOAD_LIMIT)
   @Put('photo')
   @UseInterceptors(SingleFileUpload)
-  setPhoto(@CurrentClub() club: ClubContext, @Req() request: AuthenticatedRequest): Promise<CoachProfile> {
-    return this.coaches.setPhoto(club.tenantId, club.userId, uploadedBytes(request));
+  setPhoto(@Req() request: AuthenticatedRequest): Promise<CoachCard> {
+    return this.coaches.setPhoto(request.user!.sub, uploadedBytes(request));
   }
 
   @Delete('photo')
-  removePhoto(@CurrentClub() club: ClubContext): Promise<CoachProfile> {
-    return this.coaches.removePhoto(club.tenantId, club.userId);
+  removePhoto(@Req() request: AuthenticatedRequest): Promise<CoachCard> {
+    return this.coaches.removePhoto(request.user!.sub);
+  }
+}
+
+/**
+ * Цены и группы тренера В ЭТОМ клубе.
+ *
+ * Цены клубные: в соседнем клубе у того же человека другой прайс. Правит их
+ * сам тренер — администратор в карточку и цены не лезет (решение владельца от
+ * 20.09.2026, отступление от ТЗ).
+ */
+@Roles('COACH')
+@Controller('clubs/:slug/coach')
+export class MeCoachController {
+  constructor(private readonly coaches: CoachesService) {}
+
+  @Get('prices')
+  prices(@CurrentClub() club: ClubContext): Promise<CoachPrices> {
+    return this.coaches.prices(club.tenantId, club.userId);
+  }
+
+  @Patch('prices')
+  updatePrices(@CurrentClub() club: ClubContext, @Body() dto: UpdateCoachPricesDto): Promise<CoachPrices> {
+    return this.coaches.updatePrices(club.tenantId, club.userId, dto);
   }
 
   /** Свои занятия вместе с составом записавшихся. */
@@ -53,7 +75,7 @@ export class MeCoachController {
     return this.coaches.myGroups(club.tenantId, club.userId);
   }
 
-  /** Своя статистика по проведённым занятиям. */
+  /** Своя статистика по проведённым занятиям этого клуба. */
   @Get('stats')
   stats(@CurrentClub() club: ClubContext, @Query() query: CoachStatsQueryDto): Promise<CoachStats> {
     return this.coaches.stats(club.tenantId, club.userId, query.period ?? 90);
@@ -61,48 +83,15 @@ export class MeCoachController {
 }
 
 /**
- * Карточка любого тренера своего клуба — правит администратор. Роли на классе:
- * маршрут, добавленный сюда завтра, окажется закрытым по умолчанию.
- *
- * Чтения здесь нет: карточку администратор получает вместе с карточкой
- * человека, одним запросом.
+ * Статистика тренера глазами клуба — единственное, что администратор о нём
+ * спрашивает отдельно. ТЗ просит её в разделе CRM; карточку он только видит,
+ * вместе с карточкой человека.
  */
 @Roles('ADMIN', 'OWNER')
 @Controller('clubs/:slug/coaches/:id')
 export class CoachAdminController {
   constructor(private readonly coaches: CoachesService) {}
 
-  @Patch()
-  update(
-    @CurrentClub() club: ClubContext,
-    @Param('id') coachId: string,
-    @Body() dto: UpdateCoachProfileDto,
-  ): Promise<CoachProfile> {
-    return this.coaches.update(club.tenantId, coachId, dto);
-  }
-
-  @Throttle(UPLOAD_LIMIT)
-  @Put('photo')
-  @UseInterceptors(SingleFileUpload)
-  setPhoto(
-    @CurrentClub() club: ClubContext,
-    @Param('id') coachId: string,
-    @Req() request: AuthenticatedRequest,
-  ): Promise<CoachProfile> {
-    return this.coaches.setPhoto(club.tenantId, coachId, uploadedBytes(request));
-  }
-
-  @Delete('photo')
-  removePhoto(@CurrentClub() club: ClubContext, @Param('id') coachId: string): Promise<CoachProfile> {
-    return this.coaches.removePhoto(club.tenantId, coachId);
-  }
-
-  /**
-   * Статистика тренера глазами клуба — тот же расчёт, что видит он сам.
-   *
-   * ТЗ просит её в разделе CRM: «статистика посещаемости доступна и по
-   * каждому тренеру».
-   */
   @Get('stats')
   stats(
     @CurrentClub() club: ClubContext,

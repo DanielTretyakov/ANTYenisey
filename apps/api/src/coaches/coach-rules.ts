@@ -7,12 +7,14 @@
  */
 import { MAX_COACH_SOCIAL_LINKS, type CoachSocialLink } from '@yenisey/types';
 
-/** Границы текстовых полей. Те же цифры держит CHECK `CoachProfile_text_filled`. */
+/** Границы текстовых полей. Те же цифры держит CHECK `CoachCard_text_filled`. */
 export const COACH_TEXT_LIMITS = {
   achievements: 2000,
   inventory: 1000,
-  priceInfo: 500,
 } as const;
+
+/** Приписка к ценам — короткая строка: «первое занятие бесплатно». */
+export const MAX_PRICE_NOTE = 300;
 
 export const MAX_SOCIAL_LABEL = 50;
 export const MAX_SOCIAL_URL = 300;
@@ -106,8 +108,18 @@ export function checkText(
 const FIELD_NAMES: Record<keyof typeof COACH_TEXT_LIMITS, string> = {
   achievements: 'Достижения',
   inventory: 'Инвентарь',
-  priceInfo: 'Стоимость',
 };
+
+/** Приписка к ценам: пусто — это null, длина под CHECK. */
+export function checkPriceNote(note: string | null | undefined): Decision<{ value: string | null }> {
+  const cleaned = cleanText(note);
+
+  if (cleaned && cleaned.length > MAX_PRICE_NOTE) {
+    return { ok: false, message: `Примечание к ценам — не длиннее ${MAX_PRICE_NOTE} символов` };
+  }
+
+  return { ok: true, value: cleaned };
+}
 
 /**
  * Разбор `socialLinks` из базы: поле Json, и что в нём лежит, база не знает.

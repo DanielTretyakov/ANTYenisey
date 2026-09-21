@@ -554,6 +554,10 @@ model User {
   sportRank     SportRank?
   files         StoredFile[]
 
+  // Карточка тренера — тоже свойство человека: она одна на все клубы, где он
+  // тренирует, и заполняет её он сам.
+  coachCard CoachCard?
+
   // Семья: чьим ребёнком человек числится и чьим родителем.
   guardianshipsAsChild    Guardianship[] @relation("GuardianshipChild")
   guardianshipsAsGuardian Guardianship[] @relation("GuardianshipGuardian")
@@ -664,7 +668,7 @@ model StoredFile {
 
   avatarOf       PlayerProfile[] @relation("ProfileAvatar")
   rankDocumentOf SportRank[]     @relation("RankDocument")
-  coachPhotoOf   CoachProfile[]  @relation("CoachPhoto")
+  coachPhotoOf   CoachCard[]     @relation("CoachPhoto")
 
   // Мишень составных ключей: аватар и приказ ссылаются на пару (файл,
   // владелец), и база не примет чужой файл в своём профиле.
@@ -922,29 +926,50 @@ model ClientProfile {
   @@id([userId, tenantId])
 }
 
-/// Публичная карточка тренера + служебные связи (какие сессии ведёт, чью
-/// статистику считать). Редактирует сам тренер (свою) или admin/owner (любую).
-model CoachProfile {
-  // Составной ключ по той же причине, что у ClientProfile: тренер одного
-  // клуба и клиент другого — это один аккаунт с двумя анкетами.
-  userId       String
-  tenantId     String // вторая половина ключа привязки к клубу
-  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  membership   TenantMembership @relation(fields: [userId, tenantId], references: [userId, tenantId], onDelete: Cascade)
+/// Публичная карточка тренера — ОДНА на человека, общая для всех клубов, где
+/// он тренирует.
+///
+/// Решение владельца от 20.09.2026: у тренера, как и у игрока, один профиль на
+/// платформу. Заполняет его только он сам; клуб карточку не правит — в отличие
+/// от того, что написано в ТЗ («либо admin/owner любую»). Клубным осталось
+/// только то, что у клубов действительно разное, — цены (см. CoachProfile).
+model CoachCard {
+  userId String @id
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  /// Фотография лежит файлом, как аватар игрока, а не адресом: внешней ссылке
-  /// нечем подтвердить, что за ней картинка, а не что угодно ещё.
-  ///
-  /// Ключ составной — (файл, этот же человек), NoAction — по тем же причинам,
-  /// что расписаны у `PlayerProfile.avatarFileId`. Половина ключа — `userId`,
-  /// а не пара с клубом: файл принадлежит человеку, карточка — клубу.
-  photoFileId  String?          @unique
-  photo        StoredFile?      @relation("CoachPhoto", fields: [photoFileId, userId], references: [id, ownerUserId], onDelete: NoAction)
+  /// Фотография лежит файлом, а не адресом: внешней ссылке нечем подтвердить,
+  /// что за ней картинка. Ключ составной — (файл, этот же человек), NoAction —
+  /// по тем же причинам, что у `PlayerProfile.avatarFileId`; карточка теперь
+  /// прямой потомок учётки, и каскад уносит их одной волной.
+  photoFileId String?     @unique
+  photo       StoredFile? @relation("CoachPhoto", fields: [photoFileId, userId], references: [id, ownerUserId], onDelete: NoAction)
 
   achievements String?
   inventory    String?
-  priceInfo    String?
   socialLinks  Json? // ссылки на соцсети: [{ label, url }]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Тренер в клубе: его цены здесь и служебные связи (какие сессии ведёт, чью
+/// статистику считать). Публичная карточка — общая, CoachCard.
+model CoachProfile {
+  // Составной ключ по той же причине, что у ClientProfile: тренер одного
+  // клуба и клиент другого — это один аккаунт с двумя анкетами.
+  userId     String
+  tenantId   String // вторая половина ключа привязки к клубу
+  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  membership TenantMembership @relation(fields: [userId, tenantId], references: [userId, tenantId], onDelete: Cascade)
+
+  /// Цены этого тренера В ЭТОМ клубе, копейки. Сама карточка — общая на все
+  /// клубы (CoachCard), а цены клубные: в соседнем клубе у того же тренера
+  /// другой прайс (решение владельца от 20.09.2026).
+  groupPrice      Int?
+  individualPrice Int?
+
+  /// Необязательная приписка к ценам: «первое занятие бесплатно».
+  priceNote String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

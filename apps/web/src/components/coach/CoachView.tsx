@@ -1,6 +1,7 @@
 'use client';
 
-import type { CoachProfile, CoachSocialLink, PublicCoach } from '@yenisey/types';
+import type { CoachCard, CoachPrices, CoachSocialLink, PublicCoach } from '@yenisey/types';
+import { formatKopecks } from '@/lib/money';
 
 /**
  * Куски карточки тренера, одинаковые в трёх местах: в кабинете тренера, на
@@ -12,10 +13,43 @@ import type { CoachProfile, CoachSocialLink, PublicCoach } from '@yenisey/types'
  */
 
 /** Что показывать: и в карточке правки, и в публичной — одни и те же поля. */
-type Card = Pick<CoachProfile | PublicCoach, 'achievements' | 'inventory' | 'priceInfo' | 'socialLinks'>;
+type Card = Pick<CoachCard | PublicCoach, 'achievements' | 'inventory' | 'socialLinks'>;
 
 export function coachCardEmpty(card: Card): boolean {
-  return !card.achievements && !card.inventory && !card.priceInfo && card.socialLinks.length === 0;
+  return !card.achievements && !card.inventory && card.socialLinks.length === 0;
+}
+
+/** Цены пусты целиком: показывать нечего, и заголовок только мешал бы. */
+export function coachPricesEmpty(prices: CoachPrices): boolean {
+  return prices.groupPrice === null && prices.individualPrice === null && !prices.priceNote;
+}
+
+/**
+ * Цены тренера в одном клубе. Заголовок задаёт зовущий: на публичной странице
+ * это название клуба, в карточке человека — «Стоимость занятий».
+ */
+export function CoachPricesView({ prices }: { prices: CoachPrices }) {
+  if (coachPricesEmpty(prices)) {
+    return <p className="text-[0.9375rem] text-text-muted">Стоимость не указана.</p>;
+  }
+
+  return (
+    <div className="grid gap-1">
+      {prices.groupPrice !== null && (
+        <p className="text-[0.9375rem]">
+          Групповое занятие — <span className="font-medium">{formatKopecks(prices.groupPrice)}</span>
+        </p>
+      )}
+      {prices.individualPrice !== null && (
+        <p className="text-[0.9375rem]">
+          Индивидуальное занятие — <span className="font-medium">{formatKopecks(prices.individualPrice)}</span>
+        </p>
+      )}
+      {prices.priceNote && (
+        <p className="text-[0.875rem] whitespace-pre-line break-words text-text-muted">{prices.priceNote}</p>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -79,7 +113,6 @@ export function CoachCardBody({ card }: { card: Card }) {
     <div className="grid gap-7">
       <CoachText title="Достижения" text={card.achievements} />
       <CoachText title="Инвентарь" text={card.inventory} />
-      <CoachText title="Стоимость занятий" text={card.priceInfo} />
       <CoachLinks links={card.socialLinks} />
     </div>
   );

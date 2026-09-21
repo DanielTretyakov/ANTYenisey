@@ -1,18 +1,23 @@
 import { Module } from '@nestjs/common';
 import { FilesModule } from '../files/files.module';
-import { CoachAdminController, CoachesController, MeCoachController } from './coaches.controller';
+import {
+  CoachAdminController,
+  CoachesController,
+  MeCoachCardController,
+  MeCoachController,
+} from './coaches.controller';
 import { CoachesService } from './coaches.service';
 
 /**
- * Карточка тренера: фотография, достижения, инвентарь, стоимость, соцсети, и
- * состав своих групп.
+ * Тренер: карточка (одна на человека, без клуба в адресе), цены в каждом
+ * клубе, состав групп и статистика.
  *
  * `CoachesService` отдаётся наружу ради карточки человека: администратор
- * смотрит и правит карточку тренера оттуда.
+ * видит там карточку тренера и его цены в этом клубе — только смотрит.
  */
 @Module({
   imports: [FilesModule],
-  controllers: [MeCoachController, CoachAdminController, CoachesController],
+  controllers: [MeCoachCardController, MeCoachController, CoachAdminController, CoachesController],
   providers: [CoachesService],
   exports: [CoachesService],
 })

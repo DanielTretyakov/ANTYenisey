@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { checkText, cleanText, parseSocialLinks, readSocialLinks } from './coach-rules.ts';
+import { checkPriceNote, checkText, cleanText, parseSocialLinks, readSocialLinks } from './coach-rules.ts';
 
 describe('cleanText', () => {
   it('пусто и пробелы — это null', () => {
@@ -13,14 +13,24 @@ describe('cleanText', () => {
 
 describe('checkText', () => {
   it('слишком длинное поле называет себя', () => {
-    const decision = checkText('priceInfo', 'я'.repeat(501));
+    const decision = checkText('achievements', 'я'.repeat(2001));
 
     assert.equal(decision.ok, false);
-    assert.match((decision as { message: string }).message, /Стоимость/);
+    assert.match((decision as { message: string }).message, /Достижения/);
   });
 
   it('на границе длины принимается', () => {
     assert.deepEqual(checkText('inventory', 'я'.repeat(1000)), { ok: true, value: 'я'.repeat(1000) });
+  });
+});
+
+describe('checkPriceNote', () => {
+  it('пусто — это null, а не пустая строка', () => {
+    assert.deepEqual(checkPriceNote('   '), { ok: true, value: null });
+  });
+
+  it('слишком длинная приписка не проходит', () => {
+    assert.equal(checkPriceNote('я'.repeat(301)).ok, false);
   });
 });
 

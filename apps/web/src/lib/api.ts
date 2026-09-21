@@ -14,17 +14,19 @@ import type {
   ClubCoach,
   ClubEvent,
   ClubSearchQuery,
+  CoachCard,
   CoachGroup,
-  CoachProfile,
+  CoachPrices,
   CoachStats,
   CoachStatsPeriod,
+  UpdateCoachCardRequest,
+  UpdateCoachPricesRequest,
   AdjustSubscriptionRequest,
   ClientSubscription,
   SubscriptionLedgerRow,
   SubscriptionPlan,
   SubscriptionPlanRequest,
   PublicCoach,
-  UpdateCoachProfileRequest,
   FavouriteClub,
   FeedEvent,
   ClubPeoplePage,
@@ -414,6 +416,19 @@ export const api = {
    */
   player: (id: string): Promise<PublicPlayer> => optionallyAuthorized(`/players/${id}`),
 
+  // --- Карточка тренера. Одна на все клубы, поэтому клуба в адресе нет:
+  // заполняет её сам тренер, а клуб только смотрит.
+  myCoachCard: (): Promise<CoachCard> => authorized('/me/coach-card'),
+
+  updateCoachCard: (patch: UpdateCoachCardRequest): Promise<CoachCard> =>
+    authorized('/me/coach-card', json('PATCH', patch)),
+
+  /** Фотография заменяется целиком. Картинку пережимает сервер. */
+  setCoachPhoto: (file: File): Promise<CoachCard> =>
+    authorized('/me/coach-card/photo', form('PUT', {}, file)),
+
+  removeCoachPhoto: (): Promise<CoachCard> => authorized('/me/coach-card/photo', { method: 'DELETE' }),
+
   /** Свои абонементы по всем клубам; за ребёнка — с `forPerson`. */
   mySubscriptions: (forPerson?: string | null): Promise<ClientSubscription[]> =>
     authorized(withFor('/me/subscriptions', forPerson)),
@@ -754,20 +769,12 @@ export function clubApi(slug: string = TENANT_SLUG) {
     revokeGuardian: (childId: string, reason: string): Promise<void> =>
       authorized(`${club}/people/${childId}/guardian/revoke`, json('POST', { reason })),
 
-    // --- Карточка тренера. Она принадлежит клубу, а не человеку, поэтому клуб
-    // в адресе обязателен. Свою правит тренер, любую — администратор; методы
-    // разные только адресом, ответ один и тот же.
-    coachProfile: (): Promise<CoachProfile> => authorized(`${club}/coach`),
+    // --- Цены тренера В ЭТОМ клубе. Сама карточка общая на все клубы и живёт
+    // платформенным маршрутом (`api.myCoachCard`).
+    coachPrices: (): Promise<CoachPrices> => authorized(`${club}/coach/prices`),
 
-    updateCoachProfile: (patch: UpdateCoachProfileRequest): Promise<CoachProfile> =>
-      authorized(`${club}/coach`, json('PATCH', patch)),
-
-    /** Фотография заменяется целиком. Картинку пережимает сервер. */
-    setCoachPhoto: (file: File): Promise<CoachProfile> =>
-      authorized(`${club}/coach/photo`, form('PUT', {}, file)),
-
-    removeCoachPhoto: (): Promise<CoachProfile> =>
-      authorized(`${club}/coach/photo`, { method: 'DELETE' }),
+    updateCoachPrices: (payload: UpdateCoachPricesRequest): Promise<CoachPrices> =>
+      authorized(`${club}/coach/prices`, json('PATCH', payload)),
 
     /** Свои занятия вместе с составом записавшихся. */
     coachGroups: (): Promise<CoachGroup[]> => authorized(`${club}/coach/groups`),
@@ -805,16 +812,6 @@ export function clubApi(slug: string = TENANT_SLUG) {
     subscriptionLedger: (personId: string, subscriptionId: string): Promise<SubscriptionLedgerRow[]> =>
       authorized(`${club}/people/${personId}/subscriptions/${subscriptionId}/ledger`),
 
-    // Правка чужой карточки администратором. `coaches()` выше — другое: это
-    // список тренеров для выбора в расписании.
-    updateCoachOf: (coachId: string, patch: UpdateCoachProfileRequest): Promise<CoachProfile> =>
-      authorized(`${club}/coaches/${coachId}`, json('PATCH', patch)),
-
-    setCoachPhotoOf: (coachId: string, file: File): Promise<CoachProfile> =>
-      authorized(`${club}/coaches/${coachId}/photo`, form('PUT', {}, file)),
-
-    removeCoachPhotoOf: (coachId: string): Promise<CoachProfile> =>
-      authorized(`${club}/coaches/${coachId}/photo`, { method: 'DELETE' }),
   };
 }
 
