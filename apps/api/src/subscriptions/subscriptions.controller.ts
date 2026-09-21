@@ -1,10 +1,20 @@
-import { Body, Controller, Get, Ip, Param, Patch, Post } from '@nestjs/common';
-import type { ClientSubscription, SubscriptionLedgerRow, SubscriptionPlan } from '@yenisey/types';
+import { Body, Controller, Get, Ip, Param, Patch, Post, Query } from '@nestjs/common';
+import type {
+  ClientSubscription,
+  ClubLedgerPage,
+  SubscriptionLedgerRow,
+  SubscriptionPlan,
+} from '@yenisey/types';
 import type { ClubContext } from '../auth/club-context';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Acting, ClientAction, type ActingClient } from '../guardianship/acting-client.guard';
-import { AdjustSubscriptionDto, IssueSubscriptionDto, SubscriptionPlanDto } from './dto/subscription.dto';
+import {
+  AdjustSubscriptionDto,
+  ClubLedgerQueryDto,
+  IssueSubscriptionDto,
+  SubscriptionPlanDto,
+} from './dto/subscription.dto';
 import { SubscriptionsService } from './subscriptions.service';
 
 /**
@@ -36,6 +46,24 @@ export class SubscriptionPlansController {
     @Body() dto: SubscriptionPlanDto,
   ): Promise<SubscriptionPlan> {
     return this.subscriptions.updatePlan(club.tenantId, id, dto);
+  }
+}
+
+/**
+ * История абонементов всего клуба.
+ *
+ * Отдельный раздел, а не приложение к карточке человека: деньги за абонементы
+ * приходят мимо системы, и этот журнал — единственный след того, кто что продал
+ * и кому что вернули.
+ */
+@Roles('ADMIN', 'OWNER')
+@Controller('clubs/:slug/subscriptions')
+export class ClubSubscriptionsController {
+  constructor(private readonly subscriptions: SubscriptionsService) {}
+
+  @Get('ledger')
+  ledger(@CurrentClub() club: ClubContext, @Query() query: ClubLedgerQueryDto): Promise<ClubLedgerPage> {
+    return this.subscriptions.clubLedger(club.tenantId, query);
   }
 }
 

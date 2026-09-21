@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ClubModule } from '../club/club.module';
 import { GuardianshipModule } from '../guardianship/guardianship.module';
 import {
+  ClubSubscriptionsController,
   MeSubscriptionsController,
   PersonSubscriptionsController,
   SubscriptionPlansController,
@@ -21,7 +22,12 @@ import { SubscriptionsService } from './subscriptions.service';
  */
 @Module({
   imports: [ClubModule, GuardianshipModule],
-  controllers: [SubscriptionPlansController, PersonSubscriptionsController, MeSubscriptionsController],
+  controllers: [
+    SubscriptionPlansController,
+    ClubSubscriptionsController,
+    PersonSubscriptionsController,
+    MeSubscriptionsController,
+  ],
   providers: [SubscriptionsService],
   exports: [SubscriptionsService],
 })

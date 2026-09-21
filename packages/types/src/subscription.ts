@@ -72,6 +72,33 @@ export interface SubscriptionLedgerRow {
   entry: { title: string; startsAt: string } | null;
 }
 
+/**
+ * Движение по абонементу в истории всего клуба.
+ *
+ * Та же строка, что в истории одного абонемента, плюс чей это абонемент и
+ * какого тарифа: в общем списке без этого не разобрать, о ком речь.
+ */
+export interface ClubLedgerRow extends SubscriptionLedgerRow {
+  subscriptionId: string;
+  planName: string;
+  person: { id: string; fullName: string };
+}
+
+export interface ClubLedgerPage {
+  items: ClubLedgerRow[];
+  /** Сколько всего движений подходит под фильтр — для «показано 50 из 320». */
+  total: number;
+}
+
+export interface ClubLedgerQuery {
+  /** Только по одному человеку — из его карточки. */
+  personId?: string;
+  /** Поиск по ФИО владельца абонемента. */
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
 export interface IssueSubscriptionRequest {
   planId: string;
   /**

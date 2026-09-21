@@ -1,4 +1,4 @@
-import type { BookingEntry } from '@yenisey/types';
+import type { BookingEntry, SubscriptionLedgerRow } from '@yenisey/types';
 import { formatKopecks } from './money';
 import { plural } from './plural';
 import type { SubscriptionAlert } from './subscriptionAlert';
@@ -50,6 +50,29 @@ export function remainingLabel(remainingVisits: number | null): string {
   return remainingVisits === null
     ? 'безлимит'
     : `осталось ${visitsLabel(remainingVisits)}`;
+}
+
+/**
+ * Движение по абонементу словами: «Продан · Иванов И. И.», «Запись: Группа
+ * начинающих, 3 окт.». Одна подпись на историю одного абонемента в карточке
+ * человека и на историю всего клуба — разойдясь, они назвали бы одно и то же
+ * движение по-разному.
+ */
+export function ledgerLabel(row: SubscriptionLedgerRow): string {
+  const entry = row.entry
+    ? `${row.entry.title}, ${new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(new Date(row.entry.startsAt))}`
+    : '';
+
+  switch (row.reason) {
+    case 'PURCHASE':
+      return `Продан${row.by ? ` · ${row.by}` : ''}`;
+    case 'VISIT_CHARGED':
+      return `Запись: ${entry}`;
+    case 'VISIT_REFUNDED':
+      return `Возврат: ${entry}`;
+    case 'ADMIN_ADJUSTMENT':
+      return `${row.delta === 0 ? 'Закрыт досрочно' : 'Корректировка'}: ${row.note ?? ''}${row.by ? ` · ${row.by}` : ''}`;
+  }
 }
 
 /**

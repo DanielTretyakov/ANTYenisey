@@ -23,6 +23,8 @@ import type {
   UpdateCoachPricesRequest,
   AdjustSubscriptionRequest,
   ClientSubscription,
+  ClubLedgerPage,
+  ClubLedgerQuery,
   SubscriptionLedgerRow,
   SubscriptionPlan,
   SubscriptionPlanRequest,
@@ -806,6 +808,20 @@ export function clubApi(slug: string = TENANT_SLUG) {
     issueSubscription: (personId: string, planId: string, hallId?: string): Promise<ClientSubscription> =>
       authorized(`${club}/people/${personId}/subscriptions`, json('POST', { planId, hallId })),
 
+    /** История абонементов всего клуба: движение за движением, свежие сверху. */
+    subscriptionLedger: (query: ClubLedgerQuery = {}): Promise<ClubLedgerPage> => {
+      const params = new URLSearchParams();
+
+      if (query.personId) params.set('personId', query.personId);
+      if (query.search) params.set('search', query.search);
+      if (query.limit !== undefined) params.set('limit', String(query.limit));
+      if (query.offset !== undefined) params.set('offset', String(query.offset));
+
+      const search = params.toString();
+
+      return authorized(`${club}/subscriptions/ledger${search ? `?${search}` : ''}`);
+    },
+
     /** Корректировка визитов или досрочное закрытие безлимита — с причиной. */
     adjustSubscription: (
       personId: string,
@@ -814,7 +830,8 @@ export function clubApi(slug: string = TENANT_SLUG) {
     ): Promise<ClientSubscription> =>
       authorized(`${club}/people/${personId}/subscriptions/${subscriptionId}/adjust`, json('POST', payload)),
 
-    subscriptionLedger: (personId: string, subscriptionId: string): Promise<SubscriptionLedgerRow[]> =>
+    /** История ОДНОГО абонемента — в карточке человека. Клубная выше. */
+    subscriptionLedgerOf: (personId: string, subscriptionId: string): Promise<SubscriptionLedgerRow[]> =>
       authorized(`${club}/people/${personId}/subscriptions/${subscriptionId}/ledger`),
 
   };

@@ -2604,9 +2604,31 @@ async function subscriptions() {
   assert('в журнале нет строк «сгорел»', !reasons.includes('VISIT_BURNED'));
   assert('журнал сошёлся с остатком', (r.body ?? []).reduce((sum, row) => sum + row.delta, 0) === 0);
 
+  // --- История абонементов клуба: тот же журнал, но по всему клубу сразу.
+  r = await asClient('/clubs/yenisey/subscriptions/ledger');
+  check('клиенту история клуба закрыта', 403, r.status);
+
+  r = await asAdmin('/clubs/yenisey/subscriptions/ledger?limit=200');
+  check('история клуба читается', 200, r.status);
+  assert('движения этого абонемента в ней есть',
+    (r.body?.items ?? []).some((row) => row.subscriptionId === subscriptionId));
+  assert('у строки есть владелец и тариф',
+    (r.body?.items ?? []).every((row) => typeof row.person?.fullName === 'string' && typeof row.planName === 'string'));
+  assert('всего движений не меньше показанных', (r.body?.total ?? 0) >= (r.body?.items ?? []).length);
+
+  r = await asAdmin('/clubs/yenisey/subscriptions/ledger?search=Абонементов');
+  assert('поиск по фамилии сужает выборку',
+    (r.body?.items ?? []).every((row) => row.person?.fullName?.includes('Абонементов')));
+
+  r = await asAdmin('/clubs/yenisey/subscriptions/ledger?search=Нетаковогочеловека');
+  assert('по незнакомой фамилии пусто', (r.body?.total ?? -1) === 0);
+
   // --- Изоляция клубов
   r = await asAdmin(`/clubs/sayany/people/${clientId}/subscriptions`, { method: 'POST', json: { planId } });
   assert('чужой клуб не отдаёт продажу', r.status === 403 || r.status === 404, `получено ${r.status}`);
+
+  r = await asAdmin('/clubs/sayany/subscriptions/ledger');
+  assert('и чужую историю не показывает', r.status === 403 || r.status === 404, `получено ${r.status}`);
 }
 
 /**

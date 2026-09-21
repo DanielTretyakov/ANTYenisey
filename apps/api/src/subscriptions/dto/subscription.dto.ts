@@ -10,8 +10,10 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import type {
   AdjustSubscriptionRequest,
+  ClubLedgerQuery,
   IssueSubscriptionRequest,
   SubscriptionPlanRequest,
 } from '@yenisey/types';
@@ -85,4 +87,33 @@ export class AdjustSubscriptionDto implements AdjustSubscriptionRequest {
   @IsString()
   @MaxLength(500, { message: 'Причина — не длиннее 500 символов' })
   reason: string;
+}
+
+/**
+ * Фильтр истории абонементов клуба. Числа приходят строками из адреса, поэтому
+ * `@Type(() => Number)`: без него `limit=50` не прошёл бы `@IsInt`.
+ */
+export class ClubLedgerQueryDto implements ClubLedgerQuery {
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  personId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100, { message: 'Поиск — не длиннее 100 символов' })
+  search?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  limit?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  offset?: number;
 }

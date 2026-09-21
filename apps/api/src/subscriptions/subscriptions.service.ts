@@ -7,6 +7,7 @@ import {
 import { ActorType, AuditAction, LedgerReason, Prisma } from '@yenisey/database';
 import type {
   ClientSubscription,
+  ClubLedgerPage,
   LedgerReasonView,
   PaidBySubscription,
   SubscriptionLedgerRow,
@@ -14,7 +15,7 @@ import type {
 } from '@yenisey/types';
 import { MembershipService } from '../club/membership.service';
 import { PrismaService } from '../prisma/prisma.service';
-import type { AdjustSubscriptionDto, SubscriptionPlanDto } from './dto/subscription.dto';
+import type { AdjustSubscriptionDto, ClubLedgerQueryDto, SubscriptionPlanDto } from './dto/subscription.dto';
 import { lockSubscription, writeLedger, type LockedSubscription } from './subscription-ledger';
 import {
   cleanNote,
@@ -33,13 +34,55 @@ import {
 /** К какой записи относится движение по визитам. */
 export type EntryLink = { trainingBookingId: string } | { tournamentRegistrationId: string };
 
-/**
 /** Откуда абонемент: продал сотрудник у стойки или оплачен онлайн. */
 export type IssueOrigin = { issuedBy: string } | { paymentId: string };
 
 export interface Actor {
   userId: string;
   ipAddress: string | null;
+}
+
+/**
+ * Строка журнала так, как её показывают. Один набор колонок на историю одного
+ * абонемента и на историю всего клуба: разойдясь, они показали бы одно и то же
+ * движение по-разному.
+ */
+const LEDGER_SELECT = {
+  id: true,
+  createdAt: true,
+  delta: true,
+  balanceAfter: true,
+  reason: true,
+  note: true,
+  createdBy: { select: { user: { select: { fullName: true } } } },
+  trainingBooking: {
+    select: { session: { select: { startsAt: true, trainingType: { select: { name: true } } } } },
+  },
+  tournamentRegistration: {
+    select: { tournament: { select: { startsAt: true, tournamentType: { select: { name: true } } } } },
+  },
+} satisfies Prisma.SubscriptionLedgerSelect;
+
+type LedgerRowData = Prisma.SubscriptionLedgerGetPayload<{ select: typeof LEDGER_SELECT }>;
+
+function toLedgerRow(row: LedgerRowData): SubscriptionLedgerRow {
+  const session = row.trainingBooking?.session;
+  const tournament = row.tournamentRegistration?.tournament;
+
+  return {
+    id: row.id,
+    at: row.createdAt.toISOString(),
+    delta: row.delta,
+    balanceAfter: row.balanceAfter,
+    reason: row.reason as LedgerReasonView,
+    note: row.note,
+    by: row.createdBy?.user.fullName ?? null,
+    entry: session
+      ? { title: session.trainingType.name, startsAt: session.startsAt.toISOString() }
+      : tournament
+        ? { title: tournament.tournamentType.name, startsAt: tournament.startsAt.toISOString() }
+        : null,
+  };
 }
 
 const CLIENT_SUBSCRIPTION_SELECT = {
@@ -578,43 +621,69 @@ export class SubscriptionsService {
 
     const rows = await this.prisma.subscriptionLedger.findMany({
       where: { subscriptionId },
-      select: {
-        id: true,
-        createdAt: true,
-        delta: true,
-        balanceAfter: true,
-        reason: true,
-        note: true,
-        createdBy: { select: { user: { select: { fullName: true } } } },
-        trainingBooking: {
-          select: { session: { select: { startsAt: true, trainingType: { select: { name: true } } } } },
-        },
-        tournamentRegistration: {
-          select: { tournament: { select: { startsAt: true, tournamentType: { select: { name: true } } } } },
-        },
-      },
+      select: LEDGER_SELECT,
       orderBy: { createdAt: 'desc' },
     });
 
-    return rows.map((row) => {
-      const session = row.trainingBooking?.session;
-      const tournament = row.tournamentRegistration?.tournament;
+    return rows.map(toLedgerRow);
+  }
 
-      return {
-        id: row.id,
-        at: row.createdAt.toISOString(),
-        delta: row.delta,
-        balanceAfter: row.balanceAfter,
-        reason: row.reason as LedgerReasonView,
-        note: row.note,
-        by: row.createdBy?.user.fullName ?? null,
-        entry: session
-          ? { title: session.trainingType.name, startsAt: session.startsAt.toISOString() }
-          : tournament
-            ? { title: tournament.tournamentType.name, startsAt: tournament.startsAt.toISOString() }
-            : null,
-      };
-    });
+  /**
+   * История абонементов всего клуба — движение за движением.
+   *
+   * Отдельно от истории одного абонемента: администратор приходит сюда не с
+   * вопросом «что было у Иванова», а с вопросом «что вообще происходило» —
+   * деньги приняли вне системы, и журнал остаётся единственным следом.
+   * Поиск по человеку на случай, когда вопрос всё-таки про Иванова.
+   */
+  async clubLedger(tenantId: string, query: ClubLedgerQueryDto): Promise<ClubLedgerPage> {
+    const search = query.search?.trim();
+    const where: Prisma.SubscriptionLedgerWhereInput = {
+      tenantId,
+      ...(query.personId ? { subscription: { clientId: query.personId } } : {}),
+      ...(search
+        ? {
+            subscription: {
+              ...(query.personId ? { clientId: query.personId } : {}),
+              client: { membership: { user: { fullName: { contains: search, mode: 'insensitive' } } } },
+            },
+          }
+        : {}),
+    };
+
+    const limit = Math.min(query.limit ?? 50, 200);
+
+    const [total, rows] = await Promise.all([
+      this.prisma.subscriptionLedger.count({ where }),
+      this.prisma.subscriptionLedger.findMany({
+        where,
+        select: {
+          ...LEDGER_SELECT,
+          subscriptionId: true,
+          subscription: {
+            select: {
+              plan: { select: { name: true } },
+              client: { select: { userId: true, membership: { select: { user: { select: { fullName: true } } } } } },
+            },
+          },
+        },
+        // Одной секундой могут лечь и продажа, и списание первого визита:
+        // id вторым ключом держит порядок неизменным между страницами.
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: limit,
+        skip: query.offset ?? 0,
+      }),
+    ]);
+
+    return {
+      total,
+      items: rows.map((row) => ({
+        ...toLedgerRow(row),
+        subscriptionId: row.subscriptionId,
+        planName: row.subscription.plan.name,
+        person: { id: row.subscription.client.userId, fullName: row.subscription.client.membership.user.fullName },
+      })),
+    };
   }
 
   private async one(tenantId: string, clientId: string, id: string): Promise<ClientSubscription> {

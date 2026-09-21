@@ -10,7 +10,7 @@ import { Select } from '@/components/ui/Select';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { formatKopecks } from '@/lib/money';
-import { planTermsLabel, remainingLabel, validUntilLabel } from '@/lib/subscriptions';
+import { ledgerLabel, planTermsLabel, remainingLabel, validUntilLabel } from '@/lib/subscriptions';
 import { useClubApi } from '@/lib/useClubApi';
 
 function messageOf(cause: unknown): string {
@@ -203,7 +203,7 @@ function SubscriptionRow({
     }
 
     try {
-      setLedger(await club.subscriptionLedger(personId, sub.id));
+      setLedger(await club.subscriptionLedgerOf(personId, sub.id));
     } catch (cause) {
       setError(messageOf(cause));
     }
@@ -298,19 +298,3 @@ function SubscriptionRow({
   );
 }
 
-function ledgerLabel(row: SubscriptionLedgerRow): string {
-  const entry = row.entry
-    ? `${row.entry.title}, ${new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(new Date(row.entry.startsAt))}`
-    : '';
-
-  switch (row.reason) {
-    case 'PURCHASE':
-      return `Продан${row.by ? ` · ${row.by}` : ''}`;
-    case 'VISIT_CHARGED':
-      return `Запись: ${entry}`;
-    case 'VISIT_REFUNDED':
-      return `Возврат: ${entry}`;
-    case 'ADMIN_ADJUSTMENT':
-      return `${row.delta === 0 ? 'Закрыт досрочно' : 'Корректировка'}: ${row.note ?? ''}${row.by ? ` · ${row.by}` : ''}`;
-  }
-}
