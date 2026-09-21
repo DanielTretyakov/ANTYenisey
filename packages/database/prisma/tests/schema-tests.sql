@@ -1171,6 +1171,13 @@ SELECT pg_temp.expect('CN',
      VALUES ('sx','t1','u1','sp2',5,500000,'c1')$q$,
   '23503', 'Subscription_planId_tenantId_fkey');
 
+-- CN2. Абонемент клуба t1 продан «в зале» клуба t2. По залу продажи считается
+--      срок и раскладывается выручка дня, и чужой зал увёл бы и то и другое.
+SELECT pg_temp.expect('CN2',
+  $q$INSERT INTO "Subscription" (id,"tenantId","clientId","planId","remainingVisits","priceAtPurchase","issuedByUserId","soldAtHallId")
+     VALUES ('sx','t1','u1','sp1',5,500000,'c1','h2')$q$,
+  '23503', 'Subscription_soldAtHallId_tenantId_fkey');
+
 -- CO. Абонемент ниоткуда: ни продавца, ни онлайн-платежа.
 SELECT pg_temp.expect('CO',
   $q$INSERT INTO "Subscription" (id,"tenantId","clientId","planId","remainingVisits","priceAtPurchase")
