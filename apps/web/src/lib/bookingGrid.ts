@@ -83,6 +83,39 @@ export function isAvailable(
   );
 }
 
+/**
+ * Что с клеткой: свободна, занята или уже прошла.
+ *
+ * Три состояния, а не два, потому что «занято» и «прошло» — разные ответы на
+ * вопрос человека. Серым они выглядели одинаково, и в подписи для диктора
+ * прошедшее время тоже называлось занятым: в сегодняшнем дне клетка 06:00
+ * сообщала «стол занят», хотя стол свободен, просто утро кончилось.
+ */
+export type CellState = 'free' | 'busy' | 'past';
+
+export function cellState(day: BookingDay, table: BookingDayTable, startMinute: number): CellState {
+  if (startMinute < day.earliestMinute) {
+    return 'past';
+  }
+
+  return isBusy(table.busy, startMinute, startMinute + day.stepMinutes) ? 'busy' : 'free';
+}
+
+/**
+ * Клетки, которые стоит показывать: от ближайшей ещё не прошедшей.
+ *
+ * Сетка идёт с 06:00 до полуночи, и вечером три четверти её — серые клетки
+ * времени, которое занять уже нельзя: человек скроллил мимо них к вечеру, а на
+ * телефоне — несколько экранов. Прошедшее просто не рисуется; у будущей даты
+ * не прошло ничего, и сетка остаётся целой.
+ *
+ * Пусто — единственный случай, когда в зале на сегодня не осталось ни одной
+ * клетки: об этом форме придётся сказать словами.
+ */
+export function bookableMinutes(day: BookingDay): number[] {
+  return gridMinutes(day).filter((minute) => minute >= day.earliestMinute);
+}
+
 /** Клетки одного стола на дату. */
 export function slotsOf(day: BookingDay, table: BookingDayTable): Slot[] {
   return gridMinutes(day).map((startMinute) => ({

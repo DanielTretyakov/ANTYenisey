@@ -3,11 +3,14 @@ import { describe, it } from 'node:test';
 import type { BookingDay, BookingDayTable } from '@yenisey/types';
 import {
   bookableDates,
+  bookableMinutes,
   canBook,
+  cellState,
   durationsFrom,
   formatDate,
   formatDuration,
   formatMinute,
+  gridMinutes,
   isBusy,
   slotsOf,
 } from './bookingGrid.ts';
@@ -74,6 +77,44 @@ describe('slotsOf', () => {
 
     assert.equal(at(11 * 60 + 30), false);
     assert.equal(at(12 * 60), true);
+  });
+});
+
+describe('cellState', () => {
+  it('различает занятое и прошедшее', () => {
+    const today = day({ earliestMinute: 12 * 60 });
+    const busy = table([{ startMinute: 14 * 60, endMinute: 15 * 60 }]);
+
+    assert.equal(cellState(today, busy, 11 * 60), 'past');
+    assert.equal(cellState(today, busy, 13 * 60), 'free');
+    assert.equal(cellState(today, busy, 14 * 60), 'busy');
+  });
+
+  it('прошедшее остаётся прошедшим, даже если оно было занято', () => {
+    // Иначе в подписи для диктора утренняя бронь звучала бы как «занято» —
+    // и человек решал бы, что стол занят до сих пор.
+    const today = day({ earliestMinute: 12 * 60 });
+
+    assert.equal(cellState(today, table([{ startMinute: 7 * 60, endMinute: 8 * 60 }]), 7 * 60), 'past');
+  });
+});
+
+describe('bookableMinutes', () => {
+  it('у будущей даты сетка целая', () => {
+    assert.deepEqual(bookableMinutes(day()), gridMinutes(day()));
+  });
+
+  it('прошедшие клетки не рисуются', () => {
+    const rows = bookableMinutes(day({ earliestMinute: 20 * 60 + 15 }));
+
+    // 20:15 — не по шагу сетки, поэтому первая клетка, которую ещё можно
+    // занять, начинается в 20:30.
+    assert.equal(rows[0], 20 * 60 + 30);
+    assert.equal(rows.at(-1), 23 * 60 + 30);
+  });
+
+  it('поздним вечером не остаётся ни одной', () => {
+    assert.deepEqual(bookableMinutes(day({ earliestMinute: 23 * 60 + 45 })), []);
   });
 });
 

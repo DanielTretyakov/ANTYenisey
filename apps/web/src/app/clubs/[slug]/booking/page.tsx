@@ -23,13 +23,14 @@ import { roleInClub } from '@/lib/membership';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import {
   bookableDates,
+  bookableMinutes,
+  cellState,
   durationsFrom,
   formatDate,
   formatDuration,
   formatMinute,
-  gridMinutes,
-  isAvailable,
   todayIn,
+  type CellState,
 } from '@/lib/bookingGrid';
 import { cn } from '@/lib/cn';
 import { formatKopecks } from '@/lib/money';
@@ -308,7 +309,7 @@ export default function BookingPage() {
       <Card className="mb-6">
         <CardHeader
           title="Время"
-          description="Серым отмечено занятое и уже прошедшее время."
+          description="Плотным серым отмечено занятое. Время, которое уже прошло, в сетке не показывается."
         />
         <CardBody>
           {day && day.tables.length > 0 ? (
@@ -434,16 +435,34 @@ function Grid({
   pick: Pick | null;
   onPick: (pick: Pick | null) => void;
 }) {
-  const rows = gridMinutes(day);
+  // Прошедшие клетки не рисуются вовсе: вечером они занимали три четверти
+  // сетки, и человек скроллил мимо серого к своему времени.
+  const rows = bookableMinutes(day);
+
+  if (rows.length === 0) {
+    return (
+      <p className="text-[0.9375rem] text-text-muted">
+        На сегодня время в этом зале уже кончилось — выберите другой день.
+      </p>
+    );
+  }
 
   return (
-    <div className="overflow-x-auto">
+    // Своя область прокрутки с прилипающей шапкой — как в расписании у
+    // администратора: столов бывает дюжина, строк времени четыре десятка, и без
+    // шапки столбцы на длинной сетке теряют имена.
+    <div className="max-h-[calc(100dvh-16rem)] touch-pan-y overflow-auto">
       <table className="w-full border-separate border-spacing-0 text-[0.8125rem]">
         <thead>
           <tr>
-            <th className="w-16 py-2 text-left font-medium text-text-subtle">Время</th>
+            <th className="sticky top-0 z-20 w-16 bg-surface-raised py-2 text-left font-medium text-text-subtle">
+              Время
+            </th>
             {day.tables.map((table) => (
-              <th key={table.tableId} className="px-1 py-2 font-medium text-text-muted">
+              <th
+                key={table.tableId}
+                className="sticky top-0 z-20 bg-surface-raised px-1 py-2 font-medium text-text-muted"
+              >
                 {table.label}
               </th>
             ))}
@@ -489,7 +508,8 @@ function Cell({
   picked: boolean;
   onPick: (pick: Pick | null) => void;
 }) {
-  const available = isAvailable(day, table, startMinute);
+  const state = cellState(day, table, startMinute);
+  const available = state === 'free';
 
   return (
     <td className="px-0.5 py-0.5">
@@ -497,18 +517,30 @@ function Cell({
         type="button"
         disabled={!available}
         aria-pressed={picked}
-        aria-label={`${table.label}, ${formatMinute(startMinute)}${available ? '' : ', занято'}`}
+        // «Занято» и «прошло» — разные ответы, и диктор должен называть их
+        // по-разному: утренняя клетка сегодняшнего дня свободна, просто утро
+        // кончилось.
+        aria-label={`${table.label}, ${formatMinute(startMinute)}${LABELS[state]}`}
         onClick={() => onPick(picked ? null : { tableId: table.tableId, startMinute })}
         className={cn(
           'h-6 w-full rounded-[3px] transition-colors',
           picked && 'bg-accent',
-          !picked && available && 'bg-surface-sunken hover:bg-surface-accent-soft',
-          !available && 'cursor-not-allowed bg-surface-sunken/40',
+          state === 'free' && !picked && 'bg-surface-sunken hover:bg-surface-accent-soft',
+          // Занятое — плотнее прошедшего: за ним стоит чужая бронь, и его
+          // стоит замечать, выбирая соседнее время.
+          state === 'busy' && 'cursor-not-allowed bg-border/60',
+          state === 'past' && 'cursor-not-allowed bg-surface-sunken/40',
         )}
       />
     </td>
   );
 }
+
+const LABELS: Record<CellState, string> = {
+  free: '',
+  busy: ', занято',
+  past: ', время прошло',
+};
 
 /**
  * Местное время зала → мгновение в ISO-8601.
