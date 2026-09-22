@@ -34,13 +34,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Версия pnpm берётся из поля packageManager в package.json — отдельным
       # числом её здесь не дублируем, иначе разъедется.
       - uses: pnpm/action-setup@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: pnpm
@@ -73,9 +73,9 @@ jobs:
           --health-retries 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: pnpm
@@ -108,9 +108,9 @@ jobs:
           --health-retries 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: pnpm
@@ -143,10 +143,14 @@ jobs:
           NEXT_PUBLIC_API_URL="http://localhost:3001"
           EOF
 
-      - name: Накатить миграции и сид
+      # Демо-сид — не украшение: на голой базе нет ни тренера, ни занятий, и
+      # смоук честно пропускает разделы про карточку тренера, его группы и
+      # статистику. Первый прогон в CI так и прошёл: 697 сценариев вместо 767.
+      - name: Накатить миграции, сид и демо-расписание
         run: |
           pnpm --filter @yenisey/database migrate:deploy
           pnpm --filter @yenisey/database seed
+          pnpm --filter @yenisey/database seed-demo
 
       # Смоук без учётки администратора молча пропускает больше половины
       # сценариев и всё равно пишет «провалов 0» — поэтому она заводится
