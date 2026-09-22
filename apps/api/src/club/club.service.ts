@@ -30,6 +30,8 @@ import { clubSettingsViolations, hallViolations } from './settings-rules';
 const SETTINGS_SELECT = {
   name: true,
   cityId: true,
+  phone: true,
+  email: true,
   logoUrl: true,
   accentColor: true,
   // Часового пояса здесь нет: он переехал на зал (см. HALL_SELECT).

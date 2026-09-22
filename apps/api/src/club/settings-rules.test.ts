@@ -8,6 +8,8 @@ function settings(overrides: Partial<ClubSettings> = {}): ClubSettings {
   return {
     name: 'АНТ «Енисей»',
     cityId: null,
+    phone: null,
+    email: null,
     logoUrl: null,
     accentColor: null,
     noShowChargePercent: 100,

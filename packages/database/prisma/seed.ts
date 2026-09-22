@@ -105,6 +105,9 @@ async function main(): Promise<void> {
       // векторный. Здесь он ровно то же, что логотип любого другого клуба, —
       // ссылка на картинку, которую клуб про себя заявил.
       logoUrl: '/brand/clubs/yenisey.png',
+      // Контакты из ТЗ: по ним посетитель страницы клуба звонит и пишет.
+      phone: '+73912000000',
+      email: 'info@ant-yenisey.ru',
       noShowChargePercent: 100,
     },
   });
@@ -131,6 +134,16 @@ async function main(): Promise<void> {
   await prisma.tenant.updateMany({
     where: { slug: 'yenisey', logoUrl: null },
     data: { logoUrl: '/brand/clubs/yenisey.png' },
+  });
+
+  await prisma.tenant.updateMany({
+    where: { slug: 'yenisey', phone: null },
+    data: { phone: '+73912000000' },
+  });
+
+  await prisma.tenant.updateMany({
+    where: { slug: 'yenisey', email: null },
+    data: { email: 'info@ant-yenisey.ru' },
   });
 
   // Цены, шаг брони и ЧАСОВОЙ ПОЯС живут у зала, а не у клуба: залы

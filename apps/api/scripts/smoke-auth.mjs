@@ -291,17 +291,35 @@ async function main() {
     typeof r.body?.name === 'string' && r.body.name.length > 0,
   );
   assert(
-    'наружу отдана карточка клуба: код, название, города, оформление',
+    'наружу отдана карточка клуба: код, название, города, оформление, контакты и залы',
     Object.keys(r.body ?? {}).sort().join(',') ===
-      'accentColor,city,logoUrl,name,otherCities,slug',
+      'accentColor,city,email,halls,logoUrl,name,otherCities,phone,slug',
   );
   assert(
     'часового пояса в карточке клуба больше НЕТ — он свойство зала',
     !('timezone' in (r.body ?? {})),
   );
   assert(
-    'ни цен, ни политики отмены, ни статуса подписки в открытом ответе нет',
-    !['noShowChargePercent', 'tableHourPrice', 'id'].some((key) => key in (r.body ?? {})),
+    'ни политики отмены, ни статуса подписки, ни идентификаторов в открытом ответе нет',
+    !['noShowChargePercent', 'attendanceAutoNoShowAfterMinutes', 'id'].some((key) => key in (r.body ?? {})),
+  );
+
+  // Залы и цены — это и есть ответ на вопросы, с которыми человек приходит на
+  // страницу клуба: куда ехать и почём стол. Без авторизации: клуб выбирают
+  // до того, как заводят учётку.
+  const publicHall = (r.body?.halls ?? [])[0];
+  assert('в карточке есть хотя бы один зал', publicHall !== undefined);
+  assert(
+    'у зала названы место и цена часа',
+    typeof publicHall?.name === 'string' && Number.isInteger(publicHall?.tableHourPrice),
+  );
+  assert(
+    'цена с роботом показана только там, где робот есть',
+    (r.body?.halls ?? []).every((hall) => hall.robotHourPrice === null || hall.robotHourPrice > 0),
+  );
+  assert(
+    'ни шага брони, ни часового пояса зала наружу не уходит',
+    (r.body?.halls ?? []).every((hall) => !('bookingStep' in hall) && !('timezone' in hall)),
   );
   r = await call('/clubs/net-takogo-kluba');
   check('несуществующий клуб', 404, r.status);
@@ -436,6 +454,31 @@ async function main() {
     check('процент больше ста отклонён', 400, r.status);
     r = await patchSettings({ tableHourPrice: 40000 });
     check('цена в настройках клуба больше не принимается', 400, r.status);
+
+    // Контакты клуба: их видит посетитель страницы, и телефон уходит в ссылку
+    // `tel:` — потому формат тот же, что у телефона человека.
+    r = await patchSettings({ phone: '8 (391) 200-00-00' });
+    check('телефон клуба в человеческом написании отклонён', 400, r.status);
+    r = await patchSettings({ email: 'club.example.ru' });
+    check('почта клуба без собаки отклонена', 400, r.status);
+
+    r = await patchSettings({ phone: '+73912000001', email: 'probe@example.ru' });
+    check('контакты клуба сохранены', 200, r.status);
+    assert('и пришли обратно', r.body?.phone === '+73912000001' && r.body?.email === 'probe@example.ru');
+
+    r = await call('/clubs/yenisey');
+    assert('контакты видны на публичной карточке', r.body?.phone === '+73912000001');
+
+    // Пустая строка означает «убрать контакт», а не мусор в поле.
+    r = await patchSettings({ phone: '' });
+    check('пустой телефон принят как «не указан»', 200, r.status);
+    assert('и стал пустым', r.body?.phone === null);
+
+    r = await patchSettings({
+      phone: originalSettings?.phone ?? null,
+      email: originalSettings?.email ?? null,
+    });
+    check('контакты клуба возвращены', 200, r.status);
 
     console.log('=== 19. Залы');
     r = await asAdmin('/clubs/yenisey/halls');

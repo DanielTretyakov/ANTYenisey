@@ -81,13 +81,36 @@ export class TenantsService {
    * Карточка клуба по его коду. Открыто без авторизации: клуб выбирают до
    * того, как заводят учётку.
    *
-   * Ни цен, ни настроек, ни статуса подписки здесь нет. Часового пояса тоже:
-   * он теперь свойство зала, и форме брони приезжает вместе с залом.
+   * Вместе с карточкой едут контакты и залы с ценами — то, ради чего человек
+   * на страницу клуба и приходит: куда ехать, кому звонить и почём стол. До
+   * 21.09.2026 здесь не было ничего, кроме названия и города, и посетитель
+   * упирался в тупик.
+   *
+   * Настроек клуба и статуса подписки здесь по-прежнему нет. Часового пояса
+   * тоже: он свойство зала, и форме брони приезжает вместе с залом.
    */
   async findPublicBySlug(slug: string): Promise<PublicTenant> {
     const tenant = await this.prisma.tenant.findUnique({
       where: { slug },
-      select: CARD_SELECT,
+      select: {
+        ...CARD_SELECT,
+        phone: true,
+        email: true,
+        halls: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            tableHourPrice: true,
+            tableExtra30MinPrice: true,
+            hasRobotOption: true,
+            robot60MinPrice: true,
+            city: { select: { name: true } },
+            _count: { select: { tables: true } },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     });
 
     if (!tenant) {
@@ -103,6 +126,20 @@ export class TenantsService {
       otherCities: card.otherCities,
       logoUrl: card.logoUrl,
       accentColor: card.accentColor,
+      phone: tenant.phone,
+      email: tenant.email,
+      halls: tenant.halls.map((hall) => ({
+        id: hall.id,
+        name: hall.name,
+        city: hall.city?.name ?? null,
+        address: hall.address,
+        tableHourPrice: hall.tableHourPrice,
+        tableExtra30MinPrice: hall.tableExtra30MinPrice,
+        // Час с роботом показывается только там, где робот есть: цена без
+        // услуги читалась бы как «доплатите и получите».
+        robotHourPrice: hall.hasRobotOption ? hall.robot60MinPrice : null,
+        tables: hall._count.tables,
+      })),
     };
   }
 }

@@ -37,6 +37,28 @@ export class UpdateClubSettingsDto implements UpdateClubSettingsRequest {
   @MaxLength(40)
   cityId?: string | null;
 
+  /**
+   * Телефон клуба в том же формате, что у человека: он уходит в ссылку `tel:`,
+   * и «8 (391) …» из неё дозванивается не везде. Пустая строка означает «убрать
+   * номер», поэтому она превращается в null, а не падает на формате.
+   */
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' && value.trim() === '' ? null : value,
+  )
+  @Matches(/^\+7[0-9]{10}$/, {
+    message: 'phone: телефон в формате +79991234567',
+  })
+  phone?: string | null;
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' && value.trim() === '' ? null : value,
+  )
+  @Matches(/^[^@\s]+@[^@\s]+\.[^@\s]+$/, { message: 'email: ожидается адрес почты' })
+  @MaxLength(200)
+  email?: string | null;
+
   @IsOptional()
   @IsString()
   @MaxLength(500)

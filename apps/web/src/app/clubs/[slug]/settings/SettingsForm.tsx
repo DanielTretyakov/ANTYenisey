@@ -31,6 +31,8 @@ import { cn } from '@/lib/cn';
 type FormState = {
   name: string;
   cityId: string;
+  phone: string;
+  email: string;
   logoUrl: string;
   accentColor: string;
   noShowChargePercent: string;
@@ -43,6 +45,8 @@ function toForm(settings: ClubSettings): FormState {
   return {
     name: settings.name,
     cityId: settings.cityId ?? '',
+    phone: settings.phone ?? '',
+    email: settings.email ?? '',
     logoUrl: settings.logoUrl ?? '',
     accentColor: settings.accentColor ?? '',
     noShowChargePercent: String(settings.noShowChargePercent),
@@ -115,6 +119,10 @@ export function SettingsForm({
         // Пустое поле означает «не задано», а не пустую строку: базе нужен
         // либо настоящий идентификатор города, либо NULL.
         cityId: form.cityId || null,
+        // Пустое поле — «контакта нет», а не пустая строка: посетителю нельзя
+        // показать ссылку `tel:` в никуда.
+        phone: form.phone.trim() || null,
+        email: form.email.trim() || null,
         logoUrl: form.logoUrl.trim() || null,
         accentColor: form.accentColor.trim() || null,
         noShowChargePercent,
@@ -175,6 +183,24 @@ export function SettingsForm({
             value={form.cityId}
             onChange={(event) => set('cityId', event.target.value)}
           />
+          <div className="grid gap-x-6 sm:grid-cols-2">
+            <Field
+              label="Телефон клуба"
+              hint="Виден на странице клуба ссылкой для звонка. Пусто — не показывается."
+              value={form.phone}
+              onChange={(event) => set('phone', event.target.value)}
+              placeholder="+79991234567"
+              inputMode="tel"
+            />
+            <Field
+              label="Почта клуба"
+              hint="Тоже видна посетителю — на случай, если звонить неудобно."
+              value={form.email}
+              onChange={(event) => set('email', event.target.value)}
+              placeholder="club@example.ru"
+              inputMode="email"
+            />
+          </div>
         </CardBody>
       </Card>
 

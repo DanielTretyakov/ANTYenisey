@@ -14,6 +14,7 @@ import { api, ApiError } from '@/lib/api';
 import { clubAccent } from '@/lib/clubTheme';
 import { cn } from '@/lib/cn';
 import { formatKopecks } from '@/lib/money';
+import { plural } from '@/lib/plural';
 import { entryPriceLabel } from '@/lib/subscriptions';
 import { roleInClub } from '@/lib/membership';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
@@ -139,6 +140,8 @@ export default function ClubPage() {
           className="-mt-6 mb-10"
         />
 
+        <Halls tenant={tenant} slug={slug} viewer={viewer} />
+
         <MyEvents
           entries={mine}
           anonymous={session.status === 'anonymous'}
@@ -195,6 +198,108 @@ function Masthead({ tenant }: { tenant: PublicTenant | null }) {
         )}
       </div>
     </header>
+  );
+}
+
+/**
+ * Залы клуба: где играют, почём стол и как связаться.
+ *
+ * До 21.09.2026 страница клуба состояла из одной ленты мероприятий, и человек,
+ * нашедший зал в поиске, не мог узнать ни адреса, ни цены, ни телефона —
+ * стартовая обещала «свободные столы», а на клубе их не было вовсе. Аренда при
+ * этом существовала, но попасть в неё можно было только через пункт шапки,
+ * который показывается уже состоявшемуся клиенту КЛУБА. Новичок такой роли не
+ * имеет, и сценарий ТЗ «клиент бронирует сам» для него был закрыт.
+ *
+ * Отсюда две вещи на одном блоке: контакты и кнопка аренды, ведущая на ту же
+ * сетку, что и пункт шапки. Сотруднику кнопка не показывается — бронь
+ * ссылается на карточку клиента, которой у него нет; ему вместо неё показан
+ * его же рабочий путь.
+ */
+function Halls({ tenant, slug, viewer }: { tenant: PublicTenant | null; slug: string; viewer: Viewer }) {
+  if (!tenant || tenant.halls.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="mb-12">
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+        <h2 className="text-[1.25rem]">Где играют</h2>
+        <Contacts tenant={tenant} />
+      </div>
+
+      <ul className="grid gap-3 sm:grid-cols-2">
+        {tenant.halls.map((hall) => (
+          <li key={hall.id} className="rounded-card border border-border bg-surface-raised px-5 py-4">
+            <p className="text-[0.9375rem] font-medium">{hall.name}</p>
+            <p className="mt-0.5 text-[0.875rem] text-text-muted">{placeOf(hall)}</p>
+            <p className="mt-2 text-[0.875rem]">
+              Стол — {formatKopecks(hall.tableHourPrice)} в час
+              {hall.robotHourPrice !== null && <>, с роботом — {formatKopecks(hall.robotHourPrice)}</>}
+            </p>
+            <p className="mt-0.5 text-[0.8125rem] text-text-subtle">
+              {hall.tables} {plural(hall.tables, 'стол', 'стола', 'столов')} · дальше — по{' '}
+              {formatKopecks(hall.tableExtra30MinPrice)} за полчаса
+            </p>
+          </li>
+        ))}
+      </ul>
+
+      {/* Ребёнку кнопка не показывается: до 16 за него бронирует родитель, и
+          вести его на форму, которая ответит отказом, незачем. */}
+      {viewer !== 'staff' && viewer !== 'child' && (
+        <div className="mt-4">
+          <Link href={viewer === 'anonymous' ? '/login' : `/clubs/${slug}/booking`}>
+            <Button>{viewer === 'anonymous' ? 'Войти и забронировать стол' : 'Забронировать стол'}</Button>
+          </Link>
+        </div>
+      )}
+
+      {viewer === 'child' && (
+        <p className="mt-4 text-[0.875rem] text-text-muted">
+          Пока тебе нет 16, стол бронирует родитель — со своей страницы.
+        </p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Где зал: город и адрес одной строкой.
+ *
+ * Город приписывается к адресу, только если его там ещё нет: администратор
+ * заполняет адрес свободной строкой и чаще всего начинает её с города, а
+ * «Красноярск, Красноярск, ул. …» читается как ошибка вёрстки.
+ */
+function placeOf(hall: PublicTenant['halls'][number]): string {
+  if (!hall.address) {
+    return hall.city ?? 'Адрес не указан';
+  }
+
+  const repeats = hall.city !== null && hall.address.toLowerCase().includes(hall.city.toLowerCase());
+
+  return repeats || !hall.city ? hall.address : `${hall.city}, ${hall.address}`;
+}
+
+/** Телефон и почта клуба. Нет ни того ни другого — блока нет вовсе. */
+function Contacts({ tenant }: { tenant: PublicTenant }) {
+  if (!tenant.phone && !tenant.email) {
+    return null;
+  }
+
+  return (
+    <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.9375rem]">
+      {tenant.phone && (
+        <a href={`tel:${tenant.phone}`} className="text-text-accent underline-offset-2 hover:underline">
+          {tenant.phone}
+        </a>
+      )}
+      {tenant.email && (
+        <a href={`mailto:${tenant.email}`} className="text-text-accent underline-offset-2 hover:underline">
+          {tenant.email}
+        </a>
+      )}
+    </p>
   );
 }
 

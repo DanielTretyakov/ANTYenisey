@@ -1275,3 +1275,27 @@ EXCEPTION WHEN others THEN
     RAISE NOTICE 'CY. ПРОВАЛ: отказ пришёл от %', code;
   END IF;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- 24. Контакты клуба
+-- ---------------------------------------------------------------------------
+
+-- CZ. Телефон клуба в человеческом написании. Номер уходит в ссылку `tel:`, и
+--     «8 (391) 200-00-00» из неё дозванивается не везде — формат один на
+--     платформу, как у телефона человека.
+SELECT pg_temp.expect('CZ',
+  $q$UPDATE "Tenant" SET phone = '8 (391) 200-00-00' WHERE id = 't1'$q$,
+  '23514', 'Tenant_phone_format');
+
+-- DA. Почта без собаки.
+SELECT pg_temp.expect('DA',
+  $q$UPDATE "Tenant" SET email = 'club.example.ru' WHERE id = 't1'$q$,
+  '23514', 'Tenant_email_format');
+
+-- DB. Годные контакты принимаются, а пустые остаются законными: клуб может
+--     работать без общего номера.
+DO $$ BEGIN
+  UPDATE "Tenant" SET phone = '+73912000000', email = 'info@example.ru' WHERE id = 't1';
+  UPDATE "Tenant" SET phone = NULL, email = NULL WHERE id = 't1';
+  RAISE NOTICE 'DB. Контакты клуба приняты и снова сняты.. OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'DB. ПРОВАЛ: %', SQLERRM; END $$;
