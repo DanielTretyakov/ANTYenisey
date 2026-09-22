@@ -1,0 +1,202 @@
+# Проверки на каждый пуш.
+#
+# Зачем: на рабочей машине всё гоняется руками и по памяти — типы, линт,
+# тесты, схема на одноразовой базе, смоук по поднятому API. Забыть один из
+# шагов ничего не стоит, а база разработки к тому же несёт следы прошлых
+# прогонов: смоук, который проходит на ней, на чистой может и не пройти.
+#
+# Отсюда три независимые работы. Они нарочно не сцеплены друг с другом:
+# упавшие типы не должны прятать упавшую схему — за один прогон видно всё.
+
+name: Проверки
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# Прогон на ветку один: пуш поверх пуша отменяет предыдущий, чтобы очередь не
+# копилась. Ветка по умолчанию — исключение: её история проверок нужна целиком.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # Одноразовые значения прогона: база поднимается сервисным контейнером и
+  # умирает вместе с работой. Секретов здесь нет и быть не может — настоящие
+  # живут в .env на машине и в настройках сервера.
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/yenisey_ci?schema=public
+  SHADOW_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/yenisey_ci_shadow?schema=public
+
+jobs:
+  checks:
+    name: Типы, линт и тесты
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Версия pnpm берётся из поля packageManager в package.json — отдельным
+      # числом её здесь не дублируем, иначе разъедется.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Клиент Prisma в git не попадает: без генерации не сойдутся типы ни в
+      # API, ни в скриптах базы.
+      - name: Сгенерировать клиент Prisma
+        run: pnpm db:generate
+
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+
+  schema:
+    name: Схема на чистой базе
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+
+      # Ровно то, ради чего эта работа отдельная: база чистая и одноразовая.
+      # На машине разработчика такую приходится заводить руками, и потому
+      # verify там гоняют реже, чем стоило бы.
+      - name: Завести одноразовую базу
+        run: psql "postgresql://postgres:postgres@localhost:5432/postgres" -c 'CREATE DATABASE yenisey_ci'
+
+      - name: Прогнать схему и сценарии изоляции
+        run: pnpm db:verify
+
+  smoke:
+    name: Смоук по живому API
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+
+      - name: Завести базу прогона
+        run: psql "postgresql://postgres:postgres@localhost:5432/postgres" -c 'CREATE DATABASE yenisey_ci'
+
+      # Скрипты базы и сам API читают один .env в корне (`dotenv -e ../../.env`,
+      # `envFilePath: ['../../.env']`), поэтому файл нужен и здесь. Секреты в
+      # нём случайные и живут ровно одну работу.
+      - name: Собрать .env прогона
+        run: |
+          cat > .env <<EOF
+          DATABASE_URL="${DATABASE_URL}"
+          SHADOW_DATABASE_URL="${SHADOW_DATABASE_URL}"
+          JWT_ACCESS_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
+          JWT_REFRESH_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
+          JWT_ACCESS_TTL="15m"
+          JWT_REFRESH_TTL="30d"
+          API_PORT=3001
+          CORS_ORIGINS="http://localhost:3000"
+          AUTH_MAX_FAILED_ATTEMPTS=10
+          AUTH_ATTEMPT_WINDOW="15m"
+          RATE_LIMIT=120
+          RATE_LIMIT_WINDOW="1m"
+          ATTENDANCE_JOB=off
+          ATTENDANCE_JOB_INTERVAL="5m"
+          NEXT_PUBLIC_API_URL="http://localhost:3001"
+          EOF
+
+      - name: Накатить миграции и сид
+        run: |
+          pnpm --filter @yenisey/database migrate:deploy
+          pnpm --filter @yenisey/database seed
+
+      # Смоук без учётки администратора молча пропускает больше половины
+      # сценариев и всё равно пишет «провалов 0» — поэтому она заводится
+      # всегда, а её отсутствие ниже считается ошибкой.
+      - name: Завести администратора смоука
+        run: >-
+          pnpm db:create-admin --
+          --email smoke-admin@ci.local
+          --password ci-smoke-password-2026
+          --name "Проверкин Пров Провович"
+          --phone +79990000000
+          --birthdate 1990-01-01
+
+      - name: Собрать и поднять API
+        run: |
+          pnpm exec turbo run build --filter=@yenisey/api...
+          (cd apps/api && node dist/main.js > "$RUNNER_TEMP/api.log" 2>&1 &)
+
+          for _ in $(seq 1 60); do
+            curl -sf http://127.0.0.1:3001/api/health >/dev/null && break
+            sleep 1
+          done
+
+          curl -sf http://127.0.0.1:3001/api/health >/dev/null || {
+            echo "API не поднялся за минуту. Его вывод:"
+            cat "$RUNNER_TEMP/api.log"
+            exit 1
+          }
+
+      - name: Прогнать смоук
+        env:
+          SMOKE_ADMIN_EMAIL: smoke-admin@ci.local
+          SMOKE_ADMIN_PASSWORD: ci-smoke-password-2026
+        run: |
+          set -o pipefail
+          pnpm smoke | tee "$RUNNER_TEMP/smoke.log"
+
+          # Провал сценария скрипт отражает кодом возврата, а вот ПРОПУСК —
+          # нет: без учётки администратора смоук молча идёт по сокращённой
+          # программе (85 сценариев вместо 767) и всё равно пишет «провалов 0».
+          # Здесь такой прогон считается неудачей: зелёная галочка на
+          # восьмушке проверок хуже красной.
+          #
+          # Раздел про джобу автонеявки к этому не относится — он пропускается
+          # всегда и просится отдельным прогоном с ATTENDANCE_JOB=on.
+          if grep -q 'нет учётки администратора' "$RUNNER_TEMP/smoke.log"; then
+            echo "Смоук не увидел учётку администратора — половина сценариев не выполнилась."
+            exit 1
+          fi
+
+      - name: Показать вывод API при провале
+        if: failure()
+        run: cat "$RUNNER_TEMP/api.log" || true
