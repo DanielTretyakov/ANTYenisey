@@ -29,6 +29,13 @@ if ! command -v psql >/dev/null 2>&1; then
   exit 1
 fi
 
+# Один и тот же адрес Prisma и psql понимают по-разному: `?schema=public`
+# Prisma ставит сама, а psql на него отвечает «invalid URI query parameter» и
+# падает. Раньше это лечилось памятью — «направляй verify на URL без schema», —
+# и первый же прогон в CI на этом и споткнулся. Убираем только этот параметр:
+# остальные (sslmode и прочие) psql понимает, и на удалённой базе они нужны.
+PSQL_URL="$(printf '%s' "$PGURL" | sed -E 's/([?&])schema=[^&]*/\1/; s/\?&/?/; s/[?&]$//')"
+
 DDL="$(mktemp)"
 trap 'rm -f "$DDL"' EXIT
 
@@ -48,10 +55,10 @@ DATABASE_URL="$PGURL" SHADOW_DATABASE_URL="$SHADOW_STUB" npx --yes prisma@6 migr
 echo "    таблиц: $(grep -c 'CREATE TABLE' "$DDL")"
 
 echo "=== 2/4  Создаю таблицы"
-psql "$PGURL" -v ON_ERROR_STOP=1 -q -f "$DDL" || { echo "DDL не применился"; exit 1; }
+psql "$PSQL_URL" -v ON_ERROR_STOP=1 -q -f "$DDL" || { echo "DDL не применился"; exit 1; }
 
 echo "=== 3/4  Накатываю ограничения целостности"
-psql "$PGURL" -v ON_ERROR_STOP=1 -q -f "$SCHEMA_DIR/constraints.sql" \
+psql "$PSQL_URL" -v ON_ERROR_STOP=1 -q -f "$SCHEMA_DIR/constraints.sql" \
   || { echo "Ограничения не применились — смотри ошибку выше"; exit 1; }
 
 echo "=== 4/4  Прогоняю тестовые сценарии"
@@ -62,7 +69,7 @@ echo "=== 4/4  Прогоняю тестовые сценарии"
 REPORT="$(mktemp)"
 trap 'rm -f "$DDL" "$REPORT"' EXIT
 
-psql "$PGURL" -q -f "$SCHEMA_DIR/tests/schema-tests.sql" 2>&1 \
+psql "$PSQL_URL" -q -f "$SCHEMA_DIR/tests/schema-tests.sql" 2>&1 \
   | grep -E 'ТЕСТЫ|OK \(ожидалось\)|ПРОВАЛ' \
   | tee "$REPORT"
 
