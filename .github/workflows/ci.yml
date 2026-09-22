@@ -56,6 +56,18 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
 
+      # Самодостаточная сборка веба — та самая, что уезжает в образ. Проверить
+      # её на рабочей машине нельзя: Next собирает standalone симлинками, а
+      # Windows их без особых прав не создаёт. Без этого шага поломка образа
+      # обнаруживалась бы в день выкладки.
+      - name: Собрать веб так же, как в образе
+        env:
+          NEXT_STANDALONE: 'on'
+          NEXT_PUBLIC_API_URL: ''
+        run: |
+          pnpm exec turbo run build --filter=@yenisey/web...
+          test -f apps/web/.next/standalone/apps/web/server.js
+
   schema:
     name: Схема на чистой базе
     runs-on: ubuntu-latest

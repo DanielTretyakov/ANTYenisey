@@ -1,0 +1,117 @@
+# Боевое развёртывание «Енисея» на одном VPS.
+#
+# Четыре службы: база, API, веб и обратный прокси, который снимает с них TLS.
+# Наружу смотрит только прокси — остальные доступны друг другу по именам служб
+# во внутренней сети и не публикуют портов на хост.
+#
+# Запуск — из каталога deploy, рядом лежит .env (см. .env.production.example):
+#   docker compose --env-file .env up -d --build
+#
+# Порядок первой выкладки, миграции и бэкапы — в docs/DEPLOY.md.
+
+name: yenisey
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Локаль базы задаётся один раз при её создании и потом не меняется:
+      # сортировка русских названий клубов и людей зависит от неё.
+      LANG: ru_RU.utf8
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Каталог для выгрузок: pg_dump из задания по расписанию пишет сюда же,
+      # внутрь тома, чтобы копия переживала пересоздание контейнера.
+      - postgres-backups:/backups
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    # Наружу база не смотрит вовсе. Подключиться к ней с рабочей машины можно
+    # пробросом через SSH — открытый в интернет 5432 сканируют круглосуточно.
+    expose:
+      - '5432'
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      SHADOW_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}_shadow?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-30d}
+      API_PORT: 3001
+      # Веб и API за одним доменом, поэтому кросс-доменных запросов быть не
+      # должно вовсе. Список оставлен на случай мобильного клиента.
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://${DOMAIN}}
+      AUTH_MAX_FAILED_ATTEMPTS: ${AUTH_MAX_FAILED_ATTEMPTS:-10}
+      AUTH_ATTEMPT_WINDOW: ${AUTH_ATTEMPT_WINDOW:-15m}
+      RATE_LIMIT: ${RATE_LIMIT:-120}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1m}
+      # В production джоба включена по умолчанию — здесь это сказано вслух,
+      # чтобы не выяснять по памяти, ставятся ли неявки на боевой базе.
+      ATTENDANCE_JOB: ${ATTENDANCE_JOB:-on}
+      ATTENDANCE_JOB_INTERVAL: ${ATTENDANCE_JOB_INTERVAL:-5m}
+    expose:
+      - '3001'
+    healthcheck:
+      test: ['CMD-SHELL', 'node -e "fetch(\"http://127.0.0.1:3001/api/health\").then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"']
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Пусто — значит «тот же домен»: браузер пойдёт на /api относительным
+        # адресом. Значение вшивается в бандл на сборке, и поменять его на
+        # работающем контейнере нельзя.
+        NEXT_PUBLIC_API_URL: ''
+    restart: unless-stopped
+    depends_on:
+      - api
+    expose:
+      - '3000'
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+      - web
+    environment:
+      DOMAIN: ${DOMAIN}
+      # Почта для Let's Encrypt: на неё приходят письма об истечении
+      # сертификата, если автопродление вдруг перестанет работать.
+      TLS_EMAIL: ${TLS_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Сертификаты переживают пересоздание контейнера — иначе каждая выкладка
+      # ходила бы за новым, а у Let's Encrypt есть недельные лимиты.
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - '80:80'
+      - '443:443'
+
+volumes:
+  postgres-data:
+  postgres-backups:
+  caddy-data:
+  caddy-config:
