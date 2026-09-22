@@ -43,6 +43,8 @@ pnpm --filter @yenisey/database verify
 
 `verify` разворачивает схему с нуля и намеренно пишет некорректные данные, проверяя, что база физически не даёт смешать данные двух клубов. **Направлять только на пустую одноразовую базу.** После `pnpm smoke` остаются учётки `probe-*@example.com` — убираются через `pnpm db:clean-probes`.
 
+Те же проверки идут в CI на каждый пуш (`.github/workflows/ci.yml`): типы с линтом и тестами, схема на пустом Postgres 18 и смоук по собранному API. Две вещи, которые там сделаны намеренно и которые легко сломать: **смоук по сокращённой программе считается провалом** (без учётки администратора идёт 85 сценариев из 767, а итог всё равно бодро пишет «провалов 0»), и **`verify` падает на проваленном сценарии** — до 22.09.2026 он печатал «ПРОВАЛ» и возвращал ноль. Подробности — в `docs/DEVELOPMENT.md`.
+
 ## Архитектура продукта
 
 `apps/api` — NestJS. Модули `auth`, `tenants`, `users`, `club`, `booking`, `events`, `entries`, `me`, `desk`, `attendance`, `people`, `files`, `players`, `coaches`, `subscriptions`, `guardianship`, `prisma`, `config`. `apps/web` — Next.js (app router). `packages/database` — Prisma, единственный владелец схемы. `packages/types` — общие типы, собирается через `tsc -p tsconfig.build.json`.
