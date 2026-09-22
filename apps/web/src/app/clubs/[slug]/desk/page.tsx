@@ -309,16 +309,20 @@ function Tiles({ day, pending }: { day: DeskDay; pending: { total: number; overd
         //
         // Продажи абонементов — рядом, а не в сумме: абонемент — предоплата
         // будущих визитов, и записи по нему в сумме дают ноль.
-        note={[
-          day.money.cancelled > 0
-            ? `из них ${formatKopecks(day.money.cancelled)} по отменам`
-            : 'по цене на момент записи',
-          day.money.subscriptionSales.count > 0
-            ? `абонементов продано на ${formatKopecks(day.money.subscriptionSales.amount)}`
-            : '',
-        ]
-          .filter(Boolean)
-          .join(' · ')}
+        //
+        // Общее «по цене на момент записи» — только когда сказать больше
+        // нечего: с отменами и продажами приписка вырастала до трёх строк, и
+        // плитка перекашивала ряд соседок в одну.
+        note={
+          [
+            day.money.cancelled > 0 ? `из них ${formatKopecks(day.money.cancelled)} по отменам` : '',
+            day.money.subscriptionSales.count > 0
+              ? `+ ${formatKopecks(day.money.subscriptionSales.amount)} абонементами`
+              : '',
+          ]
+            .filter(Boolean)
+            .join(' · ') || 'по цене на момент записи'
+        }
       />
 
       {day.today ? (
@@ -570,7 +574,13 @@ function Ahead({
     <Card>
       <CardHeader
         title={day.today ? 'Дальше сегодня' : 'В этот день'}
-        description="Телефон стоит прямо в строке: чтобы позвонить, не нужно открывать карточку."
+        // Объяснение — только когда есть что объяснять: под пустым списком
+        // подсказка про телефон в строке рассказывает о том, чего на экране нет.
+        description={
+          rows.length > 0
+            ? 'Телефон стоит прямо в строке: чтобы позвонить, не нужно открывать карточку.'
+            : undefined
+        }
       />
 
       {rows.length === 0 ? (
