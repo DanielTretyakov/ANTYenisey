@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-ghost';
 type Size = 'sm' | 'md' | 'lg';
 
 const VARIANTS: Record<Variant, string> = {
@@ -9,6 +9,11 @@ const VARIANTS: Record<Variant, string> = {
   secondary: 'bg-surface-raised text-text border border-border-strong hover:bg-surface-sunken',
   ghost: 'bg-transparent text-text-muted hover:bg-surface-sunken hover:text-text',
   danger: 'bg-danger-soft text-danger border border-danger-border hover:bg-danger-soft/70',
+  // Опасное действие в ряду обычных: цветом оно предупреждает, но заливкой не
+  // притягивает взгляд. В строке справочника «Удалить» стояло залитой кнопкой
+  // рядом с текстовыми «Изменить» и «Снять с продажи» — и было самым заметным
+  // из трёх, хотя нужно реже всех и стоит дороже всех.
+  'danger-ghost': 'bg-transparent text-danger hover:bg-danger-soft',
 };
 
 const SIZES: Record<Size, string> = {

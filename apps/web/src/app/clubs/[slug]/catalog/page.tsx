@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { inputClassName } from '@/components/ui/Field';
 import { MoneyField } from '@/components/ui/MoneyField';
+import { Tab } from '@/components/ui/Tab';
 import { roleInClub } from '@/lib/membership';
 import { ApiError } from '@/lib/api';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
@@ -45,6 +46,8 @@ export default function CatalogPage() {
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // «Типы» первыми: без них нельзя ни поставить занятие, ни завести тариф.
+  const [tab, setTab] = useState<CatalogTab>('types');
 
   // Роль берётся из привязки к КЛУБУ ИЗ АДРЕСА, а не из профиля: аккаунт один
   // на платформу, и в разных клубах она разная. Раньше клуб здесь не
@@ -99,11 +102,8 @@ export default function CatalogPage() {
   return (
     <AdminShell>
       <h1 className="mb-2 text-[1.75rem]">Занятия и турниры</h1>
-      <p className="mb-7 max-w-2xl text-[0.9375rem] text-text-muted">
-        То, на что клиент будет записываться. Тип занятия несёт цену и название — «просто
-        тренировка» в расписании не говорит клиенту ничего. Сами занятия и турниры
-        заводятся в расписании зала, из закрашенного времени, и сюда попадают уже
-        готовыми — здесь их видно списком и здесь же правится число мест.
+      <p className="mb-6 max-w-2xl text-[0.9375rem] text-text-muted">
+        {TAB_HINTS[tab]}
       </p>
 
       {session.status === 'ready' && !allowed && (
@@ -113,26 +113,73 @@ export default function CatalogPage() {
       {error && <Alert>{error}</Alert>}
 
       {allowed && !loading && (
-        <div className="grid gap-6">
-          <TrainingTypesCard types={trainingTypes} onChange={setTrainingTypes} onError={setError} />
-          <TournamentTypesCard
-            types={tournamentTypes}
-            onChange={setTournamentTypes}
-            onError={setError}
-          />
-          <SubscriptionPlansCard
-            plans={plans}
-            trainingTypes={trainingTypes}
-            tournamentTypes={tournamentTypes}
-            onChange={setPlans}
-          />
-          <TrainingSessionsCard sessions={sessions} onChange={setSessions} onError={setError} />
-          <TournamentsCard tournaments={tournaments} onChange={setTournaments} onError={setError} />
-        </div>
+        <>
+          {/* Вкладки, а не пять карточек подряд: на одной странице лежали
+              справочники, которые правят раз в сезон, и списки проведений на
+              десятки строк, которые растут каждую неделю. Прокрутить её до
+              турниров было отдельным упражнением. */}
+          <div className="mb-6 flex flex-wrap items-center gap-1.5">
+            {TABS.map((item) => (
+              <Tab key={item.value} active={tab === item.value} onClick={() => setTab(item.value)}>
+                {item.label}
+              </Tab>
+            ))}
+          </div>
+
+          <div className="grid gap-6">
+            {tab === 'types' && (
+              <>
+                <TrainingTypesCard types={trainingTypes} onChange={setTrainingTypes} onError={setError} />
+                <TournamentTypesCard
+                  types={tournamentTypes}
+                  onChange={setTournamentTypes}
+                  onError={setError}
+                />
+              </>
+            )}
+
+            {tab === 'plans' && (
+              <SubscriptionPlansCard
+                plans={plans}
+                trainingTypes={trainingTypes}
+                tournamentTypes={tournamentTypes}
+                onChange={setPlans}
+              />
+            )}
+
+            {tab === 'events' && (
+              <>
+                <TrainingSessionsCard sessions={sessions} onChange={setSessions} onError={setError} />
+                <TournamentsCard tournaments={tournaments} onChange={setTournaments} onError={setError} />
+              </>
+            )}
+          </div>
+        </>
       )}
     </AdminShell>
   );
 }
+
+/** Вкладки раздела: справочники, тарифы и то, что уже поставлено в расписание. */
+type CatalogTab = 'types' | 'plans' | 'events';
+
+const TABS: { value: CatalogTab; label: string }[] = [
+  { value: 'types', label: 'Типы' },
+  { value: 'plans', label: 'Абонементы' },
+  { value: 'events', label: 'Занятия и турниры' },
+];
+
+/**
+ * Подпись под заголовком — своя у каждой вкладки.
+ *
+ * Общее объяснение на пять списков сразу получалось про всё и ни про что:
+ * человек, пришедший за числом мест, читал про цену типа занятия.
+ */
+const TAB_HINTS: Record<CatalogTab, string> = {
+  types: 'То, на что клиент будет записываться. Тип занятия несёт цену и название — «просто тренировка» в расписании не говорит клиенту ничего. Новая цена действует на будущие записи: у записанных сумма зафиксирована на момент записи.',
+  plans: 'Тарифы абонементов: сколько визитов, на какой срок и что они покрывают. Продаются у стойки, из карточки человека.',
+  events: 'Занятия и турниры заводятся в расписании зала, из закрашенного времени, и сюда попадают уже готовыми — здесь их видно списком и здесь же правится число мест.',
+};
 
 /** Типы тренировок: «Общая групповая», «Первая подача». */
 function TrainingTypesCard({
@@ -259,7 +306,7 @@ function TrainingTypesCard({
                 </Button>
                 <Button
                   type="button"
-                  variant="danger"
+                  variant="danger-ghost"
                   size="sm"
                   // На тип, стоящий в расписании, ссылается внешний ключ:
                   // удалить его нельзя, можно только снять с продажи.
@@ -499,7 +546,7 @@ function TournamentsCard({
                 </span>
                 <Button
                   type="button"
-                  variant="danger"
+                  variant="danger-ghost"
                   size="sm"
                   // Турнир, стоящий в сетке, удалить нельзя: вместе с ним
                   // молча ушли бы куски расписания.
@@ -633,7 +680,7 @@ function TrainingSessionsCard({
 
                 <Button
                   type="button"
-                  variant="danger"
+                  variant="danger-ghost"
                   size="sm"
                   // Те же два запрета, что у турнира: занятие в сетке унесло бы
                   // с собой куски расписания, а занятие с записями — чужие
