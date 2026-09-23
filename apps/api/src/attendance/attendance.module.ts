@@ -4,6 +4,7 @@ import { AttendanceService } from './attendance.service';
 import { AutoNoShowJob } from './auto-no-show.job';
 import { ClubModule } from '../club/club.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 /**
  * Отметка присутствия.
@@ -22,7 +23,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
  * возвращает визит в той же транзакции, что меняет отметку.
  */
 @Module({
-  imports: [ClubModule, SubscriptionsModule],
+  imports: [ClubModule, SubscriptionsModule, NotificationsModule],
   controllers: [AttendanceController],
   providers: [AttendanceService, AutoNoShowJob],
   exports: [AttendanceService],

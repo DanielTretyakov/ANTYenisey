@@ -26,6 +26,7 @@ import {
 } from '../attendance/attendance.service';
 import { instantAt, localParts } from '../club/closures';
 import { MembershipService } from '../club/membership.service';
+import { ClientNotifier } from '../notifications/client-notifier.service';
 import {
   bookingViolation,
   cancellationOpen,
@@ -175,6 +176,7 @@ export class DeskService {
     private readonly occupancy: OccupancyService,
     private readonly membership: MembershipService,
     private readonly attendance: AttendanceService,
+    private readonly notifier: ClientNotifier,
   ) {}
 
   async findDay(tenantId: string, hallId: string, date: string): Promise<DeskDay> {
@@ -440,6 +442,10 @@ export class DeskService {
           );
         }
 
+        // Бронь «уже за столом» подтверждать незачем — notifier сам пропустит
+        // всё, что не BOOKED.
+        await this.notifier.entryBooked(tx, tenantId, 'TABLE', created.id, 'club');
+
         return created.id;
       }),
     );
@@ -528,20 +534,25 @@ export class DeskService {
     const minutes = Math.floor((booking.startsAt.getTime() - Date.now()) / 60_000);
 
     // Условие на статус — против гонки с клиентом, отменившим ту же бронь.
-    const { count } = await this.prisma.tableBooking.updateMany({
-      where: { id: bookingId, status: BookingStatus.BOOKED },
-      data: {
-        status: BookingStatus.CANCELLED,
-        // Момент отмены обязателен — check-констрейнт: от него считается
-        // процент, и запись без него делает спор о деньгах неразрешимым.
-        cancelledAt: new Date(),
-        chargeRatio: dto.waiveCharge ? 0 : cancellationPercent(tiers, minutes),
-      },
-    });
+    await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.tableBooking.updateMany({
+        where: { id: bookingId, status: BookingStatus.BOOKED },
+        data: {
+          status: BookingStatus.CANCELLED,
+          // Момент отмены обязателен — check-констрейнт: от него считается
+          // процент, и запись без него делает спор о деньгах неразрешимым.
+          cancelledAt: new Date(),
+          chargeRatio: dto.waiveCharge ? 0 : cancellationPercent(tiers, minutes),
+        },
+      });
 
-    if (count === 0) {
-      throw new ConflictException('Бронь уже изменилась — обновите страницу');
-    }
+      if (count === 0) {
+        throw new ConflictException('Бронь уже изменилась — обновите страницу');
+      }
+
+      // Клуб отменил — человек должен узнать об этом не у закрытой двери.
+      await this.notifier.entryCancelled(tx, tenantId, 'TABLE', bookingId, 'club');
+    });
 
     return this.presentOne(tenantId, bookingId);
   }

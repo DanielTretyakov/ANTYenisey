@@ -21,6 +21,7 @@ import type {
   RecordVisitRequest,
 } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
+import { ClientNotifier } from '../notifications/client-notifier.service';
 import { MembershipService } from '../club/membership.service';
 import { consumed } from '../subscriptions/subscription-rules';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -104,6 +105,7 @@ export class AttendanceService {
     private readonly prisma: PrismaService,
     private readonly membership: MembershipService,
     private readonly subscriptions: SubscriptionsService,
+    private readonly notifier: ClientNotifier,
   ) {}
 
   // --- Отметка ---------------------------------------------------------------
@@ -264,6 +266,12 @@ export class AttendanceService {
         ipAddress: actor.ipAddress,
       },
     });
+
+    // Неявка стоит денег или визита, и человек должен узнать о ней сразу, а не
+    // в споре через неделю. «Пришёл» не сообщается: это он знает и так.
+    if (decision.status === 'NO_SHOW') {
+      await this.notifier.entryNoShow(tx, tenantId, kind, entryId, context.now);
+    }
 
     return {
       kind,

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ActorType, AuditAction } from '@yenisey/database';
 import type { PlayerProfile } from '@yenisey/types';
+import { ClientNotifier } from '../notifications/client-notifier.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { RankReviewDto } from './dto/player.dto';
 import { decideRankReview } from './player-rules';
@@ -28,6 +29,7 @@ export class RankReviewService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly players: PlayersService,
+    private readonly notifier: ClientNotifier,
   ) {}
 
   async review(
@@ -111,6 +113,8 @@ export class RankReviewService {
           ipAddress: actor.ipAddress,
         },
       });
+
+      await this.notifier.rankDecided(tx, tenantId, playerId);
     });
 
     return this.players.profile(playerId);

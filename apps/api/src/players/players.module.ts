@@ -10,6 +10,7 @@ import {
 } from './players.controller';
 import { PlayersService } from './players.service';
 import { RankReviewService } from './rank-review.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 /**
  * Профиль игрока: аватар, инвентарь, достижения, разряд и его проверка
@@ -19,7 +20,7 @@ import { RankReviewService } from './rank-review.service';
  * смотрит профиль игрока и решает по разряду оттуда.
  */
 @Module({
-  imports: [FilesModule, GuardianshipModule],
+  imports: [FilesModule, GuardianshipModule, NotificationsModule],
   controllers: [MePlayerController, PlayersController, PlayerFilesController, RankReviewController],
   providers: [PlayersService, PlayerAccess, RankReviewService],
   exports: [PlayersService],

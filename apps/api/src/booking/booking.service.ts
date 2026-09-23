@@ -15,6 +15,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { localParts } from '../club/closures';
 import { MembershipService } from '../club/membership.service';
+import { ClientNotifier } from '../notifications/client-notifier.service';
 import {
   bookingViolation,
   cancellationOpen,
@@ -118,6 +119,7 @@ export class BookingService {
     private readonly prisma: PrismaService,
     private readonly occupancy: OccupancyService,
     private readonly membership: MembershipService,
+    private readonly notifier: ClientNotifier,
   ) {}
 
   /**
@@ -254,21 +256,29 @@ export class BookingService {
     let created: BookingRow;
 
     try {
-      created = await this.prisma.tableBooking.create({
-        data: {
-          tenantId,
-          tableId: table.id,
-          ...(owner.kind === 'client'
-            ? { clientId: owner.userId }
-            : { coachId: owner.userId, isSparring: true }),
-          withRobot: dto.withRobot,
-          startsAt,
-          endsAt,
-          // Копия цены на момент брони: поднятый через месяц прайс не должен
-          // переписывать то, о чём клуб уже договорился с клиентом.
-          priceAtBooking: price,
-        },
-        select: BOOKING_SELECT,
+      // Транзакция — ради подтверждения в MAX: бронь и сообщение о ней либо
+      // вместе, либо никак. У спарринга клиента нет, и сообщать некому.
+      created = await this.prisma.$transaction(async (tx) => {
+        const row = await tx.tableBooking.create({
+          data: {
+            tenantId,
+            tableId: table.id,
+            ...(owner.kind === 'client'
+              ? { clientId: owner.userId }
+              : { coachId: owner.userId, isSparring: true }),
+            withRobot: dto.withRobot,
+            startsAt,
+            endsAt,
+            // Копия цены на момент брони: поднятый через месяц прайс не должен
+            // переписывать то, о чём клуб уже договорился с клиентом.
+            priceAtBooking: price,
+          },
+          select: BOOKING_SELECT,
+        });
+
+        await this.notifier.entryBooked(tx, tenantId, 'TABLE', row.id, 'self');
+
+        return row;
       });
     } catch (error) {
       // Пересечение с чужой бронью ловит exclusion-констрейнт. Prisma такую
@@ -335,18 +345,22 @@ export class BookingService {
 
     // Условие на статус — против гонки: вторая вкладка отменила бронь, пока
     // эта читала её живой, — и процент записался бы дважды, вторым поверх.
-    const { count } = await this.prisma.tableBooking.updateMany({
-      where: { id: bookingId, status: BookingStatus.BOOKED },
-      data: {
-        status: BookingStatus.CANCELLED,
-        cancelledAt: new Date(),
-        chargeRatio: percent,
-      },
-    });
+    await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.tableBooking.updateMany({
+        where: { id: bookingId, status: BookingStatus.BOOKED },
+        data: {
+          status: BookingStatus.CANCELLED,
+          cancelledAt: new Date(),
+          chargeRatio: percent,
+        },
+      });
 
-    if (count === 0) {
-      throw new ConflictException('Бронь уже изменилась — обновите страницу');
-    }
+      if (count === 0) {
+        throw new ConflictException('Бронь уже изменилась — обновите страницу');
+      }
+
+      await this.notifier.entryCancelled(tx, tenantId, 'TABLE', bookingId, 'self');
+    });
 
     const cancelled = await this.prisma.tableBooking.findUniqueOrThrow({
       where: { id: bookingId },

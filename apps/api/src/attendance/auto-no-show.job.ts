@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { parseDuration } from '../auth/tokens';
 import { attendanceJobEnabled, type Env } from '../config/env';
 import { decideAutoNoShow, noShowRatio, type AttendancePolicy } from './attendance-rules';
+import { ClientNotifier } from '../notifications/client-notifier.service';
 import { AttendanceService, ENTITY_TYPE, type LoadedEntry } from './attendance.service';
 
 /** Сколько записей одного вида берётся за раз. */
@@ -47,6 +48,7 @@ export class AutoNoShowJob implements OnApplicationBootstrap, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly attendance: AttendanceService,
+    private readonly notifier: ClientNotifier,
     private readonly config: ConfigService<Env, true>,
   ) {}
 
@@ -229,6 +231,8 @@ export class AutoNoShowJob implements OnApplicationBootstrap, OnModuleDestroy {
           reason: `Присутствие не отмечено за ${formatDelay(policy.autoNoShowAfterMinutes)} после окончания`,
         },
       });
+
+      await this.notifier.entryNoShow(tx, tenantId, kind, entry.id, now);
 
       return true;
     });

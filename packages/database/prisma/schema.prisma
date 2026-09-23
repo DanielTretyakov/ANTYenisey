@@ -190,6 +190,10 @@ enum NotificationType {
   BOOKING_CONFIRMED
   BOOKING_CANCELLED
   BOOKING_REMINDER
+  BOOKING_NO_SHOW // клиенту: отмечена неявка — администратором или джобой
+  SUBSCRIPTION_ENDING // клиенту: абонемент кончается по сроку или по визитам
+  RANK_DECIDED // игроку: клуб подтвердил или отклонил разряд
+  GUARDIANSHIP_REQUESTED // ребёнку: родитель просит закрепить его
   ATTENDANCE_ESCALATION_HOUR // напоминание админу/руководству спустя час после мероприятия
   ATTENDANCE_AUTO_NO_SHOW // уведомление об автоматической фиксации неявки через сутки
   SUBSCRIPTION_PAST_DUE // клубу — про просрочку подписки на платформу

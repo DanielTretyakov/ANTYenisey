@@ -4,6 +4,7 @@ import { NotificationStatus, Prisma } from '@yenisey/database';
 import { parseDuration } from '../auth/tokens';
 import { notificationsJobEnabled, webOrigin, type Env } from '../config/env';
 import { PrismaService } from '../prisma/prisma.service';
+import { stillRelevant } from './client-notifier.service';
 import { MaxTransport } from './max.transport';
 import { afterFailure } from './notification-rules';
 import { renderNotification } from './render';
@@ -29,6 +30,7 @@ const FIRST_RUN_DELAY = 5_000;
 interface ClaimedRow {
   id: string;
   userId: string;
+  tenantId: string | null;
   type: string;
   payload: unknown;
   attempts: number;
@@ -147,6 +149,12 @@ export class NotificationDispatcher implements OnApplicationBootstrap, OnModuleD
         continue;
       }
 
+      // Напоминание об отменённой или перенесённой записи — хуже тишины.
+      if (!(await stillRelevant(this.prisma, row))) {
+        await this.finish(row.id, NotificationStatus.SKIPPED, 'устарело: запись отменена или перенесена');
+        continue;
+      }
+
       let message;
 
       try {
@@ -215,7 +223,7 @@ export class NotificationDispatcher implements OnApplicationBootstrap, OnModuleD
         LIMIT ${BATCH}
         FOR UPDATE SKIP LOCKED
       )
-      RETURNING "id", "userId", "type"::text AS "type", "payload", "attempts"
+      RETURNING "id", "userId", "tenantId", "type"::text AS "type", "payload", "attempts"
     `);
   }
 

@@ -30,6 +30,24 @@ export const SPORT_RANK_LEVELS: readonly SportRankLevel[] = [
   'MSMK',
 ];
 
+/**
+ * Коротко — так, как разряд называют в зале.
+ *
+ * В общем пакете, потому что называют его обе стороны: веб в профиле, сервер
+ * в сообщении бота о решении клуба. Две копии разошлись бы на первой правке.
+ */
+export const RANK_LABELS: Record<SportRankLevel, string> = {
+  YOUTH_3: '3-й юношеский',
+  YOUTH_2: '2-й юношеский',
+  YOUTH_1: '1-й юношеский',
+  SPORT_3: '3-й спортивный',
+  SPORT_2: '2-й спортивный',
+  SPORT_1: '1-й спортивный',
+  KMS: 'КМС',
+  MS: 'МС',
+  MSMK: 'МСМК',
+};
+
 export type SportRankStatus = 'PENDING' | 'VERIFIED' | 'REJECTED';
 
 export type AchievementLevel = 'INTERNATIONAL' | 'NATIONAL' | 'REGIONAL' | 'CITY' | 'CLUB';

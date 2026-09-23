@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../config/env';
+import { ClientNotifier } from './client-notifier.service';
 import { DevMaxController } from './dev-max.controller';
 import { NotificationDispatcher } from './dispatcher.job';
 import { MaxBotService } from './max-bot.service';
@@ -10,6 +11,7 @@ import { MaxWebhookController } from './max-webhook.controller';
 import { DisabledMaxTransport, FakeMaxTransport, LiveMaxTransport, MaxTransport } from './max.transport';
 import { MeNotificationsController } from './me-notifications.controller';
 import { NotificationsService } from './notifications.service';
+import { NotificationScheduler } from './scheduler.job';
 
 /**
  * Уведомления: очередь, её отправщик и бот в мессенджере MAX.
@@ -22,8 +24,9 @@ import { NotificationsService } from './notifications.service';
  * Поддельный в production невозможен намеренно — у него открытые отладочные
  * маршруты.
  *
- * `NotificationsService` экспортируется: ставить уведомления в очередь будут
- * модули записи, отметки, разряда и абонементов — в своих транзакциях.
+ * `ClientNotifier` экспортируется: сообщения клиенту ставят в очередь модули
+ * записи, отметки, разряда и семьи — в своих транзакциях, одной строкой.
+ * Сам модуль от них не зависит, поэтому циклов импорта нет.
  */
 @Module({
   controllers: [MeNotificationsController, MaxWebhookController, DevMaxController],
@@ -47,8 +50,10 @@ import { NotificationsService } from './notifications.service';
     MaxLinkService,
     MaxBotService,
     NotificationDispatcher,
+    NotificationScheduler,
     MaxUpdatesJob,
+    ClientNotifier,
   ],
-  exports: [NotificationsService],
+  exports: [NotificationsService, ClientNotifier],
 })
 export class NotificationsModule {}

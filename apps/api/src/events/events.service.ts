@@ -14,6 +14,7 @@ import {
   trainingEvent,
 } from './event-view';
 import { MembershipService } from '../club/membership.service';
+import { ClientNotifier } from '../notifications/client-notifier.service';
 import { EntriesService } from '../entries/entries.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { consumed, subscriptionCancelRatio } from '../subscriptions/subscription-rules';
@@ -39,6 +40,7 @@ export class EventsService {
     private readonly entries: EntriesService,
     private readonly membership: MembershipService,
     private readonly subscriptions: SubscriptionsService,
+    private readonly notifier: ClientNotifier,
   ) {}
 
   /**
@@ -164,6 +166,8 @@ export class EventsService {
           await this.subscriptions.chargeInTx(tx, tenantId, sub, { tournamentRegistrationId: created.id });
         }
 
+        await this.notifier.entryBooked(tx, tenantId, 'TOURNAMENT', created.id, 'self');
+
         return created.id;
       });
     } catch (error) {
@@ -280,6 +284,8 @@ export class EventsService {
           await this.subscriptions.chargeInTx(tx, tenantId, sub, { trainingBookingId: created.id });
         }
 
+        await this.notifier.entryBooked(tx, tenantId, 'TRAINING', created.id, 'self');
+
         return created.id;
       });
     } catch (error) {
@@ -342,6 +348,8 @@ export class EventsService {
           { tournamentRegistrationId: registration.id },
         );
       }
+
+      await this.notifier.entryCancelled(tx, tenantId, 'TOURNAMENT', registration.id, 'self');
     });
 
     return this.entryFor(tenantId, userId, registration.id);
@@ -395,6 +403,8 @@ export class EventsService {
           { trainingBookingId: booking.id },
         );
       }
+
+      await this.notifier.entryCancelled(tx, tenantId, 'TRAINING', booking.id, 'self');
     });
 
     return this.entryFor(tenantId, userId, booking.id);

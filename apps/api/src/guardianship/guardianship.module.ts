@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MeChildrenController, MeGuardianshipController } from './family.controller';
 import { FamilyService } from './family.service';
 import { GuardianAccess } from './guardian-access.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 /**
  * Семья: родитель ведёт ребёнка младше 16. Расширение сверх ТЗ по решениям
@@ -12,6 +13,7 @@ import { GuardianAccess } from './guardian-access.service';
  * `FamilyService` — ради карточки человека у стойки.
  */
 @Module({
+  imports: [NotificationsModule],
   controllers: [MeChildrenController, MeGuardianshipController],
   providers: [FamilyService, GuardianAccess],
   exports: [FamilyService, GuardianAccess],

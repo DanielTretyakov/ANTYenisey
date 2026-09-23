@@ -7,18 +7,8 @@
  */
 import type { AchievementLevel, PlayerRank, PublicRank, SportRankLevel } from '@yenisey/types';
 
-/** Коротко — так, как разряд называют в зале. */
-export const RANK_LABELS: Record<SportRankLevel, string> = {
-  YOUTH_3: '3-й юношеский',
-  YOUTH_2: '2-й юношеский',
-  YOUTH_1: '1-й юношеский',
-  SPORT_3: '3-й спортивный',
-  SPORT_2: '2-й спортивный',
-  SPORT_1: '1-й спортивный',
-  KMS: 'КМС',
-  MS: 'МС',
-  MSMK: 'МСМК',
-};
+/** Коротко — так, как разряд называют в зале. Общий с сервером: он пишет разряд в сообщениях бота. */
+export { RANK_LABELS } from '@yenisey/types';
 
 /** Полностью — для подсказки и выпадающего списка. */
 export const RANK_TITLES: Record<SportRankLevel, string> = {

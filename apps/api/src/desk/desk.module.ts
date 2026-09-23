@@ -4,6 +4,7 @@ import { DeskService } from './desk.service';
 import { AttendanceModule } from '../attendance/attendance.module';
 import { BookingModule } from '../booking/booking.module';
 import { ClubModule } from '../club/club.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 /**
  * Рабочее место администратора.
@@ -21,7 +22,7 @@ import { ClubModule } from '../club/club.module';
  * отметил, а бронь задним числом сразу становится «пришёл».
  */
 @Module({
-  imports: [AttendanceModule, BookingModule, ClubModule],
+  imports: [AttendanceModule, BookingModule, ClubModule, NotificationsModule],
   controllers: [DeskController],
   providers: [DeskService],
 })

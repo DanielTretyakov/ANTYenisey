@@ -20,6 +20,7 @@ import { formatBirthDate, parseBirthDate } from '../auth/birth-date';
 import { joinFullName } from '../auth/full-name';
 import { hashPassword } from '../auth/password';
 import type { AccountDto } from '../auth/dto/register.dto';
+import { ClientNotifier } from '../notifications/client-notifier.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   canBeGuardian,
@@ -70,7 +71,10 @@ function refuse(decision: Extract<Decision, { ok: false }>): never {
  */
 @Injectable()
 export class FamilyService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifier: ClientNotifier,
+  ) {}
 
   /** Дети, которых человек ведёт прямо сейчас. Шестнадцатилетние из списка уходят сами. */
   async children(guardianId: string): Promise<FamilyChild[]> {
@@ -236,14 +240,21 @@ export class FamilyService {
     }
 
     if (decision.create && target) {
-      await this.prisma.guardianship
-        .create({
-          data: {
-            childUserId: target.id,
-            guardianUserId: guardianId,
-            status: GuardianshipStatus.PENDING,
-            createdByUserId: guardianId,
-          },
+      // Сообщение уходит ребёнку, и только ему: тот, кто подал заявку, по-прежнему
+      // получает одинаковый ответ при любом исходе.
+      await this.prisma
+        .$transaction(async (tx) => {
+          const request = await tx.guardianship.create({
+            data: {
+              childUserId: target.id,
+              guardianUserId: guardianId,
+              status: GuardianshipStatus.PENDING,
+              createdByUserId: guardianId,
+            },
+            select: { id: true },
+          });
+
+          await this.notifier.guardianshipRequested(tx, request.id);
         })
         .catch((error: unknown) => {
           // Двойное нажатие: вторая заявка упёрлась в частичный уникальный
@@ -364,14 +375,19 @@ export class FamilyService {
       return;
     }
 
-    await this.prisma.guardianship.create({
-      data: {
-        childUserId: childId,
-        guardianUserId: guardianId,
-        status: GuardianshipStatus.PENDING,
-        createdByUserId: desk.actorUserId,
-        createdInTenantId: desk.tenantId,
-      },
+    await this.prisma.$transaction(async (tx) => {
+      const request = await tx.guardianship.create({
+        data: {
+          childUserId: childId,
+          guardianUserId: guardianId,
+          status: GuardianshipStatus.PENDING,
+          createdByUserId: desk.actorUserId,
+          createdInTenantId: desk.tenantId,
+        },
+        select: { id: true },
+      });
+
+      await this.notifier.guardianshipRequested(tx, request.id);
     });
   }
 

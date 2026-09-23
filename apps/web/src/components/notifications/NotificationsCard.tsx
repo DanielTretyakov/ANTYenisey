@@ -14,7 +14,16 @@ import { api, ApiError } from '@/lib/api';
  * несуществующее. Сервер отдаёт все категории по ролям человека — показываются
  * только описанные.
  */
-const CATEGORY_TEXT: Partial<Record<NotificationCategoryName, { label: string; hint: string }>> = {};
+const CATEGORY_TEXT: Partial<Record<NotificationCategoryName, { label: string; hint: string }>> = {
+  MY_BOOKINGS: {
+    label: 'Мои записи',
+    hint: 'Подтверждение и отмена записи, напоминание за три часа до начала, отмеченная неявка.',
+  },
+  MY_SUBSCRIPTION: {
+    label: 'Мой абонемент',
+    hint: 'За три дня до конца срока, когда остался последний визит и когда визиты кончились.',
+  },
+};
 
 /** Как часто спрашивать, привязался ли MAX, пока ссылка открыта. */
 const POLL_MS = 3_000;

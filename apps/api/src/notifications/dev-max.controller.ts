@@ -1,7 +1,8 @@
-import { Body, Controller, Get, NotFoundException, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Post, Query } from '@nestjs/common';
 import { Public } from '../auth/decorators/public.decorator';
 import { NotificationDispatcher } from './dispatcher.job';
 import { MaxBotService } from './max-bot.service';
+import { NotificationScheduler } from './scheduler.job';
 import { FakeMaxTransport, MaxTransport, type FakeSentMessage } from './max.transport';
 
 /**
@@ -21,6 +22,7 @@ export class DevMaxController {
     private readonly transport: MaxTransport,
     private readonly bot: MaxBotService,
     private readonly dispatcher: NotificationDispatcher,
+    private readonly scheduler: NotificationScheduler,
   ) {}
 
   /** Событие MAX как есть: bot_started, bot_stopped, message_created. */
@@ -52,6 +54,22 @@ export class DevMaxController {
     this.fake();
 
     return this.dispatcher.runOnce();
+  }
+
+  /**
+   * Один проход планировщика с подставным «сейчас»: напоминание за три часа
+   * до начала смоук проверяет, не дожидаясь трёх часов.
+   */
+  @Post('schedule')
+  schedule(@Body() body: { now?: string }): Promise<{ reminders: number; subscriptions: number }> {
+    this.fake();
+    const now = body.now ? new Date(body.now) : new Date();
+
+    if (Number.isNaN(now.getTime())) {
+      throw new BadRequestException('now — момент ISO-8601');
+    }
+
+    return this.scheduler.runOnce(now);
   }
 
   private fake(): FakeMaxTransport {
