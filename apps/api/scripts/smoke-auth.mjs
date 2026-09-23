@@ -1926,6 +1926,7 @@ async function main() {
   await subscriptions();
   await family();
   await autoNoShow(asMe);
+  await notifications();
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
@@ -3794,6 +3795,141 @@ async function family() {
 
   r = await asAdmin(`/clubs/yenisey/people/${youngParentId}`);
   assert('семнадцатилетний — не ребёнок и не родитель', r.body?.family?.isChild === false && r.body?.family?.canBeGuardian === false);
+}
+
+/**
+ * Уведомления в MAX: привязка через бота, проверочное сообщение, категории,
+ * остановка бота и перенос привязки.
+ *
+ * Идёт через поддельный MAX (маршруты /dev/max): смоук присылает боту те же
+ * события, что прислал бы MAX, и читает, что бот ответил. На API с настоящим
+ * ботом или в production этих маршрутов нет — раздел пропускается.
+ */
+async function notifications() {
+  let r = await call('/dev/max/sent?maxUserId=0');
+
+  if (r.status !== 200) {
+    console.log('\n=== 35. Уведомления в MAX — ПРОПУЩЕНЫ (нет поддельного MAX: API с ботом или production)');
+    return;
+  }
+
+  console.log('\n=== 35. Уведомления в MAX');
+
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+  const event = (json) => call('/dev/max/events', { method: 'POST', json });
+  const user = (id) => ({ user_id: id, first_name: 'Проба', name: 'Проба', username: null, is_bot: false, last_activity_time: 0 });
+  const sentTo = async (id) => (await call(`/dev/max/sent?maxUserId=${id}`)).body ?? [];
+  const lastTo = async (id) => (await sentTo(id)).at(-1)?.text ?? '';
+  const tokenOf = (url) => new URL(url).searchParams.get('start') ?? '';
+  // Уникальные на прогон идентификаторы MAX: прошлые прогоны оставляют привязки.
+  const maxIdA = (RUN % 1_000_000_000) * 10 + 1;
+  const maxIdB = maxIdA + 1;
+
+  r = await call('/me/notifications');
+  check('настройки без входа закрыты', 401, r.status);
+
+  r = await post('/auth/register', registration({ lastName: 'Максимов' }));
+  const asA = as(r.body?.accessToken ?? '');
+
+  r = await asA('/me/notifications');
+  check('настройки уведомлений читаются', 200, r.status);
+  assert('MAX доступен и ещё не подключён', r.body?.max?.available === true && r.body?.max?.linked === false);
+  assert(
+    'клиенту — только свои записи и абонемент',
+    JSON.stringify(r.body?.categories?.map((item) => item.category)) === JSON.stringify(['MY_BOOKINGS', 'MY_SUBSCRIPTION']),
+  );
+
+  r = await asA('/me/notifications/test', { method: 'POST' });
+  check('проверочное без привязки — 409', 409, r.status);
+
+  r = await asA('/me/notifications/max', { method: 'POST' });
+  check('ссылка привязки выдана', 201, r.status);
+  const tokenA = tokenOf(r.body?.url ?? 'https://x.invalid');
+  assert('в ссылке токен для start', /^[A-Za-z0-9_-]{32}$/.test(tokenA));
+
+  await event({ update_type: 'bot_started', timestamp: Date.now(), chat_id: 1, user: user(maxIdA), payload: tokenA });
+  assert('бот подтвердил привязку сокращённым именем', /Готово.*Максимов П\./s.test(await lastTo(maxIdA)));
+
+  r = await asA('/me/notifications');
+  assert('на сайте MAX подключён', r.body?.max?.linked === true && r.body?.max?.blocked === false);
+
+  // Та же ссылка второй раз — уже с другого MAX: токен одноразовый.
+  await event({ update_type: 'bot_started', timestamp: Date.now(), chat_id: 2, user: user(maxIdB), payload: tokenA });
+  assert('повтор ссылки отвергнут', /устарела или уже использована/.test(await lastTo(maxIdB)));
+
+  // --- Проверочное сообщение: очередь → отправщик → MAX.
+  r = await asA('/me/notifications/test', { method: 'POST' });
+  check('проверочное встало в очередь', 204, r.status);
+  r = await asA('/me/notifications/test', { method: 'POST' });
+  check('второе в ту же минуту — 429', 429, r.status);
+
+  r = await call('/dev/max/dispatch', { method: 'POST' });
+  check('отправщик прошёл', 201, r.status);
+  assert('проверочное дошло до MAX', /Проверка связи/.test(await lastTo(maxIdA)));
+
+  // --- Категории.
+  r = await asA('/me/notifications/categories/MY_BOOKINGS', { method: 'PUT', json: { enabled: false } });
+  check('категория выключается', 200, r.status);
+  assert(
+    'и остаётся выключенной',
+    r.body?.categories?.find((item) => item.category === 'MY_BOOKINGS')?.enabled === false,
+  );
+  r = await asA('/me/notifications/categories/CLUB_DIGEST', { method: 'PUT', json: { enabled: false } });
+  check('чужая по ролям категория — 400', 400, r.status);
+  r = await asA('/me/notifications/categories/SERVICE', { method: 'PUT', json: { enabled: false } });
+  check('служебное не выключается — 400', 400, r.status);
+  r = await asA('/me/notifications/categories/MY_BOOKINGS', { method: 'PUT', json: { enabled: 'нет' } });
+  check('не булево — 400', 400, r.status);
+
+  // --- Остановка бота и возвращение.
+  await event({ update_type: 'bot_stopped', timestamp: Date.now(), chat_id: 1, user: user(maxIdA) });
+  r = await asA('/me/notifications');
+  assert('остановленный бот виден на сайте', r.body?.max?.blocked === true);
+  r = await asA('/me/notifications/test', { method: 'POST' });
+  check('проверочное остановленному — 409', 409, r.status);
+
+  await event({ update_type: 'bot_started', timestamp: Date.now(), chat_id: 1, user: user(maxIdA), payload: null });
+  assert('запуск без ссылки возвращает уведомления', /снова включены/.test(await lastTo(maxIdA)));
+  r = await asA('/me/notifications');
+  assert('и на сайте тоже', r.body?.max?.blocked === false && r.body?.max?.linked === true);
+
+  // --- Тот же MAX привязывает вторая учётка: первая его теряет.
+  r = await post('/auth/register', registration({ lastName: 'Второва' }));
+  const asB = as(r.body?.accessToken ?? '');
+  r = await asB('/me/notifications/max', { method: 'POST' });
+  await event({ update_type: 'bot_started', timestamp: Date.now(), chat_id: 1, user: user(maxIdA), payload: tokenOf(r.body?.url ?? 'https://x.invalid') });
+  assert('бот предупредил о переносе привязки', /к другой учётке/.test(await lastTo(maxIdA)));
+  r = await asA('/me/notifications');
+  assert('первая учётка отвязана', r.body?.max?.linked === false);
+
+  // --- /stop в диалоге снимает привязку.
+  await event({
+    update_type: 'message_created',
+    timestamp: Date.now(),
+    message: {
+      sender: user(maxIdA),
+      recipient: { chat_id: 1, chat_type: 'dialog', user_id: null, post_id: null },
+      timestamp: Date.now(),
+      body: { mid: 'm', seq: 1, text: '/stop' },
+    },
+  });
+  assert('бот подтвердил отключение', /Уведомления отключены/.test(await lastTo(maxIdA)));
+  r = await asB('/me/notifications');
+  assert('вторая учётка отвязана командой', r.body?.max?.linked === false);
+
+  // --- MAX отказал в отправке (бота остановили, а событие не дошло).
+  r = await asB('/me/notifications/max', { method: 'POST' });
+  await event({ update_type: 'bot_started', timestamp: Date.now(), chat_id: 2, user: user(maxIdB), payload: tokenOf(r.body?.url ?? 'https://x.invalid') });
+  await call('/dev/max/stopped', { method: 'POST', json: { maxUserId: String(maxIdB) } });
+  r = await asB('/me/notifications/test', { method: 'POST' });
+  check('проверочное встало', 204, r.status);
+  await call('/dev/max/dispatch', { method: 'POST' });
+  r = await asB('/me/notifications');
+  assert('отказ MAX помечает бота остановленным', r.body?.max?.blocked === true);
+
+  r = await call('/max/webhook', { method: 'POST', json: { update_type: 'bot_started' } });
+  check('вебхук без секрета не отвечает', 404, r.status);
 }
 
 main().catch((error) => {

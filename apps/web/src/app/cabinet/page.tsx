@@ -8,6 +8,7 @@ import { MAX_FAVOURITE_CLUBS } from '@yenisey/types';
 import { ClubMark } from '@/components/club/ClubMark';
 import { ChildFamilyCard, ParentFamilyCard } from '@/components/family/FamilyCards';
 import { PersonSwitch } from '@/components/family/PersonSwitch';
+import { NotificationsCard } from '@/components/notifications/NotificationsCard';
 import { AppShell } from '@/components/layout/AppShell';
 import { PlayerEditor } from '@/components/player/PlayerEditor';
 import { MySubscriptions } from '@/components/subscriptions/MySubscriptions';
@@ -93,6 +94,10 @@ export default function CabinetPage() {
       {user && isChildBirthDate(user.birthDate) && <ChildFamilyCard />}
 
       {user && <MyClubs user={user} />}
+
+      {/* Уведомления — свои у каждого, в том числе у ребёнка: это его учётка
+          и его сообщения. Переключатель «за ребёнка» их поэтому не меняет. */}
+      {user && <NotificationsCard />}
     </AppShell>
   );
 }

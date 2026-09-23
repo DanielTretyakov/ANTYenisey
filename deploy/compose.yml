@@ -70,6 +70,13 @@ services:
       # чтобы не выяснять по памяти, ставятся ли неявки на боевой базе.
       ATTENDANCE_JOB: ${ATTENDANCE_JOB:-on}
       ATTENDANCE_JOB_INTERVAL: ${ATTENDANCE_JOB_INTERVAL:-5m}
+      # Бот уведомлений в MAX. Незаполненное значение приходит пустой
+      # строкой, и env.ts считает её «не задано» — сайт работает без бота.
+      MAX_BOT_TOKEN: ${MAX_BOT_TOKEN:-}
+      MAX_BOT_LINK: ${MAX_BOT_LINK:-}
+      MAX_WEBHOOK_SECRET: ${MAX_WEBHOOK_SECRET:-}
+      NOTIFICATIONS_JOB: ${NOTIFICATIONS_JOB:-on}
+      WEB_ORIGIN: https://${DOMAIN}
     expose:
       - '3001'
     healthcheck:

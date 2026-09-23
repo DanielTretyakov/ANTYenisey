@@ -81,6 +81,15 @@ enum Role {
   OWNER // руководство клуба: те же права, что ADMIN, плюс управление персоналом
 }
 
+/// Роль на уровне ПЛАТФОРМЫ, а не клуба (решение владельца от 23.09.2026).
+///
+/// Клубные роли выше не годятся: владелец платформы не состоит в клубах, а
+/// видит их все. Пока роль даёт только сводку платформы в MAX; ставится
+/// командой `pnpm db:grant-platform`, а не формой — выдавать её некому.
+enum PlatformRole {
+  OWNER // владелец платформы
+}
+
 /// Как появилась запись на тренировку: клиент записался сам через сайт, или
 /// администратор добавил её вручную (в т.ч. задним числом).
 enum BookingSource {
@@ -168,19 +177,45 @@ enum VisitSourceType {
   WALK_IN // первый визит клиента «с порога», без онлайн-брони
 }
 
+/// Канал доставки уведомлений. Мессенджер — MAX (решение заказчика от
+/// 23.09.2026: Telegram заменён на MAX до первой строки в очереди).
 enum NotificationChannel {
-  TELEGRAM
+  MAX
   WEB_PUSH
 }
 
 /// Тип уведомления, включая служебные эскалации по неотмеченному присутствию.
 enum NotificationType {
+  TEST // проверочное сообщение со страницы настроек
   BOOKING_CONFIRMED
   BOOKING_CANCELLED
   BOOKING_REMINDER
   ATTENDANCE_ESCALATION_HOUR // напоминание админу/руководству спустя час после мероприятия
   ATTENDANCE_AUTO_NO_SHOW // уведомление об автоматической фиксации неявки через сутки
   SUBSCRIPTION_PAST_DUE // клубу — про просрочку подписки на платформу
+}
+
+/// Судьба строки очереди уведомлений.
+enum NotificationStatus {
+  PENDING // ждёт отправки: впервые или после неудачной попытки
+  SENT
+  FAILED // попытки кончились — сеть или MAX так и не ответили
+  SKIPPED // отправлять оказалось некому или незачем: привязку сняли, бота остановили
+}
+
+/// Что человек может выключить у себя в настройках.
+///
+/// Категория, а не тип: выбирать из двадцати типов никто не станет, а «мои
+/// записи» против «сводки клуба» понятны сразу. Какому типу какая категория —
+/// решает notification-rules.ts.
+enum NotificationCategory {
+  SERVICE // служебное: проверочное сообщение. Не выключается
+  MY_BOOKINGS // мои записи: подтверждение, отмена, напоминание, неявка
+  MY_SUBSCRIPTION // мой абонемент кончается
+  COACH_GROUPS // тренеру: записи в его группы, состав на день
+  CLUB_ALERTS // администратору: что ждёт решения клуба
+  CLUB_DIGEST // руководству клуба: утренняя сводка
+  PLATFORM_DIGEST // владельцу платформы: утренняя сводка
 }
 
 /// Кто выполнил действие в журнале аудита. Далеко не всё делают люди:
@@ -526,6 +561,9 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  /// Роль на платформе. У всех, кроме владельца платформы, — пусто.
+  platformRole PlatformRole?
+
   // --- Мягкое удаление и анонимизация (152-ФЗ).
   //
   // Физически удалять клиента нельзя: за ним висят платежи и визиты, которые
@@ -572,6 +610,12 @@ model User {
   guardianshipsAsGuardian Guardianship[] @relation("GuardianshipGuardian")
   guardianshipsCreated    Guardianship[] @relation("GuardianshipCreatedBy")
   guardianshipsRevoked    Guardianship[] @relation("GuardianshipRevokedBy")
+
+  // Уведомления: адресованы человеку, а не членству в клубе (см. Notification).
+  notifications        Notification[]
+  notificationSettings NotificationSetting[]
+  maxLink              MaxLink?
+  maxLinkTokens        MaxLinkToken[]
 }
 
 // ---------------------------------------------------------------------------
@@ -870,7 +914,6 @@ model TenantMembership {
 
   clientProfile    ClientProfile? // заполнен, если role = CLIENT
   coachProfile     CoachProfile? // заполнен, если role = COACH
-  notifications    Notification[]
   visitsRecorded   VisitLog[]        @relation("VisitRecordedBy")
   legalAcceptances LegalAcceptance[]
   auditEntries     AuditLog[]        @relation("AuditActor")
@@ -2008,22 +2051,103 @@ model LegalAcceptance {
   @@index([tenantId, userId])
 }
 
-/// Уведомление пользователю по одному из каналов (Telegram-бот, Web Push),
-/// включая служебные эскалации по неотмеченному присутствию.
+/// Уведомление: строка очереди исходящих сообщений (outbox).
+///
+/// Код предметной области мессенджер не зовёт никогда. Он вставляет строку сюда
+/// той же транзакцией, что и само действие, а отправляет её джоба
+/// (NotificationDispatcher). Откатилась бронь — нет и сообщения «вы записаны»;
+/// лёг MAX — запись всё равно проходит, а сообщение уйдёт позже.
+///
+/// Адресат — человек, а не членство в клубе. До 23.09.2026 здесь был составной
+/// ключ на TenantMembership, и он не пускал два законных случая: сводку
+/// владельцу платформы (клуба у неё нет) и сообщение родителю о записи ребёнка
+/// в клуб, где сам родитель не состоит. Клуб здесь — контекст сообщения, а не
+/// право адресата: кому что положено, решает NotificationsService.
+///
+/// Строка создаётся только для того, кому есть куда слать: без привязки
+/// MAX и при выключенной категории её нет вовсе.
 model Notification {
-  id         String           @id @default(cuid())
-  tenantId   String
-  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  userId     String
-  membership TenantMembership @relation(fields: [userId, tenantId], references: [userId, tenantId], onDelete: Cascade)
+  id       String  @id @default(cuid())
+  userId   String
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId String?
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   channel NotificationChannel
   type    NotificationType
-  payload Json? // произвольные данные под конкретный тип уведомления
+  /// Данные для текста. Текст собирается в момент отправки (render.ts), а не
+  /// при постановке в очередь: к тому времени запись могли и отменить.
+  payload Json?
 
-  sentAt    DateTime?
-  readAt    DateTime?
-  createdAt DateTime  @default(now())
+  /// Ключ идемпотентности: «reminder:TRAINING:<id записи>», «digest:2026-09-23».
+  /// Уникален в паре с адресатом и каналом, поэтому планировщик можно гонять
+  /// повторно и в нескольких экземплярах — второе напоминание не встанет.
+  dedupeKey String
 
-  @@index([tenantId, userId])
+  status    NotificationStatus @default(PENDING)
+  attempts  Int                @default(0)
+  lastError String?
+  /// Раньше этого момента не слать: тихие часы, пауза перед повтором и аренда
+  /// строки отправщиком (см. dispatcher.job.ts).
+  sendAfter DateTime           @default(now()) @db.Timestamptz(3)
+  sentAt    DateTime?          @db.Timestamptz(3)
+  readAt    DateTime?          @db.Timestamptz(3)
+  createdAt DateTime           @default(now()) @db.Timestamptz(3)
+
+  @@unique([userId, channel, dedupeKey])
+  @@index([status, sendAfter])
+  @@index([tenantId])
+}
+
+/// Привязка учётки к пользователю мессенджера MAX.
+///
+/// Один пользователь MAX — одна учётка и наоборот: оба ключа уникальны.
+/// Привязать тот же MAX ко второй учётке можно, но старая привязка при этом
+/// снимается — иначе сообщения одного человека уходили бы другому.
+///
+/// maxUserId — персональные данные: по нему человека находят в MAX. Строка
+/// уходит вместе с учёткой (каскад) и снимается кнопкой «Отключить» на сайте
+/// или остановкой бота в самом MAX.
+model MaxLink {
+  userId String @id
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  maxUserId BigInt    @unique
+  linkedAt  DateTime  @default(now()) @db.Timestamptz(3)
+  /// Человек остановил бота или удалил диалог: MAX прислал bot_stopped или
+  /// dialog_removed, либо отказал в отправке. Слать больше некуда, пока он
+  /// не привяжет MAX заново.
+  blockedAt DateTime? @db.Timestamptz(3)
+}
+
+/// Одноразовый токен привязки: уходит в ссылку max.ru/<бот>?start=<токен>.
+///
+/// Хранится хэш, а не сам токен, — по той же причине, что у refresh-токенов:
+/// дамп базы не должен позволять привязать чужую учётку к своему MAX.
+model MaxLinkToken {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String    @unique
+  expiresAt DateTime  @db.Timestamptz(3)
+  usedAt    DateTime? @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([userId])
+}
+
+/// Выключенная (или снова включённая) категория уведомлений.
+///
+/// Строки нет — категория включена: новое уведомление не должно ждать, пока
+/// человек зайдёт в настройки и разрешит его.
+model NotificationSetting {
+  userId   String
+  user     User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category NotificationCategory
+  enabled  Boolean
+
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  @@id([userId, category])
 }

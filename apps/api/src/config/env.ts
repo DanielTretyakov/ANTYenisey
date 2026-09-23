@@ -2,6 +2,17 @@ import { z } from 'zod';
 import { parseDuration } from '../auth/tokens';
 
 /**
+ * Необязательная переменная, где пустая строка — это «не задано».
+ *
+ * compose передаёт незаполненное `MAX_BOT_TOKEN=` пустой строкой, а не
+ * отсутствием, и без этого API на стенде падал бы на старте из-за поля,
+ * которое заполнять и не собирались.
+ */
+function optional<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess((value) => (value === '' ? undefined : value), schema.optional());
+}
+
+/**
  * Схема переменных окружения. Валидируется один раз при старте: приложение
  * должно падать сразу с внятной ошибкой, а не через неделю на проде, когда
  * забытый JWT_ACCESS_SECRET окажется `undefined` и токены станут подписываться
@@ -36,12 +47,41 @@ const envSchema = z
       .string()
       .default('5m')
       .refine(isDuration, 'Ожидается длительность вида 30s, 5m, 1h'),
+    // Бот уведомлений в мессенджере MAX. Токен — в настройках бота на
+    // business.max.ru, ссылка — адрес бота вида https://max.ru/yenisey_bot: к
+    // ней приписывается ?start=<токен привязки>. Без токена в production
+    // уведомления недоступны, а в разработке вместо MAX работает поддельный
+    // транспорт (notifications/max.transport.ts).
+    MAX_BOT_TOKEN: optional(z.string().min(10)),
+    MAX_BOT_LINK: optional(
+      z.string().regex(/^https:\/\/max\.ru\/[A-Za-z0-9_]+$/, 'Адрес бота вида https://max.ru/yenisey_bot'),
+    ),
+    // Секрет вебхука: MAX присылает его в заголовке X-Max-Bot-Api-Secret.
+    // Задан — бот получает события вебхуком на <WEB_ORIGIN>/api/max/webhook
+    // (так MAX советует для production), не задан — опрашивает GET /updates.
+    MAX_WEBHOOK_SECRET: optional(
+      z.string().regex(/^[A-Za-z0-9_-]{16,256}$/, 'От 16 символов: латиница, цифры, _ и -'),
+    ),
+    // Отправщик очереди уведомлений и приём событий бота. Не задано — как у
+    // автонеявки: включены в production, выключены в разработке.
+    NOTIFICATIONS_JOB: optional(z.enum(['on', 'off'])),
+    NOTIFICATIONS_JOB_INTERVAL: z
+      .string()
+      .default('10s')
+      .refine(isDuration, 'Ожидается длительность вида 30s, 5m, 1h'),
+    // Адрес сайта для ссылок в сообщениях. Не задан — первый из CORS_ORIGINS.
+    WEB_ORIGIN: optional(z.string().url()),
   })
   .refine((env) => env.JWT_ACCESS_SECRET !== env.JWT_REFRESH_SECRET, {
     // Совпадение секретов означает, что refresh-токен примут как access:
     // подпись сойдётся, и долгоживущий токен обойдёт короткий срок жизни.
     message: 'JWT_ACCESS_SECRET и JWT_REFRESH_SECRET должны различаться',
     path: ['JWT_REFRESH_SECRET'],
+  })
+  .refine((env) => !env.MAX_BOT_TOKEN || env.MAX_BOT_LINK, {
+    // Без адреса бота не собрать ссылку привязки, и токен лежал бы без дела.
+    message: 'Задан MAX_BOT_TOKEN, но не задан MAX_BOT_LINK',
+    path: ['MAX_BOT_LINK'],
   });
 
 export type Env = z.infer<typeof envSchema>;
@@ -62,6 +102,18 @@ export function validateEnv(raw: Record<string, unknown>): Env {
 /** Работает ли джоба автонеявки при этом окружении. */
 export function attendanceJobEnabled(env: Pick<Env, 'ATTENDANCE_JOB' | 'NODE_ENV'>): boolean {
   return (env.ATTENDANCE_JOB ?? (env.NODE_ENV === 'production' ? 'on' : 'off')) === 'on';
+}
+
+/** Работают ли отправщик уведомлений и приём событий бота при этом окружении. */
+export function notificationsJobEnabled(env: Pick<Env, 'NOTIFICATIONS_JOB' | 'NODE_ENV'>): boolean {
+  return (env.NOTIFICATIONS_JOB ?? (env.NODE_ENV === 'production' ? 'on' : 'off')) === 'on';
+}
+
+/** Адрес сайта для ссылок в сообщениях, без косой черты в конце. */
+export function webOrigin(env: Pick<Env, 'WEB_ORIGIN' | 'CORS_ORIGINS'>): string {
+  const origin = env.WEB_ORIGIN ?? parseCorsOrigins(env.CORS_ORIGINS)[0] ?? 'http://localhost:3000';
+
+  return origin.replace(/\/+$/, '');
 }
 
 function isDuration(value: string): boolean {

@@ -1299,3 +1299,51 @@ DO $$ BEGIN
   UPDATE "Tenant" SET phone = NULL, email = NULL WHERE id = 't1';
   RAISE NOTICE 'DB. Контакты клуба приняты и снова сняты.. OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'DB. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- ---------------------------------------------------------------------------
+-- 25. Уведомления
+-- ---------------------------------------------------------------------------
+
+-- Проверочное сообщение u1 и сводка платформы без клуба — законны: адресат
+-- уведомления — человек, а не членство в клубе.
+DO $$ BEGIN
+  INSERT INTO "Notification" (id,"userId","tenantId",channel,type,"dedupeKey")
+  VALUES ('n1','u1','t1','MAX','TEST','test:1'),
+         ('n2','u2',NULL,'MAX','TEST','test:1');
+  RAISE NOTICE 'DC. Уведомление с клубом и без клуба...... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'DC. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- DD. То же сообщение тому же человеку второй раз — то, от чего ключ
+--     идемпотентности и заведён: повторный проход планировщика не должен
+--     прислать второе напоминание.
+SELECT pg_temp.expect('DD',
+  $q$INSERT INTO "Notification" (id,"userId",channel,type,"dedupeKey")
+     VALUES ('n3','u1','MAX','TEST','test:1')$q$,
+  '23505', 'Notification_userId_channel_dedupeKey_key');
+
+-- DE. «Отправлено», но неизвестно когда.
+SELECT pg_temp.expect('DE',
+  $q$UPDATE "Notification" SET status = 'SENT' WHERE id = 'n1'$q$,
+  '23514', 'Notification_sent_has_time');
+
+-- DF. Пустой ключ идемпотентности склеил бы все сообщения человека в одно.
+SELECT pg_temp.expect('DF',
+  $q$INSERT INTO "Notification" (id,"userId",channel,type,"dedupeKey")
+     VALUES ('n4','u1','MAX','TEST','')$q$,
+  '23514', 'Notification_text_sane');
+
+-- DG. Вторая учётка на того же пользователя MAX: её сообщения уходили бы
+--     первому.
+DO $$ BEGIN
+  INSERT INTO "MaxLink" ("userId","maxUserId") VALUES ('u1', 1001);
+EXCEPTION WHEN others THEN RAISE NOTICE 'DG. ПРОВАЛ подготовки: %', SQLERRM; END $$;
+
+SELECT pg_temp.expect('DG',
+  $q$INSERT INTO "MaxLink" ("userId","maxUserId") VALUES ('u2', 1001)$q$,
+  '23505', 'MaxLink_maxUserId_key');
+
+-- DH. Токен привязки, использованный после истечения.
+SELECT pg_temp.expect('DH',
+  $q$INSERT INTO "MaxLinkToken" (id,"userId","tokenHash","expiresAt","usedAt","createdAt")
+     VALUES ('tl1','u1',repeat('a',64),now() + interval '15 minutes',now() + interval '1 hour',now())$q$,
+  '23514', 'MaxLinkToken_times_sane');

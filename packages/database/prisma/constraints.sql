@@ -1000,3 +1000,48 @@ CREATE TRIGGER "SubscriptionLedger_no_truncate"
 -- Что абонемент на записи действовал на момент мероприятия и покрывал его тип
 -- — тоже сравнение с другими таблицами, и правило сервиса: подходящий
 -- абонемент выбирает pickSubscription в момент записи.
+
+-- ---------------------------------------------------------------------------
+-- 22. Уведомления
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_notifications_outbox. Очередь исходящих сообщений:
+-- строки пишет NotificationsService, отправляет NotificationDispatcher.
+
+-- Счётчик попыток не уходит в минус: по нему отправщик решает, пора ли
+-- сдаваться.
+ALTER TABLE "Notification"
+  ADD CONSTRAINT "Notification_attempts_nonneg"
+  CHECK ("attempts" >= 0);
+
+-- «Отправлено» и момент отправки — одно и то же знание. Статус без времени
+-- (или время у неотправленного) значит, что писатель ошибся, и по такой строке
+-- уже не ответить, дошло ли сообщение.
+ALTER TABLE "Notification"
+  ADD CONSTRAINT "Notification_sent_has_time"
+  CHECK (("status" = 'SENT') = ("sentAt" IS NOT NULL));
+
+-- Ключ идемпотентности не пустой и не безразмерный; текст ошибки — не дамп
+-- ответа целиком.
+ALTER TABLE "Notification"
+  ADD CONSTRAINT "Notification_text_sane"
+  CHECK (
+    char_length("dedupeKey") BETWEEN 1 AND 200
+    AND ("lastError" IS NULL OR char_length("lastError") <= 1000)
+  );
+
+-- Токен привязки живёт вперёд, а использован — пока ещё жил.
+ALTER TABLE "MaxLinkToken"
+  ADD CONSTRAINT "MaxLinkToken_times_sane"
+  CHECK ("expiresAt" > "createdAt" AND ("usedAt" IS NULL OR "usedAt" <= "expiresAt"));
+
+-- Чего здесь НЕТ и почему.
+--
+-- Что адресат уведомления с клубом состоит в этом клубе. Составной ключ на
+-- TenantMembership здесь был и снят: родитель законно получает сообщение о
+-- записи ребёнка в клуб, где сам не состоит, а у сводки платформы клуба нет
+-- вовсе. Кому что положено, решает NotificationsService.
+--
+-- Что один пользователь MAX привязан к одной учётке и наоборот — это не
+-- CHECK, а два уникальных ключа MaxLink (userId — первичный, maxUserId —
+-- уникальный).

@@ -21,6 +21,7 @@
     "db:verify": "pnpm --filter @yenisey/database verify",
     "db:clean-probes": "pnpm --filter @yenisey/database clean-probes",
     "db:create-admin": "dotenv -e .env -- node --experimental-strip-types apps/api/scripts/create-admin.ts",
+    "db:grant-platform": "dotenv -e .env -- node --experimental-strip-types apps/api/scripts/grant-platform.ts",
     "smoke": "node apps/api/scripts/smoke-auth.mjs"
   },
   "devDependencies": {

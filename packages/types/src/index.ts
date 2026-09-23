@@ -6,6 +6,7 @@ export * from './coach';
 export * from './desk';
 export * from './family';
 export * from './names';
+export * from './notification';
 export * from './platform';
 export * from './player';
 export * from './subscription';

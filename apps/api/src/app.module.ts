@@ -14,6 +14,7 @@ import { EntriesModule } from './entries/entries.module';
 import { EventsModule } from './events/events.module';
 import { GuardianshipModule } from './guardianship/guardianship.module';
 import { MeModule } from './me/me.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { PeopleModule } from './people/people.module';
 import { PlayersModule } from './players/players.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
@@ -75,6 +76,7 @@ import { validateEnv, type Env } from './config/env';
     EntriesModule,
     EventsModule,
     MeModule,
+    NotificationsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

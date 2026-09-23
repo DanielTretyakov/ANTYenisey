@@ -58,6 +58,9 @@ import type {
   FamilyNotice,
   GuardianshipRequestView,
   MyGuardian,
+  MaxLinkResponse,
+  NotificationCategoryName,
+  NotificationSettingsView,
   PlayerProfile,
   PublicPlayer,
   PublicTenant,
@@ -437,6 +440,20 @@ export const api = {
 
   /** Публичная карточка тренера. Возраста у неё нет — открыта всем. */
   coach: (id: string): Promise<PublicCoach> => optionallyAuthorized(`/coaches/${id}`),
+
+  // --- Уведомления в MAX. Свойство человека, а не клуба: клуба в адресе нет.
+  notificationSettings: (): Promise<NotificationSettingsView> => authorized('/me/notifications'),
+
+  /** Ссылка на бота с одноразовым токеном: живёт 15 минут, действует последняя. */
+  linkMax: (): Promise<MaxLinkResponse> => authorized('/me/notifications/max', { method: 'POST' }),
+
+  unlinkMax: (): Promise<NotificationSettingsView> => authorized('/me/notifications/max', { method: 'DELETE' }),
+
+  setNotificationCategory: (category: NotificationCategoryName, enabled: boolean): Promise<NotificationSettingsView> =>
+    authorized(`/me/notifications/categories/${category}`, json('PUT', { enabled })),
+
+  /** Проверочное сообщение. Не чаще раза в минуту. */
+  sendTestNotification: (): Promise<void> => authorized('/me/notifications/test', { method: 'POST' }),
 
   /**
    * Файл — байтами, а не адресом для `<img src>`. Картинка по адресу ушла бы
