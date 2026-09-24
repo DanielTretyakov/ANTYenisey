@@ -15,6 +15,7 @@ import {
 } from './event-view';
 import { MembershipService } from '../club/membership.service';
 import { ClientNotifier } from '../notifications/client-notifier.service';
+import { StaffNotifier } from '../notifications/staff-notifier.service';
 import { EntriesService } from '../entries/entries.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { consumed, subscriptionCancelRatio } from '../subscriptions/subscription-rules';
@@ -41,6 +42,7 @@ export class EventsService {
     private readonly membership: MembershipService,
     private readonly subscriptions: SubscriptionsService,
     private readonly notifier: ClientNotifier,
+    private readonly staff: StaffNotifier,
   ) {}
 
   /**
@@ -285,6 +287,7 @@ export class EventsService {
         }
 
         await this.notifier.entryBooked(tx, tenantId, 'TRAINING', created.id, 'self');
+        await this.staff.trainingChanged(tx, tenantId, created.id, 'BOOKED');
 
         return created.id;
       });
@@ -405,6 +408,7 @@ export class EventsService {
       }
 
       await this.notifier.entryCancelled(tx, tenantId, 'TRAINING', booking.id, 'self');
+      await this.staff.trainingChanged(tx, tenantId, booking.id, 'CANCELLED');
     });
 
     return this.entryFor(tenantId, userId, booking.id);

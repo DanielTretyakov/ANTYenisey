@@ -75,6 +75,62 @@ export interface GuardianshipPayload {
   guardian: string;
 }
 
+/** Тренеру: запись или отмена в его группе. */
+export interface CoachEntryPayload {
+  change: 'BOOKED' | 'CANCELLED';
+  person: string;
+  title: string;
+  startsAt: string;
+  timezone: string;
+  club: string;
+  slug: string;
+  booked: number;
+  capacity: number;
+}
+
+/** Тренеру утром: его занятия на сегодня. */
+export interface CoachDayPayload {
+  club: string;
+  slug: string;
+  timezone: string;
+  sessions: { startsAt: string; title: string; booked: number; capacity: number }[];
+}
+
+/** Администраторам: у мероприятия не отмечено присутствие. */
+export interface EscalationPayload {
+  kind: EntryKind;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  timezone: string;
+  place: string | null;
+  club: string;
+  slug: string;
+  /** Сокращённые имена тех, кто без отметки: не больше десяти. */
+  people: string[];
+  count: number;
+}
+
+/** Администраторам: джоба поставила неявки. */
+export interface AutoNoShowPayload {
+  club: string;
+  slug: string;
+  people: string[];
+  count: number;
+}
+
+/** Администраторам: разряд ждёт проверки. */
+export interface RankPendingPayload {
+  person: string;
+  personId: string;
+  rank: string;
+  club: string;
+  slug: string;
+}
+
+/** Сколько имён показывать в списке: дальше — «и ещё N». */
+const NAMES_SHOWN = 10;
+
 /**
  * Текст сообщения по типу и данным.
  *
@@ -94,7 +150,7 @@ export function renderNotification(type: string, payload: unknown, context: Rend
 
     case 'BOOKING_CONFIRMED': {
       const p = payload as EntryPayload;
-      const head = p.person ? `Новая запись · ${p.person}` : p.byClub ? 'Администратор записал вас' : 'Вы записаны';
+      const head = p.person ? `Новая запись · ${p.person}` : p.byClub ? 'Вас записал клуб' : 'Вы записаны';
 
       return {
         text: lines(head, ...entryLines(p), p.prepaid ? 'Оплата — визит с абонемента.' : `Стоимость — ${rubles(p.price)}.`),
@@ -171,9 +227,77 @@ export function renderNotification(type: string, payload: unknown, context: Rend
       };
     }
 
+    case 'COACH_ENTRY_CHANGED': {
+      const p = payload as CoachEntryPayload;
+      const head = p.change === 'BOOKED' ? `Запись в группу · ${p.person}` : `Отмена в группе · ${p.person}`;
+
+      return {
+        text: lines(head, `Занятие «${p.title}»`, when(p.startsAt, p.timezone), `Записано ${p.booked} из ${p.capacity}.`),
+        link: { label: 'Мои группы', url: `${context.webOrigin}/clubs/${p.slug}/coach` },
+      };
+    }
+
+    case 'COACH_DAY_PLAN': {
+      const p = payload as CoachDayPayload;
+      const rows = p.sessions.map(
+        (session) => `${time(session.startsAt, p.timezone)} ${session.title} — ${session.booked} из ${session.capacity}`,
+      );
+
+      return {
+        text: lines(`Сегодня у вас в клубе «${p.club}»:`, ...rows),
+        link: { label: 'Мои группы', url: `${context.webOrigin}/clubs/${p.slug}/coach` },
+      };
+    }
+
+    case 'ATTENDANCE_ESCALATION_HOUR': {
+      const p = payload as EscalationPayload;
+      const what =
+        p.kind === 'TRAINING' ? `Занятие «${p.title}»` : p.kind === 'TOURNAMENT' ? `Турнир «${p.title}»` : `Аренда: ${p.title}`;
+
+      return {
+        text: lines(
+          'Не отмечено присутствие',
+          `${what}, ${when(p.startsAt, p.timezone)}–${time(p.endsAt, p.timezone)}${p.place ? ` · ${p.place}` : ''}`,
+          `Без отметки: ${p.count} — ${names(p.people, p.count)}`,
+          'Через сутки после окончания система сама поставит неявку.',
+        ),
+        link: { label: 'Экран смены', url: `${context.webOrigin}/clubs/${p.slug}/desk` },
+      };
+    }
+
+    case 'ATTENDANCE_AUTO_NO_SHOW': {
+      const p = payload as AutoNoShowPayload;
+
+      return {
+        text: lines(
+          `Автоматически отмечены неявки: ${p.count}`,
+          names(p.people, p.count),
+          'Присутствие не отметили за сутки после окончания. Исправить можно на экране смены — с причиной.',
+        ),
+        link: { label: 'Экран смены', url: `${context.webOrigin}/clubs/${p.slug}/desk` },
+      };
+    }
+
+    case 'RANK_PENDING': {
+      const p = payload as RankPendingPayload;
+
+      return {
+        text: lines(`Разряд на проверку · ${p.person}`, `Заявлен разряд: ${p.rank}. Подтвердите или отклоните в карточке человека.`),
+        link: { label: 'Карточка человека', url: `${context.webOrigin}/clubs/${p.slug}/people/${p.personId}` },
+      };
+    }
+
     default:
       throw new Error(`Нет шаблона для уведомления ${type}`);
   }
+}
+
+/** «Иванов И., Петров П. и ещё 3». */
+function names(people: readonly string[], count: number): string {
+  const shown = people.slice(0, NAMES_SHOWN).join(', ');
+  const rest = count - Math.min(people.length, NAMES_SHOWN);
+
+  return rest > 0 ? `${shown} и ещё ${rest}` : shown;
 }
 
 /** Что, когда, где — одинаково во всех сообщениях о записи. */

@@ -3,6 +3,9 @@ import { Public } from '../auth/decorators/public.decorator';
 import { NotificationDispatcher } from './dispatcher.job';
 import { MaxBotService } from './max-bot.service';
 import { NotificationScheduler } from './scheduler.job';
+import type { SchedulePart } from './staff-schedule';
+
+const PARTS: readonly SchedulePart[] = ['clients', 'escalations', 'coachPlans'];
 import { FakeMaxTransport, MaxTransport, type FakeSentMessage } from './max.transport';
 
 /**
@@ -58,18 +61,20 @@ export class DevMaxController {
 
   /**
    * Один проход планировщика с подставным «сейчас»: напоминание за три часа
-   * до начала смоук проверяет, не дожидаясь трёх часов.
+   * до начала смоук проверяет, не дожидаясь трёх часов. `parts` обязателен —
+   * см. `NotificationScheduler.runOnce`.
    */
   @Post('schedule')
-  schedule(@Body() body: { now?: string }): Promise<{ reminders: number; subscriptions: number }> {
+  schedule(@Body() body: { now?: string; parts?: string[] }): Promise<Record<string, number>> {
     this.fake();
     const now = body.now ? new Date(body.now) : new Date();
+    const parts = new Set((body.parts ?? []).filter((part): part is SchedulePart => PARTS.includes(part as SchedulePart)));
 
-    if (Number.isNaN(now.getTime())) {
-      throw new BadRequestException('now — момент ISO-8601');
+    if (Number.isNaN(now.getTime()) || parts.size === 0) {
+      throw new BadRequestException('now — момент ISO-8601, parts — clients, escalations или coachPlans');
     }
 
-    return this.scheduler.runOnce(now);
+    return this.scheduler.runOnce(now, parts);
   }
 
   private fake(): FakeMaxTransport {

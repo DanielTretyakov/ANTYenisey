@@ -12,6 +12,7 @@ import { formatBirthDate, parsePastDate } from '../auth/birth-date';
 import { FileIntake } from '../files/file-intake.service';
 import { FileStorage } from '../files/file-storage';
 import { PrismaService } from '../prisma/prisma.service';
+import { StaffNotifier } from '../notifications/staff-notifier.service';
 import type { AchievementDto, SetRankDto, UpdateEquipmentDto } from './dto/player.dto';
 import { PlayerAccess } from './player-access.service';
 import { canSeeProfile, cleanText, decideRankEdit, isProfilePublic, type RankState } from './player-rules';
@@ -84,6 +85,7 @@ export class PlayersService {
     private readonly storage: FileStorage,
     private readonly intake: FileIntake,
     private readonly access: PlayerAccess,
+    private readonly staff: StaffNotifier,
   ) {}
 
   /**
@@ -305,6 +307,9 @@ export class PlayersService {
         kind: StoredFileKind.RANK_DOCUMENT,
         keepId: documentFileId,
       });
+
+      // Настоящая правка разряда — снова на проверку: администраторам его клубов.
+      await this.staff.rankPending(tx, userId);
     });
 
     return this.profile(userId);

@@ -205,6 +205,36 @@ export function decideAutoNoShow(
 }
 
 /**
+ * Пора ли напомнить администраторам, что присутствие не отмечено (ТЗ →
+ * «Отметка присутствия»: через час после мероприятия).
+ *
+ * Напоминание одно: `reminderSentAt` ставится той же транзакцией, что и
+ * сообщение, и второй проход запись уже не берёт. Записи, которые джоба вот-вот
+ * закроет неявкой или уже должна была, не напоминаются — о них придёт итог
+ * автонеявки. До начала учёта отметки — тоже нет: отметить их было нечем.
+ */
+export function escalationDue(
+  entry: { status: BookingStatus; endsAt: Date; reminderSentAt: Date | null },
+  policy: AttendancePolicy,
+  now: Date,
+): boolean {
+  if (entry.status !== 'BOOKED' || entry.reminderSentAt !== null) {
+    return false;
+  }
+
+  if (entry.endsAt.getTime() < policy.trackedSince.getTime()) {
+    return false;
+  }
+
+  const time = now.getTime();
+
+  return (
+    time >= entry.endsAt.getTime() + policy.reminderAfterMinutes * MINUTE &&
+    time < entry.endsAt.getTime() + policy.autoNoShowAfterMinutes * MINUTE
+  );
+}
+
+/**
  * Фаза неотмеченной записи: рано, идёт, ждёт отметки, просрочена.
  *
  * Граница «просрочено» включительно: ровно через час после окончания ТЗ уже

@@ -12,6 +12,7 @@ import { parseDuration } from '../auth/tokens';
 import { attendanceJobEnabled, type Env } from '../config/env';
 import { decideAutoNoShow, noShowRatio, type AttendancePolicy } from './attendance-rules';
 import { ClientNotifier } from '../notifications/client-notifier.service';
+import { StaffNotifier } from '../notifications/staff-notifier.service';
 import { AttendanceService, ENTITY_TYPE, type LoadedEntry } from './attendance.service';
 
 /** Сколько записей одного вида берётся за раз. */
@@ -49,6 +50,7 @@ export class AutoNoShowJob implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly attendance: AttendanceService,
     private readonly notifier: ClientNotifier,
+    private readonly staff: StaffNotifier,
     private readonly config: ConfigService<Env, true>,
   ) {}
 
@@ -137,9 +139,19 @@ export class AutoNoShowJob implements OnApplicationBootstrap, OnModuleDestroy {
         continue;
       }
 
+      // Чьи записи закрыты — для одного итогового сообщения клубу, а не
+      // сообщения на каждую запись.
+      const owners: string[] = [];
+
       for (const kind of KINDS) {
-        total += await this.closeKind(tenant.id, kind, policy, cutoff, now, tenant.noShowChargePercent);
+        total += await this.closeKind(tenant.id, kind, policy, cutoff, now, tenant.noShowChargePercent, owners);
       }
+
+      // Неявки уже записаны и не зависят от того, дошёл ли итог: упавшее
+      // сообщение не должно останавливать проход по остальным клубам.
+      await this.staff.autoNoShows(this.prisma, tenant.id, owners, now).catch((error: unknown) => {
+        this.logger.error('Итог автонеявки не встал в очередь', error instanceof Error ? error.stack : error);
+      });
     }
 
     return total;
@@ -152,6 +164,7 @@ export class AutoNoShowJob implements OnApplicationBootstrap, OnModuleDestroy {
     cutoff: Date,
     now: Date,
     percent: number,
+    owners: string[],
   ): Promise<number> {
     let closed = 0;
 
@@ -168,6 +181,12 @@ export class AutoNoShowJob implements OnApplicationBootstrap, OnModuleDestroy {
 
         if (await this.close(tenantId, kind, entry, percent, policy, now)) {
           closed += 1;
+
+          const owner = entry.clientId ?? entry.coachId;
+
+          if (owner) {
+            owners.push(owner);
+          }
         }
 
         progressed += 1;

@@ -3,10 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import { BookingStatus, GuardianshipStatus } from '@yenisey/database';
 import { notificationsJobEnabled, type Env } from '../config/env';
 import { PrismaService } from '../prisma/prisma.service';
-import { ClientNotifier, loadEntry, zoneClock } from './client-notifier.service';
+import { ClientNotifier, loadEntry } from './client-notifier.service';
+import { clubTimezone, zoneClock } from './clock';
 import { MaxTransport } from './max.transport';
 import { reminderAt, reminderDue } from './notification-rules';
 import type { EntryKind } from './render';
+import { StaffSchedule, type SchedulePart } from './staff-schedule';
+
+const ALL_PARTS: ReadonlySet<SchedulePart> = new Set(['clients', 'escalations', 'coachPlans']);
 
 /** Раз в минуту: напоминание не должно опаздывать больше, чем на минуту. */
 const INTERVAL_MS = 60_000;
@@ -24,7 +28,8 @@ const EXPIRY_NOTICE_DAYS = 3;
 
 /**
  * Планировщик уведомлений: то, что случается не по действию человека, а по
- * часам, — напоминания о записях и концы абонементов.
+ * часам, — напоминания о записях и концы абонементов; персоналу — эскалация
+ * неотмеченного присутствия и утренние сообщения (StaffSchedule).
  *
  * Сам ничего не шлёт — ставит строки в очередь, откуда их заберёт отправщик.
  * Ключи идемпотентности делают проход безопасным повторять: второй проход за
@@ -44,6 +49,7 @@ export class NotificationScheduler implements OnApplicationBootstrap, OnModuleDe
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifier: ClientNotifier,
+    private readonly staff: StaffSchedule,
     private readonly transport: MaxTransport,
     private readonly config: ConfigService<Env, true>,
   ) {}
@@ -90,17 +96,28 @@ export class NotificationScheduler implements OnApplicationBootstrap, OnModuleDe
   /**
    * Один проход. Открыт ради проверок: смоук зовёт его с подставным «сейчас»,
    * чтобы не ждать трёх часов до напоминания.
+   *
+   * `parts` — какие части прохода выполнять. Нужно ровно смоуку: проход с
+   * «сейчас» через три дня целиком пометил бы напомненными настоящие записи
+   * базы, которые к тому «сейчас» кончились бы.
    */
-  async runOnce(now = new Date()): Promise<{ reminders: number; subscriptions: number }> {
-    const clients = await this.reachableClients();
+  async runOnce(now = new Date(), parts: ReadonlySet<SchedulePart> = ALL_PARTS): Promise<{
+    reminders: number;
+    subscriptions: number;
+    escalations: number;
+    coachPlans: number;
+  }> {
+    const staff = await this.staff.runOnce(now, parts);
+    const clients = parts.has('clients') ? await this.reachableClients() : [];
 
     if (clients.length === 0) {
-      return { reminders: 0, subscriptions: 0 };
+      return { reminders: 0, subscriptions: 0, ...staff };
     }
 
     return {
       reminders: await this.reminders(clients, now),
       subscriptions: await this.subscriptions(clients, now),
+      ...staff,
     };
   }
 
@@ -229,7 +246,7 @@ export class NotificationScheduler implements OnApplicationBootstrap, OnModuleDe
           clientId: row.clientId,
           plan: row.plan.name,
           club: row.tenant.name,
-          timezone: row.soldAtHall?.timezone ?? (await this.clubTimezone(row.tenantId)),
+          timezone: row.soldAtHall?.timezone ?? (await clubTimezone(this.prisma, row.tenantId)),
           expiresAt: row.expiresAt,
           remainingVisits: row.remainingVisits,
         },
@@ -256,15 +273,5 @@ export class NotificationScheduler implements OnApplicationBootstrap, OnModuleDe
     });
 
     return other !== null;
-  }
-
-  private async clubTimezone(tenantId: string): Promise<string> {
-    const hall = await this.prisma.hall.findFirst({
-      where: { tenantId },
-      select: { timezone: true },
-      orderBy: { createdAt: 'asc' },
-    });
-
-    return hall?.timezone ?? 'Asia/Krasnoyarsk';
   }
 }

@@ -12,6 +12,8 @@ import { DisabledMaxTransport, FakeMaxTransport, LiveMaxTransport, MaxTransport 
 import { MeNotificationsController } from './me-notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { NotificationScheduler } from './scheduler.job';
+import { StaffNotifier } from './staff-notifier.service';
+import { StaffSchedule } from './staff-schedule';
 
 /**
  * Уведомления: очередь, её отправщик и бот в мессенджере MAX.
@@ -24,8 +26,9 @@ import { NotificationScheduler } from './scheduler.job';
  * Поддельный в production невозможен намеренно — у него открытые отладочные
  * маршруты.
  *
- * `ClientNotifier` экспортируется: сообщения клиенту ставят в очередь модули
- * записи, отметки, разряда и семьи — в своих транзакциях, одной строкой.
+ * `ClientNotifier` и `StaffNotifier` экспортируются: сообщения клиенту и
+ * персоналу ставят в очередь модули записи, отметки, разряда и семьи —
+ * в своих транзакциях, одной строкой.
  * Сам модуль от них не зависит, поэтому циклов импорта нет.
  */
 @Module({
@@ -53,7 +56,9 @@ import { NotificationScheduler } from './scheduler.job';
     NotificationScheduler,
     MaxUpdatesJob,
     ClientNotifier,
+    StaffNotifier,
+    StaffSchedule,
   ],
-  exports: [NotificationsService, ClientNotifier],
+  exports: [NotificationsService, ClientNotifier, StaffNotifier],
 })
 export class NotificationsModule {}

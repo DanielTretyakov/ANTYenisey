@@ -35,7 +35,7 @@ describe('сообщения о записи', () => {
   });
 
   it('запись администратором — так и сказано', () => {
-    assert.match(renderNotification('BOOKING_CONFIRMED', { ...training, byClub: true }, context).text, /^Администратор записал вас/);
+    assert.match(renderNotification('BOOKING_CONFIRMED', { ...training, byClub: true }, context).text, /^Вас записал клуб/);
   });
 
   it('по абонементу — визит, а не деньги', () => {
@@ -163,4 +163,73 @@ describe('buttonAllowed', () => {
     assert.equal(buttonAllowed('http://localhost:3000/cabinet'), false);
     assert.equal(buttonAllowed('https://localhost/cabinet'), false);
   });
+});
+
+describe('сообщения персоналу', () => {
+  it('тренеру: запись в группу — кто и сколько мест занято', () => {
+    const { text, link } = renderNotification(
+      'COACH_ENTRY_CHANGED',
+      {
+        change: 'BOOKED',
+        person: 'Иванов И.',
+        title: 'Начинающие',
+        startsAt: '2026-09-25T11:00:00.000Z',
+        timezone: 'Asia/Krasnoyarsk',
+        club: 'Енисей',
+        slug: 'yenisey',
+        booked: 8,
+        capacity: 10,
+      },
+      context,
+    );
+
+    assert.match(text, /^Запись в группу · Иванов И\./);
+    assert.match(text, /Записано 8 из 10\./);
+    assert.equal(link?.url, 'https://ant-yenisey.ru/clubs/yenisey/coach');
+  });
+
+  it('тренеру утром: занятия дня по местному времени', () => {
+    const { text } = renderNotification(
+      'COACH_DAY_PLAN',
+      {
+        club: 'Енисей',
+        slug: 'yenisey',
+        timezone: 'Asia/Krasnoyarsk',
+        sessions: [
+          { startsAt: '2026-09-25T11:00:00.000Z', title: 'Начинающие', booked: 8, capacity: 10 },
+          { startsAt: '2026-09-25T13:00:00.000Z', title: 'Взрослые', booked: 3, capacity: 12 },
+        ],
+      },
+      context,
+    );
+
+    assert.match(text, /18:00 Начинающие — 8 из 10\n20:00 Взрослые — 3 из 12/);
+  });
+
+  it('эскалация: что, когда, кто без отметки и что будет дальше', () => {
+    const people = Array.from({ length: 12 }, (_, index) => `Игрок${index} И.`);
+    const { text, link } = renderNotification(
+      'ATTENDANCE_ESCALATION_HOUR',
+      {
+        kind: 'TRAINING',
+        title: 'Начинающие',
+        startsAt: '2026-09-25T11:00:00.000Z',
+        endsAt: '2026-09-25T12:30:00.000Z',
+        timezone: 'Asia/Krasnoyarsk',
+        place: 'Основной зал',
+        club: 'Енисей',
+        slug: 'yenisey',
+        people,
+        count: 12,
+      },
+      context,
+    );
+
+    assert.match(text, /^Не отмечено присутствие/);
+    assert.match(text, /18:00–19:30 · Основной зал/);
+    assert.match(text, /Без отметки: 12 — .* и ещё 2/);
+    assert.equal(link?.url, 'https://ant-yenisey.ru/clubs/yenisey/desk');
+  });
+
+
 });

@@ -5,6 +5,7 @@ import {
   autoNoShowAt,
   decideAutoNoShow,
   decideMark,
+  escalationDue,
   noShowRatio,
   type AttendancePolicy,
   type EntryState,
@@ -299,5 +300,38 @@ describe('noShowRatio', () => {
     // У записи на занятие тренер заполнен всегда — он ведёт группу. Без вида
     // записи в условии клиент платил бы за неявку на занятие все 100.
     assert.equal(noShowRatio('TRAINING', { subscriptionId: null, coachId: 'c1' }, 50), 50);
+  });
+});
+
+describe('escalationDue: напоминание администраторам через час', () => {
+  const policy: AttendancePolicy = {
+    reminderAfterMinutes: 60,
+    autoNoShowAfterMinutes: 1440,
+    trackedSince: new Date('2026-09-01T00:00:00Z'),
+  };
+  const endsAt = new Date('2026-09-23T12:00:00Z');
+  const open = { status: 'BOOKED' as const, endsAt, reminderSentAt: null };
+
+  it('через час после окончания — пора, раньше — нет', () => {
+    assert.equal(escalationDue(open, policy, new Date('2026-09-23T12:59:00Z')), false);
+    assert.equal(escalationDue(open, policy, new Date('2026-09-23T13:00:00Z')), true);
+  });
+
+  it('напоминание одно: уже напомненной записи — нет', () => {
+    assert.equal(escalationDue({ ...open, reminderSentAt: new Date() }, policy, new Date('2026-09-23T14:00:00Z')), false);
+  });
+
+  it('отмеченной — нет', () => {
+    assert.equal(escalationDue({ ...open, status: 'ATTENDED' }, policy, new Date('2026-09-23T14:00:00Z')), false);
+  });
+
+  it('когда пора автонеявке — уже нет: о ней придёт итог джобы', () => {
+    assert.equal(escalationDue(open, policy, new Date('2026-09-24T12:00:00Z')), false);
+  });
+
+  it('до начала учёта отметки — нет: отметить было нечем', () => {
+    const early = { ...open, endsAt: new Date('2026-08-31T12:00:00Z') };
+
+    assert.equal(escalationDue(early, policy, new Date('2026-08-31T14:00:00Z')), false);
   });
 });

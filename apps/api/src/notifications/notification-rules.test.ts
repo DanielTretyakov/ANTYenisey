@@ -8,6 +8,7 @@ import {
   clientRecipients,
   isToggleableCategory,
   MAX_ATTEMPTS,
+  morningDue,
   reminderAt,
   reminderDue,
   retryDelay,
@@ -182,7 +183,7 @@ describe('повторы отправки', () => {
     assert.equal(retryDelay(20), 3_600_000);
   });
 
-  it('Telegram сказал, сколько ждать, — ждём столько', () => {
+  it('сказано, сколько ждать, — ждём столько', () => {
     const decision = afterFailure(1, now, 7_000);
 
     assert.deepEqual(decision, { status: 'PENDING', sendAfter: new Date('2026-09-23T10:00:07Z') });
@@ -191,5 +192,21 @@ describe('повторы отправки', () => {
   it(`после ${MAX_ATTEMPTS} попыток строка неудачная`, () => {
     assert.equal(afterFailure(MAX_ATTEMPTS - 1, now).status, 'PENDING');
     assert.equal(afterFailure(MAX_ATTEMPTS, now).status, 'FAILED');
+  });
+});
+
+describe('morningDue: утренние сообщения', () => {
+  it('с 08:00 до полудня — за сегодняшнюю местную дату', () => {
+    assert.equal(morningDue(kr('2026-09-24T07:59:00'), krasnoyarsk), null);
+    assert.equal(morningDue(kr('2026-09-24T08:00:00'), krasnoyarsk), '2026-09-24');
+    assert.equal(morningDue(kr('2026-09-24T11:59:00'), krasnoyarsk), '2026-09-24');
+  });
+
+  it('после полудня — уже нет: план на день к обеду не план', () => {
+    assert.equal(morningDue(kr('2026-09-24T12:00:00'), krasnoyarsk), null);
+  });
+
+  it('дата — местная: в Красноярске уже утро 24-го, по UTC ещё 24-е 01:00', () => {
+    assert.equal(morningDue(new Date('2026-09-24T01:00:00Z'), krasnoyarsk), '2026-09-24');
   });
 });

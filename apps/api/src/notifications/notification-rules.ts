@@ -17,6 +17,9 @@ export type NotificationKind =
   | 'GUARDIANSHIP_REQUESTED'
   | 'ATTENDANCE_ESCALATION_HOUR'
   | 'ATTENDANCE_AUTO_NO_SHOW'
+  | 'COACH_ENTRY_CHANGED'
+  | 'COACH_DAY_PLAN'
+  | 'RANK_PENDING'
   | 'SUBSCRIPTION_PAST_DUE';
 
 export type Category =
@@ -50,6 +53,9 @@ export const CATEGORY_OF: Record<NotificationKind, Category> = {
   GUARDIANSHIP_REQUESTED: 'SERVICE',
   ATTENDANCE_ESCALATION_HOUR: 'CLUB_ALERTS',
   ATTENDANCE_AUTO_NO_SHOW: 'CLUB_ALERTS',
+  COACH_ENTRY_CHANGED: 'COACH_GROUPS',
+  COACH_DAY_PLAN: 'COACH_GROUPS',
+  RANK_PENDING: 'CLUB_ALERTS',
   SUBSCRIPTION_PAST_DUE: 'CLUB_ALERTS',
 };
 
@@ -113,12 +119,12 @@ export function isToggleableCategory(value: string): value is ToggleableCategory
 /** Сколько раз пробовать отправить, прежде чем признать строку неудачной. */
 export const MAX_ATTEMPTS = 5;
 
-/** Сколько живёт ссылка привязки Telegram. */
+/** Сколько живёт ссылка привязки MAX. */
 export const LINK_TOKEN_TTL_MS = 15 * 60_000;
 
 /**
  * Пауза перед повтором после неудачи: 30 с, 1 мин, 2 мин, 4 мин… не больше
- * часа. Нарастающая — чтобы лёгший на полчаса Telegram не получал от нас
+ * часа. Нарастающая — чтобы лёгший на полчаса MAX не получал от нас
  * запрос каждые десять секунд.
  */
 export function retryDelay(attempt: number): number {
@@ -219,6 +225,25 @@ export function reminderDue(entry: { createdAt: Date; startsAt: Date }, due: Dat
     entry.createdAt.getTime() < due.getTime() &&
     now.getTime() < entry.startsAt.getTime()
   );
+}
+
+/** Утреннее сообщение тренеру — его план на день — в 08:00. */
+export const MORNING_MINUTE = 8 * 60;
+
+/** До какого часа утреннее ещё уместно: лёг планировщик до обеда — сегодня уже не шлём. */
+const MORNING_LATEST_MINUTE = 12 * 60;
+
+/**
+ * Пора ли слать утреннее сообщение, и за какой день.
+ *
+ * Возвращает местную дату — она же уходит в ключ идемпотентности, так что
+ * утреннее приходит раз в сутки, сколько бы проходов планировщик ни сделал.
+ * После полудня — null: план на день, пришедший к обеду, уже не план.
+ */
+export function morningDue(now: Date, clock: LocalClock, minute = MORNING_MINUTE): string | null {
+  const local = clock.local(now);
+
+  return local.minutes >= minute && local.minutes < MORNING_LATEST_MINUTE ? local.date : null;
 }
 
 /** Опека над клиентом — в том виде, в каком её читает выбор адресатов. */

@@ -1928,6 +1928,7 @@ async function main() {
   await autoNoShow(asMe);
   await notifications();
   await clientNotifications();
+  await staffNotifications();
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
@@ -3960,7 +3961,7 @@ async function clientNotifications() {
   const sentTo = async (id) => (await call(`/dev/max/sent?maxUserId=${id}`)).body ?? [];
   const lastTo = async (id) => (await sentTo(id)).at(-1)?.text ?? '';
   const dispatch = () => call('/dev/max/dispatch', { method: 'POST' });
-  const schedule = (now) => call('/dev/max/schedule', { method: 'POST', json: { now: now.toISOString() } });
+  const schedule = (now) => call('/dev/max/schedule', { method: 'POST', json: { now: now.toISOString(), parts: ['clients'] } });
   const bornYearsAgo = (years) => {
     const now = new Date();
     return new Date(Date.UTC(now.getUTCFullYear() - years, now.getUTCMonth(), now.getUTCDate())).toISOString().slice(0, 10);
@@ -4077,6 +4078,168 @@ async function clientNotifications() {
   r = await parent.asUser(`${booking}?for=${teenId}`, { method: 'DELETE' });
   await dispatch();
   assert('об отмене узнали оба', /^Запись отменена · Детков К\./.test(await lastTo(maxParent)) && /^Запись отменена/.test(await lastTo(maxTeen)));
+}
+
+/**
+ * Сообщения персоналу в MAX: тренеру — запись и отмена в его группе и план на
+ * день, администраторам — разряд на проверку и неотмеченное присутствие.
+ *
+ * Эскалация идёт на занятии длиной в несколько секунд и со сроком
+ * напоминания клуба, опущенным до нуля: иначе её пришлось бы ждать час.
+ * Настройки клуба раздел возвращает.
+ */
+async function staffNotifications() {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+  let r = await call('/dev/max/sent?maxUserId=0');
+
+  if (r.status !== 200 || !adminEmail || !adminPassword) {
+    console.log('\n=== 37. Сообщения персоналу в MAX — ПРОПУЩЕНЫ (нет поддельного MAX или нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 37. Сообщения персоналу в MAX');
+
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+  const user = (id) => ({ user_id: id, first_name: 'Проба', name: 'Проба', username: null, is_bot: false, last_activity_time: 0 });
+  const sentTo = async (id) => (await call(`/dev/max/sent?maxUserId=${id}`)).body ?? [];
+  const lastTo = async (id) => (await sentTo(id)).at(-1)?.text ?? '';
+  const dispatch = () => call('/dev/max/dispatch', { method: 'POST' });
+  const schedule = (now, parts) => call('/dev/max/schedule', { method: 'POST', json: { now: now.toISOString(), parts } });
+  const linkMax = async (asUser, maxId) => {
+    const reply = await asUser('/me/notifications/max', { method: 'POST' });
+    const token = new URL(reply.body?.url ?? 'https://x.invalid').searchParams.get('start');
+    await call('/dev/max/events', {
+      method: 'POST',
+      json: { update_type: 'bot_started', timestamp: Date.now(), chat_id: maxId, user: user(maxId), payload: token },
+    });
+  };
+
+  const base = (RUN % 1_000_000_000) * 10 + 7;
+  const maxAdmin = base;
+  const maxCoach = base + 1;
+
+  r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const asAdmin = as(r.body?.accessToken ?? '');
+  await linkMax(asAdmin, maxAdmin);
+
+  r = await asAdmin('/me/notifications');
+  assert(
+    'администратору доступны дела клуба',
+    r.body?.categories?.some((item) => item.category === 'CLUB_ALERTS'),
+  );
+
+  // --- Пробный тренер со своим MAX.
+  r = await post('/auth/register', registration({ lastName: 'Тренеров', firstName: 'Игнат' }));
+  const coachId = r.body?.user?.id;
+  const asCoach = as(r.body?.accessToken ?? '');
+  r = await asAdmin(`/clubs/yenisey/people/${coachId}/role`, { method: 'PATCH', json: { role: 'COACH' } });
+  check('пробному тренеру выдана роль', 200, r.status);
+  await linkMax(asCoach, maxCoach);
+
+  r = await asCoach('/me/notifications');
+  assert('тренеру доступны «Мои группы»', r.body?.categories?.some((item) => item.category === 'COACH_GROUPS'));
+
+  const trainingType = (await asAdmin('/clubs/yenisey/training-types')).body?.[0];
+  const startsAt = new Date(instantAt(dateIn('Asia/Krasnoyarsk', 3), 18 * 60, 'Asia/Krasnoyarsk'));
+  r = await asAdmin('/clubs/yenisey/training-sessions', {
+    method: 'POST',
+    json: {
+      trainingTypeId: trainingType?.id,
+      coachId,
+      startsAt: startsAt.toISOString(),
+      endsAt: new Date(startsAt.getTime() + 90 * 60_000).toISOString(),
+      capacity: 5,
+    },
+  });
+  check('занятие пробного тренера заведено', 201, r.status);
+  const booking = `/clubs/yenisey/trainings/${r.body?.id}/booking`;
+
+  r = await post('/auth/register', registration({ lastName: 'Ученикова', firstName: 'Анна' }));
+  const asPupil = as(r.body?.accessToken ?? '');
+  const pupilToken = r.body?.accessToken ?? '';
+
+  // --- Тренеру: запись и отмена в группе.
+  r = await asPupil(booking, { method: 'POST' });
+  check('ученица записалась', 201, r.status);
+  await dispatch();
+  let text = await lastTo(maxCoach);
+  assert('тренеру пришла запись в группу', /^Запись в группу · Ученикова А\./.test(text));
+  assert('с числом занятых мест', /Записано 1 из 5\./.test(text));
+
+  r = await asPupil(booking, { method: 'DELETE' });
+  await dispatch();
+  text = await lastTo(maxCoach);
+  assert('тренеру пришла отмена', /^Отмена в группе · Ученикова А\./.test(text) && /Записано 0 из 5\./.test(text));
+
+  // --- Тренеру утром: план на день.
+  await asPupil(booking, { method: 'POST' });
+  const morning = new Date(instantAt(dateIn('Asia/Krasnoyarsk', 3), 8 * 60 + 5, 'Asia/Krasnoyarsk'));
+  await schedule(morning, ['coachPlans']);
+  await schedule(morning, ['coachPlans']);
+  await dispatch();
+  text = await lastTo(maxCoach);
+  assert('тренеру утром пришёл план', /^Сегодня у вас/.test(text) && /18:00 .* — 1 из 5/.test(text));
+  assert(
+    'план приходит один раз за утро',
+    (await sentTo(maxCoach)).filter((message) => message.text.startsWith('Сегодня у вас')).length === 1,
+  );
+
+  // --- Администраторам: разряд на проверку.
+  const form = new FormData();
+  form.set('rank', 'SPORT_1');
+  form.set('orderNumber', '12-с');
+  form.set('orderDate', '2025-03-01');
+  r = await fetch(`${API}/me/player/rank`, { method: 'PUT', body: form, headers: { Authorization: `Bearer ${pupilToken}` } });
+  check('ученица заявила разряд', 200, r.status);
+  await dispatch();
+  text = await lastTo(maxAdmin);
+  assert('администратору пришёл разряд на проверку', /^Разряд на проверку · Ученикова А\./.test(text) && /1-й спортивный/.test(text));
+
+  // --- Администраторам: присутствие не отмечено.
+  r = await asAdmin('/clubs/yenisey/settings');
+  const original = { attendanceReminderAfterMinutes: r.body?.attendanceReminderAfterMinutes };
+
+  try {
+    r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: { attendanceReminderAfterMinutes: 0 } });
+    check('срок напоминания опущен до нуля', 200, r.status);
+
+    const shortStart = new Date(Date.now() + 3_000);
+    const shortEnd = new Date(shortStart.getTime() + 3_000);
+    r = await asAdmin('/clubs/yenisey/training-sessions', {
+      method: 'POST',
+      json: {
+        trainingTypeId: trainingType?.id,
+        coachId,
+        startsAt: shortStart.toISOString(),
+        endsAt: shortEnd.toISOString(),
+        capacity: 2,
+      },
+    });
+    check('короткое занятие заведено', 201, r.status);
+    r = await asPupil(`/clubs/yenisey/trainings/${r.body?.id}/booking`, { method: 'POST' });
+    check('запись на короткое занятие', 201, r.status);
+
+    await new Promise((resolve) => setTimeout(resolve, Math.max(shortEnd.getTime() - Date.now() + 1_000, 0)));
+
+    r = await schedule(new Date(), ['escalations']);
+    assert('планировщик напомнил хотя бы об одном мероприятии', (r.body?.escalations ?? 0) >= 1);
+    await dispatch();
+    const escalations = (await sentTo(maxAdmin)).filter((message) => message.text.startsWith('Не отмечено присутствие'));
+    assert('администратору пришло напоминание об отметке', escalations.some((message) => /Ученикова А\./.test(message.text)));
+
+    const before = escalations.length;
+    await schedule(new Date(), ['escalations']);
+    await dispatch();
+    assert(
+      'повторного напоминания о том же нет',
+      (await sentTo(maxAdmin)).filter((message) => message.text.startsWith('Не отмечено присутствие')).length === before,
+    );
+  } finally {
+    r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: original });
+    check('срок напоминания возвращён', 200, r.status);
+  }
 }
 
 main().catch((error) => {

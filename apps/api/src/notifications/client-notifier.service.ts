@@ -2,15 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { BookingStatus, GuardianshipStatus, type NotificationType, type Prisma } from '@yenisey/database';
 import { RANK_LABELS, shortName, type SportRankLevel } from '@yenisey/types';
 import { cancellationPercent } from '../booking/availability';
-import { instantAt, localParts } from '../club/closures';
 import { chargeOf } from '../desk/revenue';
 import { guardianHasRights } from '../guardianship/guardianship-rules';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  clientRecipients,
-  sendAfterFor,
-  type LocalClock,
-} from './notification-rules';
+import { clubTimezone, FALLBACK_TIMEZONE, zoneClock } from './clock';
+import { clientRecipients, sendAfterFor } from './notification-rules';
 import { NotificationsService, type NotificationDraft } from './notifications.service';
 import type { EntryKind, EntryPayload, GuardianshipPayload, RankPayload, SubscriptionPayload } from './render';
 
@@ -18,9 +14,6 @@ type Db = Prisma.TransactionClient | PrismaService;
 
 /** Кто вызвал событие: сам клиент (или его родитель) — или клуб. */
 export type Origin = 'self' | 'club';
-
-/** Пояс, если у клуба ещё нет ни одного зала: первый клуб платформы — в Красноярске. */
-const FALLBACK_TIMEZONE = 'Asia/Krasnoyarsk';
 
 /** Запись в том объёме, в каком её читают сообщения. */
 export interface EntryFacts {
@@ -197,7 +190,7 @@ export class ClientNotifier {
         type: 'RANK_DECIDED',
         payload: payload as unknown as Prisma.InputJsonValue,
         dedupeKey: `rank:${rank.updatedAt.getTime()}`,
-        sendAfter: sendAfterFor(new Date(), await clubClock(db, tenantId), false),
+        sendAfter: sendAfterFor(new Date(), zoneClock(await clubTimezone(db, tenantId)), false),
       },
     ]);
   }
@@ -318,21 +311,6 @@ export async function stillRelevant(
   const facts = await loadEntry(db, row.tenantId, entry.kind, entry.id);
 
   return facts !== null && facts.status === BookingStatus.BOOKED && facts.startsAt.toISOString() === entry.startsAt;
-}
-
-/** Часы пояса — для правил из notification-rules.ts. */
-export function zoneClock(timezone: string): LocalClock {
-  return {
-    local: (instant) => localParts(instant, timezone),
-    instant: (date, minute) => instantAt(date, minute, timezone),
-  };
-}
-
-/** Часы клуба: пояс старшего зала. У клуба своего пояса нет — он свойство зала. */
-async function clubClock(db: Db, tenantId: string): Promise<LocalClock> {
-  const hall = await db.hall.findFirst({ where: { tenantId }, select: { timezone: true }, orderBy: { createdAt: 'asc' } });
-
-  return zoneClock(hall?.timezone ?? FALLBACK_TIMEZONE);
 }
 
 /**
