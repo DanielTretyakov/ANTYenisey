@@ -30,6 +30,8 @@ import type {
   SubscriptionPlanRequest,
   PublicCoach,
   FavouriteClub,
+  EventDetail,
+  EventKind,
   FeedEvent,
   ClubPeoplePage,
   ClubPeopleQuery,
@@ -656,6 +658,15 @@ export function clubApi(slug: string = TENANT_SLUG) {
      */
     events: (forPerson?: string | null): Promise<ClubEvent[]> =>
       optionallyAuthorized(withFor(`${club}/events`, forPerson)),
+
+    /**
+     * Одно мероприятие для окна подробностей: описание, зал, тренер и
+     * записавшиеся кружками. Открыто, как и список.
+     */
+    event: (kind: EventKind, id: string, forPerson?: string | null): Promise<EventDetail> =>
+      optionallyAuthorized(
+        withFor(`${club}/events/${kind === 'TRAINING' ? 'training' : 'tournament'}/${id}`, forPerson),
+      ),
 
     /** Мои мероприятия в этом клубе: занятия, турниры и свои брони столов. */
     myEvents: (forPerson?: string | null): Promise<BookingEntry[]> =>

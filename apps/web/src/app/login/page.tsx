@@ -2,18 +2,27 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Field } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
+import { registerHref, safeNext } from '@/lib/next';
 import { saveSession } from '@/lib/session';
 
 export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Куда вернуть после входа: окно мероприятия и сетка брони отправляют
+  // сюда анонима и ждут его обратно. Из адреса в эффекте, а не через
+  // `useSearchParams`: тому нужна граница Suspense на всю страницу.
+  const [next, setNext] = useState<string | null>(null);
+
+  useEffect(() => {
+    setNext(safeNext(new URLSearchParams(window.location.search).get('next')));
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -30,7 +39,7 @@ export default function LoginPage() {
       });
 
       saveSession(auth);
-      router.push('/cabinet');
+      router.push(next ?? '/cabinet');
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен, попробуйте позже');
       setPending(false);
@@ -44,7 +53,7 @@ export default function LoginPage() {
       footer={
         <>
           Нет учётной записи?{' '}
-          <Link href="/register" className="font-medium text-text-accent hover:underline">
+          <Link href={registerHref(next)} className="font-medium text-text-accent hover:underline">
             Зарегистрироваться
           </Link>
         </>

@@ -5,6 +5,7 @@ import type { ClubPerson, DeskBooking, DeskDay, Hall } from '@yenisey/types';
 import { ClientPicker } from '@/components/club/ClientPicker';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
 import { inputClassName } from '@/components/ui/Field';
 import { ApiError } from '@/lib/api';
 import { formatDate, formatDuration, STEP_MINUTES } from '@/lib/bookingGrid';
@@ -88,17 +89,6 @@ export function BookingDialog({
     };
   }, [club, day.hallId, duration, withRobot, hall.hasRobotOption]);
 
-  // Закрытие по Escape: окно перекрывает экран смены, и мышью до него
-  // добираться дольше, чем клавишей.
-  useEffect(() => {
-    const escape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose();
-    };
-
-    window.addEventListener('keydown', escape);
-    return () => window.removeEventListener('keydown', escape);
-  }, [onClose]);
-
   async function submit(): Promise<void> {
     if (!client || !tableId) return;
 
@@ -123,125 +113,112 @@ export function BookingDialog({
   }
 
   return (
-    // Затемнение — краской из палитры, а не утилитой: в @theme inline
-    // выведены только семантические роли, шкала --ink-* в классы не попадает.
-    <div
-      className="fixed inset-0 z-40 overflow-y-auto px-4 py-10"
-      style={{ background: 'color-mix(in oklab, var(--ink-950) 45%, transparent)' }}
+    <Dialog
+      title="Посадить клиента"
+      onClose={onClose}
+      description={
+        <>
+          {day.hallName} · {formatDate(day.date)}. Бронь заведётся от имени человека — он увидит
+          её в «Моих записях» и сможет отменить сам.
+        </>
+      }
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="seat-title"
-        className="mx-auto w-full max-w-lg rounded-card border border-border bg-surface-raised shadow-lg"
-      >
-        <div className="border-b border-border px-6 py-5">
-          <h2 id="seat-title" className="text-[1.0625rem]">
-            Посадить клиента
-          </h2>
-          <p className="mt-1 text-[0.875rem] text-text-muted">
-            {day.hallName} · {formatDate(day.date)}. Бронь заведётся от имени человека — он увидит
-            её в «Моих записях» и сможет отменить сам.
-          </p>
+      <div className="grid gap-5 px-6 py-5">
+        {error && <Alert>{error}</Alert>}
+
+        <ClientPicker value={client} onChange={setClient} label="Кто играет" />
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="grid gap-1.5 text-[0.875rem]">
+            <span className="font-medium text-text">Стол</span>
+            <select
+              value={tableId}
+              onChange={(event) => setTableId(event.target.value)}
+              className={inputClassName}
+            >
+              {day.tables.map((table) => (
+                <option key={table.tableId} value={table.tableId}>
+                  {table.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="grid gap-1.5 text-[0.875rem]">
+            <span className="font-medium text-text">Начало</span>
+            <input
+              type="time"
+              value={time}
+              step={step * 60}
+              onChange={(event) => setTime(event.target.value)}
+              className={inputClassName}
+            />
+          </label>
+
+          <label className="grid gap-1.5 text-[0.875rem]">
+            <span className="font-medium text-text">Длительность</span>
+            <select
+              value={String(duration)}
+              onChange={(event) => setDuration(Number(event.target.value))}
+              className={inputClassName}
+            >
+              {durations.map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  {formatDuration(minutes)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {hall.hasRobotOption && (
+            <label className="flex items-start gap-2.5 self-end pb-2">
+              <input
+                type="checkbox"
+                checked={withRobot}
+                onChange={(event) => setWithRobot(event.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-accent"
+              />
+              <span>
+                <span className="block text-[0.875rem] font-medium">Со столовым роботом</span>
+                <span className="block text-[0.8125rem] text-text-subtle">
+                  Отдельная услуга со своей ценой.
+                </span>
+              </span>
+            </label>
+          )}
         </div>
 
-        <div className="grid gap-5 px-6 py-5">
-          {error && <Alert>{error}</Alert>}
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-control border border-border bg-surface-sunken px-4 py-3.5">
+          <span className="font-display text-[1.5rem] tabular-nums">
+            {price === null ? '—' : formatKopecks(price)}
+          </span>
+          <span className="flex-1 text-[0.8125rem] text-text-muted">
+            {billedMinutes !== null && billedMinutes !== duration
+              ? `Оплачивается ${formatDuration(billedMinutes)}: начатые полчаса считаются полными. `
+              : ''}
+            Сумму вернул сервер — форма её не считает.
+          </span>
+        </div>
 
-          <ClientPicker value={client} onChange={setClient} label="Кто играет" />
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Button onClick={() => void submit()} pending={pending} disabled={!client || !tableId}>
+            Посадить
+          </Button>
+          <Button variant="secondary" onClick={onClose} disabled={pending}>
+            Отмена
+          </Button>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="grid gap-1.5 text-[0.875rem]">
-              <span className="font-medium text-text">Стол</span>
-              <select
-                value={tableId}
-                onChange={(event) => setTableId(event.target.value)}
-                className={inputClassName}
-              >
-                {day.tables.map((table) => (
-                  <option key={table.tableId} value={table.tableId}>
-                    {table.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="grid gap-1.5 text-[0.875rem]">
-              <span className="font-medium text-text">Начало</span>
-              <input
-                type="time"
-                value={time}
-                step={step * 60}
-                onChange={(event) => setTime(event.target.value)}
-                className={inputClassName}
-              />
-            </label>
-
-            <label className="grid gap-1.5 text-[0.875rem]">
-              <span className="font-medium text-text">Длительность</span>
-              <select
-                value={String(duration)}
-                onChange={(event) => setDuration(Number(event.target.value))}
-                className={inputClassName}
-              >
-                {durations.map((minutes) => (
-                  <option key={minutes} value={minutes}>
-                    {formatDuration(minutes)}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {hall.hasRobotOption && (
-              <label className="flex items-start gap-2.5 self-end pb-2">
-                <input
-                  type="checkbox"
-                  checked={withRobot}
-                  onChange={(event) => setWithRobot(event.target.checked)}
-                  className="mt-0.5 h-4 w-4 accent-accent"
-                />
-                <span>
-                  <span className="block text-[0.875rem] font-medium">Со столовым роботом</span>
-                  <span className="block text-[0.8125rem] text-text-subtle">
-                    Отдельная услуга со своей ценой.
-                  </span>
-                </span>
-              </label>
+          <span
+            className={cn(
+              'ml-auto rounded-full border border-dashed border-border px-2.5 py-1',
+              'text-[0.75rem] tracking-[0.04em] text-text-muted uppercase',
             )}
-          </div>
-
-          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-control border border-border bg-surface-sunken px-4 py-3.5">
-            <span className="font-display text-[1.5rem] tabular-nums">
-              {price === null ? '—' : formatKopecks(price)}
-            </span>
-            <span className="flex-1 text-[0.8125rem] text-text-muted">
-              {billedMinutes !== null && billedMinutes !== duration
-                ? `Оплачивается ${formatDuration(billedMinutes)}: начатые полчаса считаются полными. `
-                : ''}
-              Сумму вернул сервер — форма её не считает.
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5">
-            <Button onClick={() => void submit()} pending={pending} disabled={!client || !tableId}>
-              Посадить
-            </Button>
-            <Button variant="secondary" onClick={onClose} disabled={pending}>
-              Отмена
-            </Button>
-
-            <span
-              className={cn(
-                'ml-auto rounded-full border border-dashed border-border px-2.5 py-1',
-                'text-[0.75rem] tracking-[0.04em] text-text-muted uppercase',
-              )}
-            >
-              запишется как «завёл админ»
-            </span>
-          </div>
+          >
+            запишется как «завёл админ»
+          </span>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }
 

@@ -2049,6 +2049,48 @@ async function eventRegistration(asMe) {
   assert('состав записавшихся отдаётся сокращённым', /^\S+ \S\.$/.test(mine?.participants?.[0] ?? ''));
   assert('мест не осталось', mine?.freeSeats === 0);
 
+  // --- Окно мероприятия: открыто без входа, записавшиеся — кружками.
+  // Описание пишется у типа — проверяем, что оно доходит до окна, и
+  // возвращаем прежнее: тип настоящий, клубный.
+  r = await asAdmin('/clubs/yenisey/training-types');
+  const trainingType = (r.body ?? []).find((type) => type.id === trainingTypeId);
+  r = await asAdmin(`/clubs/yenisey/training-types/${trainingTypeId}`, {
+    method: 'PATCH',
+    json: { name: trainingType?.name, price: trainingType?.price, description: '  Проверка описания  ' },
+  });
+  check('описание типа занятия сохранено', 200, r.status);
+  assert('описание обрезано по краям', r.body?.description === 'Проверка описания');
+
+  r = await call(`/clubs/yenisey/events/training/${sessionId}`);
+  check('окно занятия открыто без входа', 200, r.status);
+  assert('окно — того же занятия', r.body?.id === sessionId && r.body?.kind === 'TRAINING');
+  assert('описание типа дошло до окна', r.body?.description === 'Проверка описания');
+  assert('тренер — со ссылкой на карточку', r.body?.coach?.id === coachId);
+  assert('клуб окна назван', r.body?.club?.slug === 'yenisey');
+  assert('записавшийся взрослый — кружком со ссылкой', typeof r.body?.people?.[0]?.userId === 'string');
+  assert('имя в кружке сокращено', /^\S+ \S\.$/.test(r.body?.people?.[0]?.name ?? ''));
+  assert('анониму отметка «записан» пустая', r.body?.registered === null);
+
+  r = await asAdmin(`/clubs/yenisey/training-types/${trainingTypeId}`, {
+    method: 'PATCH',
+    json: { name: trainingType?.name, price: trainingType?.price, description: trainingType?.description ?? null },
+  });
+  check('описание типа возвращено', 200, r.status);
+
+  r = await asMe(`/clubs/yenisey/events/tournament/${tournamentId}`);
+  check('окно турнира', 200, r.status);
+  assert('в окне турнира вошедший записан', r.body?.registered === true);
+  assert('у турнира тренера нет', r.body?.coach === null);
+
+  r = await call(`/clubs/yenisey/events/tournament/${sessionId}`);
+  check('занятие по адресу турнира не находится', 404, r.status);
+
+  r = await call(`/clubs/yenisey/events/party/${sessionId}`);
+  check('неизвестный вид мероприятия отклонён', 400, r.status);
+
+  r = await call(`/clubs/yenisey/events/training/${sessionId}?for=${sessionId}`);
+  check('окно за ребёнка без входа не открывается', 401, r.status);
+
   r = await asMe('/me/bookings');
   const kinds = (r.body ?? []).map((entry) => entry.kind);
   assert('обе записи видны в «Моих записях»', kinds.includes('TRAINING') && kinds.includes('TOURNAMENT'));
@@ -3592,6 +3634,13 @@ async function family() {
 
   r = await asParent(`/clubs/yenisey/trainings/${sessionId}/booking?for=${kidId}`, { method: 'POST' });
   check('родитель записал ребёнка на занятие', 201, r.status);
+
+  // Ребёнок в окне мероприятия — инициалами: ни ссылки на закрытый профиль,
+  // ни фотографии. Одинаково для всех, даже для его родителя.
+  r = await asParent(`/clubs/yenisey/events/tournament/${cupId}`);
+  const kidCircle = (r.body?.people ?? []).find((person) => person.userId === null);
+  assert('ребёнок в окне — без ссылки и фотографии', kidCircle !== undefined && kidCircle.avatarFileId === null);
+  assert('идентификатор ребёнка в окно не ушёл', !(r.body?.people ?? []).some((person) => person.userId === kidId));
 
   r = await asKid('/me/bookings');
   check('ребёнок видит свои записи', 200, r.status);

@@ -71,6 +71,25 @@ export function canReadFile(
 }
 
 /**
+ * Записавшийся в открытом окне мероприятия: кружок со ссылкой на профиль или
+ * только инициалы.
+ *
+ * Ссылка и фотография — только у открытого профиля, и решается это без
+ * смотрящего: окно одно на всех, и даже родитель видит в нём своего ребёнка
+ * инициалами, как посторонний (решение владельца от 24.09.2026). Иначе
+ * список записавшихся стал бы обходом закрытого профиля: по адресам кружков
+ * собирался бы список несовершеннолетних с фотографиями.
+ */
+export function participantView(
+  person: { userId: string; name: string; birthDate: Date; avatarFileId: string | null },
+  today: Date,
+): { userId: string | null; name: string; avatarFileId: string | null } {
+  return isProfilePublic(person.birthDate, today)
+    ? { userId: person.userId, name: person.name, avatarFileId: person.avatarFileId }
+    : { userId: null, name: person.name, avatarFileId: null };
+}
+
+/**
  * Строка из формы → то, что кладётся в базу: без пробелов по краям, пусто —
  * это null. Два написания «ничего не указано» база не примет
  * (constraints.sql, раздел 18).

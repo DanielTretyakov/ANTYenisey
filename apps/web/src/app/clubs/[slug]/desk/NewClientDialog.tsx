@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import type { ClubPerson, PlatformPersonLookup } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
 import { inputClassName } from '@/components/ui/Field';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
@@ -54,15 +55,6 @@ export function NewClientDialog({
       .catch(() => setQr(null));
   }, [link]);
 
-  useEffect(() => {
-    const escape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose();
-    };
-
-    window.addEventListener('keydown', escape);
-    return () => window.removeEventListener('keydown', escape);
-  }, [onClose]);
-
   async function search(): Promise<void> {
     const value = query.trim();
 
@@ -100,125 +92,114 @@ export function NewClientDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-40 overflow-y-auto px-4 py-10"
-      style={{ background: 'color-mix(in oklab, var(--ink-950) 45%, transparent)' }}
+    <Dialog
+      title="Новый клиент"
+      onClose={onClose}
+      description={
+        <>
+          Учётку человек заводит сам — пароль знает только он. Дайте отсканировать код, потом
+          найдите его по почте или телефону и привяжите к клубу.
+        </>
+      }
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="new-client-title"
-        className="mx-auto w-full max-w-lg rounded-card border border-border bg-surface-raised shadow-lg"
-      >
-        <div className="border-b border-border px-6 py-5">
-          <h2 id="new-client-title" className="text-[1.0625rem]">
-            Новый клиент
-          </h2>
-          <p className="mt-1 text-[0.875rem] text-text-muted">
-            Учётку человек заводит сам — пароль знает только он. Дайте отсканировать код, потом
-            найдите его по почте или телефону и привяжите к клубу.
-          </p>
+      <div className="grid gap-5 px-6 py-5">
+        {error && <Alert>{error}</Alert>}
+
+        <div className="flex flex-wrap items-center gap-4">
+          {qr ? (
+            // Белая подложка обязательна: по тёмной теме чёрный код не
+            // читается камерой.
+            <img
+              src={qr}
+              alt="QR-код на регистрацию в клубе"
+              className="h-40 w-40 rounded-control bg-white p-2"
+            />
+          ) : (
+            <div className="h-40 w-40 animate-pulse rounded-control bg-surface-sunken" />
+          )}
+
+          <div className="min-w-[12rem] flex-1 text-[0.875rem]">
+            <p className="text-text-muted">Или продиктуйте ссылку:</p>
+            <p className="mt-1 break-all text-text">{link}</p>
+            <p className="mt-2 text-[0.8125rem] text-text-subtle">
+              Регистрация по этой ссылке сразу привязывает человека к клубу — искать его после
+              неё не нужно.
+            </p>
+          </div>
         </div>
 
-        <div className="grid gap-5 px-6 py-5">
-          {error && <Alert>{error}</Alert>}
-
-          <div className="flex flex-wrap items-center gap-4">
-            {qr ? (
-              // Белая подложка обязательна: по тёмной теме чёрный код не
-              // читается камерой.
-              <img
-                src={qr}
-                alt="QR-код на регистрацию в клубе"
-                className="h-40 w-40 rounded-control bg-white p-2"
+        <div className="border-t border-border pt-5">
+          <label className="grid gap-1.5 text-[0.875rem]">
+            <span className="font-medium text-text">Уже зарегистрирован?</span>
+            <span className="flex flex-wrap gap-2">
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void search();
+                }}
+                placeholder="почта целиком или +79991234567"
+                className={cn(inputClassName, 'w-auto min-w-[16rem] flex-1')}
               />
-            ) : (
-              <div className="h-40 w-40 animate-pulse rounded-control bg-surface-sunken" />
-            )}
+              <Button variant="secondary" pending={pending} onClick={() => void search()}>
+                Найти
+              </Button>
+            </span>
+          </label>
 
-            <div className="min-w-[12rem] flex-1 text-[0.875rem]">
-              <p className="text-text-muted">Или продиктуйте ссылку:</p>
-              <p className="mt-1 break-all text-text">{link}</p>
-              <p className="mt-2 text-[0.8125rem] text-text-subtle">
-                Регистрация по этой ссылке сразу привязывает человека к клубу — искать его после
-                неё не нужно.
-              </p>
-            </div>
-          </div>
+          <p className="mt-2 text-[0.8125rem] text-text-subtle">
+            Только целиком: по куску почты поиск ничего не найдёт — это чужие данные.
+          </p>
 
-          <div className="border-t border-border pt-5">
-            <label className="grid gap-1.5 text-[0.875rem]">
-              <span className="font-medium text-text">Уже зарегистрирован?</span>
-              <span className="flex flex-wrap gap-2">
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') void search();
-                  }}
-                  placeholder="почта целиком или +79991234567"
-                  className={cn(inputClassName, 'w-auto min-w-[16rem] flex-1')}
-                />
-                <Button variant="secondary" pending={pending} onClick={() => void search()}>
-                  Найти
-                </Button>
-              </span>
-            </label>
-
-            <p className="mt-2 text-[0.8125rem] text-text-subtle">
-              Только целиком: по куску почты поиск ничего не найдёт — это чужие данные.
+          {found && !found.found && (
+            <p className="mt-3 text-[0.875rem] text-text-muted">
+              Такого человека на платформе нет. Пусть зарегистрируется по коду — после этого он
+              уже будет в клубе.
             </p>
+          )}
 
-            {found && !found.found && (
-              <p className="mt-3 text-[0.875rem] text-text-muted">
-                Такого человека на платформе нет. Пусть зарегистрируется по коду — после этого он
-                уже будет в клубе.
-              </p>
-            )}
+          {found?.ambiguous && (
+            <p className="mt-3 text-[0.875rem] text-warning">
+              С таким телефоном на платформе несколько человек — так бывает у семьи с одним
+              номером. Спросите почту: она у каждого своя.
+            </p>
+          )}
 
-            {found?.ambiguous && (
-              <p className="mt-3 text-[0.875rem] text-warning">
-                С таким телефоном на платформе несколько человек — так бывает у семьи с одним
-                номером. Спросите почту: она у каждого своя.
-              </p>
-            )}
-
-            {found?.person && (
-              <div className="mt-3 flex flex-wrap items-center gap-3 rounded-control border border-border bg-surface-sunken px-4 py-3 text-[0.875rem]">
-                <span className="flex-1">
-                  Нашёлся: <b>{found.person.name}</b>
-                  {found.person.member && (
-                    <span className="text-text-muted"> — уже в этом клубе</span>
-                  )}
-                </span>
-
-                {found.person.member ? (
-                  <Link
-                    href={`/clubs/${slug}/people/${found.person.id}`}
-                    className="text-text-accent underline-offset-2 hover:underline"
-                  >
-                    Открыть карточку
-                  </Link>
-                ) : (
-                  <Button
-                    size="sm"
-                    pending={pending}
-                    onClick={() => void attach(found.person!.id)}
-                  >
-                    Привязать к клубу
-                  </Button>
+          {found?.person && (
+            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-control border border-border bg-surface-sunken px-4 py-3 text-[0.875rem]">
+              <span className="flex-1">
+                Нашёлся: <b>{found.person.name}</b>
+                {found.person.member && (
+                  <span className="text-text-muted"> — уже в этом клубе</span>
                 )}
-              </div>
-            )}
-          </div>
+              </span>
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            <Button variant="secondary" onClick={onClose} disabled={pending}>
-              Закрыть
-            </Button>
-          </div>
+              {found.person.member ? (
+                <Link
+                  href={`/clubs/${slug}/people/${found.person.id}`}
+                  className="text-text-accent underline-offset-2 hover:underline"
+                >
+                  Открыть карточку
+                </Link>
+              ) : (
+                <Button
+                  size="sm"
+                  pending={pending}
+                  onClick={() => void attach(found.person!.id)}
+                >
+                  Привязать к клубу
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Button variant="secondary" onClick={onClose} disabled={pending}>
+            Закрыть
+          </Button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

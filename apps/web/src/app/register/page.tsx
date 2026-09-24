@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/Button';
 import { Field } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
 import { isChildBirthDate } from '@/lib/family';
+import { safeNext } from '@/lib/next';
 import { saveSession } from '@/lib/session';
 
 /**
@@ -35,7 +36,7 @@ import { saveSession } from '@/lib/session';
  */
 export default function RegisterPage() {
   return (
-    <Suspense fallback={<RegisterForm clubSlug={null} />}>
+    <Suspense fallback={<RegisterForm clubSlug={null} next={null} />}>
       <RegisterFormFromQuery />
     </Suspense>
   );
@@ -44,10 +45,10 @@ export default function RegisterPage() {
 function RegisterFormFromQuery() {
   const params = useSearchParams();
 
-  return <RegisterForm clubSlug={params.get('club')} />;
+  return <RegisterForm clubSlug={params.get('club')} next={safeNext(params.get('next'))} />;
 }
 
-function RegisterForm({ clubSlug }: { clubSlug: string | null }) {
+function RegisterForm({ clubSlug, next }: { clubSlug: string | null; next: string | null }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -88,7 +89,7 @@ function RegisterForm({ clubSlug }: { clubSlug: string | null }) {
       });
 
       saveSession(auth);
-      router.push(clubSlug ? `/clubs/${clubSlug}` : '/');
+      router.push(next ?? (clubSlug ? `/clubs/${clubSlug}` : '/'));
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен, попробуйте позже');
       setPending(false);
@@ -102,7 +103,7 @@ function RegisterForm({ clubSlug }: { clubSlug: string | null }) {
       footer={
         <>
           Уже есть учётная запись?{' '}
-          <Link href="/login" className="font-medium text-text-accent hover:underline">
+          <Link href={next ? `/login?next=${encodeURIComponent(next)}` : '/login'} className="font-medium text-text-accent hover:underline">
             Войти
           </Link>
         </>

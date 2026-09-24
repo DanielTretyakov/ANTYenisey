@@ -7,6 +7,7 @@ import {
   decideRankEdit,
   decideRankReview,
   isProfilePublic,
+  participantView,
   type RankState,
 } from './player-rules.ts';
 
@@ -54,6 +55,36 @@ describe('canSeeProfile и canReadFile', () => {
     assert.equal(canReadFile('RANK_DOCUMENT', adult, stranger, TODAY), false);
     assert.equal(canReadFile('RANK_DOCUMENT', adult, { viewerId: 'adult', managesOwner: false, guardsOwner: false }, TODAY), true);
     assert.equal(canReadFile('RANK_DOCUMENT', adult, admin, TODAY), true);
+  });
+});
+
+describe('participantView', () => {
+  const person = (birthDate: string) => ({
+    userId: 'u1',
+    name: 'Иванов И.',
+    birthDate: day(birthDate),
+    avatarFileId: 'f1',
+  });
+
+  it('взрослый — кружок с фотографией и ссылкой', () => {
+    assert.deepEqual(participantView(person('1990-01-01'), TODAY), {
+      userId: 'u1',
+      name: 'Иванов И.',
+      avatarFileId: 'f1',
+    });
+  });
+
+  it('младше 16 — только инициалы, без ссылки и фотографии', () => {
+    assert.deepEqual(participantView(person('2014-01-01'), TODAY), {
+      userId: null,
+      name: 'Иванов И.',
+      avatarFileId: null,
+    });
+  });
+
+  it('граница — день шестнадцатилетия, как у самого профиля', () => {
+    assert.equal(participantView(person('2010-09-13'), TODAY).userId, 'u1');
+    assert.equal(participantView(person('2010-09-14'), TODAY).userId, null);
   });
 });
 

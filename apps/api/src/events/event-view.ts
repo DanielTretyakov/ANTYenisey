@@ -1,6 +1,7 @@
 import { BookingStatus } from '@yenisey/database';
-import type { ClubEvent } from '@yenisey/types';
+import type { ClubEvent, ClubRef, EventDetail, EventPlace } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
+import { participantView } from '../players/player-rules';
 
 /**
  * Мероприятие в том виде, в каком его показывают: сборка `ClubEvent` из строк
@@ -137,4 +138,153 @@ function participantsOf(rows: Participant[]): string[] {
  */
 function registeredBy(userId: string | null, rows: { clientId: string }[]): boolean | null {
   return userId ? rows.some((row) => row.clientId === userId) : null;
+}
+
+// ---------------------------------------------------------------------------
+// Окно мероприятия
+// ---------------------------------------------------------------------------
+
+/**
+ * Записавшийся для окна: кроме имени — дата рождения (решает, раскрывать ли
+ * его) и аватар. Полное имя уходит из выборки только сокращённым.
+ */
+const DETAIL_PARTICIPANT_SELECT = {
+  select: {
+    membership: {
+      select: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            birthDate: true,
+            playerProfile: { select: { avatarFileId: true } },
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+/**
+ * Зал мероприятия. Прямой связи «мероприятие → зал» в схеме нет: она идёт
+ * через окно расписания, а оно — через стол. Окон у занятия бывает несколько
+ * (на каждый стол), зал у них один — берётся первое.
+ */
+const PLACE_SELECT = {
+  select: {
+    table: {
+      select: {
+        hall: { select: { name: true, address: true, city: { select: { name: true } } } },
+      },
+    },
+  },
+  orderBy: { startMinute: 'asc' },
+  take: 1,
+} as const;
+
+const CLUB_REF_SELECT = { select: { slug: true, name: true, accentColor: true } } as const;
+
+export const TOURNAMENT_DETAIL_SELECT = {
+  ...TOURNAMENT_EVENT_SELECT,
+  tournamentType: { select: { name: true, ratingLabel: true, price: true, description: true } },
+  registrations: {
+    where: { status: BookingStatus.BOOKED },
+    select: { clientId: true, client: DETAIL_PARTICIPANT_SELECT },
+  },
+  dayClosures: PLACE_SELECT,
+  tenant: CLUB_REF_SELECT,
+} as const;
+
+export const TRAINING_DETAIL_SELECT = {
+  ...TRAINING_EVENT_SELECT,
+  trainingType: { select: { name: true, price: true, description: true } },
+  coach: { select: { userId: true, membership: { select: { user: { select: { fullName: true } } } } } },
+  bookings: {
+    where: { status: BookingStatus.BOOKED },
+    select: { clientId: true, client: DETAIL_PARTICIPANT_SELECT },
+  },
+  dayClosures: PLACE_SELECT,
+  tenant: CLUB_REF_SELECT,
+} as const;
+
+type DetailParticipant = {
+  clientId: string;
+  client: {
+    membership: {
+      user: {
+        id: string;
+        fullName: string;
+        birthDate: Date;
+        playerProfile: { avatarFileId: string | null } | null;
+      };
+    };
+  };
+};
+
+type PlaceRow = {
+  table: { hall: { name: string; address: string | null; city: { name: string } | null } };
+};
+
+type DetailExtras = { dayClosures: PlaceRow[]; tenant: ClubRef };
+
+export function tournamentDetail(
+  row: TournamentRow &
+    DetailExtras & {
+      tournamentType: { description: string | null };
+      registrations: DetailParticipant[];
+    },
+  userId: string | null,
+  today: Date,
+): EventDetail {
+  return {
+    ...tournamentEvent(row, userId),
+    club: row.tenant,
+    description: row.tournamentType.description,
+    place: placeOf(row.dayClosures),
+    coach: null,
+    people: peopleOf(row.registrations, today),
+  };
+}
+
+export function trainingDetail(
+  row: TrainingRow &
+    DetailExtras & {
+      trainingType: { description: string | null };
+      coach: { userId: string };
+      bookings: DetailParticipant[];
+    },
+  userId: string | null,
+  today: Date,
+): EventDetail {
+  return {
+    ...trainingEvent(row, userId),
+    club: row.tenant,
+    description: row.trainingType.description,
+    place: placeOf(row.dayClosures),
+    coach: { id: row.coach.userId, name: shortName(row.coach.membership.user.fullName) },
+    people: peopleOf(row.bookings, today),
+  };
+}
+
+function placeOf(rows: PlaceRow[]): EventPlace | null {
+  const hall = rows[0]?.table.hall;
+
+  return hall ? { hallName: hall.name, city: hall.city?.name ?? null, address: hall.address } : null;
+}
+
+/** Те же люди, что в `participants`, и в том же порядке — но кружками. */
+function peopleOf(rows: DetailParticipant[], today: Date): EventDetail['people'] {
+  return rows
+    .map(({ client }) =>
+      participantView(
+        {
+          userId: client.membership.user.id,
+          name: shortName(client.membership.user.fullName),
+          birthDate: client.membership.user.birthDate,
+          avatarFileId: client.membership.user.playerProfile?.avatarFileId ?? null,
+        },
+        today,
+      ),
+    )
+    .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
 }

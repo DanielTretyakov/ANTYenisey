@@ -255,6 +255,7 @@ function TrainingTypesCard({
                           name: values.name,
                           price: values.price,
                           isActive: type.isActive,
+                          description: values.description,
                         });
                         setEditingId(null);
                         return types
@@ -265,8 +266,9 @@ function TrainingTypesCard({
                   />
                 ) : (
                   <>
-                <span className={cn('flex-1 text-[0.9375rem]', type.isActive ? 'text-text' : 'text-text-subtle line-through')}>
+                <span className={cn('min-w-0 flex-1 text-[0.9375rem]', type.isActive ? 'text-text' : 'text-text-subtle line-through')}>
                   {type.name}
+                  <DescriptionHint text={type.description} />
                 </span>
                 <span className="text-[0.875rem] text-text-muted">{formatKopecks(type.price)}</span>
                 {type.usageCount > 0 && (
@@ -424,6 +426,7 @@ function TournamentTypesCard({
                           ratingLabel: values.ratingLabel,
                           price: values.price,
                           isActive: type.isActive,
+                          description: values.description,
                         })
                         .then((updated) => {
                           onChange(
@@ -443,7 +446,7 @@ function TournamentTypesCard({
                   <>
                     <span
                       className={cn(
-                        'flex-1 text-[0.9375rem]',
+                        'min-w-0 flex-1 text-[0.9375rem]',
                         type.isActive ? 'text-text' : 'text-text-subtle line-through',
                       )}
                     >
@@ -453,6 +456,7 @@ function TournamentTypesCard({
                           рейтинг {type.ratingLabel}
                         </span>
                       )}
+                      <DescriptionHint text={type.description} />
                     </span>
                     <span className="text-[0.875rem] text-text-muted">
                       {formatKopecks(type.price)}
@@ -721,10 +725,24 @@ const byActiveThenName = <T extends { isActive: boolean; name: string }>(a: T, b
   a.isActive === b.isActive ? a.name.localeCompare(b.name, 'ru') : Number(b.isActive) - Number(a.isActive);
 
 /**
+ * Первая строка описания под названием типа: видно, у каких типов его нет,
+ * не открывая каждый. Без описания — приглушённая подсказка, а не пустота:
+ * посетитель увидит окно мероприятия без текста, и администратор должен
+ * знать об этом заранее.
+ */
+function DescriptionHint({ text }: { text: string | null }) {
+  return (
+    <span className="mt-0.5 block truncate text-[0.8125rem] text-text-subtle">
+      {text ?? 'без описания — в окне мероприятия будет пусто'}
+    </span>
+  );
+}
+
+/**
  * Правка типа прямо в строке списка.
  *
- * Не отдельная страница и не модальное окно: у типа всего три поля, и уводить
- * ради них с экрана — больше движений, чем самой правки. Строка на время
+ * Не отдельная страница и не модальное окно: у типа всего четыре поля, и
+ * уводить ради них с экрана — больше движений, чем самой правки. Строка на время
  * превращается в форму, остальные остаются на месте, и видно, что меняешь
  * именно эту.
  *
@@ -740,16 +758,22 @@ function TypeEditor({
   onCancel,
   onError,
 }: {
-  initial: { name: string; ratingLabel?: string | null; price: number };
+  initial: { name: string; ratingLabel?: string | null; price: number; description: string | null };
   withRating?: boolean;
   pending: boolean;
-  onSave: (values: { name: string; ratingLabel: string | null; price: number }) => void;
+  onSave: (values: {
+    name: string;
+    ratingLabel: string | null;
+    price: number;
+    description: string | null;
+  }) => void;
   onCancel: () => void;
   onError: (message: string | null) => void;
 }) {
   const [name, setName] = useState(initial.name);
   const [rating, setRating] = useState(initial.ratingLabel ?? '');
   const [price, setPrice] = useState(kopecksToInput(initial.price));
+  const [description, setDescription] = useState(initial.description ?? '');
 
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -762,7 +786,12 @@ function TypeEditor({
     }
 
     onError(null);
-    onSave({ name: name.trim(), ratingLabel: rating.trim() || null, price: kopecks });
+    onSave({
+      name: name.trim(),
+      ratingLabel: rating.trim() || null,
+      price: kopecks,
+      description: description.trim() || null,
+    });
   }
 
   return (
@@ -788,6 +817,16 @@ function TypeEditor({
       )}
 
       <MoneyField className="w-32" value={price} onChange={setPrice} />
+
+      <textarea
+        aria-label="Описание"
+        placeholder="Описание для окна мероприятия: для кого, чему учат, что взять с собой"
+        maxLength={2000}
+        rows={3}
+        value={description}
+        onChange={(event) => setDescription(event.target.value)}
+        className={cn(inputClassName, 'w-full basis-full py-1.5 text-[0.9375rem]')}
+      />
 
       <Button type="submit" size="sm" pending={pending} disabled={name.trim() === ''}>
         Сохранить

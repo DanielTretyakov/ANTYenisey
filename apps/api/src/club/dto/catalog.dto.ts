@@ -38,6 +38,16 @@ export class TrainingTypeDto implements TrainingTypeRequest {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  /**
+   * Описание для окна мероприятия. Потолок — тот же, что у CHECK в
+   * constraints.sql (раздел 24): форма должна отказать раньше базы.
+   */
+  @IsOptional()
+  @IsString()
+  @trimmed()
+  @MaxLength(2000, { message: 'Описание — не длиннее 2000 символов' })
+  description?: string | null;
 }
 
 export class TournamentTypeDto implements TournamentTypeRequest {
@@ -68,6 +78,16 @@ export class TournamentTypeDto implements TournamentTypeRequest {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  /**
+   * Описание для окна мероприятия. Потолок — тот же, что у CHECK в
+   * constraints.sql (раздел 24): форма должна отказать раньше базы.
+   */
+  @IsOptional()
+  @IsString()
+  @trimmed()
+  @MaxLength(2000, { message: 'Описание — не длиннее 2000 символов' })
+  description?: string | null;
 }
 
 export class TournamentDto implements TournamentRequest {

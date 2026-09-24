@@ -5,6 +5,7 @@ import type { ClubCoach, ClubPerson, DeskDay } from '@yenisey/types';
 import { ClientPicker } from '@/components/club/ClientPicker';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
 import { inputClassName } from '@/components/ui/Field';
 import { ApiError } from '@/lib/api';
 import { formatMinute } from '@/lib/bookingGrid';
@@ -52,15 +53,6 @@ export function VisitDialog({
       .catch(() => setCoaches([]));
   }, [club]);
 
-  useEffect(() => {
-    const escape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose();
-    };
-
-    window.addEventListener('keydown', escape);
-    return () => window.removeEventListener('keydown', escape);
-  }, [onClose]);
-
   async function submit(): Promise<void> {
     if (!client) return;
 
@@ -92,90 +84,79 @@ export function VisitDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-40 overflow-y-auto px-4 py-10"
-      style={{ background: 'color-mix(in oklab, var(--ink-950) 45%, transparent)' }}
+    <Dialog
+      title="Внести визит"
+      onClose={onClose}
+      description={
+        <>
+          Человек пришёл без брони или играл, а записать забыли. Визит ляжет в историю клиента;
+          денег он не двигает — платную аренду заводит «Посадить клиента».
+        </>
+      }
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="visit-title"
-        className="mx-auto w-full max-w-lg rounded-card border border-border bg-surface-raised shadow-lg"
-      >
-        <div className="border-b border-border px-6 py-5">
-          <h2 id="visit-title" className="text-[1.0625rem]">
-            Внести визит
-          </h2>
-          <p className="mt-1 text-[0.875rem] text-text-muted">
-            Человек пришёл без брони или играл, а записать забыли. Визит ляжет в историю клиента;
-            денег он не двигает — платную аренду заводит «Посадить клиента».
-          </p>
+      <div className="grid gap-5 px-6 py-5">
+        {error && <Alert>{error}</Alert>}
+
+        <ClientPicker value={client} onChange={setClient} label="Кто пришёл" />
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="grid gap-1.5 text-[0.875rem]">
+            <span className="font-medium text-text">День</span>
+            <input
+              type="date"
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+              className={inputClassName}
+            />
+          </label>
+
+          <label className="grid gap-1.5 text-[0.875rem]">
+            <span className="font-medium text-text">Время</span>
+            <input
+              type="time"
+              value={time}
+              onChange={(event) => setTime(event.target.value)}
+              className={inputClassName}
+            />
+          </label>
+
+          <label className="grid gap-1.5 text-[0.875rem] sm:col-span-2">
+            <span className="font-medium text-text">Тренер</span>
+            <select
+              value={coachId}
+              onChange={(event) => setCoachId(event.target.value)}
+              className={inputClassName}
+            >
+              <option value="">без тренера</option>
+              {coaches.map((coach) => (
+                <option key={coach.id} value={coach.id}>
+                  {coach.fullName}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="grid gap-1.5 text-[0.875rem] sm:col-span-2">
+            <span className="font-medium text-text">Комментарий</span>
+            <input
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              placeholder="Пришёл с другом, оплатил наличными…"
+              maxLength={500}
+              className={inputClassName}
+            />
+          </label>
         </div>
 
-        <div className="grid gap-5 px-6 py-5">
-          {error && <Alert>{error}</Alert>}
-
-          <ClientPicker value={client} onChange={setClient} label="Кто пришёл" />
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="grid gap-1.5 text-[0.875rem]">
-              <span className="font-medium text-text">День</span>
-              <input
-                type="date"
-                value={date}
-                onChange={(event) => setDate(event.target.value)}
-                className={inputClassName}
-              />
-            </label>
-
-            <label className="grid gap-1.5 text-[0.875rem]">
-              <span className="font-medium text-text">Время</span>
-              <input
-                type="time"
-                value={time}
-                onChange={(event) => setTime(event.target.value)}
-                className={inputClassName}
-              />
-            </label>
-
-            <label className="grid gap-1.5 text-[0.875rem] sm:col-span-2">
-              <span className="font-medium text-text">Тренер</span>
-              <select
-                value={coachId}
-                onChange={(event) => setCoachId(event.target.value)}
-                className={inputClassName}
-              >
-                <option value="">без тренера</option>
-                {coaches.map((coach) => (
-                  <option key={coach.id} value={coach.id}>
-                    {coach.fullName}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="grid gap-1.5 text-[0.875rem] sm:col-span-2">
-              <span className="font-medium text-text">Комментарий</span>
-              <input
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-                placeholder="Пришёл с другом, оплатил наличными…"
-                maxLength={500}
-                className={inputClassName}
-              />
-            </label>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5">
-            <Button onClick={() => void submit()} pending={pending} disabled={!client}>
-              Внести
-            </Button>
-            <Button variant="secondary" onClick={onClose} disabled={pending}>
-              Отмена
-            </Button>
-          </div>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Button onClick={() => void submit()} pending={pending} disabled={!client}>
+            Внести
+          </Button>
+          <Button variant="secondary" onClick={onClose} disabled={pending}>
+            Отмена
+          </Button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

@@ -12,6 +12,7 @@ import { useFileUrl } from '@/lib/useFileUrl';
  */
 
 const AVATAR_SIZES = {
+  xs: 'h-10 w-10 text-[0.8125rem]',
   sm: 'h-12 w-12 text-[0.9375rem]',
   md: 'h-20 w-20 text-xl',
   lg: 'h-28 w-28 text-3xl',

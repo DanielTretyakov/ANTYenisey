@@ -356,6 +356,8 @@ export interface TrainingType {
    * занятия и расписание, и удаление упёрлось бы во внешний ключ.
    */
   isActive: boolean;
+  /** Описание для окна мероприятия. Одно на все занятия этого типа. */
+  description: string | null;
   /** Сколько окон расписания на неё ссылается — показывается перед снятием. */
   usageCount: number;
 }
@@ -364,6 +366,8 @@ export interface TrainingTypeRequest {
   name: string;
   price: number;
   isActive?: boolean;
+  /** Не прислано — не трогать; пусто или `null` — стереть. */
+  description?: string | null;
 }
 
 /**
@@ -381,6 +385,8 @@ export interface TournamentType {
   /** Цена участия, копейки. */
   price: number;
   isActive: boolean;
+  /** Описание для окна мероприятия. Одно на все турниры этого типа. */
+  description: string | null;
   /** Сколько турниров заведено по этому типу. */
   tournamentCount: number;
 }
@@ -390,6 +396,8 @@ export interface TournamentTypeRequest {
   ratingLabel?: string | null;
   price: number;
   isActive?: boolean;
+  /** Не прислано — не трогать; пусто или `null` — стереть. */
+  description?: string | null;
 }
 
 /** Турнир: конкретное проведение типа в конкретный момент. */

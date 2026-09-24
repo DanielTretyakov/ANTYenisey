@@ -5,12 +5,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { BookingStatus, Prisma } from '@yenisey/database';
-import type { BookingEntry, ClubEvent } from '@yenisey/types';
+import type { BookingEntry, ClubEvent, EventDetail, EventKind } from '@yenisey/types';
 import { cancellationOpen, cancellationPercent } from '../booking/availability';
 import {
+  TOURNAMENT_DETAIL_SELECT,
   TOURNAMENT_EVENT_SELECT,
+  TRAINING_DETAIL_SELECT,
   TRAINING_EVENT_SELECT,
+  tournamentDetail,
   tournamentEvent,
+  trainingDetail,
   trainingEvent,
 } from './event-view';
 import { MembershipService } from '../club/membership.service';
@@ -96,6 +100,49 @@ export class EventsService {
     // Общая сортировка по времени: человек смотрит на неделю клуба целиком, а
     // не отдельно на занятия и отдельно на турниры.
     return events.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+  }
+
+  /**
+   * Одно мероприятие для окна подробностей — открыто, как и список.
+   *
+   * Прошедшее тоже отдаётся: окно открывают и из «Моих записей», и по ссылке,
+   * присланной накануне. Записаться на него всё равно нельзя — это решают
+   * маршруты записи, а не окно.
+   */
+  async detail(tenantId: string, kind: EventKind, id: string, userId: string | null): Promise<EventDetail> {
+    const today = new Date();
+    let event: EventDetail;
+    let typeId: string;
+
+    if (kind === 'TOURNAMENT') {
+      const row = await this.prisma.tournament.findFirst({
+        where: { id, tenantId },
+        select: TOURNAMENT_DETAIL_SELECT,
+      });
+
+      if (!row) throw new NotFoundException('Турнир не найден');
+
+      event = tournamentDetail(row, userId, today);
+      typeId = row.tournamentTypeId;
+    } else {
+      const row = await this.prisma.trainingSession.findFirst({
+        where: { id, tenantId },
+        select: TRAINING_DETAIL_SELECT,
+      });
+
+      if (!row) throw new NotFoundException('Занятие не найдено');
+
+      event = trainingDetail(row, userId, today);
+      typeId = row.trainingTypeId;
+    }
+
+    const payWith = userId
+      ? await this.subscriptions.payWithFor(tenantId, userId, [
+          { id: event.id, kind, typeId, startsAt: new Date(event.startsAt) },
+        ])
+      : new Map();
+
+    return { ...event, payWith: payWith.get(event.id) ?? null };
   }
 
   /** Мои мероприятия в этом клубе: записи на занятия, турниры и свои брони столов. */

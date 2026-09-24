@@ -43,6 +43,7 @@ export class CatalogService {
         name: true,
         price: true,
         isActive: true,
+        description: true,
         _count: { select: { closureRules: true, dayClosures: true } },
       },
       // Действующие сверху, дальше по названию: снятые с продажи нужны редко.
@@ -54,6 +55,7 @@ export class CatalogService {
       name: type.name,
       price: type.price,
       isActive: type.isActive,
+      description: type.description,
       usageCount: type._count.closureRules + type._count.dayClosures,
     }));
   }
@@ -70,7 +72,13 @@ export class CatalogService {
     }
 
     await this.prisma.trainingType.create({
-      data: { tenantId, name, price: dto.price, isActive: dto.isActive ?? true },
+      data: {
+        tenantId,
+        name,
+        price: dto.price,
+        isActive: dto.isActive ?? true,
+        description: descriptionOf(dto.description) ?? null,
+      },
     });
 
     return this.findTrainingType(tenantId, name);
@@ -95,7 +103,12 @@ export class CatalogService {
     // администратор одного клуба правил бы справочник другого.
     const updated = await this.prisma.trainingType.updateMany({
       where: { id, tenantId },
-      data: { name, price: dto.price, ...(dto.isActive === undefined ? {} : { isActive: dto.isActive }) },
+      data: {
+        name,
+        price: dto.price,
+        ...(dto.isActive === undefined ? {} : { isActive: dto.isActive }),
+        ...(dto.description === undefined ? {} : { description: descriptionOf(dto.description) }),
+      },
     });
 
     if (updated.count === 0) {
@@ -170,6 +183,7 @@ export class CatalogService {
         ratingLabel: true,
         price: true,
         isActive: true,
+        description: true,
         _count: { select: { tournaments: true } },
       },
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
@@ -181,6 +195,7 @@ export class CatalogService {
       ratingLabel: type.ratingLabel,
       price: type.price,
       isActive: type.isActive,
+      description: type.description,
       tournamentCount: type._count.tournaments,
     }));
   }
@@ -203,6 +218,7 @@ export class CatalogService {
           ratingLabel: dto.ratingLabel?.trim() || null,
           price: dto.price,
           isActive: dto.isActive ?? true,
+          description: descriptionOf(dto.description) ?? null,
         },
         select: { id: true },
       });
@@ -231,6 +247,7 @@ export class CatalogService {
         ratingLabel: dto.ratingLabel?.trim() || null,
         price: dto.price,
         ...(dto.isActive === undefined ? {} : { isActive: dto.isActive }),
+        ...(dto.description === undefined ? {} : { description: descriptionOf(dto.description) }),
       },
     });
 
@@ -589,4 +606,17 @@ export class CatalogService {
 
     return error;
   }
+}
+
+/**
+ * Описание из формы → в базу. `undefined` остаётся `undefined` («не трогать»):
+ * старый клиент, не знающий поля, не должен стирать описание одним сохранением
+ * цены. Пусто и пробелы — `null`, как требует CHECK.
+ */
+function descriptionOf(value: string | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+
+  const trimmed = value?.trim() ?? '';
+
+  return trimmed === '' ? null : trimmed;
 }

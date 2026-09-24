@@ -1064,6 +1064,12 @@ model TrainingType {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Описание для окна мероприятия: чему учат, для кого, что взять с собой.
+  /// У типа, а не у проведения (решение владельца от 24.09.2026): занятия
+  /// заводятся покраской сетки, и писать текст к каждой клетке никто не
+  /// станет.
+  description String?
+
   sessions          TrainingSession[]
   closureRules      TableClosureRule[]
   dayClosures       DayClosure[]
@@ -1176,6 +1182,9 @@ model TournamentType {
   ratingLabel String? // справочное число-ограничение в названии (напр. «100» у «Клуб 100») — не проверяется системой, чисто информация для игрока
   price       Int // текущая цена участия, копейки
   isActive    Boolean @default(true)
+  /// Описание для окна мероприятия: формат, регламент, взнос. Как у типа
+  /// занятия — одно на все проведения.
+  description String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

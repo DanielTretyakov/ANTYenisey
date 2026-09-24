@@ -1071,3 +1071,18 @@ ALTER TABLE "PushSubscription"
 -- список служб меняется без нас, и держать его в CHECK значило бы однажды
 -- отказать новому браузеру. Хватает https: отправитель не следует
 -- перенаправлениям и не читает ответ дальше кода.
+
+-- ---------------------------------------------------------------------------
+-- 24. Описание мероприятия
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_event_descriptions. Текст видит любой посетитель в
+-- окне мероприятия; пустая строка и пробелы по краям — не описание, а мусор
+-- формы, который окно показало бы пустым абзацем.
+ALTER TABLE "TrainingType"
+  ADD CONSTRAINT "TrainingType_description_sane"
+  CHECK ("description" IS NULL OR ("description" = btrim("description") AND char_length("description") BETWEEN 1 AND 2000));
+
+ALTER TABLE "TournamentType"
+  ADD CONSTRAINT "TournamentType_description_sane"
+  CHECK ("description" IS NULL OR ("description" = btrim("description") AND char_length("description") BETWEEN 1 AND 2000));

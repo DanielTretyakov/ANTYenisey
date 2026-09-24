@@ -1,5 +1,5 @@
-import { Controller, Delete, Get, Param, Post } from '@nestjs/common';
-import type { BookingEntry, ClubEvent } from '@yenisey/types';
+import { BadRequestException, Controller, Delete, Get, Param, Post } from '@nestjs/common';
+import type { BookingEntry, ClubEvent, EventDetail } from '@yenisey/types';
 import type { ClubContext } from '../auth/club-context';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Public } from '../auth/decorators/public.decorator';
@@ -31,6 +31,35 @@ export class EventsController {
   @Get('events')
   upcoming(@CurrentClub() club: ClubContext, @Acting() acting: ActingClient | null): Promise<ClubEvent[]> {
     return this.events.listUpcoming(club.tenantId, acting?.userId ?? null);
+  }
+
+  /**
+   * Окно мероприятия: описание, зал, тренер и записавшиеся кружками.
+   *
+   * Вид — участком адреса (`training` или `tournament`): занятие и турнир
+   * лежат в разных таблицах, и по идентификатору вид не восстановить. Маршрут
+   * объявлен после `events/mine` не случайно — у того один участок, у этого
+   * два, и перепутать их Nest не может.
+   */
+  @Public()
+  @ClientAction('read')
+  @Get('events/:kind/:id')
+  detail(
+    @CurrentClub() club: ClubContext,
+    @Acting() acting: ActingClient | null,
+    @Param('kind') kind: string,
+    @Param('id') id: string,
+  ): Promise<EventDetail> {
+    if (kind !== 'training' && kind !== 'tournament') {
+      throw new BadRequestException('Вид мероприятия — training или tournament');
+    }
+
+    return this.events.detail(
+      club.tenantId,
+      kind === 'training' ? 'TRAINING' : 'TOURNAMENT',
+      id,
+      acting?.userId ?? null,
+    );
   }
 
   /**

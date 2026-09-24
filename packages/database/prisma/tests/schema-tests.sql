@@ -1368,3 +1368,18 @@ SELECT pg_temp.expect('DJ',
   $q$INSERT INTO "PushSubscription" (id,"userId",endpoint,p256dh,auth)
      VALUES ('ps3','u2','https://push.example/abc','k','a')$q$,
   '23505', 'PushSubscription_endpoint_key');
+
+-- ---------------------------------------------------------------------------
+-- 27. Описание мероприятия
+-- ---------------------------------------------------------------------------
+
+-- DK. Описание из одних пробелов — мусор формы, окно показало бы пустой абзац.
+SELECT pg_temp.expect('DK',
+  $q$UPDATE "TrainingType" SET description = '   ' WHERE id = 'tt1'$q$,
+  '23514', 'TrainingType_description_sane');
+
+-- DL. Описание турнира длиннее потолка формы.
+SELECT pg_temp.expect('DL',
+  $q$INSERT INTO "TournamentType" (id,"tenantId",name,price,description,"updatedAt")
+     VALUES ('trt-long','t1','Длинное описание',50000,repeat('я',2001),now())$q$,
+  '23514', 'TournamentType_description_sane');

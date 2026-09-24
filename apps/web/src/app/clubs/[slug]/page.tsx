@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import type { BookingEntry, ClubEvent, PublicTenant } from '@yenisey/types';
 import { ClubMark } from '@/components/club/ClubMark';
+import { EventDialog } from '@/components/events/EventDialog';
 import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { WhenSpan } from '@/components/club/When';
 import { ClubNav } from '@/components/layout/ClubNav';
@@ -12,22 +13,15 @@ import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { api, ApiError } from '@/lib/api';
 import { clubAccent } from '@/lib/clubTheme';
+import { eventViewerOf, seatsLabel, useEventAction, type EventViewer } from '@/lib/eventViewer';
 import { cn } from '@/lib/cn';
 import { formatKopecks } from '@/lib/money';
 import { plural } from '@/lib/plural';
 import { entryPriceLabel } from '@/lib/subscriptions';
-import { roleInClub } from '@/lib/membership';
+import { loginHref } from '@/lib/next';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { usePersonSwitch } from '@/lib/usePersonSwitch';
 import { useSession } from '@/lib/useSession';
-
-/**
- * Кем человек приходится этому клубу — с точки зрения кнопки «Записаться».
- *
- * `child` — вошедшему нет 16, и он смотрит сам за себя: записывает его
- * родитель или администратор у стойки.
- */
-type Viewer = 'anonymous' | 'client' | 'staff' | 'child';
 
 /**
  * Страница клуба.
@@ -73,6 +67,13 @@ export default function ClubPage() {
 
   useEffect(loadEvents, [loadEvents]);
 
+  // После записи или отмены — и в строке, и в окне — обновляются оба списка:
+  // «Мои мероприятия» и отметка «записан» в предстоящих.
+  const refreshEvents = useCallback(() => {
+    loadEvents();
+    club.myEvents(forPerson).then(setMine).catch(() => undefined);
+  }, [loadEvents, club, forPerson]);
+
   // Мои мероприятия и отметка «мой клуб» — только для вошедших. Аноним видит
   // открытый список: клуб выбирают до того, как заводят учётку.
   useEffect(() => {
@@ -93,32 +94,8 @@ export default function ClubPage() {
       .catch(() => setFavourite(null));
   }, [session.status, club, slug, forPerson]);
 
-  /**
-   * Кто смотрит на страницу.
-   *
-   * `staff` — сотрудник ЭТОГО клуба: администратор, владелец или тренер.
-   * Записаться на турнир он не может, и кнопку ему показывать нельзя — она
-   * упрётся в «Недостаточно прав» уже после нажатия. Та же причина, по которой
-   * в навигации от сотрудника скрыта бронь стола: запись ссылается на
-   * карточку клиента, а его роль в этом клубе другая.
-   *
-   * Человек без привязки к клубу проходит как клиент: записаться может любой
-   * пользователь платформы, вступать заранее не нужно.
-   *
-   * За выбранного ребёнка родитель — всегда клиент, даже если сам он тренер
-   * этого клуба: право на запись проверяется у того, за кого пишут (решение
-   * от 17.09.2026). Сотрудником ребёнка сервер всё равно не пропустит.
-   */
-  const viewer: Viewer =
-    session.status !== 'ready'
-      ? 'anonymous'
-      : forPerson
-        ? 'client'
-        : (roleInClub(session.user, slug) ?? 'CLIENT') !== 'CLIENT'
-          ? 'staff'
-          : family.selfIsChild
-            ? 'child'
-            : 'client';
+  // Кто смотрит — одним правилом с окном мероприятия (`eventViewerOf`).
+  const viewer = eventViewerOf(session, slug, forPerson, family.selfIsChild);
 
   return (
     <div className="flex min-h-dvh flex-col bg-surface" style={clubAccent(tenant?.accentColor)}>
@@ -151,13 +128,12 @@ export default function ClubPage() {
         />
 
         <Upcoming
+          slug={slug}
           events={events}
           viewer={viewer}
           forPerson={forPerson}
-          onChanged={() => {
-            loadEvents();
-            club.myEvents(forPerson).then(setMine).catch(() => undefined);
-          }}
+          selfIsChild={family.selfIsChild}
+          onChanged={refreshEvents}
         />
       </main>
     </div>
@@ -216,7 +192,7 @@ function Masthead({ tenant }: { tenant: PublicTenant | null }) {
  * ссылается на карточку клиента, которой у него нет; ему вместо неё показан
  * его же рабочий путь.
  */
-function Halls({ tenant, slug, viewer }: { tenant: PublicTenant | null; slug: string; viewer: Viewer }) {
+function Halls({ tenant, slug, viewer }: { tenant: PublicTenant | null; slug: string; viewer: EventViewer }) {
   if (!tenant || tenant.halls.length === 0) {
     return null;
   }
@@ -249,7 +225,7 @@ function Halls({ tenant, slug, viewer }: { tenant: PublicTenant | null; slug: st
           вести его на форму, которая ответит отказом, незачем. */}
       {viewer !== 'staff' && viewer !== 'child' && (
         <div className="mt-4">
-          <Link href={viewer === 'anonymous' ? '/login' : `/clubs/${slug}/booking`}>
+          <Link href={viewer === 'anonymous' ? loginHref(`/clubs/${slug}/booking`) : `/clubs/${slug}/booking`}>
             <Button>{viewer === 'anonymous' ? 'Войти и забронировать стол' : 'Забронировать стол'}</Button>
           </Link>
         </div>
@@ -440,16 +416,22 @@ function MyEvents({
 
 /** Открытая запись клуба. Аренды столов здесь нет: к чужой броне не присоединиться. */
 function Upcoming({
+  slug,
   events,
   viewer,
   forPerson,
+  selfIsChild,
   onChanged,
 }: {
+  slug: string;
   events: ClubEvent[] | null;
-  viewer: Viewer;
+  viewer: EventViewer;
   forPerson: string | null;
+  selfIsChild: boolean;
   onChanged: () => void;
 }) {
+  const [open, setOpen] = useState<ClubEvent | null>(null);
+
   return (
     <section>
       <SectionTitle>Предстоящие мероприятия</SectionTitle>
@@ -482,56 +464,53 @@ function Upcoming({
               запрещено. */}
           {events.map((event) => (
             <li key={`${event.kind}-${event.id}`}>
-              <EventRow event={event} viewer={viewer} forPerson={forPerson} onChanged={onChanged} />
+              <EventRow
+                slug={slug}
+                event={event}
+                viewer={viewer}
+                forPerson={forPerson}
+                onChanged={onChanged}
+                onOpen={() => setOpen(event)}
+              />
             </li>
           ))}
         </ul>
+      )}
+
+      {open && (
+        <EventDialog
+          slug={slug}
+          kind={open.kind}
+          id={open.id}
+          forPerson={forPerson}
+          selfIsChild={selfIsChild}
+          onClose={() => setOpen(null)}
+          onChanged={onChanged}
+        />
       )}
     </section>
   );
 }
 
 function EventRow({
+  slug,
   event,
   viewer,
   forPerson,
   onChanged,
+  onOpen,
 }: {
+  slug: string;
   event: ClubEvent;
-  viewer: Viewer;
+  viewer: EventViewer;
   forPerson: string | null;
   onChanged: () => void;
+  onOpen: () => void;
 }) {
-  const club = useClubApi();
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [showParticipants, setShowParticipants] = useState(false);
+  const { toggle, pending, error } = useEventAction(slug, forPerson, onChanged);
 
   // Мест нет — но записанному кнопка отмены нужна и на переполненном занятии.
   const full = event.freeSeats === 0 && !event.registered;
-
-  async function toggle(): Promise<void> {
-    setPending(true);
-    setError(null);
-
-    try {
-      if (event.kind === 'TRAINING') {
-        await (event.registered
-          ? club.cancelTrainingBooking(event.id, forPerson)
-          : club.registerForTraining(event.id, forPerson));
-      } else {
-        await (event.registered
-          ? club.cancelTournamentRegistration(event.id, forPerson)
-          : club.registerForTournament(event.id, forPerson));
-      }
-
-      onChanged();
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
-    } finally {
-      setPending(false);
-    }
-  }
 
   return (
     <div className="border-b border-border py-5">
@@ -541,7 +520,13 @@ function EventRow({
         <WhenSpan startsAt={event.startsAt} endsAt={event.endsAt} />
 
         <span className="min-w-0 grow">
-          <span className="block text-[1rem] text-text">
+          {/* Название открывает окно мероприятия: там описание, зал и кто
+              записан. Кнопкой, а не ссылкой — адреса у окна нет. */}
+          <button
+            type="button"
+            onClick={onOpen}
+            className="block text-left text-[1rem] text-text underline-offset-2 hover:underline"
+          >
             {event.title}
             {/* Ограничение по рейтингу дописывается, только если его нет в самом
                 названии: типы «Енисея» называются «Клуб 100», и приписка давала
@@ -551,7 +536,7 @@ function EventRow({
                 рейтинг до {event.ratingLabel}
               </span>
             )}
-          </span>
+          </button>
 
           {event.subtitle && (
             <span className="mt-0.5 block text-[0.8125rem] text-text-muted">{event.subtitle}</span>
@@ -567,16 +552,11 @@ function EventRow({
             {event.registeredCount > 0 && (
               <>
                 {' · '}
-                {/* Состав раскрывается по требованию, а не висит списком: ТЗ
-                    требует его показывать, но десяток фамилий в каждой строке
-                    расписания превратил бы список мероприятий в простыню. */}
-                <button
-                  type="button"
-                  className="underline underline-offset-2 hover:text-text"
-                  aria-expanded={showParticipants}
-                  onClick={() => setShowParticipants((shown) => !shown)}
-                >
-                  {showParticipants ? 'скрыть состав' : 'кто записан'}
+                {/* Состав — в окне, а не списком в строке: ТЗ требует его
+                    показывать, но десяток фамилий в каждой строке расписания
+                    превратил бы список мероприятий в простыню. */}
+                <button type="button" className="underline underline-offset-2 hover:text-text" onClick={onOpen}>
+                  кто записан
                 </button>
               </>
             )}
@@ -595,26 +575,20 @@ function EventRow({
             size="sm"
             pending={pending}
             disabled={full}
-            onClick={() => void toggle()}
+            onClick={() => void toggle(event)}
           >
             {event.registered ? 'Отменить запись' : full ? 'Мест нет' : 'Записаться'}
           </Button>
         )}
 
         {viewer === 'anonymous' && (
-          <Link href="/login">
+          <Link href={loginHref()}>
             <Button variant="secondary" size="sm">
               Войти и записаться
             </Button>
           </Link>
         )}
       </div>
-
-      {showParticipants && event.participants.length > 0 && (
-        <p className="mt-3 text-[0.8125rem] text-text-muted">
-          {event.participants.join(', ')}
-        </p>
-      )}
     </div>
   );
 }
@@ -634,25 +608,4 @@ function RowSkeleton() {
       ))}
     </div>
   );
-}
-
-/**
- * Сколько занято и сколько осталось.
- *
- * У турнира лимита мест нет — там остаётся только число записавшихся. Ноль
- * показывается словом: «0 записавшихся» читается как ошибка, а не как пустое
- * занятие.
- */
-function seatsLabel(event: ClubEvent): string {
-  if (event.freeSeats === null) {
-    return event.registeredCount === 0
-      ? 'Пока никто не записался'
-      : `Записались: ${event.registeredCount}`;
-  }
-
-  if (event.freeSeats === 0) {
-    return 'Мест нет';
-  }
-
-  return `Осталось ${event.freeSeats} из ${event.capacity}`;
 }
