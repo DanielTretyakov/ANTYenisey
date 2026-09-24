@@ -126,7 +126,7 @@ function AccountNav() {
   return (
     <nav className="flex items-center gap-1 sm:gap-2" aria-label="Аккаунт">
       {PLATFORM_SECTIONS.map((section) => (
-        <NavLink key={section.href} href={section.href} active={pathname === section.href}>
+        <NavLink key={section.href} href={section.href} active={pathname === section.href || pathname.startsWith(`${section.href}/`)}>
           {section.label}
         </NavLink>
       ))}

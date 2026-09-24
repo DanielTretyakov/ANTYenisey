@@ -1,7 +1,6 @@
 'use client';
 
-import Link from 'next/link';
-import { createContext, useContext, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { AchievementLevel, PlayerAchievement, PlayerProfile, SportRankLevel } from '@yenisey/types';
 import { ACHIEVEMENT_LEVELS, SPORT_RANK_LEVELS } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
@@ -36,23 +35,35 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** Раздел редактора профиля игрока — по одному на пункт меню кабинета. */
+export type PlayerSection = 'avatar' | 'equipment' | 'rank' | 'achievements';
+
+const SECTION_TITLES: Record<PlayerSection, string> = {
+  avatar: 'Фото',
+  equipment: 'Инвентарь',
+  rank: 'Спортивный разряд',
+  achievements: 'Достижения',
+};
+
 /**
- * «Профиль игрока» в «Кабинете».
+ * Один раздел профиля игрока в редакторе кабинета.
  *
  * Расширение сверх ТЗ (решение владельца от 12.09.2026). Заполняет его сам
  * человек, а пока ему нет 16 — родитель (`forPerson`); клуб профиль не правит —
  * он проверяет разряд. Сам ребёнок младше 16 свой профиль только смотрит
  * (`readOnly`).
  *
- * Каждый блок сохраняется сам по себе: аватар меняют раз в год, инвентарь —
- * раз в сезон, и общая кнопка «Сохранить всё» заставляла бы отправлять
- * нетронутое.
+ * По разделу на экран, а не всё одной простынёй (решение от 24.09.2026):
+ * аватар меняют раз в год, инвентарь — раз в сезон, и искать нужную форму
+ * среди четырёх незачем. Каждый раздел и сохраняется сам по себе.
  */
 export function PlayerEditor({
+  section,
   name,
   forPerson = null,
   readOnly = false,
 }: {
+  section: PlayerSection;
   /** Полное имя владельца профиля — для инициалов на месте аватара. */
   name: string;
   /** Ребёнок, чей профиль ведёт родитель. */
@@ -65,64 +76,34 @@ export function PlayerEditor({
 
   useEffect(() => {
     setProfile(null);
+    setError(null);
     api
       .myPlayer(forPerson)
       .then(setProfile)
       .catch((cause: unknown) => setError(messageOf(cause)));
   }, [forPerson]);
 
-  const whose = forPerson ? 'его' : 'ваша';
+  const whose = forPerson ? 'его' : 'вашего';
 
   return (
-    <Card className="mt-6 max-w-2xl">
+    <Card className="max-w-2xl">
       <CardHeader
-        title={forPerson ? `Профиль игрока: ${name}` : 'Профиль игрока'}
-        description={
-          readOnly
-            ? // Без «Профиль ведёт родитель»: родителя может и не быть — ребёнок
-              // зарегистрировался сам, а заявку ещё никто не прислал.
-              'До 16 лет профиль правит закреплённый за вами родитель, а вы его смотрите. Страница видна только вам, родителю и администраторам ваших клубов.'
-            : profile && !profile.isPublic
-              ? `До 16 лет ${whose} страница игрока видна только ${forPerson ? 'ему, вам' : 'вам'} и администраторам ${forPerson ? 'его' : 'ваших'} клубов.`
-              : 'Его видят все на странице игрока — без телефона, почты и даты рождения, имя как в списках: «Фамилия И.».'
-        }
+        title={forPerson ? `${SECTION_TITLES[section]}: ${name}` : SECTION_TITLES[section]}
+        description={descriptionOf(section, profile, forPerson, readOnly, whose)}
       />
       <CardBody>
         {error && <Alert>{error}</Alert>}
 
         {!profile && !error && <p className="text-[0.875rem] text-text-muted">Загружаю…</p>}
 
-        {profile && readOnly && <PlayerSummary profile={profile} name={name} />}
+        {profile && readOnly && <ReadOnlySection section={section} profile={profile} name={name} />}
 
         {profile && !readOnly && (
           <ForPerson.Provider value={forPerson}>
-            <div className="grid gap-9">
-              <AvatarBlock profile={profile} name={name} onChange={setProfile} />
-
-              <Block title="Инвентарь">
-                <EquipmentForm profile={profile} onChange={setProfile} />
-              </Block>
-
-              <Block
-                title="Спортивный разряд"
-                note={`Разряд подтверждает администратор любого ${forPerson ? 'его' : 'вашего'} клуба — и подтверждение видно везде.`}
-              >
-                <RankForm profile={profile} onChange={setProfile} />
-              </Block>
-
-              <Block title="Достижения" note="Список ведёте вы сами, клуб его не проверяет.">
-                <AchievementsEditor profile={profile} onChange={setProfile} />
-              </Block>
-
-              <p className="text-[0.875rem]">
-                <Link
-                  href={`/players/${profile.userId}`}
-                  className="text-text-accent underline-offset-2 hover:underline"
-                >
-                  {forPerson ? 'Открыть страницу игрока →' : 'Открыть мою страницу игрока →'}
-                </Link>
-              </p>
-            </div>
+            {section === 'avatar' && <AvatarBlock profile={profile} name={name} onChange={setProfile} />}
+            {section === 'equipment' && <EquipmentForm profile={profile} onChange={setProfile} />}
+            {section === 'rank' && <RankForm profile={profile} onChange={setProfile} />}
+            {section === 'achievements' && <AchievementsEditor profile={profile} onChange={setProfile} />}
           </ForPerson.Provider>
         )}
       </CardBody>
@@ -130,45 +111,51 @@ export function PlayerEditor({
   );
 }
 
-/** Профиль только для чтения — ребёнок смотрит, что ведёт за него родитель. */
-function PlayerSummary({ profile, name }: { profile: PlayerProfile; name: string }) {
-  return (
-    <div className="grid gap-7">
-      <PlayerAvatar fileId={profile.avatarFileId} name={name} size="lg" />
+function descriptionOf(
+  section: PlayerSection,
+  profile: PlayerProfile | null,
+  forPerson: string | null,
+  readOnly: boolean,
+  whose: string,
+): string {
+  if (readOnly) {
+    // Без «Профиль ведёт родитель»: родителя может и не быть — ребёнок
+    // зарегистрировался сам, а заявку ещё никто не прислал.
+    return 'До 16 лет профиль правит закреплённый за вами родитель, а вы его смотрите.';
+  }
 
-      <Block title="Инвентарь">
-        <EquipmentList equipment={profile.equipment} />
-      </Block>
+  if (section === 'rank') {
+    return `Разряд подтверждает администратор любого ${whose} клуба — и подтверждение видно везде.`;
+  }
 
-      <Block title="Спортивный разряд">
-        {profile.rank ? (
-          <RankLine rank={profile.rank} />
-        ) : (
-          <p className="text-[0.875rem] text-text-muted">Разряд не указан.</p>
-        )}
-      </Block>
+  if (section === 'achievements') {
+    return 'Список ведёте вы сами, клуб его не проверяет.';
+  }
 
-      <Block title="Достижения">
-        <AchievementList achievements={profile.achievements} />
-      </Block>
-
-      <p className="text-[0.875rem]">
-        <Link href={`/players/${profile.userId}`} className="text-text-accent underline-offset-2 hover:underline">
-          Открыть мою страницу игрока →
-        </Link>
-      </p>
-    </div>
-  );
+  return profile && !profile.isPublic
+    ? `До 16 лет страница игрока видна только ${forPerson ? 'ему, вам' : 'вам'} и администраторам ${forPerson ? 'его' : 'ваших'} клубов.`
+    : 'Видно всем на странице игрока — без телефона, почты и даты рождения, имя как в списках: «Фамилия И.».';
 }
 
-function Block({ title, note, children }: { title: string; note?: string; children: ReactNode }) {
-  return (
-    <section>
-      <h3 className="text-[0.9375rem] font-medium">{title}</h3>
-      {note && <p className="mt-0.5 text-[0.8125rem] text-text-muted">{note}</p>}
-      <div className="mt-3.5">{children}</div>
-    </section>
-  );
+/** Раздел только для чтения — ребёнок смотрит, что ведёт за него родитель. */
+function ReadOnlySection({ section, profile, name }: { section: PlayerSection; profile: PlayerProfile; name: string }) {
+  if (section === 'avatar') {
+    return <PlayerAvatar fileId={profile.avatarFileId} name={name} size="lg" />;
+  }
+
+  if (section === 'equipment') {
+    return <EquipmentList equipment={profile.equipment} />;
+  }
+
+  if (section === 'rank') {
+    return profile.rank ? (
+      <RankLine rank={profile.rank} />
+    ) : (
+      <p className="text-[0.875rem] text-text-muted">Разряд не указан.</p>
+    );
+  }
+
+  return <AchievementList achievements={profile.achievements} />;
 }
 
 function AvatarBlock({ profile, name, onChange }: { profile: PlayerProfile; name: string; onChange: Update }) {
