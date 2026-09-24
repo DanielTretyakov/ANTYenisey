@@ -4,13 +4,14 @@ import { BookingStatus, GuardianshipStatus } from '@yenisey/database';
 import { notificationsJobEnabled, type Env } from '../config/env';
 import { PrismaService } from '../prisma/prisma.service';
 import { ClientNotifier, loadEntry } from './client-notifier.service';
+import { DigestSchedule } from './digest-schedule';
 import { clubTimezone, zoneClock } from './clock';
 import { MaxTransport } from './max.transport';
 import { reminderAt, reminderDue } from './notification-rules';
 import type { EntryKind } from './render';
 import { StaffSchedule, type SchedulePart } from './staff-schedule';
 
-const ALL_PARTS: ReadonlySet<SchedulePart> = new Set(['clients', 'escalations', 'coachPlans']);
+const ALL_PARTS: ReadonlySet<SchedulePart> = new Set(['clients', 'escalations', 'coachPlans', 'digests']);
 
 /** Раз в минуту: напоминание не должно опаздывать больше, чем на минуту. */
 const INTERVAL_MS = 60_000;
@@ -29,7 +30,8 @@ const EXPIRY_NOTICE_DAYS = 3;
 /**
  * Планировщик уведомлений: то, что случается не по действию человека, а по
  * часам, — напоминания о записях и концы абонементов; персоналу — эскалация
- * неотмеченного присутствия и утренние сообщения (StaffSchedule).
+ * неотмеченного присутствия и план тренера (StaffSchedule); утренние сводки
+ * клуба и платформы (DigestSchedule).
  *
  * Сам ничего не шлёт — ставит строки в очередь, откуда их заберёт отправщик.
  * Ключи идемпотентности делают проход безопасным повторять: второй проход за
@@ -50,6 +52,7 @@ export class NotificationScheduler implements OnApplicationBootstrap, OnModuleDe
     private readonly prisma: PrismaService,
     private readonly notifier: ClientNotifier,
     private readonly staff: StaffSchedule,
+    private readonly digests: DigestSchedule,
     private readonly transport: MaxTransport,
     private readonly config: ConfigService<Env, true>,
   ) {}
@@ -106,8 +109,13 @@ export class NotificationScheduler implements OnApplicationBootstrap, OnModuleDe
     subscriptions: number;
     escalations: number;
     coachPlans: number;
+    clubDigests: number;
+    platformDigests: number;
   }> {
-    const staff = await this.staff.runOnce(now, parts);
+    const staff = {
+      ...(await this.staff.runOnce(now, parts)),
+      ...(parts.has('digests') ? await this.digests.runOnce(now) : { clubDigests: 0, platformDigests: 0 }),
+    };
     const clients = parts.has('clients') ? await this.reachableClients() : [];
 
     if (clients.length === 0) {

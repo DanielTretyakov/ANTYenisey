@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buttonAllowed, renderNotification, rubles, type EntryPayload } from './render.ts';
+import { buttonAllowed, quoted, renderNotification, rubles, type EntryPayload } from './render.ts';
 
 const context = { webOrigin: 'https://ant-yenisey.ru' };
 
@@ -232,4 +232,80 @@ describe('сообщения персоналу', () => {
   });
 
 
+});
+
+describe('утренние сводки', () => {
+  const club = {
+    club: 'Енисей',
+    slug: 'yenisey',
+    timezone: 'Asia/Krasnoyarsk',
+    date: '2026-09-23',
+    favourites: { count: 2, total: 57, people: ['Иванов И.', 'Петрова А.'] },
+    newClients: { count: 0, people: [] },
+    yesterday: { attended: 14, noShows: 2, cancelled: 3, money: 1_240_000, subscriptionSales: { count: 2, amount: 900_000 } },
+    unmarked: 0,
+    today: { trainings: 5, booked: 38, capacity: 60, tournaments: 1, tables: 7 },
+    subscriptions: { expiring: [], empty: [] },
+  };
+
+  it('клуб: вчерашние цифры, деньги и план на сегодня', () => {
+    const { text, link } = renderNotification('CLUB_DIGEST', club, context);
+
+    assert.match(text, /^Сводка клуба «Енисей» за 23 сентября/);
+    assert.match(text, /Своим отметили: 2 \(всего 57\) — Иванов И\., Петрова А\./);
+    assert.match(text, /Новых клиентов: 0/);
+    assert.match(text, /Пришли: 14, не пришли: 2, отмен: 3/);
+    assert.match(text, /Итог дня: 12\u00a0400 ₽, абонементов продано 2 на 9\u00a0000 ₽/);
+    assert.match(text, /Сегодня: занятий 5 \(записано 38 из 60\), турниров 1, аренд 7/);
+    assert.doesNotMatch(text, /Без отметки|Абонемент кончается|Закончились визиты/);
+    assert.doesNotMatch(text, /\n\n\n/);
+    assert.equal(link?.url, 'https://ant-yenisey.ru/clubs/yenisey/desk');
+  });
+
+  it('клуб: неотмеченные и абонементы — только когда есть', () => {
+    const { text } = renderNotification(
+      'CLUB_DIGEST',
+      {
+        ...club,
+        unmarked: 4,
+        subscriptions: {
+          expiring: [{ person: 'Сидоров С.', plan: '8 занятий', expiresAt: '2026-09-25T16:59:59.999Z' }],
+          empty: [{ person: 'Орлова О.', plan: '4 занятия' }],
+        },
+      },
+      context,
+    );
+
+    assert.match(text, /Без отметки: 4/);
+    assert.match(text, /Абонемент кончается в ближайшие 3 дня:\nСидоров С\. — «8 занятий» до 25 сентября/);
+    assert.match(text, /Закончились визиты:\nОрлова О\. — «4 занятия»/);
+  });
+
+  it('платформа: учётки, клубы, «свои» по клубам и здоровье MAX', () => {
+    const { text } = renderNotification(
+      'PLATFORM_DIGEST',
+      {
+        date: '2026-09-23',
+        users: { added: 12, total: 340 },
+        clubs: { added: 0, total: 3 },
+        favourites: { count: 5, byClub: [{ club: 'Енисей', count: 4 }, { club: 'Другой', count: 1 }] },
+        entries: 57,
+        activeClients30: 210,
+        max: { linked: 45, blocked: 2, failed: 0 },
+      },
+      context,
+    );
+
+    assert.match(text, /^Сводка платформы за 23 сентября/);
+    assert.match(text, /Учётки: \+12 \(всего 340\)/);
+    assert.match(text, /Своим отметили: 5 — «Енисей» 4, «Другой» 1/);
+    assert.match(text, /MAX: подключено 45, бот остановлен у 2, не доставлено за день 0/);
+  });
+});
+
+describe('quoted', () => {
+  it('своих кавычек нет — обернуть, есть — оставить как есть', () => {
+    assert.equal(quoted('Енисей'), '«Енисей»');
+    assert.equal(quoted('АНТ «Енисей»'), 'АНТ «Енисей»');
+  });
 });

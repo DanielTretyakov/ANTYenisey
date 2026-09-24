@@ -71,6 +71,9 @@ const envSchema = z
       .refine(isDuration, 'Ожидается длительность вида 30s, 5m, 1h'),
     // Адрес сайта для ссылок в сообщениях. Не задан — первый из CORS_ORIGINS.
     WEB_ORIGIN: optional(z.string().url()),
+    // Пояс утренней сводки платформы: у платформы нет зала, а сводка «за
+    // вчера» должна знать, где кончились сутки.
+    PLATFORM_TIMEZONE: z.string().default('Asia/Krasnoyarsk').refine(isTimeZone, 'Ожидается пояс IANA, например Asia/Krasnoyarsk'),
   })
   .refine((env) => env.JWT_ACCESS_SECRET !== env.JWT_REFRESH_SECRET, {
     // Совпадение секретов означает, что refresh-токен примут как access:
@@ -114,6 +117,15 @@ export function webOrigin(env: Pick<Env, 'WEB_ORIGIN' | 'CORS_ORIGINS'>): string
   const origin = env.WEB_ORIGIN ?? parseCorsOrigins(env.CORS_ORIGINS)[0] ?? 'http://localhost:3000';
 
   return origin.replace(/\/+$/, '');
+}
+
+function isTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat('ru-RU', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isDuration(value: string): boolean {

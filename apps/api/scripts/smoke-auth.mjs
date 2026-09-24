@@ -1929,6 +1929,7 @@ async function main() {
   await notifications();
   await clientNotifications();
   await staffNotifications();
+  await digests();
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
@@ -4240,6 +4241,73 @@ async function staffNotifications() {
     r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: original });
     check('срок напоминания возвращён', 200, r.status);
   }
+}
+
+/**
+ * Утренние сводки в MAX: клуба — администратору, платформы — владельцу
+ * платформы.
+ *
+ * Дата сводки — своя у каждого прогона, далеко в будущем: ключ сводки —
+ * дата, и второй прогон смоука за день упёрся бы в уже отправленную. Сутки
+ * «вчера» у такой даты пустые, поэтому проверяется не содержание дня (его
+ * держат юнит-тесты текстов), а то, что сводка собирается на живой базе,
+ * приходит и не повторяется.
+ */
+async function digests() {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+  let r = await call('/dev/max/sent?maxUserId=0');
+
+  if (r.status !== 200 || !adminEmail || !adminPassword) {
+    console.log('\n=== 38. Утренние сводки в MAX — ПРОПУЩЕНЫ (нет поддельного MAX или нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 38. Утренние сводки в MAX');
+
+  const maxAdmin = (RUN % 1_000_000_000) * 10 + 9;
+  r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const token = r.body?.accessToken ?? '';
+  const asAdmin = (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+
+  r = await asAdmin('/me/notifications/max', { method: 'POST' });
+  await call('/dev/max/events', {
+    method: 'POST',
+    json: {
+      update_type: 'bot_started',
+      timestamp: Date.now(),
+      chat_id: maxAdmin,
+      user: { user_id: maxAdmin, first_name: 'Проба', name: 'Проба', username: null, is_bot: false, last_activity_time: 0 },
+      payload: new URL(r.body?.url ?? 'https://x.invalid').searchParams.get('start'),
+    },
+  });
+
+  const sentTo = async () => (await call(`/dev/max/sent?maxUserId=${maxAdmin}`)).body ?? [];
+  const offset = 30 + (Math.floor(RUN / 1000) % 3000);
+  const morning = new Date(instantAt(dateIn('Asia/Krasnoyarsk', offset), 9 * 60 + 5, 'Asia/Krasnoyarsk'));
+  const run = () => call('/dev/max/schedule', { method: 'POST', json: { now: morning.toISOString(), parts: ['digests'] } });
+
+  r = await run();
+  check('проход сводок', 201, r.status);
+  await call('/dev/max/dispatch', { method: 'POST' });
+  await run();
+  await call('/dev/max/dispatch', { method: 'POST' });
+
+  const club = (await sentTo()).filter((message) => message.text.startsWith('Сводка клуба'));
+  assert('администратору пришла сводка клуба', club.length === 1);
+  assert('в ней «свои» клуба, план на сегодня и итог дня', /всего \d+/.test(club[0]?.text ?? '') && /Сегодня: занятий/.test(club[0]?.text ?? '') && /Итог дня:/.test(club[0]?.text ?? ''));
+
+  r = await asAdmin('/me/notifications');
+
+  if (!r.body?.categories?.some((item) => item.category === 'PLATFORM_DIGEST')) {
+    console.log('     Сводка платформы — ПРОПУЩЕНА (SMOKE_ADMIN не владелец платформы: pnpm db:grant-platform)');
+    return;
+  }
+
+  const platform = (await sentTo()).filter((message) => message.text.startsWith('Сводка платформы'));
+  assert('владельцу платформы пришла сводка платформы', platform.length === 1);
+  assert('в ней учётки, клубы и состояние MAX', /Учётки: \+\d+ \(всего \d+\)/.test(platform[0]?.text ?? '') && /MAX: подключено \d+/.test(platform[0]?.text ?? ''));
 }
 
 main().catch((error) => {

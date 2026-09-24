@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type { Env } from '../config/env';
 import { ClientNotifier } from './client-notifier.service';
 import { DevMaxController } from './dev-max.controller';
+import { DigestSchedule } from './digest-schedule';
 import { NotificationDispatcher } from './dispatcher.job';
 import { MaxBotService } from './max-bot.service';
 import { MaxLinkService } from './max-link.service';
@@ -58,6 +59,7 @@ import { StaffSchedule } from './staff-schedule';
     ClientNotifier,
     StaffNotifier,
     StaffSchedule,
+    DigestSchedule,
   ],
   exports: [NotificationsService, ClientNotifier, StaffNotifier],
 })

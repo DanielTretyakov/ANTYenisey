@@ -77,6 +77,7 @@ services:
       MAX_WEBHOOK_SECRET: ${MAX_WEBHOOK_SECRET:-}
       NOTIFICATIONS_JOB: ${NOTIFICATIONS_JOB:-on}
       WEB_ORIGIN: https://${DOMAIN}
+      PLATFORM_TIMEZONE: ${PLATFORM_TIMEZONE:-Asia/Krasnoyarsk}
     expose:
       - '3001'
     healthcheck:

@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   console.log(
     revoke
       ? `${user.fullName} (${email}) больше не владелец платформы.`
-      : `${user.fullName} (${email}) — владелец платформы. Сводка придёт в MAX, когда он его подключит.`,
+      : `${user.fullName} (${email}) — владелец платформы. Сводка платформы пойдёт в MAX после его подключения в личном кабинете.`,
   );
 }
 

@@ -8,8 +8,8 @@ import { morningDue } from './notification-rules';
 import type { CoachDayPayload, EntryKind, EscalationPayload } from './render';
 import { StaffNotifier } from './staff-notifier.service';
 
-/** Часть прохода планировщика: клиентам, эскалации, планы тренеров. */
-export type SchedulePart = 'clients' | 'escalations' | 'coachPlans';
+/** Часть прохода планировщика: клиентам, эскалации, планы тренеров, сводки. */
+export type SchedulePart = 'clients' | 'escalations' | 'coachPlans' | 'digests';
 
 /** Одна неотмеченная группа: занятие, турнир или бронь стола. */
 interface PendingGroup {

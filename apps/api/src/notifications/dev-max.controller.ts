@@ -5,7 +5,7 @@ import { MaxBotService } from './max-bot.service';
 import { NotificationScheduler } from './scheduler.job';
 import type { SchedulePart } from './staff-schedule';
 
-const PARTS: readonly SchedulePart[] = ['clients', 'escalations', 'coachPlans'];
+const PARTS: readonly SchedulePart[] = ['clients', 'escalations', 'coachPlans', 'digests'];
 import { FakeMaxTransport, MaxTransport, type FakeSentMessage } from './max.transport';
 
 /**
@@ -71,7 +71,7 @@ export class DevMaxController {
     const parts = new Set((body.parts ?? []).filter((part): part is SchedulePart => PARTS.includes(part as SchedulePart)));
 
     if (Number.isNaN(now.getTime()) || parts.size === 0) {
-      throw new BadRequestException('now — момент ISO-8601, parts — clients, escalations или coachPlans');
+      throw new BadRequestException('now — момент ISO-8601, parts — clients, escalations, coachPlans или digests');
     }
 
     return this.scheduler.runOnce(now, parts);

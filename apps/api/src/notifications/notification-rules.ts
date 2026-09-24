@@ -20,6 +20,8 @@ export type NotificationKind =
   | 'COACH_ENTRY_CHANGED'
   | 'COACH_DAY_PLAN'
   | 'RANK_PENDING'
+  | 'CLUB_DIGEST'
+  | 'PLATFORM_DIGEST'
   | 'SUBSCRIPTION_PAST_DUE';
 
 export type Category =
@@ -56,6 +58,8 @@ export const CATEGORY_OF: Record<NotificationKind, Category> = {
   COACH_ENTRY_CHANGED: 'COACH_GROUPS',
   COACH_DAY_PLAN: 'COACH_GROUPS',
   RANK_PENDING: 'CLUB_ALERTS',
+  CLUB_DIGEST: 'CLUB_DIGEST',
+  PLATFORM_DIGEST: 'PLATFORM_DIGEST',
   SUBSCRIPTION_PAST_DUE: 'CLUB_ALERTS',
 };
 
@@ -151,7 +155,7 @@ function inQuietHours(minutes: number): boolean {
 }
 
 /** «2026-09-23» → «2026-09-24» и назад. Календарь, а не мгновения: DST не при чём. */
-function shiftDate(date: string, days: number): string {
+export function shiftDate(date: string, days: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 }
 
@@ -229,6 +233,9 @@ export function reminderDue(entry: { createdAt: Date; startsAt: Date }, due: Dat
 
 /** Утреннее сообщение тренеру — его план на день — в 08:00. */
 export const MORNING_MINUTE = 8 * 60;
+
+/** Утренние сводки — клуба и платформы — в 09:00. */
+export const DIGEST_MINUTE = 9 * 60;
 
 /** До какого часа утреннее ещё уместно: лёг планировщик до обеда — сегодня уже не шлём. */
 const MORNING_LATEST_MINUTE = 12 * 60;

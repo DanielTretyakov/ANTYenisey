@@ -128,6 +128,43 @@ export interface RankPendingPayload {
   slug: string;
 }
 
+/** Утренняя сводка клуба: за вчера, сейчас и на сегодня. */
+export interface ClubDigestPayload {
+  club: string;
+  slug: string;
+  timezone: string;
+  /** Местная дата, за которую сводка: «вчера». */
+  date: string;
+  favourites: { count: number; total: number; people: string[] };
+  newClients: { count: number; people: string[] };
+  yesterday: {
+    attended: number;
+    noShows: number;
+    cancelled: number;
+    /** Итог дня тем же `moneyOf`, что на экране смены, копейки. */
+    money: number;
+    subscriptionSales: { count: number; amount: number };
+  };
+  /** Прошедшие записи без отметки прямо сейчас. */
+  unmarked: number;
+  today: { trainings: number; booked: number; capacity: number; tournaments: number; tables: number };
+  subscriptions: {
+    expiring: { person: string; plan: string; expiresAt: string }[];
+    empty: { person: string; plan: string }[];
+  };
+}
+
+/** Утренняя сводка платформы — владельцу платформы. */
+export interface PlatformDigestPayload {
+  date: string;
+  users: { added: number; total: number };
+  clubs: { added: number; total: number };
+  favourites: { count: number; byClub: { club: string; count: number }[] };
+  entries: number;
+  activeClients30: number;
+  max: { linked: number; blocked: number; failed: number };
+}
+
 /** Сколько имён показывать в списке: дальше — «и ещё N». */
 const NAMES_SHOWN = 10;
 
@@ -202,15 +239,15 @@ export function renderNotification(type: string, payload: unknown, context: Rend
             ? `На абонементе «${p.plan}»${whose} остался один визит.`
             : `Визиты на абонементе «${p.plan}»${whose} закончились.`;
 
-      return { text: lines(what, `Продлить можно у администратора клуба «${p.club}».`), link: cabinet };
+      return { text: lines(what, `Продлить можно у администратора клуба ${quoted(p.club)}.`), link: cabinet };
     }
 
     case 'RANK_DECIDED': {
       const p = payload as RankPayload;
       const text =
         p.decision === 'VERIFIED'
-          ? `Клуб «${p.club}» подтвердил ваш разряд: ${p.rank}.`
-          : lines(`Клуб «${p.club}» не подтвердил разряд ${p.rank}.`, p.reason ? `Причина: ${p.reason}` : null);
+          ? `Клуб ${quoted(p.club)} подтвердил ваш разряд: ${p.rank}.`
+          : lines(`Клуб ${quoted(p.club)} не подтвердил разряд ${p.rank}.`, p.reason ? `Причина: ${p.reason}` : null);
 
       return { text, link: cabinet };
     }
@@ -244,7 +281,7 @@ export function renderNotification(type: string, payload: unknown, context: Rend
       );
 
       return {
-        text: lines(`Сегодня у вас в клубе «${p.club}»:`, ...rows),
+        text: lines(`Сегодня у вас в клубе ${quoted(p.club)}:`, ...rows),
         link: { label: 'Мои группы', url: `${context.webOrigin}/clubs/${p.slug}/coach` },
       };
     }
@@ -287,6 +324,62 @@ export function renderNotification(type: string, payload: unknown, context: Rend
       };
     }
 
+    case 'CLUB_DIGEST': {
+      const p = payload as ClubDigestPayload;
+      const y = p.yesterday;
+      const sales =
+        y.subscriptionSales.count > 0
+          ? `, абонементов продано ${y.subscriptionSales.count} на ${rubles(y.subscriptionSales.amount)}`
+          : '';
+      const expiring = p.subscriptions.expiring.map(
+        (row) => `${row.person} — «${row.plan}» до ${date(row.expiresAt, p.timezone)}`,
+      );
+      const empty = p.subscriptions.empty.map((row) => `${row.person} — «${row.plan}»`);
+
+      return {
+        text: lines(
+          `Сводка клуба ${quoted(p.club)} за ${calendar(p.date)}`,
+          '',
+          p.favourites.count > 0
+            ? `Своим отметили: ${p.favourites.count} (всего ${p.favourites.total}) — ${names(p.favourites.people, p.favourites.count)}`
+            : `Своим отметили: 0 (всего ${p.favourites.total})`,
+          p.newClients.count > 0
+            ? `Новых клиентов: ${p.newClients.count} — ${names(p.newClients.people, p.newClients.count)}`
+            : 'Новых клиентов: 0',
+          `Пришли: ${y.attended}, не пришли: ${y.noShows}, отмен: ${y.cancelled}`,
+          `Итог дня: ${rubles(y.money)}${sales}`,
+          p.unmarked > 0 ? `Без отметки: ${p.unmarked} — отметьте на экране смены` : null,
+          '',
+          `Сегодня: занятий ${p.today.trainings} (записано ${p.today.booked} из ${p.today.capacity}), турниров ${p.today.tournaments}, аренд ${p.today.tables}`,
+          expiring.length > 0 ? '' : null,
+          expiring.length > 0 ? `Абонемент кончается в ближайшие 3 дня:\n${expiring.join('\n')}` : null,
+          empty.length > 0 ? '' : null,
+          empty.length > 0 ? `Закончились визиты:\n${empty.join('\n')}` : null,
+        ),
+        link: { label: 'Экран смены', url: `${context.webOrigin}/clubs/${p.slug}/desk` },
+      };
+    }
+
+    case 'PLATFORM_DIGEST': {
+      const p = payload as PlatformDigestPayload;
+      const byClub = p.favourites.byClub.map((row) => `${quoted(row.club)} ${row.count}`).join(', ');
+
+      return {
+        text: lines(
+          `Сводка платформы за ${calendar(p.date)}`,
+          '',
+          `Учётки: +${p.users.added} (всего ${p.users.total})`,
+          `Клубы: +${p.clubs.added} (всего ${p.clubs.total})`,
+          `Своим отметили: ${p.favourites.count}${byClub ? ` — ${byClub}` : ''}`,
+          `Новых записей: ${p.entries}`,
+          `Активных клиентов за 30 дней: ${p.activeClients30}`,
+          '',
+          `MAX: подключено ${p.max.linked}, бот остановлен у ${p.max.blocked}, не доставлено за день ${p.max.failed}`,
+        ),
+        link: { label: 'Открыть сайт', url: context.webOrigin },
+      };
+    }
+
     default:
       throw new Error(`Нет шаблона для уведомления ${type}`);
   }
@@ -309,7 +402,7 @@ function entryLines(p: EntryPayload): string[] {
         ? `Турнир «${p.title}»`
         : `Аренда: ${p.title}`;
 
-  return [what, when(p.entry.startsAt, p.timezone), `${p.place ? `${p.place} · ` : ''}клуб «${p.club}»`];
+  return [what, when(p.entry.startsAt, p.timezone), `${p.place ? `${p.place} · ` : ''}клуб ${quoted(p.club)}`];
 }
 
 /** Деньги отмены: у абонемента — судьба визита, у разовой записи — сумма. */
@@ -323,8 +416,28 @@ function cancelMoney(p: EntryPayload): string {
     : 'Бесплатно: отмена в срок.';
 }
 
+/** Строки через перевод строки; null пропускается, '' — намеренный отступ между блоками. */
 function lines(...parts: (string | null | undefined)[]): string {
-  return parts.filter((part): part is string => Boolean(part)).join('\n');
+  return parts
+    .filter((part): part is string => part !== null && part !== undefined)
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * Название клуба в кавычках — если своих кавычек в нём нет. Клуб «Енисея»
+ * называется «АНТ «Енисей»», и обёртка дала бы «АНТ «Енисей»» в кавычках ещё раз.
+ */
+export function quoted(name: string): string {
+  return /[«"„]/.test(name) ? name : `«${name}»`;
+}
+
+/** «2026-09-23» → «23 сентября». Дата уже местная — пояс не нужен. */
+function calendar(day: string): string {
+  return new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', day: 'numeric', month: 'long' }).format(
+    new Date(`${day}T00:00:00Z`),
+  );
 }
 
 /** «пт, 26 сентября, 18:00» по поясу зала. */
