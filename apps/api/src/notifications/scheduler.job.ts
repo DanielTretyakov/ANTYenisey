@@ -7,6 +7,8 @@ import { ClientNotifier, loadEntry } from './client-notifier.service';
 import { DigestSchedule } from './digest-schedule';
 import { clubTimezone, zoneClock } from './clock';
 import { MaxTransport } from './max.transport';
+import { reachableUserIds } from './notifications.service';
+import { PushTransport } from './push.transport';
 import { reminderAt, reminderDue } from './notification-rules';
 import type { EntryKind } from './render';
 import { StaffSchedule, type SchedulePart } from './staff-schedule';
@@ -54,6 +56,7 @@ export class NotificationScheduler implements OnApplicationBootstrap, OnModuleDe
     private readonly staff: StaffSchedule,
     private readonly digests: DigestSchedule,
     private readonly transport: MaxTransport,
+    private readonly push: PushTransport,
     private readonly config: ConfigService<Env, true>,
   ) {}
 
@@ -63,7 +66,7 @@ export class NotificationScheduler implements OnApplicationBootstrap, OnModuleDe
       NODE_ENV: this.config.get('NODE_ENV', { infer: true }),
     });
 
-    if (enabled && this.transport.mode !== 'off') {
+    if (enabled && (this.transport.mode !== 'off' || this.push.mode !== 'off')) {
       this.schedule(FIRST_RUN_DELAY);
     }
   }
@@ -129,10 +132,9 @@ export class NotificationScheduler implements OnApplicationBootstrap, OnModuleDe
     };
   }
 
-  /** Клиенты, о которых есть кому сообщить: сами с MAX или их родитель с MAX. */
+  /** Клиенты, о которых есть кому сообщить: сами на связи или их родитель на связи. */
   private async reachableClients(): Promise<string[]> {
-    const linked = await this.prisma.maxLink.findMany({ where: { blockedAt: null }, select: { userId: true } });
-    const ids = linked.map((link) => link.userId);
+    const ids = await reachableUserIds(this.prisma);
 
     if (ids.length === 0) {
       return [];

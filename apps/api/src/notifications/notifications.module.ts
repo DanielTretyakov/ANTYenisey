@@ -12,12 +12,15 @@ import { MaxWebhookController } from './max-webhook.controller';
 import { DisabledMaxTransport, FakeMaxTransport, LiveMaxTransport, MaxTransport } from './max.transport';
 import { MeNotificationsController } from './me-notifications.controller';
 import { NotificationsService } from './notifications.service';
+import { DevPushController } from './dev-push.controller';
+import { DisabledPushTransport, FakePushTransport, LivePushTransport, PushTransport } from './push.transport';
 import { NotificationScheduler } from './scheduler.job';
 import { StaffNotifier } from './staff-notifier.service';
 import { StaffSchedule } from './staff-schedule';
 
 /**
- * Уведомления: очередь, её отправщик и бот в мессенджере MAX.
+ * Уведомления: очередь, её отправщик, бот в мессенджере MAX и уведомления в
+ * браузер (Web Push).
  *
  * Транспорт выбирается один раз при старте:
  *   есть MAX_BOT_TOKEN  → настоящий Bot API;
@@ -25,7 +28,7 @@ import { StaffSchedule } from './staff-schedule';
  *   нет, production     → выключен: подключить MAX нельзя, и страница
  *                          настроек так и говорит.
  * Поддельный в production невозможен намеренно — у него открытые отладочные
- * маршруты.
+ * маршруты. Web Push выбирается так же, по ключам VAPID.
  *
  * `ClientNotifier` и `StaffNotifier` экспортируются: сообщения клиенту и
  * персоналу ставят в очередь модули записи, отметки, разряда и семьи —
@@ -33,7 +36,7 @@ import { StaffSchedule } from './staff-schedule';
  * Сам модуль от них не зависит, поэтому циклов импорта нет.
  */
 @Module({
-  controllers: [MeNotificationsController, MaxWebhookController, DevMaxController],
+  controllers: [MeNotificationsController, MaxWebhookController, DevMaxController, DevPushController],
   providers: [
     {
       provide: MaxTransport,
@@ -48,6 +51,23 @@ import { StaffSchedule } from './staff-schedule';
         return config.get('NODE_ENV', { infer: true }) === 'production'
           ? new DisabledMaxTransport()
           : new FakeMaxTransport();
+      },
+    },
+    {
+      provide: PushTransport,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<Env, true>): PushTransport => {
+        const publicKey = config.get('VAPID_PUBLIC_KEY', { infer: true });
+        const privateKey = config.get('VAPID_PRIVATE_KEY', { infer: true });
+        const subject = config.get('VAPID_SUBJECT', { infer: true });
+
+        if (publicKey && privateKey && subject) {
+          return new LivePushTransport(publicKey, privateKey, subject);
+        }
+
+        return config.get('NODE_ENV', { infer: true }) === 'production'
+          ? new DisabledPushTransport()
+          : new FakePushTransport();
       },
     },
     NotificationsService,

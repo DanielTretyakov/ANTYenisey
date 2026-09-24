@@ -1045,3 +1045,29 @@ ALTER TABLE "MaxLinkToken"
 -- Что один пользователь MAX привязан к одной учётке и наоборот — это не
 -- CHECK, а два уникальных ключа MaxLink (userId — первичный, maxUserId —
 -- уникальный).
+
+-- ---------------------------------------------------------------------------
+-- 23. Уведомления в браузер (Web Push)
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_web_push. Адрес подписки выдаёт служба push браузера,
+-- и на него API сам ходит запросом: адрес не по https — не подписка, а
+-- попытка заставить сервер постучаться куда-то внутрь сети.
+ALTER TABLE "PushSubscription"
+  ADD CONSTRAINT "PushSubscription_endpoint_https"
+  CHECK ("endpoint" ~ '^https://' AND char_length("endpoint") <= 1000);
+
+ALTER TABLE "PushSubscription"
+  ADD CONSTRAINT "PushSubscription_keys_sane"
+  CHECK (
+    char_length("p256dh") BETWEEN 1 AND 200
+    AND char_length("auth") BETWEEN 1 AND 100
+    AND ("userAgent" IS NULL OR char_length("userAgent") <= 300)
+  );
+
+-- Чего здесь НЕТ и почему.
+--
+-- Что адрес принадлежит настоящей службе push (Google, Mozilla, Apple) —
+-- список служб меняется без нас, и держать его в CHECK значило бы однажды
+-- отказать новому браузеру. Хватает https: отправитель не следует
+-- перенаправлениям и не читает ответ дальше кода.

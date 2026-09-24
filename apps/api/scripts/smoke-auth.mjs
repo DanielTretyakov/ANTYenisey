@@ -1930,6 +1930,7 @@ async function main() {
   await clientNotifications();
   await staffNotifications();
   await digests();
+  await webPush();
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
@@ -4308,6 +4309,76 @@ async function digests() {
   const platform = (await sentTo()).filter((message) => message.text.startsWith('Сводка платформы'));
   assert('владельцу платформы пришла сводка платформы', platform.length === 1);
   assert('в ней учётки, клубы и состояние MAX', /Учётки: \+\d+ \(всего \d+\)/.test(platform[0]?.text ?? '') && /MAX: подключено \d+/.test(platform[0]?.text ?? ''));
+}
+
+/**
+ * Уведомления в браузер (Web Push): подписка устройства, доставка на все
+ * устройства человека, отозванная подписка, переход подписки к другому
+ * человеку и отписка.
+ *
+ * Через поддельные службы push (/dev/push): настоящий браузер смоуку не
+ * поднять, а шифрование сообщения — забота библиотеки web-push.
+ */
+async function webPush() {
+  let r = await call('/dev/push/sent?endpoint=none');
+
+  if (r.status !== 200) {
+    console.log('\n=== 39. Уведомления в браузер — ПРОПУЩЕНЫ (нет поддельных служб push: API с ключами VAPID или production)');
+    return;
+  }
+
+  console.log('\n=== 39. Уведомления в браузер');
+
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+  const endpoint = (tag) => `https://push.example.test/${RUN}-${tag}`;
+  const device = (tag) => ({ endpoint: endpoint(tag), keys: { p256dh: `BPk${tag}Key`, auth: `au${tag}` }, expirationTime: null });
+  const sentTo = async (tag) => (await call(`/dev/push/sent?endpoint=${encodeURIComponent(endpoint(tag))}`)).body ?? [];
+
+  r = await post('/auth/register', registration({ lastName: 'Браузеров' }));
+  const asA = as(r.body?.accessToken ?? '');
+
+  r = await asA('/me/notifications');
+  assert('уведомления в браузере доступны', r.body?.push?.available === true && typeof r.body?.push?.publicKey === 'string');
+  assert('устройств пока нет', r.body?.push?.devices === 0);
+
+  r = await asA('/me/notifications/push', { method: 'PUT', json: { ...device('x'), endpoint: 'http://10.0.0.1/admin' } });
+  check('подписка не на https отвергнута', 400, r.status);
+
+  r = await asA('/me/notifications/push', { method: 'PUT', json: device('a') });
+  check('устройство подписано — целиком, как отдаёт браузер', 200, r.status);
+  r = await asA('/me/notifications/push', { method: 'PUT', json: device('b') });
+  assert('второе устройство', r.body?.push?.devices === 2);
+
+  // Второе устройство браузер отозвал: служба push ответит на него 410.
+  await call('/dev/push/gone', { method: 'POST', json: { endpoint: endpoint('b') } });
+
+  r = await asA('/me/notifications/test', { method: 'POST' });
+  check('проверочное без MAX, только браузер', 204, r.status);
+  await call('/dev/max/dispatch', { method: 'POST' });
+
+  const delivered = await sentTo('a');
+  assert('дошло до браузера заголовком и текстом', delivered.at(-1)?.title === 'Енисей' && /Проверка связи/.test(delivered.at(-1)?.body ?? ''));
+  assert('ведёт в настройки уведомлений', /\/cabinet#notifications$/.test(delivered.at(-1)?.url ?? ''));
+
+  r = await asA('/me/notifications');
+  assert('отозванная подписка удалена', r.body?.push?.devices === 1);
+
+  // Тот же браузер, вошёл другой человек: подписка переходит к нему.
+  r = await post('/auth/register', registration({ lastName: 'Сменщиков' }));
+  const asB = as(r.body?.accessToken ?? '');
+  r = await asB('/me/notifications/push', { method: 'PUT', json: device('a') });
+  assert('подписка перешла ко второму', r.body?.push?.devices === 1);
+  r = await asA('/me/notifications');
+  assert('у первого её больше нет', r.body?.push?.devices === 0);
+
+  r = await asA('/me/notifications/push/unsubscribe', { method: 'POST', json: { endpoint: endpoint('a') } });
+  r = await asB('/me/notifications');
+  assert('чужую подписку не снять', r.body?.push?.devices === 1);
+
+  r = await asB('/me/notifications/push/unsubscribe', { method: 'POST', json: { endpoint: endpoint('a') } });
+  check('своя подписка снята', 201, r.status);
+  assert('устройств не осталось', r.body?.push?.devices === 0);
 }
 
 main().catch((error) => {

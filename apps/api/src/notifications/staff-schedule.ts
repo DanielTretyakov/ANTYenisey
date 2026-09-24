@@ -3,6 +3,7 @@ import { BookingStatus, Role, type Prisma } from '@yenisey/database';
 import { shortName } from '@yenisey/types';
 import { escalationDue, type AttendancePolicy } from '../attendance/attendance-rules';
 import { PrismaService } from '../prisma/prisma.service';
+import { reachableUserIds } from './notifications.service';
 import { clubTimezone, zoneClock } from './clock';
 import { morningDue } from './notification-rules';
 import type { CoachDayPayload, EntryKind, EscalationPayload } from './render';
@@ -30,7 +31,7 @@ interface PendingGroup {
  * утренней сводке клуба. Часть NotificationScheduler — он и
  * зовёт `runOnce` раз в минуту.
  *
- * Смотрит только на клубы, где хоть кто-то из персонала привязал MAX: иначе
+ * Смотрит только на клубы, где хоть кто-то из персонала на связи: иначе
  * слать некому, а `reminderSentAt` без отправленного напоминания был бы
  * неправдой.
  */
@@ -46,9 +47,7 @@ export class StaffSchedule {
       return { escalations: 0, coachPlans: 0 };
     }
 
-    const linked = (await this.prisma.maxLink.findMany({ where: { blockedAt: null }, select: { userId: true } })).map(
-      (link) => link.userId,
-    );
+    const linked = await reachableUserIds(this.prisma);
 
     if (linked.length === 0) {
       return { escalations: 0, coachPlans: 0 };

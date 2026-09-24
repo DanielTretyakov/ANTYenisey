@@ -7,7 +7,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { stillRelevant } from './client-notifier.service';
 import { MaxTransport } from './max.transport';
 import { afterFailure } from './notification-rules';
-import { renderNotification } from './render';
+import { combinePush, toPushPayload, type PushOutcome } from './push-rules';
+import { PushTransport } from './push.transport';
+import { renderNotification, type RenderedMessage } from './render';
 
 /** Сколько строк берётся за проход. */
 const BATCH = 25;
@@ -27,9 +29,17 @@ const PER_USER_GAP_MS = 600;
 
 const FIRST_RUN_DELAY = 5_000;
 
+/** Итог строки очереди — одинаковый у обоих каналов. */
+type RowOutcome =
+  | { kind: 'sent' }
+  | { kind: 'skipped'; error: string }
+  | { kind: 'retry'; error: string }
+  | { kind: 'fatal'; error: string };
+
 interface ClaimedRow {
   id: string;
   userId: string;
+  channel: string;
   tenantId: string | null;
   type: string;
   payload: unknown;
@@ -54,10 +64,14 @@ export class NotificationDispatcher implements OnApplicationBootstrap, OnModuleD
   private timer: NodeJS.Timeout | null = null;
   private running: Promise<unknown> | null = null;
   private stopped = false;
+  /** Когда уходило последнее сообщение в MAX — всего и каждому: лимиты бота. */
+  private lastSend = 0;
+  private readonly lastToUser = new Map<string, number>();
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly transport: MaxTransport,
+    private readonly max: MaxTransport,
+    private readonly push: PushTransport,
     private readonly config: ConfigService<Env, true>,
   ) {}
 
@@ -67,16 +81,16 @@ export class NotificationDispatcher implements OnApplicationBootstrap, OnModuleD
       NODE_ENV: this.config.get('NODE_ENV', { infer: true }),
     });
 
-    if (!enabled || this.transport.mode === 'off') {
+    if (!enabled || (this.max.mode === 'off' && this.push.mode === 'off')) {
       this.logger.log(
-        this.transport.mode === 'off'
-          ? 'Отправка уведомлений выключена: MAX не настроен'
+        enabled
+          ? 'Отправка уведомлений выключена: не настроены ни MAX, ни Web Push'
           : 'Отправка уведомлений выключена (NOTIFICATIONS_JOB)',
       );
       return;
     }
 
-    this.logger.log(`Отправка уведомлений включена, транспорт ${this.transport.mode}`);
+    this.logger.log(`Отправка уведомлений включена: MAX — ${this.max.mode}, Web Push — ${this.push.mode}`);
     this.schedule(FIRST_RUN_DELAY);
   }
 
@@ -127,36 +141,39 @@ export class NotificationDispatcher implements OnApplicationBootstrap, OnModuleD
       return { claimed: 0, sent: 0 };
     }
 
-    const links = await this.prisma.maxLink.findMany({
-      where: { userId: { in: [...new Set(claimed.map((row) => row.userId))] } },
-      select: { userId: true, maxUserId: true, blockedAt: true },
-    });
+    const users = [...new Set(claimed.map((row) => row.userId))];
+    const [links, subscriptions] = await Promise.all([
+      this.prisma.maxLink.findMany({
+        where: { userId: { in: users } },
+        select: { userId: true, maxUserId: true, blockedAt: true },
+      }),
+      this.prisma.pushSubscription.findMany({
+        where: { userId: { in: users } },
+        select: { id: true, userId: true, endpoint: true, p256dh: true, auth: true },
+      }),
+    ]);
     const linkOf = new Map(links.map((link) => [link.userId, link]));
+    const devicesOf = new Map<string, typeof subscriptions>();
+
+    for (const subscription of subscriptions) {
+      devicesOf.set(subscription.userId, [...(devicesOf.get(subscription.userId) ?? []), subscription]);
+    }
+
     const origin = webOrigin({
       WEB_ORIGIN: this.config.get('WEB_ORIGIN', { infer: true }),
       CORS_ORIGINS: this.config.get('CORS_ORIGINS', { infer: true }),
     });
 
-    const lastToUser = new Map<string, number>();
-    let lastSend = 0;
     let sent = 0;
 
     for (const row of claimed) {
-      const link = linkOf.get(row.userId);
-
-      // Привязку сняли или бота остановили, пока строка ждала очереди.
-      if (!link || link.blockedAt) {
-        await this.finish(row.id, NotificationStatus.SKIPPED, link ? 'бот остановлен' : 'нет привязки MAX');
-        continue;
-      }
-
       // Напоминание об отменённой или перенесённой записи — хуже тишины.
       if (!(await stillRelevant(this.prisma, row))) {
         await this.finish(row.id, NotificationStatus.SKIPPED, 'устарело: запись отменена или перенесена');
         continue;
       }
 
-      let message;
+      let message: RenderedMessage;
 
       try {
         message = renderNotification(row.type, row.payload, { webOrigin: origin });
@@ -165,11 +182,10 @@ export class NotificationDispatcher implements OnApplicationBootstrap, OnModuleD
         continue;
       }
 
-      await pause(Math.max(lastSend + GLOBAL_GAP_MS, (lastToUser.get(row.userId) ?? 0) + PER_USER_GAP_MS) - Date.now());
-
-      const outcome = await this.transport.send({ maxUserId: link.maxUserId, ...message });
-      lastSend = Date.now();
-      lastToUser.set(row.userId, lastSend);
+      const outcome =
+        row.channel === 'WEB_PUSH'
+          ? await this.sendPush(row, message, devicesOf.get(row.userId) ?? [], origin)
+          : await this.sendMax(row, message, linkOf.get(row.userId));
 
       switch (outcome.kind) {
         case 'sent':
@@ -180,13 +196,7 @@ export class NotificationDispatcher implements OnApplicationBootstrap, OnModuleD
           sent += 1;
           break;
 
-        case 'blocked':
-          // Человек остановил бота: всё, что ему ещё лежит в очереди, отпадёт
-          // тем же путём, а привязка ждёт, пока он запустит бота снова.
-          await this.prisma.maxLink.updateMany({
-            where: { userId: row.userId, blockedAt: null },
-            data: { blockedAt: new Date() },
-          });
+        case 'skipped':
           await this.finish(row.id, NotificationStatus.SKIPPED, outcome.error);
           break;
 
@@ -210,6 +220,68 @@ export class NotificationDispatcher implements OnApplicationBootstrap, OnModuleD
     return { claimed: claimed.length, sent };
   }
 
+  /** В MAX — с паузами под лимиты бота. */
+  private async sendMax(
+    row: ClaimedRow,
+    message: RenderedMessage,
+    link: { maxUserId: bigint; blockedAt: Date | null } | undefined,
+  ): Promise<RowOutcome> {
+    // Привязку сняли или бота остановили, пока строка ждала очереди.
+    if (!link || link.blockedAt) {
+      return { kind: 'skipped', error: link ? 'бот остановлен' : 'нет привязки MAX' };
+    }
+
+    await pause(Math.max(this.lastSend + GLOBAL_GAP_MS, (this.lastToUser.get(row.userId) ?? 0) + PER_USER_GAP_MS) - Date.now());
+
+    const outcome = await this.max.send({ maxUserId: link.maxUserId, ...message });
+    this.lastSend = Date.now();
+    this.lastToUser.set(row.userId, this.lastSend);
+
+    if (outcome.kind === 'blocked') {
+      // Человек остановил бота: всё, что ему ещё лежит в очереди, отпадёт тем
+      // же путём, а привязка ждёт, пока он запустит бота снова.
+      await this.prisma.maxLink.updateMany({
+        where: { userId: row.userId, blockedAt: null },
+        data: { blockedAt: new Date() },
+      });
+
+      return { kind: 'skipped', error: outcome.error };
+    }
+
+    return outcome;
+  }
+
+  /**
+   * В браузер — на все устройства человека. Отозванные подписки (404, 410)
+   * удаляются сразу: слать туда больше нечего.
+   */
+  private async sendPush(
+    row: ClaimedRow,
+    message: RenderedMessage,
+    devices: readonly { id: string; endpoint: string; p256dh: string; auth: string }[],
+    origin: string,
+  ): Promise<RowOutcome> {
+    if (devices.length === 0) {
+      return { kind: 'skipped', error: 'нет подписок браузера' };
+    }
+
+    const payload = toPushPayload(message, { webOrigin: origin, tag: row.id });
+    const outcomes: PushOutcome[] = [];
+
+    for (const device of devices) {
+      const outcome = await this.push.send(device, payload);
+      outcomes.push(outcome);
+
+      if (outcome.kind === 'gone') {
+        await this.prisma.pushSubscription.deleteMany({ where: { id: device.id } });
+      } else if (outcome.kind === 'sent') {
+        await this.prisma.pushSubscription.updateMany({ where: { id: device.id }, data: { lastSentAt: new Date() } });
+      }
+    }
+
+    return combinePush(outcomes);
+  }
+
   /**
    * Аренда пачки: сдвинуть срок и засчитать попытку одним оператором.
    *
@@ -226,12 +298,12 @@ export class NotificationDispatcher implements OnApplicationBootstrap, OnModuleD
       SET "sendAfter" = ${lease}, "attempts" = "attempts" + 1
       WHERE "id" IN (
         SELECT "id" FROM "Notification"
-        WHERE "status" = 'PENDING' AND "channel" = 'MAX' AND "sendAfter" <= ${now}
+        WHERE "status" = 'PENDING' AND "sendAfter" <= ${now}
         ORDER BY "sendAfter", "createdAt"
         LIMIT ${BATCH}
         FOR UPDATE SKIP LOCKED
       )
-      RETURNING "id", "userId", "tenantId", "type"::text AS "type", "payload", "attempts", "createdAt"
+      RETURNING "id", "userId", "channel"::text AS "channel", "tenantId", "type"::text AS "type", "payload", "attempts", "createdAt"
     `);
 
     return rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));

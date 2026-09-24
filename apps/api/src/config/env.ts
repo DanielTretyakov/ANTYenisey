@@ -71,6 +71,17 @@ const envSchema = z
       .refine(isDuration, 'Ожидается длительность вида 30s, 5m, 1h'),
     // Адрес сайта для ссылок в сообщениях. Не задан — первый из CORS_ORIGINS.
     WEB_ORIGIN: optional(z.string().url()),
+    // Уведомления в браузер (Web Push). Ключи VAPID подписывают каждое
+    // сообщение: служба push браузера доставит его только от того, чей
+    // открытый ключ браузер получил при подписке. Сменить пару — значит
+    // потерять все подписки, поэтому она генерируется один раз:
+    //   npx web-push generate-vapid-keys
+    // Без ключей в production уведомлений в браузер нет; в разработке пара
+    // заводится на время запуска, а сообщения копит поддельный транспорт.
+    VAPID_PUBLIC_KEY: optional(z.string().regex(/^[A-Za-z0-9_-]{80,100}$/, 'Открытый ключ VAPID в base64url')),
+    VAPID_PRIVATE_KEY: optional(z.string().regex(/^[A-Za-z0-9_-]{40,50}$/, 'Закрытый ключ VAPID в base64url')),
+    // Контакт отправителя для служб push: mailto: или https-адрес.
+    VAPID_SUBJECT: optional(z.string().regex(/^(mailto:[^@\s]+@[^@\s]+|https:\/\/\S+)$/, 'mailto:почта или https-адрес')),
     // Пояс утренней сводки платформы: у платформы нет зала, а сводка «за
     // вчера» должна знать, где кончились сутки.
     PLATFORM_TIMEZONE: z.string().default('Asia/Krasnoyarsk').refine(isTimeZone, 'Ожидается пояс IANA, например Asia/Krasnoyarsk'),
@@ -85,7 +96,17 @@ const envSchema = z
     // Без адреса бота не собрать ссылку привязки, и токен лежал бы без дела.
     message: 'Задан MAX_BOT_TOKEN, но не задан MAX_BOT_LINK',
     path: ['MAX_BOT_LINK'],
-  });
+  })
+  .refine(
+    (env) => [env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY, env.VAPID_SUBJECT].every((value) => value === undefined) ||
+      [env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY, env.VAPID_SUBJECT].every((value) => value !== undefined),
+    {
+      // Половина набора — это подписки, которые браузер примет, а служба push
+      // откажется доставлять.
+      message: 'VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY и VAPID_SUBJECT задаются вместе',
+      path: ['VAPID_PUBLIC_KEY'],
+    },
+  );
 
 export type Env = z.infer<typeof envSchema>;
 

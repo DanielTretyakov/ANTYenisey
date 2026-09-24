@@ -1347,3 +1347,24 @@ SELECT pg_temp.expect('DH',
   $q$INSERT INTO "MaxLinkToken" (id,"userId","tokenHash","expiresAt","usedAt","createdAt")
      VALUES ('tl1','u1',repeat('a',64),now() + interval '15 minutes',now() + interval '1 hour',now())$q$,
   '23514', 'MaxLinkToken_times_sane');
+
+-- ---------------------------------------------------------------------------
+-- 26. Уведомления в браузер
+-- ---------------------------------------------------------------------------
+
+-- DI. Подписка на http-адрес — это не служба push, а запрос сервера внутрь сети.
+SELECT pg_temp.expect('DI',
+  $q$INSERT INTO "PushSubscription" (id,"userId",endpoint,p256dh,auth)
+     VALUES ('ps1','u1','http://10.0.0.1/admin','k','a')$q$,
+  '23514', 'PushSubscription_endpoint_https');
+
+-- DJ. Одна подписка браузера — одна строка: тот же адрес второй раз не встанет.
+DO $$ BEGIN
+  INSERT INTO "PushSubscription" (id,"userId",endpoint,p256dh,auth)
+  VALUES ('ps2','u1','https://push.example/abc','k','a');
+EXCEPTION WHEN others THEN RAISE NOTICE 'DJ. ПРОВАЛ подготовки: %', SQLERRM; END $$;
+
+SELECT pg_temp.expect('DJ',
+  $q$INSERT INTO "PushSubscription" (id,"userId",endpoint,p256dh,auth)
+     VALUES ('ps3','u2','https://push.example/abc','k','a')$q$,
+  '23505', 'PushSubscription_endpoint_key');

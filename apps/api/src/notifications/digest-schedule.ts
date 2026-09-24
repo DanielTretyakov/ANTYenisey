@@ -7,7 +7,7 @@ import { moneyOf } from '../desk/revenue';
 import { PrismaService } from '../prisma/prisma.service';
 import { clubTimezone, zoneClock } from './clock';
 import { DIGEST_MINUTE, morningDue, shiftDate, type LocalClock } from './notification-rules';
-import { NotificationsService } from './notifications.service';
+import { NotificationsService, reachableUserIds } from './notifications.service';
 import type { ClubDigestPayload, PlatformDigestPayload } from './render';
 import { clubStaff } from './staff-notifier.service';
 
@@ -51,9 +51,7 @@ export class DigestSchedule {
   ) {}
 
   async runOnce(now: Date): Promise<{ clubDigests: number; platformDigests: number }> {
-    const linked = (await this.prisma.maxLink.findMany({ where: { blockedAt: null }, select: { userId: true } })).map(
-      (link) => link.userId,
-    );
+    const linked = await reachableUserIds(this.prisma);
 
     if (linked.length === 0) {
       return { clubDigests: 0, platformDigests: 0 };

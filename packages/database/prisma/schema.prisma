@@ -625,6 +625,7 @@ model User {
   notificationSettings NotificationSetting[]
   maxLink              MaxLink?
   maxLinkTokens        MaxLinkToken[]
+  pushSubscriptions    PushSubscription[]
 }
 
 // ---------------------------------------------------------------------------
@@ -2142,6 +2143,34 @@ model MaxLinkToken {
   expiresAt DateTime  @db.Timestamptz(3)
   usedAt    DateTime? @db.Timestamptz(3)
   createdAt DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([userId])
+}
+
+/// Подписка браузера на уведомления (Web Push): одно устройство — одна строка.
+///
+/// Человек включает уведомления в браузере на каждом устройстве отдельно, и
+/// сообщение уходит на все его подписки. Адрес `endpoint` выдаёт служба push
+/// браузера (Google, Mozilla, Apple); он уникален — второй раз та же подписка
+/// не заводится, а переходит к тому, кто вошёл последним: на общем компьютере
+/// стойки уведомления должны идти тому, кто за ним сейчас.
+///
+/// Служба ответила 404 или 410 — подписки больше нет (браузер её отозвал), и
+/// строка удаляется: слать туда бесполезно.
+model PushSubscription {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  endpoint  String  @unique
+  /// Ключи шифрования браузера из PushSubscription.toJSON().keys.
+  p256dh    String
+  auth      String
+  /// Чем подписались — «Chrome на Windows»: чтобы человек узнал свои устройства.
+  userAgent String?
+
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  lastSentAt DateTime? @db.Timestamptz(3)
 
   @@index([userId])
 }

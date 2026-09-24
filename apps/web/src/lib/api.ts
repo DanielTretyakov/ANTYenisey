@@ -61,6 +61,7 @@ import type {
   MaxLinkResponse,
   NotificationCategoryName,
   NotificationSettingsView,
+  PushSubscriptionRequest,
   PlayerProfile,
   PublicPlayer,
   PublicTenant,
@@ -451,6 +452,14 @@ export const api = {
 
   setNotificationCategory: (category: NotificationCategoryName, enabled: boolean): Promise<NotificationSettingsView> =>
     authorized(`/me/notifications/categories/${category}`, json('PUT', { enabled })),
+
+  /** Включить уведомления в браузере на этом устройстве. */
+  subscribePush: (subscription: PushSubscriptionRequest): Promise<NotificationSettingsView> =>
+    authorized('/me/notifications/push', json('PUT', subscription)),
+
+  /** Выключить на этом устройстве: адрес подписки знает только сам браузер. */
+  unsubscribePush: (endpoint: string): Promise<NotificationSettingsView> =>
+    authorized('/me/notifications/push/unsubscribe', json('POST', { endpoint })),
 
   /** Проверочное сообщение. Не чаще раза в минуту. */
   sendTestNotification: (): Promise<void> => authorized('/me/notifications/test', { method: 'POST' }),

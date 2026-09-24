@@ -1,13 +1,15 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Headers, Param, Post, Put } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { AccessTokenPayload, MaxLinkResponse, NotificationSettingsView } from '@yenisey/types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { PushSubscriptionDto, PushUnsubscribeDto } from './dto/push-subscription.dto';
 import { SetCategoryDto } from './dto/set-category.dto';
 import { MaxLinkService } from './max-link.service';
 import { NotificationsService } from './notifications.service';
 
 /**
- * Уведомления в личном кабинете: привязка MAX и что присылать.
+ * Уведомления в личном кабинете: привязка MAX, уведомления в браузере и что
+ * присылать.
  *
  * Клуба в адресе нет: уведомления — свойство человека, а не членства, и
  * категории собираются по всем его клубам сразу. Ребёнок до 16 привязывает
@@ -38,6 +40,23 @@ export class MeNotificationsController {
     await this.links.unlinkUser(user.sub);
 
     return this.notifications.settings(user.sub);
+  }
+
+  /** Включить уведомления в браузере на этом устройстве. */
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Put('push')
+  subscribePush(
+    @CurrentUser() user: AccessTokenPayload,
+    @Body() dto: PushSubscriptionDto,
+    @Headers('user-agent') userAgent: string | undefined,
+  ): Promise<NotificationSettingsView> {
+    return this.notifications.subscribe(user.sub, { endpoint: dto.endpoint, keys: dto.keys, userAgent: userAgent ?? null });
+  }
+
+  /** Выключить на этом устройстве. Адрес подписки знает только сам браузер. */
+  @Post('push/unsubscribe')
+  unsubscribePush(@CurrentUser() user: AccessTokenPayload, @Body() dto: PushUnsubscribeDto): Promise<NotificationSettingsView> {
+    return this.notifications.unsubscribe(user.sub, dto.endpoint);
   }
 
   @Put('categories/:category')

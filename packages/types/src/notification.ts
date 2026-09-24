@@ -28,8 +28,25 @@ export interface MaxLinkState {
   blocked: boolean;
 }
 
+/** Уведомления в браузере (Web Push). */
+export interface PushState {
+  /** На сервере есть ключи VAPID. Нет — включить нечем, блок не показываем. */
+  available: boolean;
+  /** Открытый ключ VAPID: им браузер подписывается. */
+  publicKey: string | null;
+  /** Сколько устройств человека подписано — на этом ли, знает только браузер. */
+  devices: number;
+}
+
+/** Подписка этого браузера — то, что отдаёт PushSubscription.toJSON(). */
+export interface PushSubscriptionRequest {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+
 export interface NotificationSettingsView {
   max: MaxLinkState;
+  push: PushState;
   /** Только категории, которые подходят ролям человека. */
   categories: NotificationCategorySetting[];
 }
