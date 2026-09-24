@@ -34,6 +34,7 @@ interface ClaimedRow {
   type: string;
   payload: unknown;
   attempts: number;
+  createdAt: Date;
 }
 
 /**
@@ -209,22 +210,31 @@ export class NotificationDispatcher implements OnApplicationBootstrap, OnModuleD
     return { claimed: claimed.length, sent };
   }
 
-  /** Аренда пачки: сдвинуть срок и засчитать попытку одним оператором. */
-  private claim(now: Date): Promise<ClaimedRow[]> {
+  /**
+   * Аренда пачки: сдвинуть срок и засчитать попытку одним оператором.
+   *
+   * Порядок — по моменту создания, и сортируется он здесь, а не в запросе:
+   * RETURNING отдаёт строки в порядке их обновления, а не подзапроса. Без
+   * этого «запись отменена» могла уйти раньше «вы записаны» — так и случилось
+   * в CI 24.09.2026, где план тренера обогнал запись в его группу.
+   */
+  private async claim(now: Date): Promise<ClaimedRow[]> {
     const lease = new Date(now.getTime() + LEASE_MS);
 
-    return this.prisma.$queryRaw<ClaimedRow[]>(Prisma.sql`
+    const rows = await this.prisma.$queryRaw<ClaimedRow[]>(Prisma.sql`
       UPDATE "Notification"
       SET "sendAfter" = ${lease}, "attempts" = "attempts" + 1
       WHERE "id" IN (
         SELECT "id" FROM "Notification"
         WHERE "status" = 'PENDING' AND "channel" = 'MAX' AND "sendAfter" <= ${now}
-        ORDER BY "sendAfter"
+        ORDER BY "sendAfter", "createdAt"
         LIMIT ${BATCH}
         FOR UPDATE SKIP LOCKED
       )
-      RETURNING "id", "userId", "tenantId", "type"::text AS "type", "payload", "attempts"
+      RETURNING "id", "userId", "tenantId", "type"::text AS "type", "payload", "attempts", "createdAt"
     `);
+
+    return rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
   }
 
   private async finish(id: string, status: NotificationStatus, error: string): Promise<void> {
