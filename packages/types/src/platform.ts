@@ -23,6 +23,12 @@ export interface City {
   region: string | null;
 }
 
+/** Подсказки города: начало названия и сколько подсказок отдать (до 50). */
+export interface CitySearchQuery {
+  query?: string;
+  limit?: number;
+}
+
 /** Ссылка на клуб: минимум, которого хватает, чтобы его назвать и открыть. */
 export interface ClubRef {
   /** Код клуба — он же участок адреса: /clubs/:slug */

@@ -1086,3 +1086,14 @@ ALTER TABLE "TrainingType"
 ALTER TABLE "TournamentType"
   ADD CONSTRAINT "TournamentType_description_sane"
   CHECK ("description" IS NULL OR ("description" = btrim("description") AND char_length("description") BETWEEN 1 AND 2000));
+
+-- ---------------------------------------------------------------------------
+-- 25. Справочник городов
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_city_population. Население — только порядок подсказок,
+-- но ноль и минус там означали бы опечатку в данных, которую поиск показал бы
+-- «самым маленьким городом».
+ALTER TABLE "City"
+  ADD CONSTRAINT "City_population_sane"
+  CHECK ("population" IS NULL OR "population" > 0);

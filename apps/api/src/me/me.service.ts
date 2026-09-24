@@ -8,6 +8,7 @@ import {
   tournamentEvent,
   trainingEvent,
 } from '../events/event-view';
+import { distinctNearest } from './feed-rules';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -126,13 +127,19 @@ export class MeService {
   }
 
   /**
-   * Лента ближайших мероприятий моих клубов — одним списком по времени.
+   * «Ближайшее в моих клубах» на стартовой: пять ближайших неповторяющихся
+   * мероприятий клубов, отмеченных своими (правило — `distinctNearest`).
    *
    * Аренды столов в ленте нет (ТЗ → «Страница клуба»): к чужой броне стола
    * нельзя присоединиться, и лента состояла бы из строк, на которые невозможно
    * записаться.
+   *
+   * Кандидатов берётся с запасом — по `FEED_POOL` каждого вида: пять разных
+   * мероприятий могут прятаться за десятком проведений одной группы. По виду
+   * отдельно, а не на двоих: иначе клуб с плотным расписанием занятий вытеснил
+   * бы из выборки все турниры.
    */
-  async feed(userId: string, limit = 12): Promise<FeedEvent[]> {
+  async feed(userId: string, limit = 5): Promise<FeedEvent[]> {
     const favourites = await this.prisma.userClub.findMany({
       where: { userId },
       select: { tenantId: true },
@@ -147,32 +154,40 @@ export class MeService {
       startsAt: { gte: new Date() },
     };
 
-    // По `limit` каждого вида, а не по `limit` на двоих: иначе клуб с плотным
-    // расписанием занятий вытеснил бы из ленты все турниры. Лишнее срезается
-    // после общей сортировки.
     const [tournaments, sessions] = await Promise.all([
       this.prisma.tournament.findMany({
         where: scope,
         select: { ...TOURNAMENT_EVENT_SELECT, tenant: CLUB_SELECT },
         orderBy: { startsAt: 'asc' },
-        take: limit,
+        take: FEED_POOL,
       }),
       this.prisma.trainingSession.findMany({
         where: scope,
         select: { ...TRAINING_EVENT_SELECT, tenant: CLUB_SELECT },
         orderBy: { startsAt: 'asc' },
-        take: limit,
+        take: FEED_POOL,
       }),
     ]);
 
-    return [
-      ...tournaments.map((row) => ({ ...tournamentEvent(row, userId), club: row.tenant })),
-      ...sessions.map((row) => ({ ...trainingEvent(row, userId), club: row.tenant })),
-    ]
-      .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
-      .slice(0, limit);
+    const candidates = [
+      ...tournaments.map((row) => ({
+        event: { ...tournamentEvent(row, userId), club: row.tenant },
+        startsAt: row.startsAt.toISOString(),
+        sameAs: `${row.tenant.slug}:TOURNAMENT:${row.tournamentTypeId}`,
+      })),
+      ...sessions.map((row) => ({
+        event: { ...trainingEvent(row, userId), club: row.tenant },
+        startsAt: row.startsAt.toISOString(),
+        sameAs: `${row.tenant.slug}:TRAINING:${row.trainingTypeId}`,
+      })),
+    ];
+
+    return distinctNearest(candidates, limit).map((candidate) => candidate.event);
   }
 }
+
+/** Сколько проведений каждого вида рассматривать, выбирая пять разных. */
+const FEED_POOL = 200;
 
 /**
  * Наименьшее свободное место, 1..3. `null` — все заняты.

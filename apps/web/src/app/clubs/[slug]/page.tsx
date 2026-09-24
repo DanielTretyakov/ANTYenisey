@@ -14,7 +14,6 @@ import { Button } from '@/components/ui/Button';
 import { api, ApiError } from '@/lib/api';
 import { clubAccent } from '@/lib/clubTheme';
 import { eventViewerOf, seatsLabel, useEventAction, type EventViewer } from '@/lib/eventViewer';
-import { cn } from '@/lib/cn';
 import { formatKopecks } from '@/lib/money';
 import { plural } from '@/lib/plural';
 import { entryPriceLabel } from '@/lib/subscriptions';

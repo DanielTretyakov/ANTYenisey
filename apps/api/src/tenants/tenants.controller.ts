@@ -1,6 +1,7 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import type { City, ClubCard, PublicTenant } from '@yenisey/types';
 import { Public } from '../auth/decorators/public.decorator';
+import { SearchCitiesDto } from './dto/search-cities.dto';
 import { SearchClubsDto } from './dto/search-clubs.dto';
 import { TenantsService } from './tenants.service';
 
@@ -15,10 +16,22 @@ import { TenantsService } from './tenants.service';
 export class CitiesController {
   constructor(private readonly tenants: TenantsService) {}
 
+  /**
+   * Подсказки города: начало названия или начало слова в нём, крупные
+   * города первыми. Справочник — все города РФ, поэтому список целиком больше
+   * не отдаётся: тысяча строк в `<select>` — не выбор, а прокрутка.
+   */
   @Public()
   @Get()
-  list(): Promise<City[]> {
-    return this.tenants.listCities();
+  search(@Query() query: SearchCitiesDto): Promise<City[]> {
+    return this.tenants.searchCities(query);
+  }
+
+  /** Один город — чтобы форма показала уже выбранный, не ища его по имени. */
+  @Public()
+  @Get(':id')
+  findOne(@Param('id') id: string): Promise<City> {
+    return this.tenants.findCity(id);
   }
 }
 

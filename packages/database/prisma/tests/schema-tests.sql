@@ -1383,3 +1383,12 @@ SELECT pg_temp.expect('DL',
   $q$INSERT INTO "TournamentType" (id,"tenantId",name,price,description,"updatedAt")
      VALUES ('trt-long','t1','Длинное описание',50000,repeat('я',2001),now())$q$,
   '23514', 'TournamentType_description_sane');
+
+-- ---------------------------------------------------------------------------
+-- 28. Справочник городов
+-- ---------------------------------------------------------------------------
+
+-- DM. Население ноль — опечатка в данных, а не самый маленький город.
+SELECT pg_temp.expect('DM',
+  $q$INSERT INTO "City" (id,name,region,population) VALUES ('city-zero','Нульград',NULL,0)$q$,
+  '23514', 'City_population_sane');

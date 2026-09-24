@@ -1831,11 +1831,40 @@ async function main() {
   // человек попадает до всякой регистрации.
   r = await call('/cities');
   check('справочник городов открыт без входа', 200, r.status);
-  const cities = Array.isArray(r.body) ? r.body : [];
-  assert('в справочнике есть города', cities.length > 0);
+  assert('без запроса — крупнейшие, не больше двадцати', Array.isArray(r.body) && r.body.length > 0 && r.body.length <= 20);
 
-  const minusinsk = cities.find((city) => city.name === 'Минусинск');
-  const krasnoyarsk = cities.find((city) => city.name === 'Красноярск');
+  // Справочник — все города РФ, и искать надо по началу: «крас» — это
+  // прежде всего Красноярск, а не Красноармейск.
+  const cityQuery = (text, extra = '') => call(`/cities?query=${encodeURIComponent(text)}${extra}`);
+
+  r = await cityQuery('крас');
+  const krasnoyarsk = (r.body ?? []).find((city) => city.name === 'Красноярск');
+  assert('«крас» первым находит Красноярск', r.body?.[0]?.name === 'Красноярск');
+
+  r = await cityQuery('минус');
+  const minusinsk = (r.body ?? []).find((city) => city.name === 'Минусинск');
+  assert('Минусинск находится по началу названия', minusinsk !== undefined);
+
+  r = await cityQuery('новгород');
+  assert('по началу слова — оба Новгорода', (r.body ?? []).filter((city) => city.name.endsWith('Новгород')).length === 2);
+
+  r = await cityQuery('орел');
+  assert('«е» находит «ё»: Орёл', (r.body ?? []).some((city) => city.name === 'Орёл'));
+
+  r = await cityQuery('%');
+  assert('знак процента — не подстановка', Array.isArray(r.body) && r.body.length === 0);
+
+  r = await cityQuery('а', '&limit=500');
+  check('больше пятидесяти подсказок не просят', 400, r.status);
+
+  if (krasnoyarsk) {
+    r = await call(`/cities/${krasnoyarsk.id}`);
+    check('город читается по идентификатору', 200, r.status);
+    assert('тот самый город', r.body?.name === 'Красноярск' && r.body?.region === 'Красноярский край');
+  }
+
+  r = await call('/cities/net-takogo-goroda');
+  check('неизвестный город', 404, r.status);
 
   r = await call('/clubs');
   check('поиск клубов без условий открыт без входа', 200, r.status);
@@ -1897,6 +1926,18 @@ async function main() {
 
   r = await asMe('/me/clubs/sayany', { method: 'DELETE' });
   assert('отметка снимается', r.body?.length === 1);
+
+  // Лента «Ближайшее в моих клубах»: пять ближайших неповторяющихся — от
+  // каждого мероприятия клуба только ближайшее проведение.
+  r = await asMe('/me/feed');
+  check('лента моих клубов читается', 200, r.status);
+  const feed = r.body ?? [];
+  assert('в ленте не больше пяти', feed.length <= 5);
+  assert(
+    'в ленте нет повторов одного мероприятия',
+    new Set(feed.map((event) => `${event.club.slug}:${event.kind}:${event.title}`)).size === feed.length,
+  );
+  assert('лента — по времени', feed.every((event, i) => i === 0 || feed[i - 1].startsAt <= event.startsAt));
 
   // Открытый список мероприятий клуба: виден без входа, но вошедшему говорит
   // больше — записан ли он сам.

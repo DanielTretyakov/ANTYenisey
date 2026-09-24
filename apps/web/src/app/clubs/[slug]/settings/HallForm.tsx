@@ -1,15 +1,16 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
-import type { BookingStep, City, Hall } from '@yenisey/types';
+import type { BookingStep, Hall } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Field } from '@/components/ui/Field';
 import { MoneyField } from '@/components/ui/MoneyField';
+import { CityCombobox } from '@/components/ui/CityCombobox';
 import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
-import { api, ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/api';
 import { useClubApi } from '@/lib/useClubApi';
 import { inputToKopecks, kopecksToInput } from '@/lib/money';
 import { timezoneOptions } from '@/lib/timezones';
@@ -89,14 +90,6 @@ export function HallForm({
 
   const club = useClubApi();
 
-  const [cities, setCities] = useState<City[]>([]);
-
-  useEffect(() => {
-    api
-      .cities()
-      .then(setCities)
-      .catch(() => setCities([]));
-  }, []);
 
   // Переключение зала вкладками не размонтирует форму — состояние надо
   // перезалить руками, иначе в новом зале окажутся цены предыдущего.
@@ -236,12 +229,13 @@ export function HallForm({
               value={form.timezone}
               onChange={(event) => set('timezone', event.target.value)}
             />
-            <Select
+            <CityCombobox
+              className="mb-4"
               label="Город зала"
               hint="Поиск на стартовой странице находит клуб и по городу зала, а не только по городу клуба."
-              options={[{ value: '', label: 'Не указан' }, ...cityOptions(cities)]}
-              value={form.cityId}
-              onChange={(event) => set('cityId', event.target.value)}
+              emptyLabel="Не указан"
+              value={form.cityId || null}
+              onChange={(city) => set('cityId', city?.id ?? '')}
             />
           </div>
 
@@ -342,10 +336,3 @@ export function HallForm({
   );
 }
 
-/** Города для выпадающего списка. Регион в подписи различает одноимённые. */
-function cityOptions(cities: City[]): { value: string; label: string }[] {
-  return cities.map((city) => ({
-    value: city.id,
-    label: city.region ? `${city.name} (${city.region})` : city.name,
-  }));
-}

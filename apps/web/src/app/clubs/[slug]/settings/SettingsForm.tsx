@@ -1,14 +1,14 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
-import type { City, ClubSettings } from '@yenisey/types';
+import { useState, type FormEvent } from 'react';
+import type { ClubSettings } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Field } from '@/components/ui/Field';
-import { Select } from '@/components/ui/Select';
+import { CityCombobox } from '@/components/ui/CityCombobox';
 import { Toggle } from '@/components/ui/Toggle';
-import { api, ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/api';
 import { useClubApi } from '@/lib/useClubApi';
 import { cn } from '@/lib/cn';
 
@@ -74,18 +74,6 @@ export function SettingsForm({
   const [errors, setErrors] = useState<string[]>([]);
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
-
-  // Справочник городов: свободного ввода нет намеренно — «Красноярск» и «г.
-  // Красноярск» стали бы двумя разными городами, и поиск по городу перестал
-  // бы работать.
-  const [cities, setCities] = useState<City[]>([]);
-
-  useEffect(() => {
-    api
-      .cities()
-      .then(setCities)
-      .catch(() => setCities([]));
-  }, []);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((previous) => ({ ...previous, [key]: value }));
@@ -176,12 +164,13 @@ export function SettingsForm({
             onChange={(event) => set('name', event.target.value)}
             required
           />
-          <Select
+          <CityCombobox
+            className="mb-4"
             label="Основной город"
             hint="По нему клуб находят на стартовой странице. Города залов указываются отдельно, и поиск учитывает их тоже."
-            options={[{ value: '', label: 'Не указан' }, ...cityOptions(cities)]}
-            value={form.cityId}
-            onChange={(event) => set('cityId', event.target.value)}
+            emptyLabel="Не указан"
+            value={form.cityId || null}
+            onChange={(city) => set('cityId', city?.id ?? '')}
           />
           <div className="grid gap-x-6 sm:grid-cols-2">
             <Field
@@ -352,10 +341,3 @@ function SubscriptionRules({ soft }: { soft: boolean }) {
   );
 }
 
-/** Города для выпадающего списка. Регион в подписи различает одноимённые. */
-function cityOptions(cities: City[]): { value: string; label: string }[] {
-  return cities.map((city) => ({
-    value: city.id,
-    label: city.region ? `${city.name} (${city.region})` : city.name,
-  }));
-}

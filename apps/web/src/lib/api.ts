@@ -303,7 +303,15 @@ export const api = {
 
   // --- Стартовая страница: поиск клубов. Открыто без входа.
   /** Справочник городов для выпадающего списка. */
-  cities: (): Promise<City[]> => request('/cities'),
+  /**
+   * Подсказки города: начало названия или слова, крупные первыми. Пустой
+   * запрос — самые крупные города.
+   */
+  cities: (query = '', limit = 8): Promise<City[]> =>
+    request(`/cities?${new URLSearchParams({ query: query.trim(), limit: String(limit) })}`),
+
+  /** Один город — показать уже выбранный в форме. */
+  city: (id: string): Promise<City> => request(`/cities/${encodeURIComponent(id)}`),
 
   /**
    * Поиск клубов по названию и городу.

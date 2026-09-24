@@ -45,6 +45,11 @@ echo "=== 4/5  Накатываю миграции"
 # нибудь накатить их не на ту базу.
 $COMPOSE run --rm api sh -c 'cd /repo && pnpm --filter @yenisey/database exec prisma migrate deploy'
 
+# Справочник городов РФ — тем же контейнером. Идемпотентно: существующие
+# города получают только население, новые дописываются, ничего не удаляется
+# (prisma/seed-cities.ts). Полный сид здесь не гоняется — он заводит демо-клуб.
+$COMPOSE run --rm api sh -c 'cd /repo/packages/database && node --experimental-strip-types prisma/seed-cities.ts'
+
 echo "=== 5/5  Перезапускаю службы"
 $COMPOSE up -d
 

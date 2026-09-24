@@ -8,5 +8,5 @@
     "noEmit": true,
     "allowJs": false
   },
-  "include": ["prisma/seed.ts", "prisma/clean-probes.ts"]
+  "include": ["prisma/seed.ts", "prisma/seed-cities.ts", "prisma/clean-probes.ts"]
 }

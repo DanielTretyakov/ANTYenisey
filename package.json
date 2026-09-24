@@ -17,6 +17,7 @@
     "db:migrate": "pnpm --filter @yenisey/database migrate",
     "db:studio": "pnpm --filter @yenisey/database studio",
     "db:seed": "pnpm --filter @yenisey/database seed",
+    "db:seed-cities": "pnpm --filter @yenisey/database seed-cities",
     "db:seed-demo": "pnpm --filter @yenisey/database seed-demo",
     "db:verify": "pnpm --filter @yenisey/database verify",
     "db:clean-probes": "pnpm --filter @yenisey/database clean-probes",

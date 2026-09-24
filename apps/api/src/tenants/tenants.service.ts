@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { City, ClubCard, ClubSearchQuery, PublicTenant } from '@yenisey/types';
+import type { City, ClubCard, ClubSearchQuery, CitySearchQuery, PublicTenant } from '@yenisey/types';
+import { cityLimit, cityPatterns } from './city-search';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -16,6 +17,8 @@ const CARD_SELECT = {
   halls: { select: { city: { select: { name: true } } } },
 } as const;
 
+const CITY_SELECT = { id: true, name: true, region: true } as const;
+
 type CardRow = {
   slug: string;
   name: string;
@@ -30,16 +33,47 @@ export class TenantsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Справочник городов платформы.
+   * Подсказки города из справочника платформы — все города РФ.
    *
    * Открыт без авторизации: он нужен поиску на стартовой странице, куда
-   * человек попадает до всякого входа.
+   * человек попадает до всякого входа. Правила совпадения — `cityPatterns`.
    */
-  async listCities(): Promise<City[]> {
-    return this.prisma.city.findMany({
-      select: { id: true, name: true, region: true },
-      orderBy: [{ name: 'asc' }, { region: 'asc' }],
-    });
+  async searchCities(query: CitySearchQuery): Promise<City[]> {
+    const limit = cityLimit(query.limit);
+    const patterns = cityPatterns(query.query);
+
+    // Без запроса — самые крупные: у пустого поля подсказка должна что-то
+    // предлагать. Население пусто у городов вне справочника — они в конце.
+    if (!patterns) {
+      return this.prisma.city.findMany({
+        select: CITY_SELECT,
+        orderBy: [{ population: { sort: 'desc', nulls: 'last' } }, { name: 'asc' }],
+        take: limit,
+      });
+    }
+
+    // Сырой запрос ради порядка: совпавшие началом названия — раньше
+    // совпавших началом слова, внутри — по населению. Prisma такой сортировки
+    // по условию не выражает. lower(name) — под индекс City_name_lower_idx.
+    return this.prisma.$queryRaw<City[]>`
+      SELECT id, name, region
+      FROM "City"
+      WHERE lower(name) LIKE ${patterns.prefix}
+         OR lower(name) LIKE ${patterns.word}
+         OR lower(name) LIKE ${patterns.hyphen}
+      ORDER BY (lower(name) LIKE ${patterns.prefix}) DESC, population DESC NULLS LAST, name
+      LIMIT ${limit}
+    `;
+  }
+
+  async findCity(id: string): Promise<City> {
+    const city = await this.prisma.city.findUnique({ where: { id }, select: CITY_SELECT });
+
+    if (!city) {
+      throw new NotFoundException('Город не найден');
+    }
+
+    return city;
   }
 
   /**
