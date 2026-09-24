@@ -53,6 +53,22 @@ export async function normalizeAvatar(input: Uint8Array): Promise<Uint8Array> {
     .toBuffer();
 }
 
+/** Баннер клуба: полоса 1600×500 для шапки страницы клуба. */
+export const BANNER_WIDTH = 1600;
+export const BANNER_HEIGHT = 500;
+
+/**
+ * Баннер клуба: полоса 1600×500 в WebP, кадрирование — по самому заметному.
+ * Метаданные выбрасываются, как у аватара: снимок зала с телефона несёт
+ * координаты, а баннер видит вся платформа.
+ */
+export async function normalizeBanner(input: Uint8Array): Promise<Uint8Array> {
+  return open(input)
+    .resize(BANNER_WIDTH, BANNER_HEIGHT, { fit: 'cover', position: sharp.strategy.attention })
+    .webp({ quality: 80 })
+    .toBuffer();
+}
+
 /**
  * Скан приказа: формат тот же, что пришёл, размер — не больше A4.
  *

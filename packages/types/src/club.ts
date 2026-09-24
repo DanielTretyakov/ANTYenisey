@@ -62,6 +62,15 @@ export interface ClubSettings {
   phone: string | null;
   email: string | null;
 
+  /** Краткое описание клуба на его странице. До 2000 символов. */
+  description: string | null;
+
+  /**
+   * Баннер страницы клуба — загруженный файл (`GET /files/:id`). Правкой
+   * настроек не меняется: ставится загрузкой `PUT settings/banner`.
+   */
+  bannerFileId: string | null;
+
   /** Логотип организации. Показывается на странице клуба рядом с названием. */
   logoUrl: string | null;
   /** Фирменный цвет, «#126b54». Им перекрашивается акцент на странице клуба. */
@@ -86,7 +95,23 @@ export interface ClubSettings {
  * Правка настроек. Все поля необязательны: форма шлёт только изменённое, а
  * перекрёстные проверки сервер делает уже на слитом состоянии.
  */
-export type UpdateClubSettingsRequest = Partial<ClubSettings>;
+export type UpdateClubSettingsRequest = Partial<Omit<ClubSettings, 'bannerFileId'>>;
+
+/**
+ * Тренер в «Тренерском составе» настроек: все тренеры клуба, показанные —
+ * с местом в списке (решение владельца от 24.09.2026).
+ */
+export interface ClubCoachListItem {
+  id: string;
+  fullName: string;
+  /** Место на странице клуба, 1.. ; пусто — не показывается. */
+  order: number | null;
+}
+
+/** Состав на странице клуба — идентификаторы тренеров в нужном порядке. */
+export interface ClubCoachListRequest {
+  coachIds: string[];
+}
 
 /**
  * Зал: помещение со своим набором столов и своей ценой.

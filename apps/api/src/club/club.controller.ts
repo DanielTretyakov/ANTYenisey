@@ -10,10 +10,14 @@ import {
   Post,
   Put,
   Query,
+  Req,
+  UseInterceptors,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type {
   ClosureRule,
   ClubCoach,
+  ClubCoachListItem,
   ClubPeoplePage,
   ClubPerson,
   ClubSettings,
@@ -44,11 +48,17 @@ import {
   TrainingTypeDto,
 } from './dto/catalog.dto';
 import { ChangeRoleDto, ClubPeopleQueryDto } from './dto/people.dto';
+import { ClubCoachListDto } from './dto/coach-list.dto';
 import { StaffPreferencesDto } from './dto/preferences.dto';
 import { UpdateClubSettingsDto } from './dto/update-settings.dto';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { ClubContext } from '../auth/club-context';
+import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
+import { SingleFileUpload, uploadedBytes } from '../files/single-file-upload.interceptor';
+
+/** Загрузка баннера — тот же предел, что у аватара и фото тренера. */
+const UPLOAD_LIMIT = { default: { limit: 20, ttl: 60_000 } };
 
 /**
  * Профиль клуба: настройки, залы, столы и расписание.
@@ -85,6 +95,31 @@ export class ClubController {
     @Body() dto: UpdateClubSettingsDto,
   ): Promise<ClubSettings> {
     return this.club.updateSettings(club.tenantId, dto);
+  }
+
+  // --- Страница клуба: баннер и тренерский состав -------------------------
+
+  /** Баннер — файлом в поле `file`. PUT: новый заменяет старый целиком. */
+  @Throttle(UPLOAD_LIMIT)
+  @Put('settings/banner')
+  @UseInterceptors(SingleFileUpload)
+  setBanner(@CurrentClub() club: ClubContext, @Req() request: AuthenticatedRequest): Promise<ClubSettings> {
+    return this.club.setBanner(club.tenantId, uploadedBytes(request));
+  }
+
+  @Delete('settings/banner')
+  removeBanner(@CurrentClub() club: ClubContext): Promise<ClubSettings> {
+    return this.club.removeBanner(club.tenantId);
+  }
+
+  @Get('settings/coaches')
+  coachList(@CurrentClub() club: ClubContext): Promise<ClubCoachListItem[]> {
+    return this.club.listCoachList(club.tenantId);
+  }
+
+  @Put('settings/coaches')
+  replaceCoachList(@CurrentClub() club: ClubContext, @Body() dto: ClubCoachListDto): Promise<ClubCoachListItem[]> {
+    return this.club.replaceCoachList(club.tenantId, dto.coachIds);
   }
 
   // --- Личные настройки сотрудника ----------------------------------------

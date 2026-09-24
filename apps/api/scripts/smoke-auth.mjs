@@ -293,9 +293,9 @@ async function main() {
     typeof r.body?.name === 'string' && r.body.name.length > 0,
   );
   assert(
-    'наружу отдана карточка клуба: код, название, города, оформление, контакты и залы',
+    'наружу отдана карточка клуба: код, название, города, оформление, контакты, залы, описание, баннер и тренеры',
     Object.keys(r.body ?? {}).sort().join(',') ===
-      'accentColor,city,email,halls,logoUrl,name,otherCities,phone,slug',
+      'accentColor,bannerFileId,city,coaches,description,email,halls,logoUrl,name,otherCities,phone,slug',
   );
   assert(
     'часового пояса в карточке клуба больше НЕТ — он свойство зала',
@@ -431,7 +431,10 @@ async function main() {
     const adminAuth = { Authorization: `Bearer ${r.body?.accessToken ?? ''}` };
     const asAdmin = (path, options = {}) =>
       call(path, { ...options, headers: { ...adminAuth, ...options.headers } });
-    const patchSettings = (json) => asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json });
+    // Баннер правкой настроек не ставится — он загружается файлом. Прочитанные
+    // настройки несут bannerFileId, и вернуть их как есть значило бы получить 400.
+    const patchSettings = ({ bannerFileId: _banner, ...json }) =>
+      asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json });
 
     r = await asAdmin('/clubs/yenisey/settings');
     check('настройки прочитаны', 200, r.status);
@@ -1989,6 +1992,7 @@ async function main() {
   await eventAttendance(asMe);
   await playerProfile();
   await coachCard();
+  await clubPage();
   await sparring();
   await subscriptions();
   await family();
@@ -4502,3 +4506,158 @@ main().catch((error) => {
   console.error('Поднят ли API? Ожидается на', API);
   process.exitCode = 1;
 });
+
+/**
+ * Страница клуба: описание, баннер, тренерский состав, неделя мероприятий
+ * (решения владельца от 24.09.2026).
+ *
+ * Настоящий баннер клуба прогон не трогает: если он уже есть, сценарии баннера
+ * пропускаются — заменить и удалить его значило бы стереть снимок клуба.
+ * Описание и состав возвращаются к исходным.
+ */
+async function clubPage() {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('\n=== 40. Страница клуба — ПРОПУЩЕНА (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 40. Страница клуба: описание, баннер, тренеры, неделя');
+
+  const { default: sharp } = await import('sharp');
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+
+  const uploadBanner = async (token, color) => {
+    const bytes = await sharp({
+      create: { width: 2000, height: 800, channels: 3, background: color },
+    }).png().toBuffer();
+    const form = new FormData();
+    form.set('file', new Blob([bytes], { type: 'image/png' }), 'banner.png');
+    const response = await fetch(`${API}/clubs/yenisey/settings/banner`, {
+      method: 'PUT',
+      body: form,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const text = await response.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+    return { status: response.status, body };
+  };
+
+  let r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const adminToken = r.body?.accessToken ?? '';
+  const asAdmin = as(adminToken);
+
+  r = await asAdmin('/clubs/yenisey/settings');
+  const originalDescription = r.body?.description ?? null;
+  const originalBanner = r.body?.bannerFileId ?? null;
+
+  // --- Описание.
+  r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: { description: '  Клуб проверки: играем каждый день  ' } });
+  check('описание клуба сохранено', 200, r.status);
+  assert('пробелы по краям срезаны', r.body?.description === 'Клуб проверки: играем каждый день');
+
+  r = await call('/clubs/yenisey');
+  assert('описание видно на открытой странице', r.body?.description === 'Клуб проверки: играем каждый день');
+
+  r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: { bannerFileId: 'чужой' } });
+  check('баннер правкой настроек не ставится', 400, r.status);
+
+  r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: { description: originalDescription ?? '' } });
+  check('описание возвращено', 200, r.status);
+  assert('пустое описание — это «нет описания»', r.body?.description === originalDescription);
+
+  // --- Баннер.
+  if (originalBanner) {
+    console.log('  ПРОПУЩЕНО: у клуба уже есть баннер — прогон его не заменяет');
+  } else {
+    r = await post('/auth/register', registration({ lastName: 'Клиентов', firstName: 'Баннер' }));
+    const clientToken = r.body?.accessToken ?? '';
+
+    r = await uploadBanner(clientToken, { r: 200, g: 40, b: 40 });
+    check('клиент баннер клуба не ставит', 403, r.status);
+
+    r = await uploadBanner(adminToken, { r: 20, g: 110, b: 90 });
+    check('баннер загружен', 200, r.status);
+    const firstBanner = r.body?.bannerFileId;
+    assert('у клуба появился баннер', typeof firstBanner === 'string');
+
+    let response = await fetch(`${API}/files/${firstBanner}`);
+    check('баннер отдаётся без входа', 200, response.status);
+    assert('баннер пережат в WebP', response.headers.get('content-type') === 'image/webp');
+    const meta = await sharp(Buffer.from(await response.arrayBuffer())).metadata();
+    assert('баннер обрезан до 1600×500', meta.width === 1600 && meta.height === 500);
+
+    r = await call('/clubs/yenisey');
+    assert('баннер виден на открытой странице', r.body?.bannerFileId === firstBanner);
+
+    r = await uploadBanner(adminToken, { r: 30, g: 60, b: 160 });
+    check('баннер заменён', 200, r.status);
+    response = await fetch(`${API}/files/${firstBanner}`);
+    check('старый баннер удалён вместе с заменой', 404, response.status);
+
+    r = await asAdmin('/clubs/yenisey/settings/banner', { method: 'DELETE' });
+    check('баннер снят', 200, r.status);
+    assert('у клуба баннера больше нет', r.body?.bannerFileId === null);
+  }
+
+  // --- Тренерский состав.
+  r = await asAdmin('/clubs/yenisey/settings/coaches');
+  check('тренерский состав читается', 200, r.status);
+  const originalShown = (r.body ?? []).filter((coach) => coach.order !== null).map((coach) => coach.id);
+
+  r = await post('/auth/register', registration({ lastName: 'Тренеров', firstName: 'Витрина' }));
+  const probeCoachId = r.body?.user?.id;
+  const asProbe = as(r.body?.accessToken ?? '');
+
+  r = await asAdmin('/clubs/yenisey/settings/coaches', { method: 'PUT', json: { coachIds: [probeCoachId] } });
+  check('клиента в тренерский состав не поставить', 400, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/people/${probeCoachId}/role`, { method: 'PATCH', json: { role: 'COACH' } });
+  check('пробному тренеру выдана роль', 200, r.status);
+
+  r = await asAdmin('/clubs/yenisey/settings/coaches', {
+    method: 'PUT',
+    json: { coachIds: [probeCoachId, ...originalShown] },
+  });
+  check('состав сохранён', 200, r.status);
+  assert('пробный тренер — первым', r.body?.[0]?.id === probeCoachId && r.body?.[0]?.order === 1);
+
+  r = await asAdmin('/clubs/yenisey/settings/coaches', { method: 'PUT', json: { coachIds: [probeCoachId, probeCoachId] } });
+  check('дважды одного тренера не поставить', 400, r.status);
+
+  r = await asProbe('/clubs/yenisey/settings/coaches', { method: 'PUT', json: { coachIds: [] } });
+  check('тренер состав не правит', 403, r.status);
+
+  r = await call('/clubs/yenisey');
+  const shownCoach = r.body?.coaches?.[0];
+  assert('состав виден на открытой странице по порядку', shownCoach?.id === probeCoachId);
+  assert('имя тренера сокращено', /^\S+ \S\.$/.test(shownCoach?.name ?? ''));
+
+  r = await asAdmin(`/clubs/yenisey/people/${probeCoachId}/role`, { method: 'PATCH', json: { role: 'CLIENT' } });
+  check('роль тренера снята', 200, r.status);
+  r = await call('/clubs/yenisey');
+  assert('бывший тренер ушёл из состава', !(r.body?.coaches ?? []).some((coach) => coach.id === probeCoachId));
+
+  r = await asAdmin('/clubs/yenisey/settings/coaches', { method: 'PUT', json: { coachIds: originalShown } });
+  check('состав возвращён', 200, r.status);
+
+  // --- Неделя мероприятий.
+  const monday = new Date();
+  monday.setUTCHours(0, 0, 0, 0);
+  const week = { from: monday.toISOString(), to: new Date(monday.getTime() + 7 * 86400_000).toISOString() };
+  r = await call(`/clubs/yenisey/events?${new URLSearchParams(week)}`);
+  check('мероприятия за неделю', 200, r.status);
+  assert('все — внутри окна и не в прошлом', (r.body ?? []).every(
+    (event) => event.startsAt < week.to && new Date(event.startsAt).getTime() >= Date.now() - 60_000,
+  ));
+
+  r = await call(`/clubs/yenisey/events?${new URLSearchParams({ from: week.from, to: new Date(monday.getTime() + 40 * 86400_000).toISOString() })}`);
+  check('окно больше месяца отклонено', 400, r.status);
+
+  r = await call('/clubs/yenisey/events?from=вчера');
+  check('негодная дата окна отклонена', 400, r.status);
+}

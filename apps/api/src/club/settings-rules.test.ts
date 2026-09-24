@@ -10,6 +10,8 @@ function settings(overrides: Partial<ClubSettings> = {}): ClubSettings {
     cityId: null,
     phone: null,
     email: null,
+    description: null,
+    bannerFileId: null,
     logoUrl: null,
     accentColor: null,
     noShowChargePercent: 100,

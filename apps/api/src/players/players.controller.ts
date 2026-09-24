@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
+import type { StoredFileKind } from '@yenisey/database';
 import type { PlayerProfile, PublicPlayer } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
@@ -164,41 +165,20 @@ export class PlayerFilesController {
   ): Promise<void> {
     const file = await this.storage.read(id);
 
-    const owner = file
-      ? await this.prisma.user.findFirst({
-          where: { id: file.ownerUserId, deactivatedAt: null, anonymizedAt: null },
-          select: { id: true, birthDate: true },
-        })
-      : null;
-
-    if (!file || !owner) {
+    if (!file) {
       throw new NotFoundException('Файл не найден');
     }
 
-    const viewerId = request.user?.sub ?? null;
-    const allowed = canReadFile(
-      file.kind,
-      { ownerId: owner.id, birthDate: owner.birthDate },
-      await this.access.viewerOf(viewerId, owner.id),
-      new Date(),
-    );
-
-    if (!allowed) {
-      throw new ForbiddenException('Этот файл вам недоступен');
-    }
-
-    // Открытый аватар кешируется: адрес файла меняется вместе с файлом, и
-    // старый адрес всегда отдаёт одно и то же. Сутки, а не год: доступ к
-    // файлу может закрыться — учётку отключили, — и чужой кеш не должен
-    // раздавать его ещё год. Закрытое не кешируется вовсе.
+    // Файл клуба — баннер, он открыт всем, как и страница клуба. Возраста и
+    // смотрящего у него нет; довольно того, что клуб существует.
     const open =
-      (file.kind === 'AVATAR' || file.kind === 'COACH_PHOTO') &&
-      canReadFile(
-        file.kind,
-        { ownerId: owner.id, birthDate: owner.birthDate },
-        { viewerId: null, managesOwner: false, guardsOwner: false },
-        new Date(),
-      );
+      file.ownerTenantId !== null
+        ? await this.clubFileOpen(file.ownerTenantId)
+        : await this.userFileOpen(file, request);
+
+    if (open === null) {
+      throw new NotFoundException('Файл не найден');
+    }
 
     response.set({
       'Content-Type': file.contentType,
@@ -217,6 +197,51 @@ export class PlayerFilesController {
     });
 
     response.end(Buffer.from(file.data));
+  }
+
+  /** Файл клуба открыт, пока клуб есть. `null` — клуба нет. */
+  private async clubFileOpen(tenantId: string): Promise<boolean | null> {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true } });
+
+    return tenant ? true : null;
+  }
+
+  /**
+   * Файл человека: `null` — отдавать нечего (учётки нет или она отключена),
+   * `true` — открыт всем и кешируется, `false` — отдаётся только этому
+   * смотрящему. Нельзя смотрящему — 403.
+   */
+  private async userFileOpen(
+    file: { kind: StoredFileKind; ownerUserId: string | null },
+    request: AuthenticatedRequest,
+  ): Promise<boolean | null> {
+    const owner = file.ownerUserId
+      ? await this.prisma.user.findFirst({
+          where: { id: file.ownerUserId, deactivatedAt: null, anonymizedAt: null },
+          select: { id: true, birthDate: true },
+        })
+      : null;
+
+    if (!owner) {
+      return null;
+    }
+
+    const today = new Date();
+    const profile = { ownerId: owner.id, birthDate: owner.birthDate };
+    const viewerId = request.user?.sub ?? null;
+
+    if (!canReadFile(file.kind, profile, await this.access.viewerOf(viewerId, owner.id), today)) {
+      throw new ForbiddenException('Этот файл вам недоступен');
+    }
+
+    // Открытый аватар кешируется: адрес файла меняется вместе с файлом, и
+    // старый адрес всегда отдаёт одно и то же. Сутки, а не год: доступ к
+    // файлу может закрыться — учётку отключили, — и чужой кеш не должен
+    // раздавать его ещё год. Закрытое не кешируется вовсе.
+    return (
+      (file.kind === 'AVATAR' || file.kind === 'COACH_PHOTO') &&
+      canReadFile(file.kind, profile, { viewerId: null, managesOwner: false, guardsOwner: false }, today)
+    );
   }
 }
 

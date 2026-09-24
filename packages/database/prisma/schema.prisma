@@ -274,6 +274,7 @@ enum StoredFileKind {
   AVATAR // аватар игрока: приведён к 512×512 WebP, метаданные выброшены
   RANK_DOCUMENT // скан приказа о присвоении разряда: картинка или PDF
   COACH_PHOTO // фотография в карточке тренера: обработана как аватар
+  CLUB_BANNER // баннер страницы клуба: 1600×500 WebP, принадлежит клубу, а не человеку
 }
 
 /// Уровень соревнования в достижении игрока.
@@ -342,6 +343,17 @@ model Tenant {
   // только по одному из них.
   cityId String?
   city   City?   @relation(fields: [cityId], references: [id], onDelete: Restrict)
+
+  /// Краткое описание клуба на его странице: чем живёт, для кого, как
+  /// добраться. Пишет администратор в «Настройках».
+  description String?
+
+  /// Баннер страницы клуба. Составной ключ на (файл, клуб-владелец): файл
+  /// чужого клуба или человека сюда не встанет. NoAction, как у аватара:
+  /// замена удаляет старый файл после того, как ссылка уже переставлена.
+  bannerFileId String?
+  banner       StoredFile?  @relation("ClubBanner", fields: [bannerFileId, id], references: [id, ownerTenantId], onDelete: NoAction)
+  files        StoredFile[] @relation("TenantFiles")
 
   // --- Оформление страницы клуба.
   //
@@ -713,10 +725,16 @@ model Guardianship {
 /// удаляется в той же транзакции. У истории денег удаления нет, а у
 /// персональных данных оно обязано быть.
 model StoredFile {
-  id          String         @id @default(cuid())
-  ownerUserId String
-  owner       User           @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  kind        StoredFileKind
+  id            String         @id @default(cuid())
+  /// Владелец — ровно один: человек (аватар, приказ, фото тренера) или клуб
+  /// (баннер). CHECK StoredFile_one_owner в constraints.sql, раздел 26.
+  ownerUserId   String?
+  owner         User?          @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  /// Клуб-владелец. Restrict: клубы не удаляются, а файл клуба не должен
+  /// пропасть молча.
+  ownerTenantId String?
+  ownerTenant   Tenant?        @relation("TenantFiles", fields: [ownerTenantId], references: [id], onDelete: Restrict)
+  kind          StoredFileKind
 
   /// Тип определён по сигнатуре байтов, а не взят из заголовка запроса:
   /// заголовок пишет клиент, и «image/png» на HTML-файле ничего не стоит.
@@ -732,11 +750,14 @@ model StoredFile {
   avatarOf       PlayerProfile[] @relation("ProfileAvatar")
   rankDocumentOf SportRank[]     @relation("RankDocument")
   coachPhotoOf   CoachCard[]     @relation("CoachPhoto")
+  clubBannerOf   Tenant[]        @relation("ClubBanner")
 
   // Мишень составных ключей: аватар и приказ ссылаются на пару (файл,
   // владелец), и база не примет чужой файл в своём профиле.
   @@unique([id, ownerUserId])
+  @@unique([id, ownerTenantId])
   @@index([ownerUserId])
+  @@index([ownerTenantId])
 }
 
 /// Карточка игрока: аватар и инвентарь. Заполняет сам человек в «Кабинете».
@@ -930,6 +951,12 @@ model TenantMembership {
   /// составной — зал другого клуба сюда физически не встанет. Удалить зал,
   /// выбранный кем-то основным, нельзя, пока выбор не снят: `deleteHall`
   /// снимает его в той же транзакции (SET NULL обнулил бы и tenantId).
+  /// Место тренера в «Тренерском составе» на странице клуба (решение
+  /// владельца от 24.09.2026: состав выбирает и упорядочивает администратор).
+  /// Пусто — не показывать. Только у роли COACH, номера уникальны в клубе —
+  /// CHECK и частичный индекс в constraints.sql, раздел 26.
+  coachListOrder Int?
+
   preferredHallId String?
   preferredHall   Hall?   @relation("PreferredHall", fields: [preferredHallId, tenantId], references: [id, tenantId], onDelete: Restrict)
 

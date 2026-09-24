@@ -636,6 +636,7 @@ ALTER TABLE "StoredFile"
       WHEN 'AVATAR' THEN "size" <= 1048576
       WHEN 'RANK_DOCUMENT' THEN "size" <= 10485760
       WHEN 'COACH_PHOTO' THEN "size" <= 1048576
+      WHEN 'CLUB_BANNER' THEN "size" <= 2097152
     END
   );
 
@@ -648,6 +649,7 @@ ALTER TABLE "StoredFile"
       WHEN 'AVATAR' THEN "contentType" = 'image/webp'
       WHEN 'RANK_DOCUMENT' THEN "contentType" IN ('image/jpeg', 'image/png', 'image/webp', 'application/pdf')
       WHEN 'COACH_PHOTO' THEN "contentType" = 'image/webp'
+      WHEN 'CLUB_BANNER' THEN "contentType" = 'image/webp'
     END
   );
 
@@ -1097,3 +1099,34 @@ ALTER TABLE "TournamentType"
 ALTER TABLE "City"
   ADD CONSTRAINT "City_population_sane"
   CHECK ("population" IS NULL OR "population" > 0);
+
+-- ---------------------------------------------------------------------------
+-- 26. Страница клуба: баннер и описание
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_club_page (размер и тип баннера — в разделе 18).
+-- Владелец файла ровно один: человек или клуб. Файл клуба — только баннер,
+-- и баннер — только файл клуба: иначе аватар ушёл бы в баннер или баннер
+-- пережил бы увольнение загрузившего его администратора вместе с его учёткой.
+ALTER TABLE "StoredFile"
+  ADD CONSTRAINT "StoredFile_one_owner"
+  CHECK (
+    num_nonnulls("ownerUserId", "ownerTenantId") = 1
+    AND ("ownerTenantId" IS NOT NULL) = ("kind" = 'CLUB_BANNER')
+  );
+
+ALTER TABLE "Tenant"
+  ADD CONSTRAINT "Tenant_description_sane"
+  CHECK ("description" IS NULL OR ("description" = btrim("description") AND char_length("description") BETWEEN 1 AND 2000));
+
+-- Тренерский состав на странице клуба: место в списке — только у тренера.
+-- Смена роли снимает человека со списка (PeopleService), иначе этот CHECK
+-- отклонил бы саму смену роли. Номера уникальны в клубе частичным индексом:
+-- у не показанных тренеров номера нет вовсе.
+ALTER TABLE "TenantMembership"
+  ADD CONSTRAINT "TenantMembership_coach_list_only_coach"
+  CHECK ("coachListOrder" IS NULL OR ("role" = 'COACH' AND "coachListOrder" BETWEEN 1 AND 100));
+
+CREATE UNIQUE INDEX "TenantMembership_coach_list_order_unique"
+  ON "TenantMembership" ("tenantId", "coachListOrder")
+  WHERE "coachListOrder" IS NOT NULL;

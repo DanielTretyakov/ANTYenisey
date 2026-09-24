@@ -1401,3 +1401,40 @@ SELECT pg_temp.expect('DM',
 SELECT pg_temp.expect('DN',
   $q$UPDATE "TenantMembership" SET "preferredHallId" = 'h2' WHERE "userId" = 'c1' AND "tenantId" = 't1'$q$,
   '23503', 'TenantMembership_preferredHallId_tenantId_fkey');
+
+-- ---------------------------------------------------------------------------
+-- 30. Страница клуба: баннер, описание, тренерский состав
+-- ---------------------------------------------------------------------------
+
+-- Баннер клуба t2 — для сценариев ниже.
+DO $$ BEGIN
+  INSERT INTO "StoredFile" (id,"ownerTenantId",kind,"contentType",size,sha256,data)
+  VALUES ('fb2','t2','CLUB_BANNER','image/webp',4,repeat('d',64),'\x52494646'::bytea);
+EXCEPTION WHEN others THEN RAISE NOTICE 'DO. ПРОВАЛ подготовки: %', SQLERRM; END $$;
+
+-- DO. Файл без владельца — ничей мусор, который никто не удалит.
+SELECT pg_temp.expect('DO',
+  $q$INSERT INTO "StoredFile" (id,kind,"contentType",size,sha256,data)
+     VALUES ('fnone','AVATAR','image/webp',4,repeat('a',64),'\x52494646'::bytea)$q$,
+  '23514', 'StoredFile_one_owner');
+
+-- DP. Аватар, записанный на клуб, — не баннер: у клуба только баннеры.
+SELECT pg_temp.expect('DP',
+  $q$INSERT INTO "StoredFile" (id,"ownerTenantId",kind,"contentType",size,sha256,data)
+     VALUES ('ftav','t1','AVATAR','image/webp',4,repeat('a',64),'\x52494646'::bytea)$q$,
+  '23514', 'StoredFile_one_owner');
+
+-- DQ. Баннер чужого клуба не ставится: ключ составной (файл, клуб-владелец).
+SELECT pg_temp.expect('DQ',
+  $q$UPDATE "Tenant" SET "bannerFileId" = 'fb2' WHERE id = 't1'$q$,
+  '23503', 'Tenant_bannerFileId_id_fkey');
+
+-- DR. Клиент в тренерском составе — список только для тренеров.
+SELECT pg_temp.expect('DR',
+  $q$UPDATE "TenantMembership" SET "coachListOrder" = 1 WHERE "userId" = 'u1' AND "tenantId" = 't1'$q$,
+  '23514', 'TenantMembership_coach_list_only_coach');
+
+-- DS. Описание клуба из пробелов — мусор формы.
+SELECT pg_temp.expect('DS',
+  $q$UPDATE "Tenant" SET description = '  ' WHERE id = 't1'$q$,
+  '23514', 'Tenant_description_sane');

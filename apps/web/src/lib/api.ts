@@ -12,6 +12,7 @@ import type {
   ClientBooking,
   ClubCard,
   ClubCoach,
+  ClubCoachListItem,
   ClubEvent,
   ClubSearchQuery,
   CoachCard,
@@ -516,6 +517,18 @@ export function clubApi(slug: string = TENANT_SLUG) {
     updateClubSettings: (patch: UpdateClubSettingsRequest): Promise<ClubSettings> =>
       authorized(`${club}/settings`, json('PATCH', patch)),
 
+    /** Баннер страницы клуба: файл в поле `file`, новый заменяет старый. */
+    setClubBanner: (file: File): Promise<ClubSettings> => authorized(`${club}/settings/banner`, form('PUT', {}, file)),
+
+    removeClubBanner: (): Promise<ClubSettings> => authorized(`${club}/settings/banner`, { method: 'DELETE' }),
+
+    /** Все тренеры клуба; показанные на странице клуба — с местом. */
+    coachList: (): Promise<ClubCoachListItem[]> => authorized(`${club}/settings/coaches`),
+
+    /** Новый состав на странице клуба: идентификаторы в порядке показа. */
+    setCoachList: (coachIds: string[]): Promise<ClubCoachListItem[]> =>
+      authorized(`${club}/settings/coaches`, json('PUT', { coachIds })),
+
     // --- Залы
     halls: (): Promise<Hall[]> => authorized(`${club}/halls`),
 
@@ -671,8 +684,10 @@ export function clubApi(slug: string = TENANT_SLUG) {
      * регистрации. Вошедшему приезжает ещё и отметка «я уже записан» — ради
      * неё запрос идёт от его имени, когда есть от чьего.
      */
-    events: (forPerson?: string | null): Promise<ClubEvent[]> =>
-      optionallyAuthorized(withFor(`${club}/events`, forPerson)),
+    events: (forPerson?: string | null, range?: { from: string; to: string }): Promise<ClubEvent[]> =>
+      optionallyAuthorized(
+        withFor(range ? `${club}/events?${new URLSearchParams(range)}` : `${club}/events`, forPerson),
+      ),
 
     /**
      * Одно мероприятие для окна подробностей: описание, зал, тренер и

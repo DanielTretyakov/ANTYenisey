@@ -54,12 +54,13 @@ export function canSeeProfile(owner: ProfileOwner, viewer: ProfileViewer, today:
  * неё нет, тренером человек становится взрослым.
  */
 export function canReadFile(
-  kind: 'AVATAR' | 'RANK_DOCUMENT' | 'COACH_PHOTO',
+  kind: 'AVATAR' | 'RANK_DOCUMENT' | 'COACH_PHOTO' | 'CLUB_BANNER',
   owner: ProfileOwner,
   viewer: ProfileViewer,
   today: Date,
 ): boolean {
-  if (kind === 'COACH_PHOTO') {
+  // Фото тренера и баннер клуба — часть открытых страниц, возраста у них нет.
+  if (kind === 'COACH_PHOTO' || kind === 'CLUB_BANNER') {
     return true;
   }
 

@@ -1,9 +1,10 @@
-import { BadRequestException, Controller, Delete, Get, Param, Post } from '@nestjs/common';
+import { BadRequestException, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import type { BookingEntry, ClubEvent, EventDetail } from '@yenisey/types';
 import type { ClubContext } from '../auth/club-context';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { Acting, ClientAction, type ActingClient } from '../guardianship/acting-client.guard';
+import { EventsRangeDto } from './events-range.dto';
 import { EventsService } from './events.service';
 
 /**
@@ -29,8 +30,12 @@ export class EventsController {
   @Public()
   @ClientAction('read')
   @Get('events')
-  upcoming(@CurrentClub() club: ClubContext, @Acting() acting: ActingClient | null): Promise<ClubEvent[]> {
-    return this.events.listUpcoming(club.tenantId, acting?.userId ?? null);
+  upcoming(
+    @CurrentClub() club: ClubContext,
+    @Acting() acting: ActingClient | null,
+    @Query() range: EventsRangeDto,
+  ): Promise<ClubEvent[]> {
+    return this.events.listUpcoming(club.tenantId, acting?.userId ?? null, range);
   }
 
   /**

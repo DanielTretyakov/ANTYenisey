@@ -59,6 +59,18 @@ export class UpdateClubSettingsDto implements UpdateClubSettingsRequest {
   @MaxLength(200)
   email?: string | null;
 
+  /**
+   * Описание клуба. Пусто и пробелы — стереть (null): CHECK
+   * Tenant_description_sane другого не примет.
+   */
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() || null : value,
+  )
+  @IsString()
+  @MaxLength(2000, { message: 'description: не длиннее 2000 символов' })
+  description?: string | null;
+
   @IsOptional()
   @IsString()
   @MaxLength(500)

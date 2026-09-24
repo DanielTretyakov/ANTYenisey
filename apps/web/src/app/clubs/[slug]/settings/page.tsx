@@ -14,6 +14,7 @@ import { roleInClub } from '@/lib/membership';
 import { ApiError } from '@/lib/api';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { useSession } from '@/lib/useSession';
+import { ClubPageCard } from './ClubPageCard';
 import { HallForm } from './HallForm';
 import { SettingsForm } from './SettingsForm';
 import { TablesCard } from './TablesCard';
@@ -157,6 +158,8 @@ export default function ClubPage() {
             initial={data.settings}
             onSaved={(settings) => setData({ ...data, settings })}
           />
+
+          <ClubPageCard settings={data.settings} onSettings={(settings) => setData({ ...data, settings })} />
 
           <div>
             <div className="mb-4 flex flex-wrap items-center gap-1.5">

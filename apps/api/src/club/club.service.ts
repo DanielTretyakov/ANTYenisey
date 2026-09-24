@@ -4,9 +4,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Role } from '@yenisey/database';
+import { Prisma, Role, StoredFileKind } from '@yenisey/database';
 import type {
   ClubCoach,
+  ClubCoachListItem,
   Role as RoleName,
   ClubPeoplePage,
   ClubPeopleQuery,
@@ -19,6 +20,8 @@ import type {
   UpdateClubSettingsRequest,
   UpdateHallRequest,
 } from '@yenisey/types';
+import { FileIntake } from '../files/file-intake.service';
+import { FileStorage } from '../files/file-storage';
 import { PrismaService } from '../prisma/prisma.service';
 import { formatBirthDate } from '../auth/birth-date';
 import { clubSettingsViolations, hallViolations } from './settings-rules';
@@ -33,6 +36,8 @@ const SETTINGS_SELECT = {
   cityId: true,
   phone: true,
   email: true,
+  description: true,
+  bannerFileId: true,
   logoUrl: true,
   accentColor: true,
   // Часового пояса здесь нет: он переехал на зал (см. HALL_SELECT).
@@ -59,7 +64,11 @@ const HALL_SELECT = {
 
 @Injectable()
 export class ClubService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: FileStorage,
+    private readonly intake: FileIntake,
+  ) {}
 
   // --- Настройки клуба -----------------------------------------------------
 
@@ -195,6 +204,92 @@ export class ClubService {
       }),
       this.prisma.hall.delete({ where: { id: hallId } }),
     ]);
+  }
+
+  // --- Баннер клуба ---------------------------------------------------------
+
+  /**
+   * Новый баннер. Старый удаляется в той же транзакции — у клуба он один.
+   * Файл принадлежит клубу, а не загрузившему администратору: того могут
+   * уволить, а баннер останется.
+   */
+  async setBanner(tenantId: string, upload: Uint8Array | undefined): Promise<ClubSettings> {
+    // Перекодирование — до транзакции: sharp думает сотни миллисекунд.
+    const prepared = await this.intake.prepare('CLUB_BANNER', upload);
+
+    await this.prisma.$transaction(async (tx) => {
+      const file = await this.storage.save(tx, {
+        ownerTenantId: tenantId,
+        kind: StoredFileKind.CLUB_BANNER,
+        contentType: prepared.contentType,
+        data: prepared.data,
+      });
+
+      await tx.tenant.update({ where: { id: tenantId }, data: { bannerFileId: file.id } });
+      await this.storage.prune(tx, { ownerTenantId: tenantId, kind: StoredFileKind.CLUB_BANNER, keepId: file.id });
+    });
+
+    return this.findSettings(tenantId);
+  }
+
+  async removeBanner(tenantId: string): Promise<ClubSettings> {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.tenant.update({ where: { id: tenantId }, data: { bannerFileId: null } });
+      await this.storage.prune(tx, { ownerTenantId: tenantId, kind: StoredFileKind.CLUB_BANNER, keepId: null });
+    });
+
+    return this.findSettings(tenantId);
+  }
+
+  // --- Тренерский состав на странице клуба ----------------------------------
+
+  /** Все действующие тренеры клуба; показанные — первыми, по месту. */
+  async listCoachList(tenantId: string): Promise<ClubCoachListItem[]> {
+    const rows = await this.prisma.tenantMembership.findMany({
+      where: { tenantId, role: Role.COACH, deactivatedAt: null, user: { deactivatedAt: null, anonymizedAt: null } },
+      select: { userId: true, coachListOrder: true, user: { select: { fullName: true } } },
+    });
+
+    return rows
+      .map((row) => ({ id: row.userId, fullName: row.user.fullName, order: row.coachListOrder }))
+      .sort(
+        (a, b) =>
+          (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) ||
+          a.fullName.localeCompare(b.fullName, 'ru'),
+      );
+  }
+
+  /**
+   * Новый состав целиком: присланные — по порядку, остальные — скрыты. Одной
+   * транзакцией: сначала все места снимаются, потом раздаются заново, иначе
+   * перестановка двух тренеров упёрлась бы в уникальность места.
+   */
+  async replaceCoachList(tenantId: string, coachIds: string[]): Promise<ClubCoachListItem[]> {
+    if (new Set(coachIds).size !== coachIds.length) {
+      throw new BadRequestException('Тренер указан в списке дважды');
+    }
+
+    const coaches = await this.listCoachList(tenantId);
+    const known = new Set(coaches.map((coach) => coach.id));
+
+    if (coachIds.some((id) => !known.has(id))) {
+      throw new BadRequestException('В списке есть человек, который не тренирует в этом клубе');
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.tenantMembership.updateMany({
+        where: { tenantId, coachListOrder: { not: null } },
+        data: { coachListOrder: null },
+      }),
+      ...coachIds.map((userId, index) =>
+        this.prisma.tenantMembership.update({
+          where: { userId_tenantId: { userId, tenantId } },
+          data: { coachListOrder: index + 1 },
+        }),
+      ),
+    ]);
+
+    return this.listCoachList(tenantId);
   }
 
   // --- Личные настройки сотрудника ------------------------------------------
@@ -519,9 +614,12 @@ export class ClubService {
     }
 
     await this.prisma.$transaction(async (tx) => {
+      // Уходя из тренеров, человек уходит и из тренерского состава на
+      // странице клуба: место в списке — только у роли COACH (CHECK), и без
+      // этого база отклонила бы саму смену роли.
       await tx.tenantMembership.update({
         where: { userId_tenantId: { userId, tenantId } },
-        data: { role },
+        data: { role, ...(role === Role.COACH ? {} : { coachListOrder: null }) },
       });
 
       if (role === Role.COACH) {

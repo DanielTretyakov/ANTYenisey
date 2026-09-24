@@ -38,6 +38,9 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
  * запись на занятие — не такая же операция, как регистрация на турнир: её
  * приходится сериализовать блокировкой строки, см. `registerForTraining`.
  */
+/** Самое широкое окно списка: месяц с запасом — неделя страницы клуба и ещё три. */
+const MAX_RANGE_MS = 31 * 24 * 3600_000;
+
 @Injectable()
 export class EventsService {
   constructor(
@@ -57,17 +60,29 @@ export class EventsService {
    * «не записан» тому, кто просто не представился, значило бы показать ему
    * кнопку записи, ведущую на форму входа.
    */
-  async listUpcoming(tenantId: string, userId: string | null): Promise<ClubEvent[]> {
+  async listUpcoming(
+    tenantId: string,
+    userId: string | null,
+    range: { from?: string; to?: string } = {},
+  ): Promise<ClubEvent[]> {
     const now = new Date();
+    const from = range.from && new Date(range.from) > now ? new Date(range.from) : now;
+    const to = range.to ? new Date(range.to) : undefined;
+
+    if (to && to.getTime() - from.getTime() > MAX_RANGE_MS) {
+      throw new BadRequestException('Окно списка — не больше 31 дня');
+    }
+
+    const startsAt = { gte: from, ...(to ? { lt: to } : {}) };
 
     const [tournaments, sessions] = await Promise.all([
       this.prisma.tournament.findMany({
-        where: { tenantId, startsAt: { gte: now } },
+        where: { tenantId, startsAt },
         select: TOURNAMENT_EVENT_SELECT,
         orderBy: { startsAt: 'asc' },
       }),
       this.prisma.trainingSession.findMany({
-        where: { tenantId, startsAt: { gte: now } },
+        where: { tenantId, startsAt },
         select: TRAINING_EVENT_SELECT,
         orderBy: { startsAt: 'asc' },
       }),

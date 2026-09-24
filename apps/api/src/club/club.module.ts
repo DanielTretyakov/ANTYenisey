@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { FilesModule } from '../files/files.module';
 import { CatalogService } from './catalog.service';
 import { ClubController } from './club.controller';
 import { ClubService } from './club.service';
@@ -11,6 +12,7 @@ import { ScheduleService } from './schedule.service';
  * администратором, — и четвёртой копии этих двух upsert'ов быть не должно.
  */
 @Module({
+  imports: [FilesModule],
   controllers: [ClubController],
   providers: [ClubService, ScheduleService, CatalogService, MembershipService],
   exports: [ClubService, ScheduleService, CatalogService, MembershipService],

@@ -5,9 +5,16 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { StoredContentType } from './file-signature';
 
 /** Что известно о файле без его байтов. */
+/**
+ * Чей файл: человека или клуба — ровно одно (CHECK StoredFile_one_owner).
+ * Клубу принадлежит только баннер.
+ */
+export type FileOwner = { ownerUserId: string } | { ownerTenantId: string };
+
 export interface StoredFileInfo {
   id: string;
-  ownerUserId: string;
+  ownerUserId: string | null;
+  ownerTenantId: string | null;
   kind: StoredFileKind;
   contentType: StoredContentType;
   size: number;
@@ -20,12 +27,11 @@ export interface StoredFileContent extends StoredFileInfo {
   sha256: string;
 }
 
-export interface NewStoredFile {
-  ownerUserId: string;
+export type NewStoredFile = FileOwner & {
   kind: StoredFileKind;
   contentType: StoredContentType;
   data: Uint8Array;
-}
+};
 
 /**
  * Хранилище загруженных файлов.
@@ -55,7 +61,7 @@ export abstract class FileStorage {
    */
   abstract prune(
     tx: Prisma.TransactionClient,
-    target: { ownerUserId: string; kind: StoredFileKind; keepId: string | null },
+    target: FileOwner & { kind: StoredFileKind; keepId: string | null },
   ): Promise<void>;
 }
 
@@ -76,7 +82,7 @@ export class PostgresFileStorage extends FileStorage {
   async save(tx: Prisma.TransactionClient, file: NewStoredFile): Promise<StoredFileInfo> {
     const created = await tx.storedFile.create({
       data: {
-        ownerUserId: file.ownerUserId,
+        ...ownerOf(file),
         kind: file.kind,
         contentType: file.contentType,
         size: file.data.length,
@@ -102,11 +108,11 @@ export class PostgresFileStorage extends FileStorage {
 
   async prune(
     tx: Prisma.TransactionClient,
-    target: { ownerUserId: string; kind: StoredFileKind; keepId: string | null },
+    target: FileOwner & { kind: StoredFileKind; keepId: string | null },
   ): Promise<void> {
     await tx.storedFile.deleteMany({
       where: {
-        ownerUserId: target.ownerUserId,
+        ...ownerOf(target),
         kind: target.kind,
         ...(target.keepId ? { id: { not: target.keepId } } : {}),
       },
@@ -114,9 +120,15 @@ export class PostgresFileStorage extends FileStorage {
   }
 }
 
+/** Владелец из объединения — ровно одним полем, второе не пишется вовсе. */
+function ownerOf(owner: FileOwner): { ownerUserId: string } | { ownerTenantId: string } {
+  return 'ownerUserId' in owner ? { ownerUserId: owner.ownerUserId } : { ownerTenantId: owner.ownerTenantId };
+}
+
 const INFO = {
   id: true,
   ownerUserId: true,
+  ownerTenantId: true,
   kind: true,
   contentType: true,
   size: true,
@@ -125,7 +137,8 @@ const INFO = {
 
 function toInfo(row: {
   id: string;
-  ownerUserId: string;
+  ownerUserId: string | null;
+  ownerTenantId: string | null;
   kind: StoredFileKind;
   contentType: string;
   size: number;

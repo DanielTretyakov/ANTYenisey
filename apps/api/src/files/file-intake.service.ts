@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { checkUpload, type FileKind, type StoredContentType } from './file-signature';
-import { normalizeAvatar, normalizeDocumentImage } from './image-normalizer';
+import { normalizeAvatar, normalizeBanner, normalizeDocumentImage } from './image-normalizer';
 
 /** Файл, готовый к записи: тип определён по байтам, картинка перекодирована. */
 export interface PreparedFile {
@@ -37,9 +37,15 @@ export class FileIntake {
     try {
       // Фотография тренера проходит тем же путём, что аватар: квадрат 512×512
       // в WebP, метаданные с координатами съёмки не переживают перекодирование.
-      return kind === 'AVATAR' || kind === 'COACH_PHOTO'
-        ? { kind, contentType: 'image/webp', data: await normalizeAvatar(upload) }
-        : { kind, contentType: checked.contentType, data: await normalizeDocumentImage(upload, checked.contentType) };
+      if (kind === 'AVATAR' || kind === 'COACH_PHOTO') {
+        return { kind, contentType: 'image/webp', data: await normalizeAvatar(upload) };
+      }
+
+      if (kind === 'CLUB_BANNER') {
+        return { kind, contentType: 'image/webp', data: await normalizeBanner(upload) };
+      }
+
+      return { kind, contentType: checked.contentType, data: await normalizeDocumentImage(upload, checked.contentType) };
     } catch {
       // Сигнатура совпала, а прочитать не вышло: файл обрезан, повреждён или
       // слишком велик по разрешению. Подробности sharp человеку не помогут.

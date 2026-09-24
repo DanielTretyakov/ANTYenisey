@@ -5,7 +5,7 @@ import type { ClubSettings } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
-import { Field } from '@/components/ui/Field';
+import { Field, inputClassName } from '@/components/ui/Field';
 import { CityCombobox } from '@/components/ui/CityCombobox';
 import { Toggle } from '@/components/ui/Toggle';
 import { ApiError } from '@/lib/api';
@@ -33,6 +33,7 @@ type FormState = {
   cityId: string;
   phone: string;
   email: string;
+  description: string;
   logoUrl: string;
   accentColor: string;
   noShowChargePercent: string;
@@ -47,6 +48,7 @@ function toForm(settings: ClubSettings): FormState {
     cityId: settings.cityId ?? '',
     phone: settings.phone ?? '',
     email: settings.email ?? '',
+    description: settings.description ?? '',
     logoUrl: settings.logoUrl ?? '',
     accentColor: settings.accentColor ?? '',
     noShowChargePercent: String(settings.noShowChargePercent),
@@ -111,6 +113,7 @@ export function SettingsForm({
         // показать ссылку `tel:` в никуда.
         phone: form.phone.trim() || null,
         email: form.email.trim() || null,
+        description: form.description.trim() || null,
         logoUrl: form.logoUrl.trim() || null,
         accentColor: form.accentColor.trim() || null,
         noShowChargePercent,
@@ -199,6 +202,20 @@ export function SettingsForm({
           description="Как выглядит страница клуба. Пустые поля оставляют её в цветах платформы."
         />
         <CardBody>
+          <label className="mb-4 block">
+            <span className="mb-1.5 block text-[0.8125rem] font-medium text-text-muted">Описание клуба</span>
+            <textarea
+              value={form.description}
+              onChange={(event) => set('description', event.target.value)}
+              rows={4}
+              maxLength={2000}
+              placeholder="Чем живёт клуб, для кого он, как добраться"
+              className={cn(inputClassName, 'resize-y')}
+            />
+            <span className="mt-1.5 block text-[0.8125rem] text-text-subtle">
+              Показывается под баннером на странице клуба. До 2000 символов.
+            </span>
+          </label>
           <Field
             label="Ссылка на логотип"
             hint="Показывается рядом с названием на странице клуба."

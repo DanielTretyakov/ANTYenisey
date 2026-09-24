@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Role } from '@yenisey/database';
 import type { City, ClubCard, ClubSearchQuery, CitySearchQuery, PublicTenant } from '@yenisey/types';
+import { shortName } from '@yenisey/types';
 import { cityLimit, cityPatterns } from './city-search';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -130,6 +132,24 @@ export class TenantsService {
         ...CARD_SELECT,
         phone: true,
         email: true,
+        description: true,
+        bannerFileId: true,
+        // Состав — только показанные администратором и только действующие
+        // тренеры: уволенный остаётся без роли, а место снимает смена роли.
+        memberships: {
+          where: {
+            role: Role.COACH,
+            coachListOrder: { not: null },
+            deactivatedAt: null,
+            user: { deactivatedAt: null, anonymizedAt: null },
+          },
+          select: {
+            userId: true,
+            user: { select: { fullName: true, coachCard: { select: { photoFileId: true } } } },
+            coachProfile: { select: { groupPrice: true, individualPrice: true } },
+          },
+          orderBy: { coachListOrder: 'asc' },
+        },
         halls: {
           select: {
             id: true,
@@ -162,6 +182,15 @@ export class TenantsService {
       accentColor: card.accentColor,
       phone: tenant.phone,
       email: tenant.email,
+      description: tenant.description,
+      bannerFileId: tenant.bannerFileId,
+      coaches: tenant.memberships.map((row) => ({
+        id: row.userId,
+        name: shortName(row.user.fullName),
+        photoFileId: row.user.coachCard?.photoFileId ?? null,
+        groupPrice: row.coachProfile?.groupPrice ?? null,
+        individualPrice: row.coachProfile?.individualPrice ?? null,
+      })),
       halls: tenant.halls.map((hall) => ({
         id: hall.id,
         name: hall.name,
