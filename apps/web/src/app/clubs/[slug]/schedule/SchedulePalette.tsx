@@ -155,115 +155,125 @@ export function SchedulePalette({
   const attachedColor = attachedId ? colors.get(attachedId) : undefined;
 
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-1.5">
-      {PURPOSES.map((purpose) => (
+    <div className="mb-3 grid gap-2.5">
+      {/* Две строки, а не одна текучая (решение владельца от 24.09.2026):
+          кисти — первой, всё, что уточняет кисть, — второй. В одну строку
+          тренер и тип занятия то стояли рядом с кистями, то съезжали вниз
+          по одному, и число мест оказывалось отдельно от них. */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {PURPOSES.map((purpose) => (
+          <button
+            key={purpose.value}
+            type="button"
+            aria-pressed={brush === purpose.value}
+            onClick={() => onBrush(purpose.value)}
+            className={cn(
+              'flex items-center gap-2 rounded-control border px-3 py-1.5 text-[0.875rem] transition-colors',
+              brush === purpose.value
+                ? 'border-border-strong bg-surface-sunken text-text'
+                : 'border-border text-text-muted hover:bg-surface-sunken',
+            )}
+          >
+            <span
+              className="h-3 w-3 rounded-sm"
+              style={{ background: purpose.chip }}
+              aria-hidden="true"
+            />
+            {purpose.label}
+          </button>
+        ))}
+
         <button
-          key={purpose.value}
           type="button"
-          aria-pressed={brush === purpose.value}
-          onClick={() => onBrush(purpose.value)}
+          aria-pressed={brush === ERASER}
+          onClick={() => onBrush(ERASER)}
           className={cn(
-            'flex items-center gap-2 rounded-control border px-3 py-1.5 text-[0.875rem] transition-colors',
-            brush === purpose.value
+            'rounded-control border px-3 py-1.5 text-[0.875rem] transition-colors',
+            brush === ERASER
               ? 'border-border-strong bg-surface-sunken text-text'
               : 'border-border text-text-muted hover:bg-surface-sunken',
           )}
         >
-          <span
-            className="h-3 w-3 rounded-sm"
-            style={{ background: purpose.chip }}
-            aria-hidden="true"
-          />
-          {purpose.label}
+          Освободить
         </button>
-      ))}
+      </div>
 
-      <button
-        type="button"
-        aria-pressed={brush === ERASER}
-        onClick={() => onBrush(ERASER)}
-        className={cn(
-          'rounded-control border px-3 py-1.5 text-[0.875rem] transition-colors',
-          brush === ERASER
-            ? 'border-border-strong bg-surface-sunken text-text'
-            : 'border-border text-text-muted hover:bg-surface-sunken',
-        )}
-      >
-        Освободить
-      </button>
+      {(attachment !== 'none' || seating || brush === 'TRAINING') && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {brush === 'TRAINING' && (
+            <label className="flex items-center gap-2 text-[0.875rem] text-text-muted">
+              Занятие
+              <select
+                value={trainingTypeId ?? ''}
+                onChange={(event) => onTrainingType(event.target.value || null)}
+                className={cn(inputClassName, 'w-auto py-1.5 text-[0.875rem]')}
+              >
+                {trainingTypes.length === 0 && <option value="">типов нет</option>}
+                {trainingTypes.map((type) => (
+                  <option key={type.id} value={type.id}>
+                    {type.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
-      {attachment === 'coach' && (
-        <label className="ml-2 flex items-center gap-2 text-[0.875rem] text-text-muted">
-          Тренер
-          <select
-            value={coachId ?? ''}
-            onChange={(event) => onCoach(event.target.value || null)}
-            className={cn(inputClassName, 'w-auto py-1.5 text-[0.875rem]')}
-          >
-            {/* У тренировки тренер обязателен, у спарринга — нет: спарринг
-                заводят заранее, ещё не зная, кто его проведёт. */}
-            {brush === 'SPARRING' && <option value="">не назначен</option>}
-            {coaches.length === 0 && <option value="">тренеров нет</option>}
-            {coaches.map((coach) => (
-              <option key={coach.id} value={coach.id}>
-                {coach.fullName}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
+          {attachment === 'coach' && (
+            <label className="flex items-center gap-2 text-[0.875rem] text-text-muted">
+              Тренер
+              <select
+                value={coachId ?? ''}
+                onChange={(event) => onCoach(event.target.value || null)}
+                className={cn(inputClassName, 'w-auto py-1.5 text-[0.875rem]')}
+              >
+                {/* У тренировки тренер обязателен, у спарринга — нет: спарринг
+                    заводят заранее, ещё не зная, кто его проведёт. */}
+                {brush === 'SPARRING' && <option value="">не назначен</option>}
+                {coaches.length === 0 && <option value="">тренеров нет</option>}
+                {coaches.map((coach) => (
+                  <option key={coach.id} value={coach.id}>
+                    {coach.fullName}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
-      {seating && <ClientPicker value={client} onChange={onClient} inline />}
+          {brush === 'TRAINING' && askCapacity && (
+            <label className="flex items-center gap-2 text-[0.875rem] text-text-muted">
+              Мест
+              <input
+                type="number"
+                min={1}
+                max={200}
+                value={capacity}
+                onChange={(event) => onCapacity(Number(event.target.value))}
+                className={cn(inputClassName, 'w-20 py-1.5 text-[0.875rem]')}
+              />
+            </label>
+          )}
 
-      {brush === 'TRAINING' && (
-        <label className="flex items-center gap-2 text-[0.875rem] text-text-muted">
-          Занятие
-          <select
-            value={trainingTypeId ?? ''}
-            onChange={(event) => onTrainingType(event.target.value || null)}
-            className={cn(inputClassName, 'w-auto py-1.5 text-[0.875rem]')}
-          >
-            {trainingTypes.length === 0 && <option value="">типов нет</option>}
-            {trainingTypes.map((type) => (
-              <option key={type.id} value={type.id}>
-                {type.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
+          {brush === 'TOURNAMENT' && (
+            <label className="flex items-center gap-2 text-[0.875rem] text-text-muted">
+              Турнир
+              <select
+                value={tournamentTypeId ?? ''}
+                onChange={(event) => onTournamentType(event.target.value || null)}
+                className={cn(inputClassName, 'w-auto py-1.5 text-[0.875rem]')}
+              >
+                {tournamentTypes.length === 0 && <option value="">типов турниров нет</option>}
+                {tournamentTypes.map((type) => (
+                  <option key={type.id} value={type.id}>
+                    {type.name}
+                    {type.ratingLabel ? ` (рейтинг ${type.ratingLabel})` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
-      {brush === 'TRAINING' && askCapacity && (
-        <label className="flex items-center gap-2 text-[0.875rem] text-text-muted">
-          Мест
-          <input
-            type="number"
-            min={1}
-            max={200}
-            value={capacity}
-            onChange={(event) => onCapacity(Number(event.target.value))}
-            className={cn(inputClassName, 'w-20 py-1.5 text-[0.875rem]')}
-          />
-        </label>
-      )}
-
-      {brush === 'TOURNAMENT' && (
-        <label className="flex items-center gap-2 text-[0.875rem] text-text-muted">
-          Турнир
-          <select
-            value={tournamentTypeId ?? ''}
-            onChange={(event) => onTournamentType(event.target.value || null)}
-            className={cn(inputClassName, 'w-auto py-1.5 text-[0.875rem]')}
-          >
-            {tournamentTypes.length === 0 && <option value="">типов турниров нет</option>}
-            {tournamentTypes.map((type) => (
-              <option key={type.id} value={type.id}>
-                {type.name}
-                {type.ratingLabel ? ` (рейтинг ${type.ratingLabel})` : ''}
-              </option>
-            ))}
-          </select>
-        </label>
+          {seating && <ClientPicker value={client} onChange={onClient} inline />}
+        </div>
       )}
 
       {(attachment !== 'none' || seating) && (

@@ -20,6 +20,7 @@ import type {
   ClubTable,
   DaySchedule,
   Hall,
+  StaffPreferences,
   Tournament,
   TournamentType,
   TrainingSession,
@@ -43,6 +44,7 @@ import {
   TrainingTypeDto,
 } from './dto/catalog.dto';
 import { ChangeRoleDto, ClubPeopleQueryDto } from './dto/people.dto';
+import { StaffPreferencesDto } from './dto/preferences.dto';
 import { UpdateClubSettingsDto } from './dto/update-settings.dto';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -83,6 +85,25 @@ export class ClubController {
     @Body() dto: UpdateClubSettingsDto,
   ): Promise<ClubSettings> {
     return this.club.updateSettings(club.tenantId, dto);
+  }
+
+  // --- Личные настройки сотрудника ----------------------------------------
+
+  /**
+   * Приоритетный зал того, кто спрашивает. Под теми же ролями, что смена и
+   * расписание, — других экранов с выбором зала у персонала нет.
+   */
+  @Get('me/preferences')
+  findPreferences(@CurrentClub() club: ClubContext): Promise<StaffPreferences> {
+    return this.club.findPreferences(club.tenantId, club.userId);
+  }
+
+  @Put('me/preferences')
+  updatePreferences(
+    @CurrentClub() club: ClubContext,
+    @Body() dto: StaffPreferencesDto,
+  ): Promise<StaffPreferences> {
+    return this.club.updatePreferences(club.tenantId, club.userId, dto.preferredHallId ?? null);
   }
 
   // --- Залы ----------------------------------------------------------------

@@ -19,6 +19,7 @@ import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { useSession } from '@/lib/useSession';
 import { DayBoard } from './DayBoard';
 import { messageOf, TemplateBoard } from './TemplateBoard';
+import { initialHallId, PreferredHallButton, usePreferredHall, withPreferredFirst } from '@/components/club/PreferredHall';
 
 const MANAGERS: Role[] = ['ADMIN', 'OWNER'];
 
@@ -90,7 +91,6 @@ export default function SchedulePage() {
           tournamentTypes: tournamentTypes.filter((type) => type.isActive),
           tournaments,
         });
-        setHallId((current) => current || (halls[0]?.id ?? ''));
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(messageOf(cause));
@@ -100,6 +100,14 @@ export default function SchedulePage() {
       cancelled = true;
     };
   }, [allowed, club]);
+
+  const preferred = usePreferredHall();
+
+  // Зал по умолчанию — приоритетный, как только известны и залы, и выбор.
+  useEffect(() => {
+    if (!data || !preferred.ready) return;
+    setHallId((current) => current || initialHallId(data.halls, preferred.preferredHallId));
+  }, [data, preferred.ready, preferred.preferredHallId]);
 
   const hall = data?.halls.find((item) => item.id === hallId) ?? null;
 
@@ -142,7 +150,7 @@ export default function SchedulePage() {
           <div className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-3">
             {data.halls.length > 1 && (
               <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Зал">
-                {data.halls.map((item) => (
+                {withPreferredFirst(data.halls, preferred.preferredHallId).map((item) => (
                   <Tab
                     key={item.id}
                     inTablist
@@ -152,6 +160,12 @@ export default function SchedulePage() {
                     {item.name}
                   </Tab>
                 ))}
+                <PreferredHallButton
+                  hallId={hallId}
+                  preferredHallId={preferred.preferredHallId}
+                  pending={preferred.pending}
+                  onToggle={(id) => void preferred.toggle(id)}
+                />
               </div>
             )}
 

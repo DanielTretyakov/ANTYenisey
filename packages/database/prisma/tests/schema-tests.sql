@@ -1392,3 +1392,12 @@ SELECT pg_temp.expect('DL',
 SELECT pg_temp.expect('DM',
   $q$INSERT INTO "City" (id,name,region,population) VALUES ('city-zero','Нульград',NULL,0)$q$,
   '23514', 'City_population_sane');
+
+-- ---------------------------------------------------------------------------
+-- 29. Приоритетный зал сотрудника
+-- ---------------------------------------------------------------------------
+
+-- DN. Зал другого клуба основным не ставится: ключ составной (зал, клуб).
+SELECT pg_temp.expect('DN',
+  $q$UPDATE "TenantMembership" SET "preferredHallId" = 'h2' WHERE "userId" = 'c1' AND "tenantId" = 't1'$q$,
+  '23503', 'TenantMembership_preferredHallId_tenantId_fkey');

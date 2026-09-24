@@ -29,6 +29,7 @@ import { roleInClub } from '@/lib/membership';
 import { formatKopecks } from '@/lib/money';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { useSession } from '@/lib/useSession';
+import { initialHallId, PreferredHallButton, usePreferredHall, withPreferredFirst } from '@/components/club/PreferredHall';
 
 const MANAGERS: Role[] = ['ADMIN', 'OWNER'];
 
@@ -80,17 +81,22 @@ export default function DeskPage() {
     }
   }, [session.status, router]);
 
+  const preferred = usePreferredHall();
+
   useEffect(() => {
     if (!allowed) return;
 
     club
       .halls()
-      .then((loaded) => {
-        setHalls(loaded);
-        setHallId((current) => current || (loaded[0]?.id ?? ''));
-      })
+      .then(setHalls)
       .catch((cause: unknown) => setError(messageOf(cause)));
   }, [allowed, club]);
+
+  // Зал по умолчанию — приоритетный, как только известны и залы, и выбор.
+  useEffect(() => {
+    if (!halls || !preferred.ready) return;
+    setHallId((current) => current || initialHallId(halls, preferred.preferredHallId));
+  }, [halls, preferred.ready, preferred.preferredHallId]);
 
   const hall = halls?.find((item) => item.id === hallId) ?? null;
 
@@ -168,13 +174,22 @@ export default function DeskPage() {
             onChange={(event) => setHallId(event.target.value)}
             className={cn(inputClassName, 'w-auto')}
           >
-            {(halls ?? []).map((item) => (
+            {withPreferredFirst(halls ?? [], preferred.preferredHallId).map((item) => (
               <option key={item.id} value={item.id}>
                 {item.name}
               </option>
             ))}
           </select>
         </label>
+
+        {(halls?.length ?? 0) > 1 && (
+          <PreferredHallButton
+            hallId={hallId}
+            preferredHallId={preferred.preferredHallId}
+            pending={preferred.pending}
+            onToggle={(id) => void preferred.toggle(id)}
+          />
+        )}
 
         <label className="contents">
           <span className="sr-only">День</span>

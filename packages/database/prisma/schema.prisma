@@ -873,11 +873,11 @@ model UserClub {
 /// подсказок). Заведение города силами администратора клуба вернуло бы ровно
 /// ту проблему, ради которой справочник и появился.
 model City {
-  id     String  @id @default(cuid())
-  name   String
+  id         String  @id @default(cuid())
+  name       String
   /// Регион — чтобы различить одноимённые города («Железногорск» есть и в
   /// Красноярском крае, и в Курской области).
-  region String?
+  region     String?
   /// Население — только для порядка подсказок: на «Крас» первым должен
   /// выйти Красноярск, а не Красноармейск. Пусто у города, заведённого
   /// вне справочника РФ.
@@ -923,6 +923,15 @@ model TenantMembership {
   /// Аккаунт при этом жив и работает в других клубах. Строка не удаляется —
   /// за ней стоят платежи и история визитов.
   deactivatedAt DateTime?
+
+  /// Зал, который этот сотрудник видит первым на смене и в расписании
+  /// (решение владельца от 24.09.2026: «приоритетный зал»). Личный выбор, а не
+  /// настройка клуба: у двух администраторов одного клуба залы разные. Ключ
+  /// составной — зал другого клуба сюда физически не встанет. Удалить зал,
+  /// выбранный кем-то основным, нельзя, пока выбор не снят: `deleteHall`
+  /// снимает его в той же транзакции (SET NULL обнулил бы и tenantId).
+  preferredHallId String?
+  preferredHall   Hall?   @relation("PreferredHall", fields: [preferredHallId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1338,6 +1347,8 @@ model Hall {
   subscriptionSales Subscription[]    @relation("SubscriptionSale")
 
   // Мишень для составных FK: стол не может попасть в зал чужого клуба.
+  preferredBy TenantMembership[] @relation("PreferredHall")
+
   @@unique([id, tenantId])
   @@unique([tenantId, name])
   @@index([tenantId])

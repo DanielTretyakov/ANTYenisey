@@ -15,6 +15,7 @@ import type {
   ClubTable,
   CreateHallRequest,
   Hall,
+  StaffPreferences,
   UpdateClubSettingsRequest,
   UpdateHallRequest,
 } from '@yenisey/types';
@@ -184,7 +185,53 @@ export class ClubService {
       throw new ConflictException('Это единственный зал клуба, удалить его нельзя');
     }
 
-    await this.prisma.hall.delete({ where: { id: hallId } });
+    // Приоритетный зал сотрудников снимается той же транзакцией: ключ на зал
+    // RESTRICT (SET NULL обнулил бы и tenantId привязки), и без этого зал,
+    // который кто-то выбрал основным, не удалялся бы вовсе.
+    await this.prisma.$transaction([
+      this.prisma.tenantMembership.updateMany({
+        where: { tenantId, preferredHallId: hallId },
+        data: { preferredHallId: null },
+      }),
+      this.prisma.hall.delete({ where: { id: hallId } }),
+    ]);
+  }
+
+  // --- Личные настройки сотрудника ------------------------------------------
+
+  async findPreferences(tenantId: string, userId: string): Promise<StaffPreferences> {
+    const membership = await this.prisma.tenantMembership.findUnique({
+      where: { userId_tenantId: { userId, tenantId } },
+      select: { preferredHallId: true },
+    });
+
+    return { preferredHallId: membership?.preferredHallId ?? null };
+  }
+
+  /**
+   * Приоритетный зал. Зал проверяется здесь ради внятного 404; от гонки и от
+   * чужого клуба защищает составной ключ `(preferredHallId, tenantId)`.
+   */
+  async updatePreferences(tenantId: string, userId: string, hallId: string | null): Promise<StaffPreferences> {
+    if (hallId) {
+      const hall = await this.prisma.hall.findFirst({ where: { id: hallId, tenantId }, select: { id: true } });
+
+      if (!hall) {
+        throw new NotFoundException('Зал не найден');
+      }
+    }
+
+    // Сюда пускают только ADMIN и OWNER — у них привязка есть всегда.
+    const updated = await this.prisma.tenantMembership.updateMany({
+      where: { userId, tenantId },
+      data: { preferredHallId: hallId },
+    });
+
+    if (updated.count === 0) {
+      throw new NotFoundException('Привязка к клубу не найдена');
+    }
+
+    return { preferredHallId: hallId };
   }
 
   private async findHall(tenantId: string, hallId: string): Promise<Hall> {

@@ -27,6 +27,8 @@ const PASSWORD = 'ochen-dlinnyi-parol-123';
 
 let passed = 0;
 let failed = 0;
+/** Приоритетный зал администратора до прогона — возвращается в конце. */
+let originalPreferredHall = null;
 
 function check(title, expected, actual, extra = '') {
   if (expected === actual) {
@@ -539,6 +541,21 @@ async function main() {
     r = await asAdmin(`/clubs/yenisey/halls/${hallId}`, { method: 'PATCH', json: { bookingStep: 'MIN_15' } });
     check('шаг бронирования зала изменён', 200, r.status);
     assert('ответ отдал новое значение', r.body?.bookingStep === 'MIN_15');
+
+    // Приоритетный зал — личный выбор сотрудника; прежний возвращается в
+    // конце прогона, после удаления пробного зала.
+    r = await asAdmin('/clubs/yenisey/me/preferences');
+    check('приоритетный зал читается', 200, r.status);
+    originalPreferredHall = r.body?.preferredHallId ?? null;
+
+    r = await asAdmin('/clubs/yenisey/me/preferences', { method: 'PUT', json: { preferredHallId: hallId } });
+    check('приоритетный зал выбран', 200, r.status);
+    assert('выбор сохранился', r.body?.preferredHallId === hallId);
+
+    r = await call('/clubs/sayany');
+    const foreignHallId = r.body?.halls?.[0]?.id;
+    r = await asAdmin('/clubs/yenisey/me/preferences', { method: 'PUT', json: { preferredHallId: foreignHallId } });
+    check('зал чужого клуба приоритетным не ставится', 404, r.status);
 
     console.log('=== 20. Столы в залах');
     const label = `Стол проверки ${RUN}`;
@@ -1814,7 +1831,16 @@ async function main() {
     r = await asAdmin(`/clubs/yenisey/tables/${twinId}`, { method: 'DELETE' });
     check('стол-двойник убран', 204, r.status);
     r = await asAdmin(`/clubs/yenisey/halls/${hallId}`, { method: 'DELETE' });
-    check('пустой зал удалён', 204, r.status);
+    check('пустой зал удалён, хоть он и выбран основным', 204, r.status);
+
+    r = await asAdmin('/clubs/yenisey/me/preferences');
+    assert('удалённый зал снят с приоритетных', r.body?.preferredHallId === null);
+
+    r = await asAdmin('/clubs/yenisey/me/preferences', {
+      method: 'PUT',
+      json: { preferredHallId: originalPreferredHall },
+    });
+    check('прежний приоритетный зал возвращён', 200, r.status);
 
     r = await patchSettings(originalSettings);
     check('настройки клуба возвращены в исходное состояние', 200, r.status);

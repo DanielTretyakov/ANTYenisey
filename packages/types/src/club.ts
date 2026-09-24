@@ -29,6 +29,17 @@ import type { ClientSubscription } from './subscription';
  */
 export type BookingStep = 'MIN_10' | 'MIN_15' | 'MIN_20' | 'MIN_30' | 'HOUR_1';
 
+/**
+ * Личные настройки сотрудника в клубе.
+ *
+ * Приоритетный зал — первый на смене и в расписании (решение владельца от
+ * 24.09.2026). Свой у каждого: у двух администраторов одного клуба залы
+ * разные, и общая на клуб настройка решала бы за одного из них.
+ */
+export interface StaffPreferences {
+  preferredHallId: string | null;
+}
+
 /** Настройки клуба: общие для всех его залов. */
 export interface ClubSettings {
   /** Официальное название клуба — то, что видит клиент. */

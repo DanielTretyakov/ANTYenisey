@@ -33,6 +33,7 @@ import type {
   EventDetail,
   EventKind,
   FeedEvent,
+  StaffPreferences,
   ClubPeoplePage,
   ClubPeopleQuery,
   ClubPersonCard,
@@ -517,6 +518,12 @@ export function clubApi(slug: string = TENANT_SLUG) {
 
     // --- Залы
     halls: (): Promise<Hall[]> => authorized(`${club}/halls`),
+
+    /** Приоритетный зал того, кто спрашивает: первый на смене и в расписании. */
+    myPreferences: (): Promise<StaffPreferences> => authorized(`${club}/me/preferences`),
+
+    setMyPreferences: (preferences: StaffPreferences): Promise<StaffPreferences> =>
+      authorized(`${club}/me/preferences`, json('PUT', preferences)),
 
     createHall: (payload: CreateHallRequest): Promise<Hall> =>
       authorized(`${club}/halls`, json('POST', payload)),
