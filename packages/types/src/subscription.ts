@@ -26,6 +26,24 @@ export interface SubscriptionPlan {
   activeSubscriptions: number;
 }
 
+/**
+ * Тарифы клуба для того, у кого абонементов нет (решение владельца от
+ * 25.09.2026). Онлайн-оплаты пока нет — продаёт администратор у стойки,
+ * поэтому рядом с тарифами телефон клуба.
+ */
+export interface SubscriptionOffer {
+  club: { slug: string; name: string; accentColor: string | null; phone: string | null };
+  plans: {
+    id: string;
+    name: string;
+    visitsCount: number | null;
+    durationDays: number | null;
+    price: number;
+    /** Что покрывает: названия типов занятий и турниров. */
+    covers: string[];
+  }[];
+}
+
 export interface SubscriptionPlanRequest {
   name: string;
   visitsCount: number | null;

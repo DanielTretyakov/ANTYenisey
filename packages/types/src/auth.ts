@@ -84,6 +84,20 @@ export interface UserMembership {
 }
 
 /** Пользователь в том виде, в каком его отдаёт API — без секретов. */
+/** Правка своих данных — ФИО частями и телефон. Почта и дата рождения — через клуб. */
+export interface UpdateProfileRequest {
+  lastName: string;
+  firstName: string;
+  middleName: string;
+  phone: string;
+}
+
+/** Смена своего пароля: текущий подтверждает, что меняет владелец. */
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
 export interface PublicUser {
   id: string;
   email: string;

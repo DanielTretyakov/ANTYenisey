@@ -46,24 +46,25 @@ const SECTION_TITLES: Record<PlayerSection, string> = {
 };
 
 /**
- * Один раздел профиля игрока в редакторе кабинета.
+ * Профиль игрока в редакторе кабинета — карточками, по одной на раздел.
  *
  * Расширение сверх ТЗ (решение владельца от 12.09.2026). Заполняет его сам
  * человек, а пока ему нет 16 — родитель (`forPerson`); клуб профиль не правит —
  * он проверяет разряд. Сам ребёнок младше 16 свой профиль только смотрит
  * (`readOnly`).
  *
- * По разделу на экран, а не всё одной простынёй (решение от 24.09.2026):
- * аватар меняют раз в год, инвентарь — раз в сезон, и искать нужную форму
- * среди четырёх незачем. Каждый раздел и сохраняется сам по себе.
+ * Каждая карточка сохраняется сама по себе: аватар меняют раз в год,
+ * инвентарь — раз в сезон, и общая кнопка «Сохранить всё» заставляла бы
+ * отправлять нетронутое.
  */
 export function PlayerEditor({
-  section,
+  sections,
   name,
   forPerson = null,
   readOnly = false,
 }: {
-  section: PlayerSection;
+  /** Какие карточки показать — одной страницей, на одной загрузке профиля. */
+  sections: PlayerSection[];
   /** Полное имя владельца профиля — для инициалов на месте аватара. */
   name: string;
   /** Ребёнок, чей профиль ведёт родитель. */
@@ -85,29 +86,35 @@ export function PlayerEditor({
 
   const whose = forPerson ? 'его' : 'вашего';
 
+  // Профиль один на все карточки: правка разряда должна сразу быть видна
+  // там же, где фото, а четыре независимых копии разошлись бы.
   return (
-    <Card className="max-w-2xl">
-      <CardHeader
-        title={forPerson ? `${SECTION_TITLES[section]}: ${name}` : SECTION_TITLES[section]}
-        description={descriptionOf(section, profile, forPerson, readOnly, whose)}
-      />
-      <CardBody>
-        {error && <Alert>{error}</Alert>}
+    <ForPerson.Provider value={forPerson}>
+      {sections.map((section) => (
+        <Card key={section} className="max-w-2xl">
+          <CardHeader
+            title={forPerson ? `${SECTION_TITLES[section]}: ${name}` : SECTION_TITLES[section]}
+            description={descriptionOf(section, profile, forPerson, readOnly, whose)}
+          />
+          <CardBody>
+            {error && <Alert>{error}</Alert>}
 
-        {!profile && !error && <p className="text-[0.875rem] text-text-muted">Загружаю…</p>}
+            {!profile && !error && <p className="text-[0.875rem] text-text-muted">Загружаю…</p>}
 
-        {profile && readOnly && <ReadOnlySection section={section} profile={profile} name={name} />}
+            {profile && readOnly && <ReadOnlySection section={section} profile={profile} name={name} />}
 
-        {profile && !readOnly && (
-          <ForPerson.Provider value={forPerson}>
-            {section === 'avatar' && <AvatarBlock profile={profile} name={name} onChange={setProfile} />}
-            {section === 'equipment' && <EquipmentForm profile={profile} onChange={setProfile} />}
-            {section === 'rank' && <RankForm profile={profile} onChange={setProfile} />}
-            {section === 'achievements' && <AchievementsEditor profile={profile} onChange={setProfile} />}
-          </ForPerson.Provider>
-        )}
-      </CardBody>
-    </Card>
+            {profile && !readOnly && (
+              <>
+                {section === 'avatar' && <AvatarBlock profile={profile} name={name} onChange={setProfile} />}
+                {section === 'equipment' && <EquipmentForm profile={profile} onChange={setProfile} />}
+                {section === 'rank' && <RankForm profile={profile} onChange={setProfile} />}
+                {section === 'achievements' && <AchievementsEditor profile={profile} onChange={setProfile} />}
+              </>
+            )}
+          </CardBody>
+        </Card>
+      ))}
+    </ForPerson.Provider>
   );
 }
 

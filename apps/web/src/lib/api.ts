@@ -34,6 +34,9 @@ import type {
   EventDetail,
   EventKind,
   FeedEvent,
+  ChangePasswordRequest,
+  SubscriptionOffer,
+  UpdateProfileRequest,
   PublicDayBoard,
   StaffPreferences,
   ClubPeoplePage,
@@ -304,6 +307,16 @@ export const api = {
   /** Профиль вошедшего. Сессия восстанавливается сама, если access-токен истёк. */
   me: (): Promise<PublicUser> => authorized('/auth/me'),
 
+  /** Правка своих ФИО и телефона. Почта и дата рождения — через клуб. */
+  updateMe: (payload: UpdateProfileRequest): Promise<PublicUser> => authorized('/auth/me', json('PATCH', payload)),
+
+  /**
+   * Смена своего пароля. Ответ — новая сессия: прежние сервер гасит все,
+   * а эту вкладку оставляет в кабинете.
+   */
+  changePassword: (payload: ChangePasswordRequest): Promise<AuthResponse> =>
+    authorized('/auth/password', json('POST', payload)),
+
   // --- Стартовая страница: поиск клубов. Открыто без входа.
   /** Справочник городов для выпадающего списка. */
   /**
@@ -451,6 +464,10 @@ export const api = {
   /** Свои абонементы по всем клубам; за ребёнка — с `forPerson`. */
   mySubscriptions: (forPerson?: string | null): Promise<ClientSubscription[]> =>
     authorized(withFor('/me/subscriptions', forPerson)),
+
+  /** Тарифы моих клубов — для пустого раздела «Абонементы». */
+  mySubscriptionOffers: (forPerson?: string | null): Promise<SubscriptionOffer[]> =>
+    authorized(withFor('/me/subscriptions/offers', forPerson)),
 
   /** Публичная карточка тренера. Возраста у неё нет — открыта всем. */
   coach: (id: string): Promise<PublicCoach> => optionallyAuthorized(`/coaches/${id}`),

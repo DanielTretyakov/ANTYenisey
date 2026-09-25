@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { PublicPlayer } from '@yenisey/types';
-import { FIRST_SECTION, sectionHref } from '@/components/cabinet/sections';
+import { sectionHref } from '@/components/cabinet/sections';
 import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { AppShell } from '@/components/layout/AppShell';
 import { PlayerPublicSkeleton, PlayerPublicView } from '@/components/player/PlayerPublicView';
@@ -82,7 +82,7 @@ export default function CabinetPage() {
           player={player}
           eyebrow={child ? 'Страница игрока — так её видят другие' : 'Моя страница игрока — так её видят другие'}
           actions={
-            <Link href={sectionHref(FIRST_SECTION, child?.id ?? null)}>
+            <Link href={sectionHref('player', child?.id ?? null)}>
               <Button variant={readOnly ? 'secondary' : 'primary'}>
                 {readOnly ? 'Профиль и настройки' : 'Редактировать профиль'}
               </Button>

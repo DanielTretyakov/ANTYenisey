@@ -11,6 +11,7 @@ import type {
   LedgerReasonView,
   PaidBySubscription,
   SubscriptionLedgerRow,
+  SubscriptionOffer,
   SubscriptionPlan,
 } from '@yenisey/types';
 import { MembershipService } from '../club/membership.service';
@@ -150,6 +151,58 @@ export class SubscriptionsService {
       tournamentTypeIds: plan.coveredTournamentTypes.map((row) => row.tournamentTypeId),
       activeSubscriptions: plan._count.subscriptions,
     }));
+  }
+
+  /**
+   * Действующие тарифы клубов человека — отмеченных своими и тех, где он
+   * клиент. Для пустого раздела «Абонементы» в кабинете: прайс, как цены залов.
+   */
+  async offersFor(userId: string): Promise<SubscriptionOffer[]> {
+    const tenants = await this.prisma.tenant.findMany({
+      where: {
+        OR: [
+          { favouritedBy: { some: { userId } } },
+          { memberships: { some: { userId, role: 'CLIENT', deactivatedAt: null } } },
+        ],
+      },
+      select: {
+        slug: true,
+        name: true,
+        accentColor: true,
+        phone: true,
+        subscriptionPlans: {
+          where: { isActive: true },
+          select: {
+            id: true,
+            name: true,
+            visitsCount: true,
+            durationDays: true,
+            price: true,
+            coveredTrainingTypes: { select: { trainingType: { select: { name: true } } } },
+            coveredTournamentTypes: { select: { tournamentType: { select: { name: true } } } },
+          },
+          orderBy: [{ name: 'asc' }, { visitsCount: { sort: 'asc', nulls: 'last' } }, { durationDays: 'asc' }],
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    return tenants
+      .filter((tenant) => tenant.subscriptionPlans.length > 0)
+      .map((tenant) => ({
+        club: { slug: tenant.slug, name: tenant.name, accentColor: tenant.accentColor, phone: tenant.phone },
+        plans: tenant.subscriptionPlans.map((plan) => ({
+          id: plan.id,
+          name: plan.name,
+          visitsCount: plan.visitsCount,
+          durationDays: plan.durationDays,
+          price: plan.price,
+          covers: [
+            ...plan.coveredTrainingTypes.map((row) => row.trainingType.name),
+            ...plan.coveredTournamentTypes.map((row) => row.tournamentType.name),
+          ],
+        })),
+      }));
   }
 
   async createPlan(tenantId: string, dto: SubscriptionPlanDto): Promise<SubscriptionPlan> {

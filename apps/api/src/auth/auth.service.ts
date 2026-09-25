@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import {
+  BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -15,10 +17,13 @@ import { Prisma, Role } from '@yenisey/database';
 import type {
   AccessTokenPayload,
   AuthResponse,
+  ChangePasswordRequest,
   LoginRequest,
   PublicUser,
   RegisterRequest,
+  UpdateProfileRequest,
 } from '@yenisey/types';
+import { CHILD_UNTIL_AGE, fullYears } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { AttemptLimiter, attemptKey } from './attempt-limiter';
 import { formatBirthDate, parseBirthDate } from './birth-date';
@@ -169,6 +174,90 @@ export class AuthService {
     this.attempts.reset(key);
 
     return this.issueSession(await this.publicUser(user.id), context);
+  }
+
+  /**
+   * Правка своих ФИО и телефона. До 16 лет данные ведут родитель и
+   * администратор клуба — ровно как профиль игрока: сам ребёнок смотрит.
+   */
+  async updateProfile(userId: string, dto: UpdateProfileRequest): Promise<PublicUser> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deactivatedAt: null, anonymizedAt: null },
+      select: { birthDate: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Сессия недействительна, войдите заново');
+    }
+
+    if (fullYears(user.birthDate, new Date()) < CHILD_UNTIL_AGE) {
+      throw new ForbiddenException('До 16 лет данные меняет родитель или администратор клуба');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { fullName: joinFullName(dto), phone: dto.phone },
+    });
+
+    return this.publicUser(userId);
+  }
+
+  /**
+   * Смена своего пароля.
+   *
+   * Текущий пароль обязателен: без него открытый на чужом компьютере кабинет
+   * отдавал бы учётку насовсем. Неверный текущий — 400, а не 401: на 401 веб
+   * пошёл бы обновлять сессию. Попытки считает тот же ограничитель, что у
+   * входа, — иначе форма смены пароля стала бы обходным путём перебора.
+   *
+   * Все прежние сессии гаснут — новый пароль ничего не значит, пока старые
+   * живы, — а тому, кто меняет, выдаётся свежая: выкидывать его самого
+   * незачем.
+   */
+  async changePassword(userId: string, dto: ChangePasswordRequest, context: SessionContext): Promise<IssuedSession> {
+    const key = attemptKey(`password:${userId}`);
+    const retryAfterMs = this.attempts.retryAfterMs(key);
+
+    if (retryAfterMs !== null) {
+      throw new HttpException(
+        `Слишком много неудачных попыток. Повторите через ${minutesFrom(retryAfterMs)} мин.`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deactivatedAt: null, anonymizedAt: null },
+      select: { passwordHash: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Сессия недействительна, войдите заново');
+    }
+
+    const matches = await argon2.verify(user.passwordHash, dto.currentPassword).catch(() => false);
+
+    if (!matches) {
+      this.attempts.registerFailure(key);
+      throw new BadRequestException('Текущий пароль указан неверно');
+    }
+
+    this.attempts.reset(key);
+
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException('Новый пароль совпадает с текущим');
+    }
+
+    const passwordHash = await hashPassword(dto.newPassword);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: userId }, data: { passwordHash } }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+
+    return this.issueSession(await this.publicUser(userId), context);
   }
 
   /**

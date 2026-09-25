@@ -16,31 +16,11 @@ const trimName = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : value;
 
 /**
- * Данные учётки: кто человек и чем он входит.
- *
- * Отдельно от регистрации, потому что учётку заводит не только сам человек:
- * родитель заводит её ребёнку, а администратор — ребёнку родителя у стойки.
- * Правила имени, почты, пароля и телефона у всех одни, и вторая копия
- * разошлась бы с первой на первой же правке.
+ * ФИО и телефон — то, что человек правит о себе сам (решение владельца от
+ * 25.09.2026). Базовый класс и регистрации, и правки профиля: вторая копия
+ * правил имени и телефона разошлась бы с первой на первой же правке.
  */
-export class AccountDto implements Omit<RegisterRequest, 'tenantSlug'> {
-  // Приводим к нижнему регистру до валидации и до запроса в базу: иначе
-  // Ivan@club.ru и ivan@club.ru пройдут @@unique([tenantId, email]) как
-  // разные адреса и станут двумя учётками одного человека.
-  @Transform(({ value }: { value: unknown }) =>
-    typeof value === 'string' ? value.trim().toLowerCase() : value,
-  )
-  @IsEmail({}, { message: 'email: некорректный адрес' })
-  @MaxLength(254)
-  email: string;
-
-  @IsString()
-  @MinLength(8, { message: 'password: минимум 8 символов' })
-  // Верхняя граница — не каприз: argon2 хеширует вход целиком, и мегабайтный
-  // «пароль» превращает форму входа в DoS-вектор.
-  @MaxLength(128)
-  password: string;
-
+export class PersonDto {
   // Три части ФИО обязательны и проверяются здесь, а не только в браузере:
   // форму можно обойти запросом напрямую в API.
   @Transform(trimName)
@@ -73,6 +53,33 @@ export class AccountDto implements Omit<RegisterRequest, 'tenantSlug'> {
     message: 'phone: ожидается формат +79991234567',
   })
   phone: string;
+}
+
+/**
+ * Данные учётки: кто человек и чем он входит.
+ *
+ * Отдельно от регистрации, потому что учётку заводит не только сам человек:
+ * родитель заводит её ребёнку, а администратор — ребёнку родителя у стойки.
+ * Правила имени, почты, пароля и телефона у всех одни, и вторая копия
+ * разошлась бы с первой на первой же правке.
+ */
+export class AccountDto extends PersonDto implements Omit<RegisterRequest, 'tenantSlug'> {
+  // Приводим к нижнему регистру до валидации и до запроса в базу: иначе
+  // Ivan@club.ru и ivan@club.ru пройдут @@unique([tenantId, email]) как
+  // разные адреса и станут двумя учётками одного человека.
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() : value,
+  )
+  @IsEmail({}, { message: 'email: некорректный адрес' })
+  @MaxLength(254)
+  email: string;
+
+  @IsString()
+  @MinLength(8, { message: 'password: минимум 8 символов' })
+  // Верхняя граница — не каприз: argon2 хеширует вход целиком, и мегабайтный
+  // «пароль» превращает форму входа в DoS-вектор.
+  @MaxLength(128)
+  password: string;
 
   /**
    * Дата рождения «2001-05-17». Разумность даты проверяет `parseBirthDate` в

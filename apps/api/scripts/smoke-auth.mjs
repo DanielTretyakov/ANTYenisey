@@ -2022,6 +2022,7 @@ async function main() {
   await playerProfile();
   await coachCard();
   await clubPage();
+  await personalData();
   await sparring();
   await subscriptions();
   await family();
@@ -4689,4 +4690,97 @@ async function clubPage() {
 
   r = await call('/clubs/yenisey/events?from=вчера');
   check('негодная дата окна отклонена', 400, r.status);
+}
+
+/**
+ * Личные данные в кабинете (решение владельца от 25.09.2026): человек сам
+ * правит ФИО, телефон и пароль; почта и дата рождения — только через клуб.
+ * Пустые абонементы предлагают тарифы клубов человека.
+ */
+async function personalData() {
+  console.log('\n=== 41. Личные данные, пароль, тарифы');
+
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+
+  const form = registration({ lastName: 'Данных', firstName: 'Проверка', middleName: 'Личных' });
+  let r = await post('/auth/register', form);
+  check('человек заведён', 201, r.status);
+  const firstRefresh = r.body?.refreshToken ?? '';
+  const asMe = as(r.body?.accessToken ?? '');
+
+  // --- ФИО и телефон.
+  r = await asMe('/auth/me', {
+    method: 'PATCH',
+    json: { lastName: '  Данных ', firstName: 'Правка', middleName: 'Личных', phone: '+7 (999) 765-43-21' },
+  });
+  check('ФИО и телефон сохранены', 200, r.status);
+  assert('ФИО собрано заново и без лишних пробелов', r.body?.fullName === 'Данных Правка Личных');
+  assert('телефон приведён к +7…', r.body?.phone === '+79997654321');
+  assert('почта не тронута', r.body?.email === form.email);
+
+  r = await asMe('/auth/me', {
+    method: 'PATCH',
+    json: { lastName: 'Данных', firstName: 'Правка', middleName: 'Личных', phone: '+79997654321', email: 'chuzhoy@example.com' },
+  });
+  check('почту правкой профиля не сменить', 400, r.status);
+
+  r = await asMe('/auth/me', {
+    method: 'PATCH',
+    json: { lastName: 'Данных', firstName: 'Правка', middleName: 'Личных', phone: '+79997654321', birthDate: '2015-01-01' },
+  });
+  check('дату рождения правкой профиля не сменить', 400, r.status);
+
+  r = await asMe('/auth/me', { method: 'PATCH', json: { lastName: '1', firstName: 'Правка', middleName: 'Личных', phone: '+79997654321' } });
+  check('негодная фамилия отклонена', 400, r.status);
+
+  const now = new Date();
+  const kidBirth = new Date(Date.UTC(now.getUTCFullYear() - 12, now.getUTCMonth(), 1)).toISOString().slice(0, 10);
+  r = await post('/auth/register', registration({ lastName: 'Данных', firstName: 'Ребёнок', birthDate: kidBirth }));
+  const asKid = as(r.body?.accessToken ?? '');
+  r = await asKid('/auth/me', { method: 'PATCH', json: { lastName: 'Данных', firstName: 'Сам', middleName: 'Себе', phone: '+79990000000' } });
+  check('младше 16 данные сам не правит', 403, r.status);
+
+  // --- Пароль.
+  r = await asMe('/auth/password', { method: 'POST', json: { currentPassword: 'не-тот-пароль', newPassword: 'NovyiParol-2026' } });
+  check('неверный текущий пароль — 400, не 401', 400, r.status);
+
+  r = await asMe('/auth/password', { method: 'POST', json: { currentPassword: form.password, newPassword: 'korotk' } });
+  check('короткий новый пароль отклонён', 400, r.status);
+
+  r = await asMe('/auth/password', { method: 'POST', json: { currentPassword: form.password, newPassword: form.password } });
+  check('тот же пароль не принимается за новый', 400, r.status);
+
+  r = await asMe('/auth/password', {
+    method: 'POST',
+    json: { currentPassword: form.password, newPassword: 'NovyiParol-2026' },
+  });
+  check('пароль сменён', 200, r.status);
+  assert('вместе со сменой выдана новая сессия', typeof r.body?.accessToken === 'string');
+
+  r = await post('/auth/refresh', { refreshToken: firstRefresh });
+  check('прежняя сессия погашена', 401, r.status);
+
+  r = await post('/auth/login', { email: form.email, password: form.password });
+  check('старый пароль больше не подходит', 401, r.status);
+
+  r = await post('/auth/login', { email: form.email, password: 'NovyiParol-2026' });
+  check('новый пароль подходит', 200, r.status);
+  const asAgain = as(r.body?.accessToken ?? '');
+
+  // --- Тарифы клубов для пустых абонементов.
+  r = await asAgain('/me/subscriptions');
+  assert('абонементов у новичка нет', Array.isArray(r.body) && r.body.length === 0);
+
+  r = await asAgain('/me/subscriptions/offers');
+  check('тарифы моих клубов читаются', 200, r.status);
+  const offers = r.body ?? [];
+  assert('клуб регистрации среди предложений, если у него есть тарифы', offers.every((offer) => typeof offer.club?.slug === 'string'));
+  assert(
+    'в предложениях только действующие тарифы с ценой',
+    offers.every((offer) => offer.plans.length > 0 && offer.plans.every((plan) => Number.isInteger(plan.price))),
+  );
+
+  r = await call('/me/subscriptions/offers');
+  check('тарифы «моих клубов» без входа не отдаются', 401, r.status);
 }

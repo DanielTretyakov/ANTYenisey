@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Patch,
   Post,
   Req,
   Res,
@@ -21,6 +22,7 @@ import {
   wantsBodyTransport,
 } from './cookies';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto, UpdateProfileDto } from './dto/profile.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { RegisterDto } from './dto/register.dto';
 import { parseDuration } from './tokens';
@@ -107,6 +109,28 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: AccessTokenPayload): Promise<PublicUser> {
     return this.users.findPublicById(user.sub);
+  }
+
+  /** Правка своих ФИО и телефона. Почта и дата рождения — через клуб. */
+  @Patch('me')
+  updateMe(@CurrentUser() user: AccessTokenPayload, @Body() dto: UpdateProfileDto): Promise<PublicUser> {
+    return this.auth.updateProfile(user.sub, dto);
+  }
+
+  /**
+   * Смена своего пароля. Отвечает новой сессией: прежние гаснут все, а тот,
+   * кто меняет пароль, остаётся в кабинете.
+   */
+  @HttpCode(HttpStatus.OK)
+  @Post('password')
+  async changePassword(
+    @CurrentUser() user: AccessTokenPayload,
+    @Body() dto: ChangePasswordDto,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<AuthResponse> {
+    const session = await this.auth.changePassword(user.sub, dto, sessionContext(request));
+    return this.deliver(session, request, response);
   }
 
   /**

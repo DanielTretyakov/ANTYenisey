@@ -16,8 +16,8 @@ import { cn } from '@/lib/cn';
  * чистый E.164 (+79991234567): именно в этом виде номер уходит в API и
  * попадает в базу, и именно его ждёт валидация на сервере.
  */
-export function PhoneField({ name = 'phone' }: { name?: string }) {
-  const [digits, setDigits] = useState('');
+export function PhoneField({ name = 'phone', initial = '' }: { name?: string; /** «+79991234567» */ initial?: string }) {
+  const [digits, setDigits] = useState(initial.replace(/^\+7/, '').replace(/\D/g, '').slice(0, 10));
 
   function handleChange(event: ChangeEvent<HTMLInputElement>): void {
     // Всё, кроме цифр, отбрасываем: так вставка номера из буфера в любом

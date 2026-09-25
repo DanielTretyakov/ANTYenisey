@@ -4,8 +4,8 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { useCabinet } from '@/components/cabinet/CabinetEdit';
 import { MyClubsCard } from '@/components/cabinet/MyClubsCard';
-import { ProfileCard } from '@/components/cabinet/ProfileCard';
-import { FIRST_SECTION, isSection, sectionsFor } from '@/components/cabinet/sections';
+import { PersonalDataCard } from '@/components/cabinet/PersonalDataCard';
+import { FIRST_SECTION, isSection } from '@/components/cabinet/sections';
 import { ChildFamilyCard, ParentFamilyCard } from '@/components/family/FamilyCards';
 import { NotificationsCard } from '@/components/notifications/NotificationsCard';
 import { PlayerEditor } from '@/components/player/PlayerEditor';
@@ -21,14 +21,14 @@ import { canBeGuardianBirthDate, isChildBirthDate } from '@/lib/family';
  * клубах».
  *
  * Карточки разделов несут свой верхний отступ — из тех времён, когда они
- * стояли друг под другом; здесь он снимается обёрткой.
+ * стояли друг под другом; у первой он снимается обёрткой.
  */
 export default function CabinetSectionPage() {
   const router = useRouter();
   const params = useParams<{ section: string }>();
   const { user, family } = useCabinet();
 
-  const known = isSection(params.section) && sectionsFor(user).some((item) => item.id === params.section);
+  const known = isSection(params.section);
 
   useEffect(() => {
     if (!known) router.replace(`/cabinet/edit/${FIRST_SECTION}`);
@@ -37,45 +37,46 @@ export default function CabinetSectionPage() {
   if (!known) return null;
 
   const child = family.selected;
-  const name = child?.fullName ?? user.fullName;
-  // Ребёнок младше 16 смотрит свой профиль, а правит его родитель.
-  const readOnly = child === null && isChildBirthDate(user.birthDate);
+  const forPerson = child?.id ?? null;
   const section = params.section;
 
   return (
-    <div className="[&>*:first-child]:mt-0">
-      {(section === 'avatar' || section === 'equipment' || section === 'rank' || section === 'achievements') && (
+    <div className="grid gap-6 [&>*]:mt-0">
+      {section === 'profile' && <PersonalDataCard user={user} />}
+
+      {section === 'player' && (
         <PlayerEditor
-          key={`${section}:${child?.id ?? 'self'}`}
-          section={section}
-          name={name}
-          forPerson={child?.id ?? null}
-          readOnly={readOnly}
+          key={`player:${forPerson ?? 'self'}`}
+          sections={['avatar', 'equipment', 'rank', 'achievements']}
+          name={child?.fullName ?? user.fullName}
+          forPerson={forPerson}
+          // Ребёнок младше 16 смотрит свой профиль, а правит его родитель.
+          readOnly={child === null && isChildBirthDate(user.birthDate)}
         />
       )}
 
-      {section === 'subscriptions' && (
-        <MySubscriptions key={`subscriptions:${child?.id ?? 'self'}`} forPerson={child?.id ?? null} />
+      {section === 'subscriptions' && <MySubscriptions key={`subscriptions:${forPerson ?? 'self'}`} forPerson={forPerson} />}
+
+      {section === 'clubs' && (
+        <>
+          <MyClubsCard user={user} />
+
+          {canBeGuardianBirthDate(user.birthDate) && (
+            <ParentFamilyCard
+              user={user}
+              kids={family.children}
+              onChanged={family.reload}
+              onOpenProfile={(childId) => router.push(`/cabinet?for=${childId}`)}
+            />
+          )}
+
+          {isChildBirthDate(user.birthDate) && <ChildFamilyCard />}
+        </>
       )}
-
-      {section === 'family' && canBeGuardianBirthDate(user.birthDate) && (
-        <ParentFamilyCard
-          user={user}
-          kids={family.children}
-          onChanged={family.reload}
-          onOpenProfile={(childId) => router.push(`/cabinet?for=${childId}`)}
-        />
-      )}
-
-      {section === 'family' && isChildBirthDate(user.birthDate) && <ChildFamilyCard />}
-
-      {section === 'clubs' && <MyClubsCard user={user} />}
 
       {/* Уведомления — свои у каждого, в том числе у ребёнка: это его учётка
           и его сообщения. Переключатель «за ребёнка» их поэтому не меняет. */}
       {section === 'notifications' && <NotificationsCard />}
-
-      {section === 'profile' && <ProfileCard user={user} />}
     </div>
   );
 }

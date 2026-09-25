@@ -3,6 +3,7 @@ import type {
   ClientSubscription,
   ClubLedgerPage,
   SubscriptionLedgerRow,
+  SubscriptionOffer,
   SubscriptionPlan,
 } from '@yenisey/types';
 import type { ClubContext } from '../auth/club-context';
@@ -122,5 +123,15 @@ export class MeSubscriptionsController {
   @Get()
   list(@Acting() acting: ActingClient): Promise<ClientSubscription[]> {
     return this.subscriptions.forClient(acting.userId);
+  }
+
+  /**
+   * Тарифы моих клубов — чтобы пустой раздел «Абонементы» предлагал, что
+   * купить. За ребёнка — клубы ребёнка.
+   */
+  @ClientAction('read')
+  @Get('offers')
+  offers(@Acting() acting: ActingClient): Promise<SubscriptionOffer[]> {
+    return this.subscriptions.offersFor(acting.userId);
   }
 }

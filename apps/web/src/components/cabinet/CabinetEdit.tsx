@@ -53,29 +53,33 @@ export function CabinetEditShell({ children }: { children: ReactNode }) {
 
   return (
     <AppShell>
-      <div className="mb-7 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-[0.75rem] tracking-[0.1em] text-text-subtle uppercase">Кабинет</p>
-          <h1 className="mt-1 text-[1.75rem]">Редактор профиля</h1>
-        </div>
-        <Link href={viewHref} className="text-[0.875rem] text-text-accent underline-offset-2 hover:underline">
-          ← К странице игрока
-        </Link>
+      <div className="mb-7">
+        <p className="text-[0.75rem] tracking-[0.1em] text-text-subtle uppercase">Кабинет</p>
+        <h1 className="mt-1 text-[1.75rem]">Редактор профиля</h1>
       </div>
 
       {user && (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-10">
           <SectionNav user={user} current={current} forPerson={forPerson} />
 
-          <div className="min-w-0">
-            {section?.perPerson && (
-              <PersonSwitch
-                people={family.children}
-                selected={family.selected}
-                onChoose={family.choose}
-                className="mb-6"
-              />
-            )}
+          <div className="min-w-0 max-w-2xl">
+            {/* Над блоком редактирования, справа (решение владельца от
+                25.09.2026): возврат к странице — там, где глаз заканчивает
+                правку, а не в другом конце экрана. Слева в той же строке —
+                переключатель «за кого», если он нужен разделу. */}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              {section?.perPerson ? (
+                <PersonSwitch people={family.children} selected={family.selected} onChoose={family.choose} />
+              ) : (
+                <span />
+              )}
+              <Link
+                href={viewHref}
+                className="ml-auto text-[0.875rem] text-text-accent underline-offset-2 hover:underline"
+              >
+                ← К странице игрока
+              </Link>
+            </div>
 
             <CabinetContext.Provider value={{ user, family }}>{children}</CabinetContext.Provider>
           </div>
@@ -99,7 +103,7 @@ function SectionNav({
   current: CabinetSection;
   forPerson: string | null;
 }) {
-  const sections = sectionsFor(user);
+  const sections = sectionsFor();
   const currentLabel = sections.find((section) => section.id === current)?.label ?? 'Разделы';
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
