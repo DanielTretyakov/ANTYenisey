@@ -33,7 +33,7 @@ export function ClubPageCard({
     <Card>
       <CardHeader
         title="Страница клуба"
-        description="Баннер над названием и тренеры, которых видит посетитель. Карточку тренер ведёт сам — здесь выбирается только, кого и в каком порядке показать."
+        description="Баннер над названием и тренеры, которых видит посетитель. Карточку тренер ведёт сам — здесь только порядок и кого скрыть."
       />
       <CardBody className="grid gap-8">
         <BannerBlock settings={settings} onSettings={onSettings} />
@@ -144,7 +144,9 @@ function BannerBlock({
 }
 
 /**
- * Тренерский состав: галочка «показывать» и порядок стрелками.
+ * Тренерский состав (решение владельца от 25.09.2026): на странице клуба все
+ * тренеры, администратор задаёт порядок стрелками и скрывает ненужных
+ * галочкой. Новый тренер появляется на странице сам — в конце, по ФИО.
  *
  * Сохраняется целиком одной кнопкой: состав — это список, и сохранять каждую
  * перестановку отдельно значило бы на мгновение показывать посетителю два
@@ -153,14 +155,17 @@ function BannerBlock({
 function CoachListBlock() {
   const club = useClubApi();
   const [coaches, setCoaches] = useState<ClubCoachListItem[] | null>(null);
-  const [shown, setShown] = useState<string[]>([]);
+  const [order, setOrder] = useState<string[]>([]);
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function load(list: ClubCoachListItem[]): void {
     setCoaches(list);
-    setShown(list.filter((coach) => coach.order !== null).map((coach) => coach.id));
+    // Сервер отдаёт уже в порядке страницы: упорядоченные, потом по ФИО.
+    setOrder(list.map((coach) => coach.id));
+    setHidden(new Set(list.filter((coach) => coach.hidden).map((coach) => coach.id)));
   }
 
   useEffect(() => {
@@ -170,14 +175,23 @@ function CoachListBlock() {
       .catch((cause: unknown) => setError(messageOf(cause)));
   }, [club]);
 
-  const hidden = (coaches ?? []).filter((coach) => !shown.includes(coach.id));
   const nameOf = (id: string): string => coaches?.find((coach) => coach.id === id)?.fullName ?? id;
 
   function move(index: number, delta: -1 | 1): void {
-    setShown((list) => {
+    setOrder((list) => {
       const next = [...list];
       const target = index + delta;
       [next[index], next[target]] = [next[target]!, next[index]!];
+      return next;
+    });
+    setSaved(false);
+  }
+
+  function toggle(id: string): void {
+    setHidden((set) => {
+      const next = new Set(set);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
     setSaved(false);
@@ -188,7 +202,7 @@ function CoachListBlock() {
     setError(null);
 
     try {
-      load(await club.setCoachList(shown));
+      load(await club.setCoachList(order, [...hidden]));
       setSaved(true);
     } catch (cause) {
       setError(messageOf(cause));
@@ -197,12 +211,14 @@ function CoachListBlock() {
     }
   }
 
+  const shown = order.length - hidden.size;
+
   return (
     <section>
       <h3 className="text-[0.9375rem] font-medium">Тренерский состав</h3>
       <p className="mt-0.5 text-[0.8125rem] text-text-muted">
-        Показываются только отмеченные — в этом порядке. Список берётся из людей с ролью тренера в
-        «Составе клуба».
+        На странице клуба — все тренеры в этом порядке; снимите галочку, чтобы скрыть. Список берётся из людей с
+        ролью тренера в «Составе клуба».
       </p>
 
       {error && (
@@ -222,57 +238,46 @@ function CoachListBlock() {
       {coaches && coaches.length > 0 && (
         <>
           <ol className="mt-3.5 grid max-w-xl gap-1.5">
-            {shown.map((id, index) => (
-              <li
-                key={id}
-                className="flex items-center gap-2 rounded-control border border-border bg-surface-raised px-3 py-2"
-              >
-                <span className="w-6 text-[0.8125rem] text-text-subtle tabular-nums">{index + 1}.</span>
-                <span className="min-w-0 grow truncate text-[0.9375rem]">{nameOf(id)}</span>
-                <IconButton label="Выше" disabled={index === 0} onClick={() => move(index, -1)}>
-                  ↑
-                </IconButton>
-                <IconButton label="Ниже" disabled={index === shown.length - 1} onClick={() => move(index, 1)}>
-                  ↓
-                </IconButton>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setShown((list) => list.filter((item) => item !== id));
-                    setSaved(false);
-                  }}
+            {order.map((id, index) => {
+              const isHidden = hidden.has(id);
+
+              return (
+                <li
+                  key={id}
+                  className={cn(
+                    'flex items-center gap-2 rounded-control border border-border bg-surface-raised px-3 py-1.5',
+                    isHidden && 'bg-surface-sunken text-text-subtle',
+                  )}
                 >
-                  Скрыть
-                </Button>
-              </li>
-            ))}
+                  <input
+                    type="checkbox"
+                    checked={!isHidden}
+                    onChange={() => toggle(id)}
+                    aria-label={`${nameOf(id)}: показывать на странице клуба`}
+                    className="h-4 w-4 accent-[var(--accent)]"
+                  />
+                  <span className="w-6 text-[0.8125rem] text-text-subtle tabular-nums">{index + 1}.</span>
+                  <span className={cn('min-w-0 grow truncate text-[0.9375rem]', isHidden && 'line-through')}>
+                    {nameOf(id)}
+                  </span>
+                  <IconButton label="Выше" disabled={index === 0} onClick={() => move(index, -1)}>
+                    ↑
+                  </IconButton>
+                  <IconButton label="Ниже" disabled={index === order.length - 1} onClick={() => move(index, 1)}>
+                    ↓
+                  </IconButton>
+                </li>
+              );
+            })}
           </ol>
 
-          {hidden.length > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-[0.8125rem] text-text-subtle">Не показаны:</span>
-              {hidden.map((coach) => (
-                <Button
-                  key={coach.id}
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    setShown((list) => [...list, coach.id]);
-                    setSaved(false);
-                  }}
-                >
-                  + {coach.fullName}
-                </Button>
-              ))}
-            </div>
-          )}
-
-          <div className="mt-4 flex items-center gap-3">
+          <div className="mt-4 flex flex-wrap items-center gap-3">
             <Button size="sm" pending={pending} onClick={() => void save()}>
               Сохранить состав
             </Button>
-            {saved && <span className="text-[0.8125rem] text-text-muted">Сохранено</span>}
+            <span className="text-[0.8125rem] text-text-muted">
+              {saved ? 'Сохранено · ' : ''}на странице {shown} из {order.length}
+            </span>
           </div>
         </>
       )}

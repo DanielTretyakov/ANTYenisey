@@ -102,7 +102,12 @@ export default function BookingPage() {
       .bookingHalls()
       .then((loaded) => {
         setHalls(loaded);
-        setHallId((current) => current || (loaded[0]?.id ?? ''));
+        // «Забронировать в этом зале» со страницы клуба приходит с ?hall=.
+        // Из адреса читается здесь, а не через useSearchParams: страница
+        // обходится без границы Suspense, как и переключатель «за кого».
+        const wanted = new URLSearchParams(window.location.search).get('hall');
+        const preset = loaded.find((hall) => hall.id === wanted)?.id;
+        setHallId((current) => current || preset || (loaded[0]?.id ?? ''));
       })
       .catch((cause: unknown) => setError(messageOf(cause)));
   }, [club]);

@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { ClubSettings, Hall } from '@yenisey/types';
-import { clubSettingsViolations, hallViolations, isValidTimezone } from './settings-rules.ts';
+import {
+  clubSettingsViolations,
+  hallViolations,
+  isValidTimezone,
+  parseClubValues,
+  parseSocialUrl,
+  readClubValues,
+  type HallRulesInput,
+} from './settings-rules.ts';
 
 /** Настройки клуба «Енисей» из ТЗ — точка отсчёта для точечных отклонений. */
 function settings(overrides: Partial<ClubSettings> = {}): ClubSettings {
@@ -11,6 +19,9 @@ function settings(overrides: Partial<ClubSettings> = {}): ClubSettings {
     phone: null,
     email: null,
     description: null,
+    values: [],
+    vkUrl: null,
+    maxUrl: null,
     bannerFileId: null,
     logoUrl: null,
     accentColor: null,
@@ -23,7 +34,7 @@ function settings(overrides: Partial<ClubSettings> = {}): ClubSettings {
 }
 
 /** Основной зал «Енисея» с ценами из прайса. */
-function hall(overrides: Partial<Hall> = {}): Omit<Hall, 'id'> {
+function hall(overrides: Partial<Hall> = {}): HallRulesInput {
   return {
     name: 'Основной зал',
     timezone: 'Asia/Krasnoyarsk',
@@ -157,5 +168,67 @@ describe('hallViolations', () => {
     );
 
     assert.equal(violations.length, 3);
+  });
+});
+
+describe('parseClubValues', () => {
+  it('пустые пункты отбрасываются, остальное обрезается', () => {
+    const result = parseClubValues([{ title: ' Честность ', text: ' Играем по правилам ' }, { title: '', text: '  ' }]);
+    assert.deepEqual(result, { ok: true, value: [{ title: 'Честность', text: 'Играем по правилам' }] });
+  });
+
+  it('пусто — null: CHECK не примет пустой массив', () => {
+    assert.deepEqual(parseClubValues([]), { ok: true, value: null });
+  });
+
+  it('текст без заголовка — ошибка, а не молча потерянный текст', () => {
+    assert.equal(parseClubValues([{ title: '', text: 'Без заголовка' }]).ok, false);
+  });
+
+  it('седьмая ценность — ошибка', () => {
+    const seven = Array.from({ length: 7 }, (_, index) => ({ title: `Пункт ${index}`, text: '' }));
+    assert.equal(parseClubValues(seven).ok, false);
+  });
+
+  it('слишком длинный заголовок', () => {
+    assert.equal(parseClubValues([{ title: 'я'.repeat(61), text: '' }]).ok, false);
+  });
+});
+
+describe('readClubValues', () => {
+  it('негодное из базы отбрасывается', () => {
+    assert.deepEqual(readClubValues([{ title: 'Семья', text: '' }, { title: 1 }, 'строка', null]), [{ title: 'Семья', text: '' }]);
+    assert.deepEqual(readClubValues({ title: 'не массив' }), []);
+    assert.deepEqual(readClubValues(null), []);
+  });
+});
+
+describe('parseSocialUrl', () => {
+  it('без схемы — дописывается https', () => {
+    assert.deepEqual(parseSocialUrl('vk', 'vk.com/yenisey_tt'), { ok: true, value: 'https://vk.com/yenisey_tt' });
+  });
+
+  it('www, мобильная версия и косая черта в конце нормализуются', () => {
+    assert.deepEqual(parseSocialUrl('vk', 'https://m.vk.com/club123/'), { ok: true, value: 'https://vk.com/club123' });
+    assert.deepEqual(parseSocialUrl('vk', 'http://www.vk.ru/yenisey'), { ok: true, value: 'https://vk.ru/yenisey' });
+  });
+
+  it('MAX — ссылка на канал', () => {
+    assert.deepEqual(parseSocialUrl('max', 'https://max.ru/join/AbC-123'), { ok: true, value: 'https://max.ru/join/AbC-123' });
+  });
+
+  it('javascript: и чужой домен — отказ', () => {
+    assert.equal(parseSocialUrl('vk', 'javascript:alert(1)').ok, false);
+    assert.equal(parseSocialUrl('vk', 'https://vk.com.evil.ru/x').ok, false);
+    assert.equal(parseSocialUrl('max', 'https://vk.com/yenisey').ok, false);
+  });
+
+  it('главная без страницы клуба — отказ', () => {
+    assert.equal(parseSocialUrl('vk', 'https://vk.com/').ok, false);
+  });
+
+  it('пусто — убрать ссылку', () => {
+    assert.deepEqual(parseSocialUrl('max', '  '), { ok: true, value: null });
+    assert.deepEqual(parseSocialUrl('max', null), { ok: true, value: null });
   });
 });

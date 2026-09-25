@@ -119,7 +119,7 @@ export class ClubController {
 
   @Put('settings/coaches')
   replaceCoachList(@CurrentClub() club: ClubContext, @Body() dto: ClubCoachListDto): Promise<ClubCoachListItem[]> {
-    return this.club.replaceCoachList(club.tenantId, dto.coachIds);
+    return this.club.replaceCoachList(club.tenantId, dto.coachIds, dto.hiddenIds);
   }
 
   // --- Личные настройки сотрудника ----------------------------------------

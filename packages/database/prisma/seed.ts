@@ -122,6 +122,10 @@ async function main(): Promise<void> {
       timezone: 'Asia/Krasnoyarsk',
       cityId: cities.get('Красноярск')!,
       address: 'Красноярск, ул. Партизана Железняка, 25',
+      // Адрес зала обязан прийти из справочника (CHECK Hall_address_verified).
+      // У демо-данных кода ФИАС нет — заглушка с приставкой seed-, а
+      // координат нет вовсе: ссылка «На карте» тогда ищет по тексту адреса.
+      addressFiasId: 'seed-krasnoyarsk-partizana-zheleznyaka-25',
       hasRobotOption: true,
       tableHourPrice: 400 * RUB,
       tableExtra30MinPrice: 200 * RUB,
@@ -272,10 +276,10 @@ async function seedNeighbour(cities: Map<string, string>): Promise<void> {
   }
 
   const halls = [
-    { name: 'Зал на Щетинкина', city: 'Абакан', address: 'Абакан, ул. Щетинкина, 12' },
+    { name: 'Зал на Щетинкина', city: 'Абакан', address: 'Абакан, ул. Щетинкина, 12', fias: 'seed-abakan-shchetinkina-12' },
     // Второй зал в другом городе: по нему клуб обязан находиться в поиске
     // Минусинска, хотя сам клуб числится в Абакане.
-    { name: 'Филиал в Минусинске', city: 'Минусинск', address: 'Минусинск, ул. Гоголя, 7' },
+    { name: 'Филиал в Минусинске', city: 'Минусинск', address: 'Минусинск, ул. Гоголя, 7', fias: 'seed-minusinsk-gogolya-7' },
   ];
 
   for (const item of halls) {
@@ -288,6 +292,7 @@ async function seedNeighbour(cities: Map<string, string>): Promise<void> {
         timezone: 'Asia/Krasnoyarsk',
         cityId: cities.get(item.city)!,
         address: item.address,
+        addressFiasId: item.fias,
         hasRobotOption: false,
         tableHourPrice: 350 * RUB,
         tableExtra30MinPrice: 175 * RUB,

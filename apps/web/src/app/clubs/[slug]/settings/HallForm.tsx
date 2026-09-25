@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Field } from '@/components/ui/Field';
 import { MoneyField } from '@/components/ui/MoneyField';
+import { AddressCombobox, type ChosenAddress } from '@/components/ui/AddressCombobox';
 import { CityCombobox } from '@/components/ui/CityCombobox';
 import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
@@ -27,7 +28,8 @@ type FormState = {
   name: string;
   timezone: string;
   cityId: string;
-  address: string;
+  /** Дом из справочника; пусто — зал заведён до 25.09.2026 и адреса не имеет. */
+  address: ChosenAddress | null;
   bookingStep: BookingStep;
   tableHourPrice: string;
   tableExtra30MinPrice: string;
@@ -47,7 +49,7 @@ function toForm(hall: Hall): FormState {
     name: hall.name,
     timezone: hall.timezone,
     cityId: hall.cityId ?? '',
-    address: hall.address ?? '',
+    address: hall.address && hall.addressFiasId ? { value: hall.address, fiasId: hall.addressFiasId } : null,
     bookingStep: hall.bookingStep,
     tableHourPrice: kopecksToInput(hall.tableHourPrice),
     tableExtra30MinPrice: kopecksToInput(hall.tableExtra30MinPrice),
@@ -133,6 +135,11 @@ export function HallForm({
       return;
     }
 
+    if (!form.address) {
+      setErrors(['Укажите адрес зала — выберите дом из подсказок']);
+      return;
+    }
+
     setErrors([]);
     setPending(true);
 
@@ -142,7 +149,9 @@ export function HallForm({
         timezone: form.timezone,
         // Пустое поле означает «не задано», а не пустую строку.
         cityId: form.cityId || null,
-        address: form.address.trim() || null,
+        // Код дома — только если адрес сменили: сервер перепроверяет его у
+        // справочника, и незачем тратить запрос на неизменённый.
+        ...(form.address.fiasId !== hall.addressFiasId ? { addressFiasId: form.address.fiasId } : {}),
         bookingStep: form.bookingStep,
         tableHourPrice,
         tableExtra30MinPrice,
@@ -239,11 +248,12 @@ export function HallForm({
             />
           </div>
 
-          <Field
+          <AddressCombobox
             label="Адрес"
-            hint="Показывается клиенту. В поиске не участвует — для него есть город."
+            hint="Дом из справочника адресов. Показывается клиенту вместе со ссылкой на карту."
+            cityId={form.cityId || null}
             value={form.address}
-            onChange={(event) => set('address', event.target.value)}
+            onChange={(address) => set('address', address)}
           />
 
           <div className="grid gap-x-6 sm:grid-cols-2">

@@ -1,5 +1,7 @@
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsInt,
   IsOptional,
@@ -8,8 +10,24 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
-import type { UpdateClubSettingsRequest } from '@yenisey/types';
+import type { ClubValue, UpdateClubSettingsRequest } from '@yenisey/types';
+
+/**
+ * Ценность клуба. Пределы длины здесь с запасом: точные и с понятной
+ * формулировкой проверяет `parseClubValues`, а тут — лишь чтобы мегабайт
+ * текста не доехал до правил.
+ */
+export class ClubValueDto implements ClubValue {
+  @IsString()
+  @MaxLength(1000)
+  title: string;
+
+  @IsString()
+  @MaxLength(1000)
+  text: string;
+}
 
 /**
  * Правка настроек клуба.
@@ -70,6 +88,28 @@ export class UpdateClubSettingsDto implements UpdateClubSettingsRequest {
   @IsString()
   @MaxLength(2000, { message: 'description: не длиннее 2000 символов' })
   description?: string | null;
+
+  /** Ценности — список целиком; пустой — убрать блок. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => ClubValueDto)
+  values?: ClubValueDto[];
+
+  /**
+   * Ссылки ВКонтакте и MAX. Домен, схему и путь проверяет `parseSocialUrl` —
+   * он же дописывает https к скопированному «vk.com/…». Пустое — убрать.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  vkUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  maxUrl?: string | null;
 
   @IsOptional()
   @IsString()

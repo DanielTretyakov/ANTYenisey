@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Role } from '@yenisey/database';
 import type { City, ClubCard, ClubSearchQuery, CitySearchQuery, PublicTenant } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
+import { readClubValues } from '../club/settings-rules';
 import { cityLimit, cityPatterns } from './city-search';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -126,6 +127,8 @@ export class TenantsService {
    * тоже: он свойство зала, и форме брони приезжает вместе с залом.
    */
   async findPublicBySlug(slug: string): Promise<PublicTenant> {
+    const now = new Date();
+    const monthAhead = new Date(now.getTime() + LEADS_HORIZON_MS);
     const tenant = await this.prisma.tenant.findUnique({
       where: { slug },
       select: {
@@ -133,28 +136,45 @@ export class TenantsService {
         phone: true,
         email: true,
         description: true,
+        values: true,
+        vkUrl: true,
+        maxUrl: true,
         bannerFileId: true,
-        // Состав — только показанные администратором и только действующие
-        // тренеры: уволенный остаётся без роли, а место снимает смена роли.
+        // Состав — все действующие тренеры, кроме скрытых администратором
+        // (решение владельца от 25.09.2026): новый тренер появляется на
+        // странице сам. Уволенный остаётся без роли — и из списка уходит.
         memberships: {
           where: {
             role: Role.COACH,
-            coachListOrder: { not: null },
+            coachHidden: false,
             deactivatedAt: null,
             user: { deactivatedAt: null, anonymizedAt: null },
           },
           select: {
             userId: true,
+            coachListOrder: true,
             user: { select: { fullName: true, coachCard: { select: { photoFileId: true } } } },
-            coachProfile: { select: { groupPrice: true, individualPrice: true } },
+            coachProfile: {
+              select: {
+                groupPrice: true,
+                individualPrice: true,
+                // «Ведёт: …» — по занятиям ближайшего месяца, по одному на тип.
+                trainingSessions: {
+                  where: { startsAt: { gte: now, lt: monthAhead } },
+                  select: { trainingType: { select: { name: true } } },
+                  distinct: ['trainingTypeId'],
+                },
+              },
+            },
           },
-          orderBy: { coachListOrder: 'asc' },
         },
         halls: {
           select: {
             id: true,
             name: true,
             address: true,
+            latitude: true,
+            longitude: true,
             tableHourPrice: true,
             tableExtra30MinPrice: true,
             hasRobotOption: true,
@@ -183,19 +203,34 @@ export class TenantsService {
       phone: tenant.phone,
       email: tenant.email,
       description: tenant.description,
+      values: readClubValues(tenant.values),
+      vkUrl: tenant.vkUrl,
+      maxUrl: tenant.maxUrl,
       bannerFileId: tenant.bannerFileId,
-      coaches: tenant.memberships.map((row) => ({
-        id: row.userId,
-        name: shortName(row.user.fullName),
-        photoFileId: row.user.coachCard?.photoFileId ?? null,
-        groupPrice: row.coachProfile?.groupPrice ?? null,
-        individualPrice: row.coachProfile?.individualPrice ?? null,
-      })),
+      // Упорядоченные администратором — первыми, по месту; остальные — по ФИО.
+      coaches: [...tenant.memberships]
+        .sort(
+          (a, b) =>
+            (a.coachListOrder ?? Number.MAX_SAFE_INTEGER) - (b.coachListOrder ?? Number.MAX_SAFE_INTEGER) ||
+            a.user.fullName.localeCompare(b.user.fullName, 'ru'),
+        )
+        .map((row) => ({
+          id: row.userId,
+          name: shortName(row.user.fullName),
+          photoFileId: row.user.coachCard?.photoFileId ?? null,
+          groupPrice: row.coachProfile?.groupPrice ?? null,
+          individualPrice: row.coachProfile?.individualPrice ?? null,
+          leads: (row.coachProfile?.trainingSessions ?? [])
+            .map((session) => session.trainingType.name)
+            .sort((a, b) => a.localeCompare(b, 'ru')),
+        })),
       halls: tenant.halls.map((hall) => ({
         id: hall.id,
         name: hall.name,
         city: hall.city?.name ?? null,
         address: hall.address,
+        latitude: hall.latitude,
+        longitude: hall.longitude,
         tableHourPrice: hall.tableHourPrice,
         tableExtra30MinPrice: hall.tableExtra30MinPrice,
         // Час с роботом показывается только там, где робот есть: цена без
@@ -206,6 +241,9 @@ export class TenantsService {
     };
   }
 }
+
+/** «Ведёт: …» у тренера на странице клуба — по занятиям ближайшего месяца. */
+const LEADS_HORIZON_MS = 30 * 24 * 3600_000;
 
 /**
  * Строка базы в карточку.

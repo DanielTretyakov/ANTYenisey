@@ -47,6 +47,11 @@ const envSchema = z
       .string()
       .default('5m')
       .refine(isDuration, 'Ожидается длительность вида 30s, 5m, 1h'),
+    // Подсказки адресов залов (DaData, suggestions.dadata.ru): «API-ключ» из
+    // личного кабинета dadata.ru. Без ключа вне production работает поддельный
+    // справочник на несколько домов, в production выбрать адрес зала нельзя
+    // (address/address.module.ts).
+    DADATA_API_KEY: optional(z.string().regex(/^[0-9a-f]{40}$/, 'API-ключ DaData — 40 шестнадцатеричных символов')),
     // Бот уведомлений в мессенджере MAX. Токен — в настройках бота на
     // business.max.ru, ссылка — адрес бота вида https://max.ru/yenisey_bot: к
     // ней приписывается ?start=<токен привязки>. Без токена в production

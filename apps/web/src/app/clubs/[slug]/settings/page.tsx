@@ -7,6 +7,10 @@ import type { ClubSettings, ClubTable, Hall, Role } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { clubPath } from '@/components/layout/ClubNav';
 import { Alert } from '@/components/ui/Alert';
+import { AddressCombobox, type ChosenAddress } from '@/components/ui/AddressCombobox';
+import { CityCombobox } from '@/components/ui/CityCombobox';
+import { Dialog } from '@/components/ui/Dialog';
+import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Tab } from '@/components/ui/Tab';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -50,6 +54,9 @@ export default function ClubPage() {
   const [hallId, setHallId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [addingHall, setAddingHall] = useState(false);
+  const [newHall, setNewHall] = useState<{ name: string; cityId: string | null; address: ChosenAddress | null } | null>(
+    null,
+  );
 
   // Роль берётся из привязки к КЛУБУ ИЗ АДРЕСА, а не из профиля: аккаунт один
   // на платформу, и в разных клубах она разная. Раньше клуб здесь не
@@ -98,8 +105,26 @@ export default function ClubPage() {
 
   const hall = data?.halls.find((item) => item.id === hallId) ?? null;
 
-  async function addHall(): Promise<void> {
+  /**
+   * Новый зал — окном «название, город, адрес»: адрес обязателен и приходит
+   * только из справочника (решение владельца от 25.09.2026), поэтому завести
+   * зал одной кнопкой, как раньше, больше нельзя.
+   */
+  function startHall(): void {
     if (!data) return;
+
+    const source = hall ?? data.halls[0];
+    setError(null);
+    setNewHall({ name: nextHallName(data.halls), cityId: source?.cityId ?? null, address: null });
+  }
+
+  async function addHall(): Promise<void> {
+    if (!data || !newHall) return;
+
+    if (!newHall.address) {
+      setError('Выберите адрес нового зала из подсказок');
+      return;
+    }
 
     setError(null);
     setAddingHall(true);
@@ -109,14 +134,14 @@ export default function ClubPage() {
       // похож на первый, и переписывать цены с нуля незачем.
       const source = hall ?? data.halls[0];
       const created = await club.createHall({
-        name: nextHallName(data.halls),
+        name: newHall.name.trim() || nextHallName(data.halls),
         // Пояс и город тоже наследуются от соседнего зала: второй зал обычно
         // в том же городе, а если нет — это ровно то, что администратор
         // придёт и поправит. Пустой пояс здесь означал бы зал, живущий по
         // времени сервера.
         timezone: source?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-        cityId: source?.cityId ?? null,
-        address: null,
+        cityId: newHall.cityId,
+        addressFiasId: newHall.address.fiasId,
         bookingStep: source?.bookingStep ?? 'MIN_30',
         tableHourPrice: source?.tableHourPrice ?? 0,
         tableExtra30MinPrice: source?.tableExtra30MinPrice ?? 0,
@@ -128,6 +153,7 @@ export default function ClubPage() {
 
       setData({ ...data, halls: [...data.halls, created].sort(byName) });
       setHallId(created.id);
+      setNewHall(null);
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
     } finally {
@@ -177,12 +203,55 @@ export default function ClubPage() {
                 type="button"
                 variant="ghost"
                 size="sm"
-                pending={addingHall}
-                onClick={() => void addHall()}
+                onClick={startHall}
               >
                 + Зал
               </Button>
             </div>
+
+            {newHall && (
+              <Dialog
+                title="Новый зал"
+                description="Цены, шаг брони и пояс возьмём у текущего зала — поправите после."
+                onClose={() => setNewHall(null)}
+              >
+                <form
+                  className="px-6 py-5"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void addHall();
+                  }}
+                >
+                  {error && <Alert>{error}</Alert>}
+                  <Field
+                    label="Название зала"
+                    value={newHall.name}
+                    onChange={(event) => setNewHall({ ...newHall, name: event.target.value })}
+                    required
+                  />
+                  <CityCombobox
+                    className="mb-4"
+                    label="Город зала"
+                    value={newHall.cityId}
+                    onChange={(city) => setNewHall({ ...newHall, cityId: city?.id ?? null, address: null })}
+                  />
+                  <AddressCombobox
+                    label="Адрес"
+                    cityId={newHall.cityId}
+                    value={newHall.address}
+                    onChange={(address) => setNewHall({ ...newHall, address })}
+                  />
+                  <div className="mt-2 flex justify-end gap-2">
+                    <Button type="button" variant="ghost" onClick={() => setNewHall(null)}>
+                      Отмена
+                    </Button>
+                    <Button type="submit" pending={addingHall} disabled={!newHall.address}>
+                      Завести зал
+                    </Button>
+                  </div>
+                </form>
+              </Dialog>
+            )}
 
             {hall && (
               <div className="grid gap-6">

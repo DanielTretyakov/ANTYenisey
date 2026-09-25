@@ -65,6 +65,14 @@ export interface ClubSettings {
   /** Краткое описание клуба на его странице. До 2000 символов. */
   description: string | null;
 
+  /** Ценности клуба — до шести карточек под описанием. Пусто — блока нет. */
+  values: ClubValue[];
+
+  /** Страница во ВКонтакте, `https://vk.com/…`. Сервер нормализует `vk.com/…`. */
+  vkUrl: string | null;
+  /** Страница или канал в MAX, `https://max.ru/…`. */
+  maxUrl: string | null;
+
   /**
    * Баннер страницы клуба — загруженный файл (`GET /files/:id`). Правкой
    * настроек не меняется: ставится загрузкой `PUT settings/banner`.
@@ -91,6 +99,17 @@ export interface ClubSettings {
   subscriptionBurnsOnNoShowOnly: boolean;
 }
 
+/** Ценность клуба: короткий заголовок и пара строк пояснения. */
+export interface ClubValue {
+  /** До 60 символов. */
+  title: string;
+  /** До 300 символов; может быть пустым — тогда карточка из одного заголовка. */
+  text: string;
+}
+
+/** Сколько ценностей у клуба может быть. Тот же предел держит CHECK в базе. */
+export const MAX_CLUB_VALUES = 6;
+
 /**
  * Правка настроек. Все поля необязательны: форма шлёт только изменённое, а
  * перекрёстные проверки сервер делает уже на слитом состоянии.
@@ -98,19 +117,25 @@ export interface ClubSettings {
 export type UpdateClubSettingsRequest = Partial<Omit<ClubSettings, 'bannerFileId'>>;
 
 /**
- * Тренер в «Тренерском составе» настроек: все тренеры клуба, показанные —
- * с местом в списке (решение владельца от 24.09.2026).
+ * Тренер в «Тренерском составе» настроек. С 25.09.2026 (решение владельца)
+ * на странице клуба все действующие тренеры: администратор лишь поднимает
+ * выбранных наверх и скрывает ненужных галочкой.
  */
 export interface ClubCoachListItem {
   id: string;
   fullName: string;
-  /** Место на странице клуба, 1.. ; пусто — не показывается. */
+  /** Место наверху списка, 1.. ; пусто — после упорядоченных, по ФИО. */
   order: number | null;
+  /** Скрыт со страницы клуба. */
+  hidden: boolean;
 }
 
-/** Состав на странице клуба — идентификаторы тренеров в нужном порядке. */
+/** Состав на странице клуба: порядок и скрытые. */
 export interface ClubCoachListRequest {
+  /** Тренеры в порядке показа — им достаются места 1, 2, … */
   coachIds: string[];
+  /** Скрытые со страницы клуба. */
+  hiddenIds: string[];
 }
 
 /**
@@ -134,8 +159,17 @@ export interface Hall {
   timezone: string;
   /** Фактический город зала: идентификатор из справочника платформы. */
   cityId: string | null;
-  /** Адрес зала. Показывается клиенту, поиском не используется. */
+  /**
+   * Адрес зала — из справочника DaData, не свободной строкой (решение
+   * владельца от 25.09.2026). Пусто только у залов, заведённых раньше и с тех
+   * пор не правленых.
+   */
   address: string | null;
+  /** Код дома в ФИАС/ГАР, из которого сервер взял адрес. */
+  addressFiasId: string | null;
+  /** Координаты дома — для ссылки «На карте». */
+  latitude: number | null;
+  longitude: number | null;
 
   bookingStep: BookingStep;
   /** Цена первого часа аренды стола без робота, копейки. */
@@ -152,8 +186,27 @@ export interface Hall {
   robotExtra30MinPrice: number | null;
 }
 
-export type CreateHallRequest = Omit<Hall, 'id'>;
+/**
+ * Новый зал. Адрес форма не присылает вовсе — только код ФИАС выбранной
+ * подсказки: строку и координаты сервер берёт у DaData сам, иначе «ул.
+ * Крутых Ключей, 777» прошла бы, подставленная в запрос руками.
+ */
+export type CreateHallRequest = Omit<Hall, 'id' | 'address' | 'addressFiasId' | 'latitude' | 'longitude'> & {
+  addressFiasId: string;
+};
+/** Правка зала: код ФИАС — только если адрес меняется. */
 export type UpdateHallRequest = Partial<CreateHallRequest>;
+
+/** Подсказка адреса для формы зала — дом из справочника DaData. */
+export interface AddressSuggestion {
+  /** Адрес для показа: «г Красноярск, ул Партизана Железняка, д 25». */
+  value: string;
+  /** Код дома в ФИАС/ГАР — его форма и присылает при сохранении. */
+  fiasId: string;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
 
 /**
  * Стол зала.

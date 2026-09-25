@@ -39,9 +39,9 @@ VALUES ('t1','Енисей','yenisey',now(),now()),
        ('t2','Другой клуб','other',now(),now());
 
 -- По залу в каждом клубе: без зала не завести ни стол, ни цену.
-INSERT INTO "Hall" (id,"tenantId",name,"tableHourPrice","tableExtra30MinPrice","hasRobotOption","createdAt","updatedAt")
-VALUES ('h1','t1','Основной зал',40000,20000,false,now(),now()),
-       ('h2','t2','Основной зал',50000,25000,false,now(),now());
+INSERT INTO "Hall" (id,"tenantId",name,address,"addressFiasId","tableHourPrice","tableExtra30MinPrice","hasRobotOption","createdAt","updatedAt")
+VALUES ('h1','t1','Основной зал','Красноярск, ул. Ленина, 1','fias-h1',40000,20000,false,now(),now()),
+       ('h2','t2','Основной зал','Абакан, ул. Щетинкина, 2','fias-h2',50000,25000,false,now(),now());
 
 -- Учётные записи платформы. Клуба и роли у них нет: аккаунт один на всю
 -- платформу. Телефон и дата рождения обязательны у всех.
@@ -153,8 +153,8 @@ EXCEPTION WHEN others THEN RAISE NOTICE 'J. Списание больше хол
 --    прайс переехал в зал: тест падал на несуществующей колонке и засчитывал
 --    это как успех.
 DO $$ BEGIN
-  INSERT INTO "Hall" (id,"tenantId",name,"tableHourPrice","tableExtra30MinPrice","hasRobotOption","createdAt","updatedAt")
-  VALUES ('h3','t1','Зал без цен робота',40000,20000,true,now(),now());
+  INSERT INTO "Hall" (id,"tenantId",name,address,"addressFiasId","tableHourPrice","tableExtra30MinPrice","hasRobotOption","createdAt","updatedAt")
+  VALUES ('h3','t1','Зал без цен робота','Красноярск, ул. Ленина, 3','fias-h3',40000,20000,true,now(),now());
   RAISE NOTICE 'K. ПРОВАЛ: робот включён без цен!';
 EXCEPTION WHEN others THEN RAISE NOTICE 'K. Робот без цен отклонён.................. OK (ожидалось)'; END $$;
 
@@ -181,8 +181,8 @@ EXCEPTION WHEN others THEN RAISE NOTICE 'L2. Списание вне 0..100 от
 DO $$
 DECLARE code text;
 BEGIN
-  INSERT INTO "Hall" (id,"tenantId",name,"tableHourPrice","tableExtra30MinPrice","hasRobotOption",timezone,"createdAt","updatedAt")
-  VALUES ('h4','t1','Зал с опечаткой',40000,20000,false,'Asia/Krasnayarsk',now(),now());
+  INSERT INTO "Hall" (id,"tenantId",name,address,"addressFiasId","tableHourPrice","tableExtra30MinPrice","hasRobotOption",timezone,"createdAt","updatedAt")
+  VALUES ('h4','t1','Зал с опечаткой','Красноярск, ул. Ленина, 4','fias-h4',40000,20000,false,'Asia/Krasnayarsk',now(),now());
   RAISE NOTICE 'M. ПРОВАЛ: несуществующая таймзона принята!';
 EXCEPTION WHEN others THEN
   GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
@@ -1438,3 +1438,38 @@ SELECT pg_temp.expect('DR',
 SELECT pg_temp.expect('DS',
   $q$UPDATE "Tenant" SET description = '  ' WHERE id = 't1'$q$,
   '23514', 'Tenant_description_sane');
+
+-- ---------------------------------------------------------------------------
+-- 31. Страница клуба: ценности, соцсети, адрес зала, скрытые тренеры
+-- ---------------------------------------------------------------------------
+
+-- DT. Зал без адреса — посетитель не узнает, куда ехать.
+SELECT pg_temp.expect('DT',
+  $q$INSERT INTO "Hall" (id,"tenantId",name,"tableHourPrice","tableExtra30MinPrice","hasRobotOption","createdAt","updatedAt")
+     VALUES ('hna','t1','Зал без адреса',40000,20000,false,now(),now())$q$,
+  '23514', 'Hall_address_verified');
+
+-- DU. Адрес свободной строкой, без кода ФИАС — «ул. Крутых Ключей, 777».
+SELECT pg_temp.expect('DU',
+  $q$UPDATE "Hall" SET "addressFiasId" = NULL WHERE id = 'h1'$q$,
+  '23514', 'Hall_address_verified');
+
+-- DV. Седьмая ценность — предел шесть.
+SELECT pg_temp.expect('DV',
+  $q$UPDATE "Tenant" SET "values" = (SELECT jsonb_agg(jsonb_build_object('title', 'Пункт ' || n, 'text', '')) FROM generate_series(1, 7) n) WHERE id = 't1'$q$,
+  '23514', 'Tenant_values_sane');
+
+-- DW. Ссылка «ВКонтакте» на чужой домен.
+SELECT pg_temp.expect('DW',
+  $q$UPDATE "Tenant" SET "vkUrl" = 'https://vk.com.evil.ru/x' WHERE id = 't1'$q$,
+  '23514', 'Tenant_vk_url_sane');
+
+-- DX. javascript: вместо адреса MAX.
+SELECT pg_temp.expect('DX',
+  $q$UPDATE "Tenant" SET "maxUrl" = 'javascript:alert(1)' WHERE id = 't1'$q$,
+  '23514', 'Tenant_max_url_sane');
+
+-- DY. Скрыть со страницы клуба можно только тренера.
+SELECT pg_temp.expect('DY',
+  $q$UPDATE "TenantMembership" SET "coachHidden" = true WHERE "userId" = 'u1' AND "tenantId" = 't1'$q$,
+  '23514', 'TenantMembership_coach_hidden_only_coach');

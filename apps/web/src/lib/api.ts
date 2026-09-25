@@ -6,12 +6,14 @@ import type {
   BookingDay,
   BookingEntry,
   BookingQuote,
+  AddressSuggestion,
   City,
   ClosureRule,
   ClosureRuleDraft,
   ClientBooking,
   ClubCard,
   ClubCoach,
+  ClubCatalogItem,
   ClubCoachListItem,
   ClubEvent,
   ClubSearchQuery,
@@ -526,6 +528,15 @@ export interface SetRankPayload {
  * Фабрика, а не первый аргумент у каждого метода: страница знает свой клуб
  * один раз, в начале, и повторять его в тридцати вызовах незачем.
  */
+/** Что спросить у списка мероприятий клуба. */
+export interface EventsFilter {
+  from?: string;
+  to?: string;
+  kind?: EventKind;
+  typeId?: string;
+  limit?: number;
+}
+
 export function clubApi(slug: string = TENANT_SLUG) {
   const club = `/clubs/${slug}`;
 
@@ -544,9 +555,15 @@ export function clubApi(slug: string = TENANT_SLUG) {
     /** Все тренеры клуба; показанные на странице клуба — с местом. */
     coachList: (): Promise<ClubCoachListItem[]> => authorized(`${club}/settings/coaches`),
 
-    /** Новый состав на странице клуба: идентификаторы в порядке показа. */
-    setCoachList: (coachIds: string[]): Promise<ClubCoachListItem[]> =>
-      authorized(`${club}/settings/coaches`, json('PUT', { coachIds })),
+    /** Состав на странице клуба: упорядоченные наверху и скрытые галочкой. */
+    setCoachList: (coachIds: string[], hiddenIds: string[]): Promise<ClubCoachListItem[]> =>
+      authorized(`${club}/settings/coaches`, json('PUT', { coachIds, hiddenIds })),
+
+    /** Подсказки адреса зала — дома из справочника, в городе зала. */
+    addressSuggestions: (query: string, cityId: string | null): Promise<AddressSuggestion[]> =>
+      authorized(
+        `${club}/address-suggestions?${new URLSearchParams({ query, ...(cityId ? { cityId } : {}) })}`,
+      ),
 
     // --- Залы
     halls: (): Promise<Hall[]> => authorized(`${club}/halls`),
@@ -703,10 +720,22 @@ export function clubApi(slug: string = TENANT_SLUG) {
      * регистрации. Вошедшему приезжает ещё и отметка «я уже записан» — ради
      * неё запрос идёт от его имени, когда есть от чьего.
      */
-    events: (forPerson?: string | null, range?: { from: string; to: string }): Promise<ClubEvent[]> =>
-      optionallyAuthorized(
-        withFor(range ? `${club}/events?${new URLSearchParams(range)}` : `${club}/events`, forPerson),
-      ),
+    /**
+     * Предстоящие мероприятия: окном `from`/`to` (неделя, месяц) или одним
+     * видом — «ближайшие N детских тренировок» по всем датам.
+     */
+    events: (forPerson?: string | null, filter: EventsFilter = {}): Promise<ClubEvent[]> => {
+      const params = new URLSearchParams(
+        Object.entries(filter)
+          .filter(([, value]) => value !== undefined && value !== null)
+          .map(([key, value]) => [key, String(value)]),
+      ).toString();
+
+      return optionallyAuthorized(withFor(params ? `${club}/events?${params}` : `${club}/events`, forPerson));
+    },
+
+    /** Что есть в клубе: виды занятий и турниров с ближайшим проведением. */
+    catalog: (): Promise<ClubCatalogItem[]> => optionallyAuthorized(`${club}/catalog`),
 
     /**
      * Одно мероприятие для окна подробностей: описание, зал, тренер и

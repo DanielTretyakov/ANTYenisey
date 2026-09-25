@@ -1,5 +1,5 @@
 import { BadRequestException, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
-import type { BookingEntry, ClubEvent, EventDetail } from '@yenisey/types';
+import type { BookingEntry, ClubCatalogItem, ClubEvent, EventDetail } from '@yenisey/types';
 import type { ClubContext } from '../auth/club-context';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Public } from '../auth/decorators/public.decorator';
@@ -36,6 +36,16 @@ export class EventsController {
     @Query() range: EventsRangeDto,
   ): Promise<ClubEvent[]> {
     return this.events.listUpcoming(club.tenantId, acting?.userId ?? null, range);
+  }
+
+  /**
+   * Что есть в клубе: действующие типы занятий и турниров с ближайшим
+   * проведением — вкладка «Мероприятия клуба». Открыто, как и список.
+   */
+  @Public()
+  @Get('catalog')
+  catalog(@CurrentClub() club: ClubContext): Promise<ClubCatalogItem[]> {
+    return this.events.catalog(club.tenantId);
   }
 
   /**

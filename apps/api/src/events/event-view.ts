@@ -1,5 +1,5 @@
 import { BookingStatus } from '@yenisey/database';
-import type { ClubEvent, ClubRef, EventDetail, EventPlace } from '@yenisey/types';
+import type { ClubCatalogItem, ClubEvent, ClubRef, EventDetail, EventKind, EventPlace } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
 import { participantView } from '../players/player-rules';
 
@@ -61,6 +61,7 @@ type Participant = { clientId: string; client: { membership: { user: { fullName:
 
 type TournamentRow = {
   id: string;
+  tournamentTypeId: string;
   startsAt: Date;
   endsAt: Date;
   tournamentType: { name: string; ratingLabel: string | null; price: number };
@@ -69,6 +70,7 @@ type TournamentRow = {
 
 type TrainingRow = {
   id: string;
+  trainingTypeId: string;
   startsAt: Date;
   endsAt: Date;
   capacity: number;
@@ -81,6 +83,7 @@ export function tournamentEvent(row: TournamentRow, userId: string | null): Club
   return {
     id: row.id,
     kind: 'TOURNAMENT',
+    typeId: row.tournamentTypeId,
     title: row.tournamentType.name,
     ratingLabel: row.tournamentType.ratingLabel,
     startsAt: row.startsAt.toISOString(),
@@ -104,6 +107,7 @@ export function trainingEvent(row: TrainingRow, userId: string | null): ClubEven
   return {
     id: row.id,
     kind: 'TRAINING',
+    typeId: row.trainingTypeId,
     title: row.trainingType.name,
     // Число-ограничение по рейтингу — свойство турнира, у занятия его нет.
     ratingLabel: null,
@@ -119,6 +123,28 @@ export function trainingEvent(row: TrainingRow, userId: string | null): ClubEven
     freeSeats: Math.max(row.capacity - row.bookings.length, 0),
     participants: participantsOf(row.bookings),
     registered: registeredBy(userId, row.bookings),
+  };
+}
+
+/**
+ * Вид мероприятия во вкладке «Мероприятия клуба»: тип и ближайшее проведение.
+ * `next` — итог группировки по типу (`_min.startsAt`, `_count`); у типа без
+ * проведений впереди его нет.
+ */
+export function catalogItem(
+  kind: EventKind,
+  type: { id: string; name: string; description: string | null; price: number; ratingLabel?: string | null },
+  next: { startsAt: Date | null; count: number } | undefined,
+): ClubCatalogItem {
+  return {
+    kind,
+    typeId: type.id,
+    name: type.name,
+    description: type.description,
+    price: type.price,
+    ratingLabel: type.ratingLabel ?? null,
+    nextStartsAt: next?.startsAt?.toISOString() ?? null,
+    upcomingCount: next?.count ?? 0,
   };
 }
 

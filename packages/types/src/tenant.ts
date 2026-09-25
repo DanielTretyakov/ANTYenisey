@@ -1,3 +1,5 @@
+import type { ClubValue } from './club';
+
 /**
  * Публичная карточка клуба.
  *
@@ -19,6 +21,8 @@ export interface PublicClubCoach {
   /** Цены этого клуба, копейки. Пусто — тренер их не указал. */
   groupPrice: number | null;
   individualPrice: number | null;
+  /** Какие занятия тренер ведёт в ближайший месяц — названия типов. */
+  leads: string[];
 }
 
 export interface PublicTenant {
@@ -45,9 +49,15 @@ export interface PublicTenant {
   description: string | null;
   /** Баннер страницы клуба (`GET /files/:id`). Пусто — фирменная плоскость. */
   bannerFileId: string | null;
+  /** Ценности клуба карточками под описанием. */
+  values: ClubValue[];
+  /** Страницы клуба во ВКонтакте и MAX — только https на свой домен. */
+  vkUrl: string | null;
+  maxUrl: string | null;
   /**
-   * Тренерский состав — тот, что выбрал и упорядочил администратор (решение
-   * владельца от 24.09.2026). Карточку тренер ведёт сам, цены — клубные.
+   * Тренерский состав: все действующие тренеры клуба, кроме скрытых
+   * администратором; выбранные им — первыми (решение владельца от
+   * 25.09.2026). Карточку тренер ведёт сам, цены — клубные.
    */
   coaches: PublicClubCoach[];
   /**
@@ -67,6 +77,9 @@ export interface PublicHall {
   name: string;
   city: string | null;
   address: string | null;
+  /** Координаты дома для ссылки «На карте»; пусто — карта ищет по адресу. */
+  latitude: number | null;
+  longitude: number | null;
   /** Цена часа аренды стола без робота, копейки. */
   tableHourPrice: number;
   /** Доплата за каждые следующие 30 минут, копейки. */

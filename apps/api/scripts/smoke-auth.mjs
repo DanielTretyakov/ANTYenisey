@@ -293,9 +293,9 @@ async function main() {
     typeof r.body?.name === 'string' && r.body.name.length > 0,
   );
   assert(
-    'наружу отдана карточка клуба: код, название, города, оформление, контакты, залы, описание, баннер и тренеры',
+    'наружу отдана карточка клуба: код, название, города, оформление, контакты и соцсети, залы, описание, ценности, баннер и тренеры',
     Object.keys(r.body ?? {}).sort().join(',') ===
-      'accentColor,bannerFileId,city,coaches,description,email,halls,logoUrl,name,otherCities,phone,slug',
+      'accentColor,bannerFileId,city,coaches,description,email,halls,logoUrl,maxUrl,name,otherCities,phone,slug,values,vkUrl',
   );
   assert(
     'часового пояса в карточке клуба больше НЕТ — он свойство зала',
@@ -492,14 +492,58 @@ async function main() {
     assert('у зала есть цена аренды целым числом копеек', Number.isInteger(mainHall?.tableHourPrice));
     assert('у зала есть шаг бронирования', typeof mainHall?.bookingStep === 'string');
 
+    // Адрес зала — только дом из справочника (решение владельца от
+    // 25.09.2026). Код берётся из подсказки, а не зашит: смоук обязан идти и
+    // с поддельным справочником, и с настоящей DaData.
+    r = await call(`/clubs/yenisey/address-suggestions?${new URLSearchParams({ query: 'Партизана Железняка 25' })}`, {
+      headers: { Authorization: `Bearer ${access}` },
+    });
+    check('клиенту подсказки адреса не положены', 403, r.status);
+
+    r = await asAdmin(`/clubs/yenisey/address-suggestions?${new URLSearchParams({ query: 'Партизана Железняка 25' })}`);
+    check('подсказки адреса для администратора', 200, r.status);
+    const probeAddress = r.body?.[0] ?? null;
+    assert('справочник нашёл дом', typeof probeAddress?.fiasId === 'string' && probeAddress.fiasId.length > 0);
+
+    r = await asAdmin(`/clubs/yenisey/address-suggestions?${new URLSearchParams({ query: 'а' })}`);
+    check('подсказки по одной букве не ищутся', 400, r.status);
+
     const hallName = `Зал проверки ${RUN}`;
+    const hallBody = {
+      name: hallName,
+      timezone: 'Asia/Krasnoyarsk',
+      cityId: null,
+      bookingStep: 'HOUR_1',
+      tableHourPrice: 30000,
+      tableExtra30MinPrice: 15000,
+      hasRobotOption: false,
+      robot30MinPrice: null,
+      robot60MinPrice: null,
+      robotExtra30MinPrice: null,
+    };
+
+    r = await asAdmin('/clubs/yenisey/halls', { method: 'POST', json: hallBody });
+    check('зал без адреса не заводится', 400, r.status);
+
+    r = await asAdmin('/clubs/yenisey/halls', {
+      method: 'POST',
+      json: { ...hallBody, addressFiasId: 'krutyh-klyuchey-777' },
+    });
+    check('адрес не из справочника отклонён', 400, r.status);
+
+    r = await asAdmin('/clubs/yenisey/halls', {
+      method: 'POST',
+      json: { ...hallBody, address: 'ул. Крутых Ключей, 777', addressFiasId: probeAddress?.fiasId },
+    });
+    check('строку адреса форма не присылает', 400, r.status);
+
     r = await asAdmin('/clubs/yenisey/halls', {
       method: 'POST',
       json: {
         name: hallName,
         timezone: 'Asia/Krasnoyarsk',
         cityId: null,
-        address: null,
+        addressFiasId: probeAddress?.fiasId,
         bookingStep: 'HOUR_1',
         tableHourPrice: 30000,
         tableExtra30MinPrice: 15000,
@@ -511,6 +555,8 @@ async function main() {
     });
     check('зал заведён', 201, r.status);
     const hallId = r.body?.id;
+    assert('адрес записан из справочника, а не из формы', r.body?.address === probeAddress?.value);
+    assert('код дома сохранён', r.body?.addressFiasId === probeAddress?.fiasId);
     assert('у нового зала свои цены, а не общие клубные', r.body?.tableHourPrice === 30000);
 
     r = await asAdmin('/clubs/yenisey/halls', {
@@ -519,7 +565,7 @@ async function main() {
         name: hallName,
         timezone: 'Asia/Krasnoyarsk',
         cityId: null,
-        address: null,
+        addressFiasId: probeAddress?.fiasId,
         bookingStep: 'MIN_30',
         tableHourPrice: 1,
         tableExtra30MinPrice: 1,
@@ -1404,7 +1450,7 @@ async function main() {
         name: `Зал проверки ${RUN} (брони)`,
         timezone: 'Asia/Krasnoyarsk',
         cityId: null,
-        address: null,
+        addressFiasId: probeAddress?.fiasId,
         bookingStep: 'MIN_30',
         tableHourPrice: 30000,
         tableExtra30MinPrice: 15000,
@@ -4584,6 +4630,54 @@ async function clubPage() {
   r = await asAdmin('/clubs/yenisey/settings');
   const originalDescription = r.body?.description ?? null;
   const originalBanner = r.body?.bannerFileId ?? null;
+  const originalValues = r.body?.values ?? [];
+  const originalVk = r.body?.vkUrl ?? null;
+  const originalMax = r.body?.maxUrl ?? null;
+
+  // --- Ценности и соцсети (решение владельца от 25.09.2026).
+  r = await asAdmin('/clubs/yenisey/settings', {
+    method: 'PATCH',
+    json: {
+      values: [
+        { title: ' Семья ', text: ' Тренируемся всей семьёй ' },
+        { title: '', text: '' },
+        { title: 'Честная игра', text: '' },
+      ],
+      vkUrl: 'vk.com/yenisey_probe',
+      maxUrl: 'https://max.ru/join/Probe-1',
+    },
+  });
+  check('ценности и соцсети сохранены', 200, r.status);
+  assert('пустая ценность отброшена, пробелы срезаны', JSON.stringify(r.body?.values) === JSON.stringify([
+    { title: 'Семья', text: 'Тренируемся всей семьёй' },
+    { title: 'Честная игра', text: '' },
+  ]));
+  assert('ссылка ВКонтакте дописана до https', r.body?.vkUrl === 'https://vk.com/yenisey_probe');
+
+  r = await call('/clubs/yenisey');
+  assert('ценности видны на открытой странице', r.body?.values?.length === 2 && r.body?.values?.[0]?.title === 'Семья');
+  assert('соцсети видны на открытой странице', r.body?.maxUrl === 'https://max.ru/join/Probe-1');
+
+  r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: { vkUrl: 'javascript:alert(1)' } });
+  check('javascript: вместо ссылки ВКонтакте отклонён', 400, r.status);
+  r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: { vkUrl: 'https://vk.com.evil.ru/x' } });
+  check('чужой домен вместо ВКонтакте отклонён', 400, r.status);
+  r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: { maxUrl: 'https://vk.com/yenisey' } });
+  check('ссылка ВКонтакте в поле MAX отклонена', 400, r.status);
+  r = await asAdmin('/clubs/yenisey/settings', {
+    method: 'PATCH',
+    json: { values: Array.from({ length: 7 }, (_, index) => ({ title: `Пункт ${index + 1}`, text: '' })) },
+  });
+  check('седьмая ценность отклонена', 400, r.status);
+  r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: { values: [{ title: '', text: 'без заголовка' }] } });
+  check('ценность без заголовка отклонена', 400, r.status);
+
+  r = await asAdmin('/clubs/yenisey/settings', {
+    method: 'PATCH',
+    json: { values: originalValues, vkUrl: originalVk ?? '', maxUrl: originalMax ?? '' },
+  });
+  check('ценности и соцсети возвращены', 200, r.status);
+  assert('пустые ссылки — «ссылок нет»', r.body?.vkUrl === originalVk && r.body?.maxUrl === originalMax);
 
   // --- Описание.
   r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: { description: '  Клуб проверки: играем каждый день  ' } });
@@ -4634,10 +4728,11 @@ async function clubPage() {
     assert('у клуба баннера больше нет', r.body?.bannerFileId === null);
   }
 
-  // --- Тренерский состав.
+  // --- Тренерский состав: все тренеры, кроме скрытых (решение от 25.09.2026).
   r = await asAdmin('/clubs/yenisey/settings/coaches');
   check('тренерский состав читается', 200, r.status);
   const originalShown = (r.body ?? []).filter((coach) => coach.order !== null).map((coach) => coach.id);
+  const originalHidden = (r.body ?? []).filter((coach) => coach.hidden).map((coach) => coach.id);
 
   r = await post('/auth/register', registration({ lastName: 'Тренеров', firstName: 'Витрина' }));
   const probeCoachId = r.body?.user?.id;
@@ -4649,9 +4744,13 @@ async function clubPage() {
   r = await asAdmin(`/clubs/yenisey/people/${probeCoachId}/role`, { method: 'PATCH', json: { role: 'COACH' } });
   check('пробному тренеру выдана роль', 200, r.status);
 
+  r = await call('/clubs/yenisey');
+  assert('новый тренер виден на странице без похода в настройки', (r.body?.coaches ?? []).some((coach) => coach.id === probeCoachId));
+  assert('у тренера на странице есть список «ведёт»', (r.body?.coaches ?? []).every((coach) => Array.isArray(coach.leads)));
+
   r = await asAdmin('/clubs/yenisey/settings/coaches', {
     method: 'PUT',
-    json: { coachIds: [probeCoachId, ...originalShown] },
+    json: { coachIds: [probeCoachId, ...originalShown], hiddenIds: originalHidden },
   });
   check('состав сохранён', 200, r.status);
   assert('пробный тренер — первым', r.body?.[0]?.id === probeCoachId && r.body?.[0]?.order === 1);
@@ -4667,12 +4766,30 @@ async function clubPage() {
   assert('состав виден на открытой странице по порядку', shownCoach?.id === probeCoachId);
   assert('имя тренера сокращено', /^\S+ \S\.$/.test(shownCoach?.name ?? ''));
 
+  r = await asAdmin('/clubs/yenisey/settings/coaches', {
+    method: 'PUT',
+    json: { coachIds: originalShown, hiddenIds: [...originalHidden, probeCoachId] },
+  });
+  check('тренер скрыт галочкой', 200, r.status);
+  assert('в настройках он помечен скрытым', (r.body ?? []).some((coach) => coach.id === probeCoachId && coach.hidden));
+  r = await call('/clubs/yenisey');
+  assert('скрытого тренера на странице нет', !(r.body?.coaches ?? []).some((coach) => coach.id === probeCoachId));
+
+  r = await asAdmin('/clubs/yenisey/settings/coaches', {
+    method: 'PUT',
+    json: { coachIds: [], hiddenIds: ['net-takogo-trenera'] },
+  });
+  check('скрыть можно только тренера этого клуба', 400, r.status);
+
   r = await asAdmin(`/clubs/yenisey/people/${probeCoachId}/role`, { method: 'PATCH', json: { role: 'CLIENT' } });
   check('роль тренера снята', 200, r.status);
   r = await call('/clubs/yenisey');
   assert('бывший тренер ушёл из состава', !(r.body?.coaches ?? []).some((coach) => coach.id === probeCoachId));
 
-  r = await asAdmin('/clubs/yenisey/settings/coaches', { method: 'PUT', json: { coachIds: originalShown } });
+  r = await asAdmin('/clubs/yenisey/settings/coaches', {
+    method: 'PUT',
+    json: { coachIds: originalShown, hiddenIds: originalHidden },
+  });
   check('состав возвращён', 200, r.status);
 
   // --- Неделя мероприятий.
@@ -4690,6 +4807,45 @@ async function clubPage() {
 
   r = await call('/clubs/yenisey/events?from=вчера');
   check('негодная дата окна отклонена', 400, r.status);
+
+  // Календарь месяца: окно с первого числа по первое следующего — до 31 дня.
+  const first = new Date();
+  first.setUTCDate(1);
+  first.setUTCHours(0, 0, 0, 0);
+  const nextFirst = new Date(first);
+  nextFirst.setUTCMonth(first.getUTCMonth() + 1);
+  r = await call(`/clubs/yenisey/events?${new URLSearchParams({ from: first.toISOString(), to: nextFirst.toISOString() })}`);
+  check('окно календарного месяца проходит', 200, r.status);
+
+  // --- Что есть в клубе и «ближайшая детская тренировка».
+  r = await call('/clubs/yenisey/catalog');
+  check('виды мероприятий клуба открыты без входа', 200, r.status);
+  const catalog = r.body ?? [];
+  assert('в справочнике и занятия, и турниры', catalog.some((item) => item.kind === 'TRAINING') && catalog.some((item) => item.kind === 'TOURNAMENT'));
+  assert('у вида — цена целыми копейками и число проведений', catalog.every((item) => Number.isInteger(item.price) && Number.isInteger(item.upcomingCount)));
+  assert('ближайшее проведение не в прошлом', catalog.every(
+    (item) => item.nextStartsAt === null || new Date(item.nextStartsAt).getTime() >= Date.now() - 60_000,
+  ));
+
+  const busyKind = catalog.find((item) => item.upcomingCount > 1) ?? catalog.find((item) => item.upcomingCount > 0);
+  if (!busyKind) {
+    console.log('  ПРОПУЩЕНО: в расписании клуба нет ни одного будущего мероприятия');
+  } else {
+    r = await call(`/clubs/yenisey/events?${new URLSearchParams({ kind: busyKind.kind, typeId: busyKind.typeId, limit: '2' })}`);
+    check('ближайшие мероприятия одного вида', 200, r.status);
+    const nearest = r.body ?? [];
+    assert('только этот вид', nearest.length > 0 && nearest.every((event) => event.kind === busyKind.kind && event.typeId === busyKind.typeId));
+    assert('предел соблюдён', nearest.length <= 2);
+    assert('первое — то самое ближайшее из справочника', nearest[0]?.startsAt === busyKind.nextStartsAt);
+    assert('по возрастанию времени', nearest.every((event, index) => index === 0 || nearest[index - 1].startsAt <= event.startsAt));
+  }
+
+  r = await call(`/clubs/yenisey/events?${new URLSearchParams({ typeId: catalog[0]?.typeId ?? 'x' })}`);
+  check('тип без вида не принимается', 400, r.status);
+  r = await call('/clubs/yenisey/events?kind=TABLE');
+  check('аренда стола — не вид мероприятия', 400, r.status);
+  r = await call('/clubs/yenisey/events?kind=TRAINING&limit=500');
+  check('предел больше 50 отклонён', 400, r.status);
 }
 
 /**

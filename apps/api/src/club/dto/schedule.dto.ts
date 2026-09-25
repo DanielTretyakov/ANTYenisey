@@ -84,10 +84,14 @@ export class CreateHallDto implements CreateHallRequest {
   @MaxLength(40)
   cityId: string | null;
 
-  @IsOptional()
+  /**
+   * Код дома из подсказки адреса — не сам адрес: строку и координаты сервер
+   * берёт у справочника (решение владельца от 25.09.2026).
+   */
   @IsString()
-  @MaxLength(300)
-  address: string | null;
+  @MinLength(1, { message: 'Укажите адрес зала — выберите дом из подсказок' })
+  @MaxLength(64)
+  addressFiasId: string;
 
   @IsIn(BOOKING_STEPS, { message: 'bookingStep: недопустимый шаг бронирования' })
   bookingStep: BookingStep;
@@ -138,10 +142,12 @@ export class UpdateHallDto implements UpdateHallRequest {
   @MaxLength(40)
   cityId?: string | null;
 
+  /** Код дома из подсказки — только если адрес меняется. */
   @IsOptional()
   @IsString()
-  @MaxLength(300)
-  address?: string | null;
+  @MinLength(1)
+  @MaxLength(64)
+  addressFiasId?: string;
 
   @IsOptional()
   @IsIn(BOOKING_STEPS, { message: 'bookingStep: недопустимый шаг бронирования' })

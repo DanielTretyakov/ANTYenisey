@@ -24,7 +24,15 @@ import { FileIntake } from '../files/file-intake.service';
 import { FileStorage } from '../files/file-storage';
 import { PrismaService } from '../prisma/prisma.service';
 import { formatBirthDate } from '../auth/birth-date';
-import { clubSettingsViolations, hallViolations } from './settings-rules';
+import { AddressProvider } from '../address/address.provider';
+import { checkAddress } from '../address/address-rules';
+import {
+  clubSettingsViolations,
+  hallViolations,
+  parseClubValues,
+  parseSocialUrl,
+  readClubValues,
+} from './settings-rules';
 
 /**
  * Поля Tenant, составляющие профиль клуба. Выбираются явным списком, а не
@@ -37,6 +45,9 @@ const SETTINGS_SELECT = {
   phone: true,
   email: true,
   description: true,
+  values: true,
+  vkUrl: true,
+  maxUrl: true,
   bannerFileId: true,
   logoUrl: true,
   accentColor: true,
@@ -53,6 +64,9 @@ const HALL_SELECT = {
   timezone: true,
   cityId: true,
   address: true,
+  addressFiasId: true,
+  latitude: true,
+  longitude: true,
   bookingStep: true,
   tableHourPrice: true,
   tableExtra30MinPrice: true,
@@ -68,6 +82,7 @@ export class ClubService {
     private readonly prisma: PrismaService,
     private readonly storage: FileStorage,
     private readonly intake: FileIntake,
+    private readonly addresses: AddressProvider,
   ) {}
 
   // --- Настройки клуба -----------------------------------------------------
@@ -82,7 +97,7 @@ export class ClubService {
       throw new NotFoundException('Клуб не найден');
     }
 
-    return tenant;
+    return toSettings(tenant);
   }
 
   /**
@@ -107,11 +122,45 @@ export class ClubService {
       throw new BadRequestException(violations);
     }
 
-    return this.prisma.tenant.update({
+    const { values, vkUrl, maxUrl, ...rest } = patch;
+    const data: Prisma.TenantUpdateInput = { ...rest };
+
+    // Ценности и ссылки — через правила: база проверяет лишь форму, а
+    // человеку нужна внятная причина отказа и нормализованная ссылка.
+    if (values !== undefined) {
+      const parsed = parseClubValues(values ?? []);
+
+      if (!parsed.ok) {
+        throw new BadRequestException(parsed.message);
+      }
+
+      data.values = parsed.value ? (parsed.value as unknown as Prisma.InputJsonArray) : Prisma.DbNull;
+    }
+
+    for (const [field, kind, raw] of [
+      ['vkUrl', 'vk', vkUrl],
+      ['maxUrl', 'max', maxUrl],
+    ] as const) {
+      if (raw === undefined) {
+        continue;
+      }
+
+      const parsed = parseSocialUrl(kind, raw);
+
+      if (!parsed.ok) {
+        throw new BadRequestException(parsed.message);
+      }
+
+      data[field] = parsed.value;
+    }
+
+    const tenant = await this.prisma.tenant.update({
       where: { id: tenantId },
-      data: patch,
+      data,
       select: SETTINGS_SELECT,
     });
+
+    return toSettings(tenant);
   }
 
   // --- Залы ----------------------------------------------------------------
@@ -131,9 +180,11 @@ export class ClubService {
       throw new BadRequestException(violations);
     }
 
+    const address = await this.verifiedAddress(dto.addressFiasId, dto.cityId);
+
     try {
       return await this.prisma.hall.create({
-        data: { ...dto, name: dto.name.trim(), tenantId },
+        data: { ...dto, ...address, name: dto.name.trim(), tenantId },
         select: HALL_SELECT,
       });
     } catch (error) {
@@ -149,13 +200,30 @@ export class ClubService {
       throw new BadRequestException(violations);
     }
 
+    const { addressFiasId, ...rest } = patch;
+    const cityId = patch.cityId === undefined ? current.cityId : patch.cityId;
+    const cityChanged = patch.cityId !== undefined && patch.cityId !== current.cityId;
+    let address: Awaited<ReturnType<ClubService['verifiedAddress']>> | Record<string, never> = {};
+
+    // Адрес перепроверяется, когда он меняется или меняется город зала: дом
+    // обязан лежать в городе, по которому клуб находят в поиске. Зал, заведённый
+    // до 25.09.2026 без адреса, при любой правке обязан его получить — CHECK
+    // Hall_address_verified проверяет каждую обновлённую строку.
+    if (addressFiasId && addressFiasId !== current.addressFiasId) {
+      address = await this.verifiedAddress(addressFiasId, cityId);
+    } else if (!current.addressFiasId) {
+      throw new BadRequestException('Укажите адрес зала — выберите дом из подсказок');
+    } else if (cityChanged) {
+      address = await this.verifiedAddress(current.addressFiasId, cityId);
+    }
+
     try {
       // tenantId в условии обязателен, хотя id и так уникален: иначе
       // администратор одного клуба правил бы зал другого, подставив чужой
       // идентификатор.
       await this.prisma.hall.updateMany({
         where: { id: hallId, tenantId },
-        data: patch.name === undefined ? patch : { ...patch, name: patch.name.trim() },
+        data: { ...rest, ...address, ...(rest.name === undefined ? {} : { name: rest.name.trim() }) },
       });
     } catch (error) {
       throw this.translateHallError(error, patch.name ?? current.name);
@@ -243,15 +311,15 @@ export class ClubService {
 
   // --- Тренерский состав на странице клуба ----------------------------------
 
-  /** Все действующие тренеры клуба; показанные — первыми, по месту. */
+  /** Все действующие тренеры клуба; упорядоченные — первыми, по месту. */
   async listCoachList(tenantId: string): Promise<ClubCoachListItem[]> {
     const rows = await this.prisma.tenantMembership.findMany({
       where: { tenantId, role: Role.COACH, deactivatedAt: null, user: { deactivatedAt: null, anonymizedAt: null } },
-      select: { userId: true, coachListOrder: true, user: { select: { fullName: true } } },
+      select: { userId: true, coachListOrder: true, coachHidden: true, user: { select: { fullName: true } } },
     });
 
     return rows
-      .map((row) => ({ id: row.userId, fullName: row.user.fullName, order: row.coachListOrder }))
+      .map((row) => ({ id: row.userId, fullName: row.user.fullName, order: row.coachListOrder, hidden: row.coachHidden }))
       .sort(
         (a, b) =>
           (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) ||
@@ -260,11 +328,12 @@ export class ClubService {
   }
 
   /**
-   * Новый состав целиком: присланные — по порядку, остальные — скрыты. Одной
-   * транзакцией: сначала все места снимаются, потом раздаются заново, иначе
-   * перестановка двух тренеров упёрлась бы в уникальность места.
+   * Новый состав целиком: присланные — по порядку наверху, скрытые — с
+   * галочкой. Одной транзакцией: сначала все места и флаги снимаются, потом
+   * раздаются заново, иначе перестановка двух тренеров упёрлась бы в
+   * уникальность места.
    */
-  async replaceCoachList(tenantId: string, coachIds: string[]): Promise<ClubCoachListItem[]> {
+  async replaceCoachList(tenantId: string, coachIds: string[], hiddenIds: string[] = []): Promise<ClubCoachListItem[]> {
     if (new Set(coachIds).size !== coachIds.length) {
       throw new BadRequestException('Тренер указан в списке дважды');
     }
@@ -272,14 +341,18 @@ export class ClubService {
     const coaches = await this.listCoachList(tenantId);
     const known = new Set(coaches.map((coach) => coach.id));
 
-    if (coachIds.some((id) => !known.has(id))) {
+    if ([...coachIds, ...hiddenIds].some((id) => !known.has(id))) {
       throw new BadRequestException('В списке есть человек, который не тренирует в этом клубе');
     }
 
     await this.prisma.$transaction([
       this.prisma.tenantMembership.updateMany({
-        where: { tenantId, coachListOrder: { not: null } },
-        data: { coachListOrder: null },
+        where: { tenantId, OR: [{ coachListOrder: { not: null } }, { coachHidden: true }] },
+        data: { coachListOrder: null, coachHidden: false },
+      }),
+      this.prisma.tenantMembership.updateMany({
+        where: { tenantId, role: Role.COACH, userId: { in: hiddenIds } },
+        data: { coachHidden: true },
       }),
       ...coachIds.map((userId, index) =>
         this.prisma.tenantMembership.update({
@@ -327,6 +400,33 @@ export class ClubService {
     }
 
     return { preferredHallId: hallId };
+  }
+
+  /**
+   * Дом по коду ФИАС — заново у справочника, а не из формы: форма прислала
+   * только код, и адрес с координатами берутся из ответа DaData. Иначе «ул.
+   * Крутых Ключей, 777» прошла бы, подставленная в запрос руками.
+   */
+  private async verifiedAddress(
+    fiasId: string,
+    cityId: string | null,
+  ): Promise<{ address: string; addressFiasId: string; latitude: number | null; longitude: number | null }> {
+    const [found, city] = await Promise.all([
+      this.addresses.findById(fiasId),
+      cityId ? this.prisma.city.findUnique({ where: { id: cityId }, select: { name: true } }) : null,
+    ]);
+    const check = checkAddress(found, city?.name ?? null);
+
+    if (!check.ok) {
+      throw new BadRequestException(check.message);
+    }
+
+    return {
+      address: check.address.value,
+      addressFiasId: check.address.fiasId,
+      latitude: check.address.latitude,
+      longitude: check.address.longitude,
+    };
   }
 
   private async findHall(tenantId: string, hallId: string): Promise<Hall> {
@@ -619,7 +719,7 @@ export class ClubService {
       // этого база отклонила бы саму смену роли.
       await tx.tenantMembership.update({
         where: { userId_tenantId: { userId, tenantId } },
-        data: { role, ...(role === Role.COACH ? {} : { coachListOrder: null }) },
+        data: { role, ...(role === Role.COACH ? {} : { coachListOrder: null, coachHidden: false }) },
       });
 
       if (role === Role.COACH) {
@@ -677,6 +777,11 @@ export class ClubService {
  * пустотой — и проверка видит зал без названия там, где меняли одну цену.
  * Prisma `undefined` игнорирует сама, а вот перекрёстные правила — нет.
  */
+/** Строка базы — в настройки: ценности из Json разбирает `readClubValues`. */
+function toSettings<T extends { values: Prisma.JsonValue }>(row: T): Omit<T, 'values'> & { values: ReturnType<typeof readClubValues> } {
+  return { ...row, values: readClubValues(row.values) };
+}
+
 function defined<T extends object>(patch: T): Partial<T> {
   return Object.fromEntries(
     Object.entries(patch).filter(([, value]) => value !== undefined),

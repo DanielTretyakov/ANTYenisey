@@ -5,9 +5,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { BookingStatus, Prisma } from '@yenisey/database';
-import type { BookingEntry, ClubEvent, EventDetail, EventKind } from '@yenisey/types';
+import type { BookingEntry, ClubCatalogItem, ClubEvent, EventDetail, EventKind } from '@yenisey/types';
 import { cancellationOpen, cancellationPercent } from '../booking/availability';
 import {
+  catalogItem,
   TOURNAMENT_DETAIL_SELECT,
   TOURNAMENT_EVENT_SELECT,
   TRAINING_DETAIL_SELECT,
@@ -63,7 +64,7 @@ export class EventsService {
   async listUpcoming(
     tenantId: string,
     userId: string | null,
-    range: { from?: string; to?: string } = {},
+    range: { from?: string; to?: string; kind?: EventKind; typeId?: string; limit?: number } = {},
   ): Promise<ClubEvent[]> {
     const now = new Date();
     const from = range.from && new Date(range.from) > now ? new Date(range.from) : now;
@@ -73,19 +74,32 @@ export class EventsService {
       throw new BadRequestException('Окно списка — не больше 31 дня');
     }
 
+    if (range.typeId && !range.kind) {
+      throw new BadRequestException('Тип мероприятия указывается вместе с видом: kind=TRAINING или TOURNAMENT');
+    }
+
     const startsAt = { gte: from, ...(to ? { lt: to } : {}) };
+    // Вид отсекает вторую таблицу целиком: «только детские тренировки» не
+    // должны тянуть турниры, чтобы потом их выбросить.
+    const take = range.limit;
 
     const [tournaments, sessions] = await Promise.all([
-      this.prisma.tournament.findMany({
-        where: { tenantId, startsAt },
-        select: TOURNAMENT_EVENT_SELECT,
-        orderBy: { startsAt: 'asc' },
-      }),
-      this.prisma.trainingSession.findMany({
-        where: { tenantId, startsAt },
-        select: TRAINING_EVENT_SELECT,
-        orderBy: { startsAt: 'asc' },
-      }),
+      range.kind === 'TRAINING'
+        ? []
+        : this.prisma.tournament.findMany({
+            where: { tenantId, startsAt, ...(range.typeId ? { tournamentTypeId: range.typeId } : {}) },
+            select: TOURNAMENT_EVENT_SELECT,
+            orderBy: { startsAt: 'asc' },
+            take,
+          }),
+      range.kind === 'TOURNAMENT'
+        ? []
+        : this.prisma.trainingSession.findMany({
+            where: { tenantId, startsAt, ...(range.typeId ? { trainingTypeId: range.typeId } : {}) },
+            select: TRAINING_EVENT_SELECT,
+            orderBy: { startsAt: 'asc' },
+            take,
+          }),
     ]);
 
     // Чем оплатит запись тот, за кого действуют: абонементом или по цене.
@@ -113,8 +127,59 @@ export class EventsService {
     ].map((event) => ({ ...event, payWith: payWith.get(event.id) ?? null }));
 
     // Общая сортировка по времени: человек смотрит на неделю клуба целиком, а
-    // не отдельно на занятия и отдельно на турниры.
-    return events.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+    // не отдельно на занятия и отдельно на турниры. Предел — после слияния:
+    // каждая таблица отдала до N своих, ближайшие N общих — среди них.
+    const sorted = events.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+
+    return take ? sorted.slice(0, take) : sorted;
+  }
+
+  /**
+   * Что вообще есть в клубе — вкладка «Мероприятия клуба» (решение владельца
+   * от 25.09.2026): действующие типы занятий и турниров с ближайшим
+   * проведением. Открыто, как и список: это витрина клуба.
+   */
+  async catalog(tenantId: string): Promise<ClubCatalogItem[]> {
+    const now = new Date();
+    const [trainingTypes, tournamentTypes, trainingNext, tournamentNext] = await Promise.all([
+      this.prisma.trainingType.findMany({
+        where: { tenantId, isActive: true },
+        select: { id: true, name: true, description: true, price: true },
+      }),
+      this.prisma.tournamentType.findMany({
+        where: { tenantId, isActive: true },
+        select: { id: true, name: true, description: true, price: true, ratingLabel: true },
+      }),
+      this.prisma.trainingSession.groupBy({
+        by: ['trainingTypeId'],
+        where: { tenantId, startsAt: { gte: now } },
+        _min: { startsAt: true },
+        _count: { _all: true },
+      }),
+      this.prisma.tournament.groupBy({
+        by: ['tournamentTypeId'],
+        where: { tenantId, startsAt: { gte: now } },
+        _min: { startsAt: true },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const trainingByType = new Map(
+      trainingNext.map((row) => [row.trainingTypeId, { startsAt: row._min.startsAt, count: row._count._all }]),
+    );
+    const tournamentByType = new Map(
+      tournamentNext.map((row) => [row.tournamentTypeId, { startsAt: row._min.startsAt, count: row._count._all }]),
+    );
+
+    // Сначала то, что скоро будет, потом — без проведений впереди, по имени:
+    // «что есть в клубе» читается от того, куда можно пойти на этой неделе.
+    return [
+      ...trainingTypes.map((type) => catalogItem('TRAINING', type, trainingByType.get(type.id))),
+      ...tournamentTypes.map((type) => catalogItem('TOURNAMENT', type, tournamentByType.get(type.id))),
+    ].sort(
+      (a, b) =>
+        (a.nextStartsAt ?? '\uffff').localeCompare(b.nextStartsAt ?? '\uffff') || a.name.localeCompare(b.name, 'ru'),
+    );
   }
 
   /**
