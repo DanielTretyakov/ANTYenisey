@@ -51,6 +51,11 @@ export interface PublicPlan {
   price: number;
   /** Что покрывает: названия типов занятий и турниров. */
   covers: string[];
+  /**
+   * Те же типы ключами «TRAINING:id» / «TOURNAMENT:id» — страница клуба по
+   * ним понимает, в каких залах тариф пригодится.
+   */
+  typeKeys: string[];
 }
 
 export interface SubscriptionPlanRequest {

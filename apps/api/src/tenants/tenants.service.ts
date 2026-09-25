@@ -158,6 +158,7 @@ export class TenantsService {
               select: {
                 groupPrice: true,
                 individualPrice: true,
+                halls: { select: { hallId: true } },
                 // «Ведёт: …» — по занятиям ближайшего месяца, по одному на тип.
                 trainingSessions: {
                   where: { startsAt: { gte: now, lt: monthAhead } },
@@ -224,6 +225,7 @@ export class TenantsService {
           leads: (row.coachProfile?.trainingSessions ?? [])
             .map((session) => session.trainingType.name)
             .sort((a, b) => a.localeCompare(b, 'ru')),
+          hallIds: row.coachProfile?.halls.map((link) => link.hallId) ?? [],
         })),
       halls: tenant.halls.map((hall) => ({
         id: hall.id,

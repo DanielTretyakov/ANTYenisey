@@ -448,6 +448,9 @@ model Tenant {
   subscriptionPlans       SubscriptionPlan[]
   planTrainingTypes       SubscriptionPlanTrainingType[]
   planTournamentTypes     SubscriptionPlanTournamentType[]
+  trainingTypeHalls       TrainingTypeHall[]
+  tournamentTypeHalls     TournamentTypeHall[]
+  coachHalls              CoachHall[]
   subscriptions           Subscription[]
   subscriptionLedger      SubscriptionLedger[]
   payments                Payment[]
@@ -1112,6 +1115,8 @@ model CoachProfile {
   closureRules     TableClosureRule[]
   dayClosures      DayClosure[]
   trainingSessions TrainingSession[] // сессии, которые ведёт этот тренер
+  /// Залы, где тренирует. Пусто — во всех залах клуба.
+  halls            CoachHall[]
   tableBookings    TableBooking[]     @relation("CoachTableBookings") // брони стола, инициированные тренером (спарринги)
   visitLogs        VisitLog[] // визиты его учеников — для статистики посещаемости
 
@@ -1147,6 +1152,8 @@ model TrainingType {
   closureRules      TableClosureRule[]
   dayClosures       DayClosure[]
   subscriptionPlans SubscriptionPlanTrainingType[]
+  /// Залы, где идёт этот вид занятия. Пусто — во всех залах клуба.
+  halls             TrainingTypeHall[]
 
   @@unique([id, tenantId])
   @@index([tenantId])
@@ -1265,6 +1272,8 @@ model TournamentType {
   tournaments       Tournament[]
   closureRules      TableClosureRule[]
   subscriptionPlans SubscriptionPlanTournamentType[]
+  /// Залы, где проводится этот вид турнира. Пусто — во всех залах клуба.
+  halls             TournamentTypeHall[]
 
   @@unique([id, tenantId])
   @@index([tenantId])
@@ -1418,6 +1427,12 @@ model Hall {
 
   // Мишень для составных FK: стол не может попасть в зал чужого клуба.
   preferredBy TenantMembership[] @relation("PreferredHall")
+
+  // Что идёт в этом зале и кто в нём тренирует (решение владельца от
+  // 25.09.2026: у одной организации залы в разных городах).
+  trainingTypeLinks   TrainingTypeHall[]
+  tournamentTypeLinks TournamentTypeHall[]
+  coachLinks          CoachHall[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, name])
@@ -2283,4 +2298,64 @@ model NotificationSetting {
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
   @@id([userId, category])
+}
+
+// ---------------------------------------------------------------------------
+// Залы видов мероприятий и тренеров
+// ---------------------------------------------------------------------------
+//
+// Решение владельца от 25.09.2026: одна организация — залы в разных уголках
+// страны, и мероприятия с тренерами у них разные. Администратор отмечает, в
+// каких залах идёт вид занятия или турнира и в каких тренирует тренер.
+//
+// НЕТ СТРОК — ЗНАЧИТ «ВО ВСЕХ ЗАЛАХ». Так у клуба с одним залом и у клубов,
+// заведённых раньше, ничего не ломается, а новый зал сразу получает всё, что
+// не привязано явно. Правило — `availableIn` в `club/hall-scope.ts`.
+//
+// Ключи составные по клубу: вид или тренер одного клуба не привяжется к залу
+// другого. Связи — настройка, а не история, поэтому уходят каскадом вместе с
+// залом или видом.
+
+model TrainingTypeHall {
+  trainingTypeId String
+  hallId         String
+  tenantId       String
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  trainingType TrainingType @relation(fields: [trainingTypeId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  hall         Hall         @relation(fields: [hallId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@id([trainingTypeId, hallId])
+  @@index([hallId])
+  @@index([tenantId])
+}
+
+model TournamentTypeHall {
+  tournamentTypeId String
+  hallId           String
+  tenantId         String
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tournamentType TournamentType @relation(fields: [tournamentTypeId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  hall           Hall           @relation(fields: [hallId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@id([tournamentTypeId, hallId])
+  @@index([hallId])
+  @@index([tenantId])
+}
+
+/// Где тренирует тренер. Висит на анкете тренера в клубе (`CoachProfile`):
+/// смена роли снимает привязки той же транзакцией, что и место в составе.
+model CoachHall {
+  coachId  String
+  hallId   String
+  tenantId String
+
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  coach  CoachProfile @relation(fields: [coachId, tenantId], references: [userId, tenantId], onDelete: Cascade)
+  hall   Hall         @relation(fields: [hallId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@id([coachId, hallId])
+  @@index([hallId])
+  @@index([tenantId])
 }

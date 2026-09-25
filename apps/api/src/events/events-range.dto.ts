@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsISO8601, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsIn, IsISO8601, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import type { EventKind } from '@yenisey/types';
 
 /**
@@ -30,6 +30,16 @@ export class EventsRangeDto {
   @IsString()
   @MaxLength(64)
   typeId?: string;
+
+  /**
+   * Залы через запятую — фильтр страницы клуба «город, внутри — зал». Пусто —
+   * все залы.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(1400)
+  @Matches(/^[A-Za-z0-9_-]+(,[A-Za-z0-9_-]+){0,19}$/, { message: 'halls: идентификаторы залов через запятую, не больше 20' })
+  halls?: string;
 
   /** Сколько ближайших отдать; без окна и с видом — «ближайшие N по всем датам». */
   @IsOptional()

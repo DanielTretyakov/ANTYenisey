@@ -185,7 +185,11 @@ export default function ClubPage() {
             onSaved={(settings) => setData({ ...data, settings })}
           />
 
-          <ClubPageCard settings={data.settings} onSettings={(settings) => setData({ ...data, settings })} />
+          <ClubPageCard
+            settings={data.settings}
+            halls={data.halls}
+            onSettings={(settings) => setData({ ...data, settings })}
+          />
 
           <div>
             <div className="mb-4 flex flex-wrap items-center gap-1.5">

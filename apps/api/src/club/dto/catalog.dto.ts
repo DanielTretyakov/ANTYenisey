@@ -1,5 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsISO8601,
   IsInt,
@@ -48,6 +50,14 @@ export class TrainingTypeDto implements TrainingTypeRequest {
   @trimmed()
   @MaxLength(2000, { message: 'Описание — не длиннее 2000 символов' })
   description?: string | null;
+
+  /** Залы, где идёт вид; пусто — во всех. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  hallIds?: string[];
 }
 
 export class TournamentTypeDto implements TournamentTypeRequest {
@@ -88,6 +98,14 @@ export class TournamentTypeDto implements TournamentTypeRequest {
   @trimmed()
   @MaxLength(2000, { message: 'Описание — не длиннее 2000 символов' })
   description?: string | null;
+
+  /** Залы, где идёт вид; пусто — во всех. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  hallIds?: string[];
 }
 
 export class TournamentDto implements TournamentRequest {

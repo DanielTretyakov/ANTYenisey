@@ -315,11 +315,23 @@ export class ClubService {
   async listCoachList(tenantId: string): Promise<ClubCoachListItem[]> {
     const rows = await this.prisma.tenantMembership.findMany({
       where: { tenantId, role: Role.COACH, deactivatedAt: null, user: { deactivatedAt: null, anonymizedAt: null } },
-      select: { userId: true, coachListOrder: true, coachHidden: true, user: { select: { fullName: true } } },
+      select: {
+        userId: true,
+        coachListOrder: true,
+        coachHidden: true,
+        user: { select: { fullName: true } },
+        coachProfile: { select: { halls: { select: { hallId: true } } } },
+      },
     });
 
     return rows
-      .map((row) => ({ id: row.userId, fullName: row.user.fullName, order: row.coachListOrder, hidden: row.coachHidden }))
+      .map((row) => ({
+        id: row.userId,
+        fullName: row.user.fullName,
+        order: row.coachListOrder,
+        hidden: row.coachHidden,
+        hallIds: row.coachProfile?.halls.map((link) => link.hallId) ?? [],
+      }))
       .sort(
         (a, b) =>
           (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) ||
@@ -333,7 +345,12 @@ export class ClubService {
    * раздаются заново, иначе перестановка двух тренеров упёрлась бы в
    * уникальность места.
    */
-  async replaceCoachList(tenantId: string, coachIds: string[], hiddenIds: string[] = []): Promise<ClubCoachListItem[]> {
+  async replaceCoachList(
+    tenantId: string,
+    coachIds: string[],
+    hiddenIds: string[] = [],
+    coachHalls?: { coachId: string; hallIds: string[] }[],
+  ): Promise<ClubCoachListItem[]> {
     if (new Set(coachIds).size !== coachIds.length) {
       throw new BadRequestException('Тренер указан в списке дважды');
     }
@@ -341,8 +358,18 @@ export class ClubService {
     const coaches = await this.listCoachList(tenantId);
     const known = new Set(coaches.map((coach) => coach.id));
 
-    if ([...coachIds, ...hiddenIds].some((id) => !known.has(id))) {
+    if ([...coachIds, ...hiddenIds, ...(coachHalls ?? []).map((item) => item.coachId)].some((id) => !known.has(id))) {
       throw new BadRequestException('В списке есть человек, который не тренирует в этом клубе');
+    }
+
+    const hallIds = [...new Set((coachHalls ?? []).flatMap((item) => item.hallIds))];
+
+    if (hallIds.length > 0) {
+      const found = await this.prisma.hall.count({ where: { tenantId, id: { in: hallIds } } });
+
+      if (found !== hallIds.length) {
+        throw new BadRequestException('Среди залов тренера есть зал не из этого клуба');
+      }
     }
 
     await this.prisma.$transaction([
@@ -354,6 +381,13 @@ export class ClubService {
         where: { tenantId, role: Role.COACH, userId: { in: hiddenIds } },
         data: { coachHidden: true },
       }),
+      // Залы тренеров — только тех, про кого прислано: остальных не трогаем.
+      ...(coachHalls ?? []).flatMap((item) => [
+        this.prisma.coachHall.deleteMany({ where: { tenantId, coachId: item.coachId } }),
+        this.prisma.coachHall.createMany({
+          data: [...new Set(item.hallIds)].map((hallId) => ({ tenantId, coachId: item.coachId, hallId })),
+        }),
+      ]),
       ...coachIds.map((userId, index) =>
         this.prisma.tenantMembership.update({
           where: { userId_tenantId: { userId, tenantId } },
@@ -569,11 +603,19 @@ export class ClubService {
         user: { deactivatedAt: null, anonymizedAt: null },
         coachProfile: { isNot: null },
       },
-      select: { userId: true, user: { select: { fullName: true } } },
+      select: {
+        userId: true,
+        user: { select: { fullName: true } },
+        coachProfile: { select: { halls: { select: { hallId: true } } } },
+      },
       orderBy: { user: { fullName: 'asc' } },
     });
 
-    return coaches.map((coach) => ({ id: coach.userId, fullName: coach.user.fullName }));
+    return coaches.map((coach) => ({
+      id: coach.userId,
+      fullName: coach.user.fullName,
+      hallIds: coach.coachProfile?.halls.map((link) => link.hallId) ?? [],
+    }));
   }
 
   // --- Состав клуба --------------------------------------------------------
@@ -721,6 +763,12 @@ export class ClubService {
         where: { userId_tenantId: { userId, tenantId } },
         data: { role, ...(role === Role.COACH ? {} : { coachListOrder: null, coachHidden: false }) },
       });
+
+      // Залы тренера — тоже свойство роли: вернувшись тренером, человек
+      // начинает «во всех залах», а не с прошлогодней привязкой.
+      if (role !== Role.COACH) {
+        await tx.coachHall.deleteMany({ where: { tenantId, coachId: userId } });
+      }
 
       if (role === Role.COACH) {
         await tx.coachProfile.upsert({

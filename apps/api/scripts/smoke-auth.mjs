@@ -2075,6 +2075,7 @@ async function main() {
   await playerProfile();
   await coachCard();
   await clubPage();
+  await hallScope();
   await personalData();
   await sparring();
   await subscriptions();
@@ -4861,6 +4862,160 @@ async function clubPage() {
  * правит ФИО, телефон и пароль; почта и дата рождения — только через клуб.
  * Пустые абонементы предлагают тарифы клубов человека.
  */
+/**
+ * Залы видов мероприятий и тренеров (решение владельца от 25.09.2026): одна
+ * организация — залы в разных городах. Пусто — «во всех залах»; в расписании
+ * зала — строго свои виды и тренеры; страница клуба фильтрует по залам.
+ *
+ * Прогон работает на СВОЁМ пробном зале и возвращает привязки вида и тренера,
+ * которые трогал, — рабочее расписание клуба не меняется.
+ */
+async function hallScope() {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('\n=== 40б. Залы видов и тренеров — ПРОПУЩЕНА (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 40б. Залы видов и тренеров');
+
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+
+  let r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const asAdmin = as(r.body?.accessToken ?? '');
+
+  // --- Свой пробный зал со столом.
+  r = await asAdmin(`/clubs/yenisey/address-suggestions?${new URLSearchParams({ query: 'Партизана Железняка 25' })}`);
+  const address = r.body?.[0];
+  r = await asAdmin('/clubs/yenisey/halls', {
+    method: 'POST',
+    json: {
+      name: `Зал проверки ${RUN} (залы)`,
+      timezone: 'Asia/Krasnoyarsk',
+      cityId: null,
+      addressFiasId: address?.fiasId,
+      bookingStep: 'MIN_30',
+      tableHourPrice: 30000,
+      tableExtra30MinPrice: 15000,
+      hasRobotOption: false,
+      robot30MinPrice: null,
+      robot60MinPrice: null,
+      robotExtra30MinPrice: null,
+    },
+  });
+  check('пробный зал для привязок заведён', 201, r.status);
+  const probeHall = r.body?.id;
+
+  r = await asAdmin('/clubs/yenisey/tables', { method: 'POST', json: { hallId: probeHall, label: `Стол проверки ${RUN} (залы)` } });
+  const probeTable = r.body?.id;
+
+  r = await asAdmin('/clubs/yenisey/halls');
+  const otherHall = (r.body ?? []).find((hall) => hall.id !== probeHall)?.id;
+
+  // --- Вид занятия: залы.
+  r = await asAdmin('/clubs/yenisey/training-types');
+  const type = (r.body ?? []).find((item) => item.isActive);
+  const typeBody = (hallIds) => ({ name: type.name, price: type.price, isActive: true, hallIds });
+  assert('у вида есть список залов', Array.isArray(type?.hallIds));
+  const typeHalls = type?.hallIds ?? [];
+
+  r = await asAdmin(`/clubs/yenisey/training-types/${type.id}`, { method: 'PATCH', json: typeBody(['chuzhoy-zal']) });
+  check('вид к чужому залу не привязать', 400, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/training-types/${type.id}`, { method: 'PATCH', json: typeBody([probeHall]) });
+  check('вид привязан к пробному залу', 200, r.status);
+  assert('ответ отдал новые залы', JSON.stringify(r.body?.hallIds) === JSON.stringify([probeHall]));
+
+  r = await call('/clubs/yenisey/catalog');
+  const publicType = (r.body ?? []).find((item) => item.kind === 'TRAINING' && item.typeId === type.id);
+  assert('залы вида видны на открытой странице', JSON.stringify(publicType?.hallIds) === JSON.stringify([probeHall]));
+
+  r = await call(`/clubs/yenisey/events?${new URLSearchParams({ halls: otherHall ?? 'x' })}`);
+  check('список мероприятий по залу', 200, r.status);
+  r = await call('/clubs/yenisey/events?halls=,,');
+  check('мусор в фильтре залов отклонён', 400, r.status);
+
+  // --- Тренер: залы.
+  r = await asAdmin('/clubs/yenisey/settings/coaches');
+  const list = r.body ?? [];
+  const coach = list[0];
+
+  if (!coach) {
+    console.log('  ПРОПУЩЕНО: в клубе нет тренеров');
+  } else {
+    const order = list.filter((item) => item.order !== null).map((item) => item.id);
+    const hidden = list.filter((item) => item.hidden).map((item) => item.id);
+    const coachHalls = coach.hallIds ?? [];
+    const putCoach = (hallIds) =>
+      asAdmin('/clubs/yenisey/settings/coaches', {
+        method: 'PUT',
+        json: { coachIds: order, hiddenIds: hidden, coachHalls: [{ coachId: coach.id, hallIds }] },
+      });
+
+    r = await putCoach(['chuzhoy-zal']);
+    check('тренера к чужому залу не привязать', 400, r.status);
+
+    r = await putCoach([probeHall]);
+    check('тренер привязан к пробному залу', 200, r.status);
+    assert('в составе видны его залы', (r.body ?? []).some((item) => item.id === coach.id && item.hallIds?.[0] === probeHall));
+
+    r = await call('/clubs/yenisey');
+    const shown = (r.body?.coaches ?? []).find((item) => item.id === coach.id);
+    assert('залы тренера — на открытой странице', !shown || JSON.stringify(shown.hallIds) === JSON.stringify([probeHall]));
+
+    // --- Строго: в расписании зала только его вид и тренер.
+    const rule = (extra) => ({
+      tableId: probeTable,
+      weekday: 3,
+      startMinute: 600,
+      endMinute: 690,
+      purpose: 'TRAINING',
+      coachId: coach.id,
+      trainingTypeId: type.id,
+      tournamentId: null,
+      tournamentTypeId: null,
+      ...extra,
+    });
+
+    r = await asAdmin(`/clubs/yenisey/halls/${probeHall}/template`, { method: 'PUT', json: { rules: [rule()] } });
+    check('свой вид и свой тренер в шаблоне зала приняты', 200, r.status);
+
+    r = await asAdmin(`/clubs/yenisey/halls/${probeHall}/template`, { method: 'PUT', json: { rules: [] } });
+    r = await putCoach(otherHall ? [otherHall] : ['chuzhoy-zal']);
+    r = await asAdmin(`/clubs/yenisey/halls/${probeHall}/template`, { method: 'PUT', json: { rules: [rule()] } });
+    check('тренер из другого зала в шаблон не поставлен', 400, r.status);
+    assert('в отказе названо, что делать', JSON.stringify(r.body?.message ?? '').includes('не тренирует в этом зале'));
+
+    r = await putCoach([]);
+    check('тренер снова во всех залах', 200, r.status);
+    r = await asAdmin(`/clubs/yenisey/halls/${probeHall}/template`, { method: 'PUT', json: { rules: [rule()] } });
+    check('без привязки — можно в любом зале', 200, r.status);
+
+    // Сужение привязки не запирает то, что уже стоит в зале.
+    r = await putCoach(otherHall ? [otherHall] : []);
+    r = await asAdmin(`/clubs/yenisey/halls/${probeHall}/template`, {
+      method: 'PUT',
+      json: { rules: [rule(), rule({ purpose: 'RENT', coachId: null, trainingTypeId: null, startMinute: 700, endMinute: 760 })] },
+    });
+    check('уже стоявший тренер правку дня не запирает', 200, r.status);
+
+    r = await asAdmin(`/clubs/yenisey/halls/${probeHall}/template`, { method: 'PUT', json: { rules: [] } });
+    r = await putCoach(coachHalls);
+    check('залы тренера возвращены', 200, r.status);
+  }
+
+  r = await asAdmin(`/clubs/yenisey/training-types/${type.id}`, { method: 'PATCH', json: typeBody(typeHalls) });
+  check('залы вида возвращены', 200, r.status);
+
+  // Уборка своего зала: стол, потом зал (связи уходят каскадом).
+  await asAdmin(`/clubs/yenisey/tables/${probeTable}`, { method: 'DELETE' });
+  r = await asAdmin(`/clubs/yenisey/halls/${probeHall}`, { method: 'DELETE' });
+  check('пробный зал убран вместе со связями', 204, r.status);
+}
+
 async function personalData() {
   console.log('\n=== 41. Личные данные, пароль, тарифы');
 

@@ -133,7 +133,14 @@ export function trainingEvent(row: TrainingRow, userId: string | null): ClubEven
  */
 export function catalogItem(
   kind: EventKind,
-  type: { id: string; name: string; description: string | null; price: number; ratingLabel?: string | null },
+  type: {
+    id: string;
+    name: string;
+    description: string | null;
+    price: number;
+    ratingLabel?: string | null;
+    halls: { hallId: string }[];
+  },
   next: { startsAt: Date | null; count: number } | undefined,
 ): ClubCatalogItem {
   return {
@@ -145,6 +152,7 @@ export function catalogItem(
     ratingLabel: type.ratingLabel ?? null,
     nextStartsAt: next?.startsAt?.toISOString() ?? null,
     upcomingCount: next?.count ?? 0,
+    hallIds: type.halls.map((link) => link.hallId),
   };
 }
 

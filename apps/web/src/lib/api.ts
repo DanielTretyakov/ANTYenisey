@@ -535,6 +535,8 @@ export interface EventsFilter {
   kind?: EventKind;
   typeId?: string;
   limit?: number;
+  /** Залы через запятую — фильтр страницы клуба. */
+  halls?: string;
 }
 
 export function clubApi(slug: string = TENANT_SLUG) {
@@ -556,8 +558,12 @@ export function clubApi(slug: string = TENANT_SLUG) {
     coachList: (): Promise<ClubCoachListItem[]> => authorized(`${club}/settings/coaches`),
 
     /** Состав на странице клуба: упорядоченные наверху и скрытые галочкой. */
-    setCoachList: (coachIds: string[], hiddenIds: string[]): Promise<ClubCoachListItem[]> =>
-      authorized(`${club}/settings/coaches`, json('PUT', { coachIds, hiddenIds })),
+    setCoachList: (
+      coachIds: string[],
+      hiddenIds: string[],
+      coachHalls?: { coachId: string; hallIds: string[] }[],
+    ): Promise<ClubCoachListItem[]> =>
+      authorized(`${club}/settings/coaches`, json('PUT', { coachIds, hiddenIds, ...(coachHalls ? { coachHalls } : {}) })),
 
     /** Подсказки адреса зала — дома из справочника, в городе зала. */
     addressSuggestions: (query: string, cityId: string | null): Promise<AddressSuggestion[]> =>

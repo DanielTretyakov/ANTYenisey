@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { BookingEntry, ClubCatalogItem, PublicPlan, PublicTenant } from '@yenisey/types';
 import { RiverBackdrop } from '@/components/brand/RiverBackdrop';
 import { ClubAbout } from '@/components/club/ClubAbout';
 import { ClubMark } from '@/components/club/ClubMark';
 import { ClubTabs } from '@/components/club/ClubTabs';
+import { ALL_HALLS, HallFilter, selectedHallIds, type HallSelection } from '@/components/club/HallFilter';
 import { RowSkeleton } from '@/components/club/EventRow';
 import { UPCOMING_ANCHOR, UpcomingEvents, type KindFilter } from '@/components/club/UpcomingEvents';
 import { WhenSpan } from '@/components/club/When';
@@ -60,6 +61,40 @@ export default function ClubPage() {
   const [catalog, setCatalog] = useState<ClubCatalogItem[] | null>(null);
   const [plans, setPlans] = useState<PublicPlan[] | null>(null);
   const [filter, setFilter] = useState<KindFilter | null>(null);
+  const [halls, setHalls] = useState<HallSelection>(ALL_HALLS);
+
+  // Выбор зала помнит браузер — у каждого клуба свой: человек из Абакана не
+  // должен каждый раз заново отсеивать Красноярск. Хранилище может быть
+  // недоступно (приватный режим) — тогда просто «все».
+  const hallsKey = `yenisey.halls.${slug}`;
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(hallsKey) ?? 'null') as HallSelection | null;
+      if (saved && typeof saved === 'object') setHalls({ city: saved.city ?? null, hallId: saved.hallId ?? null });
+    } catch {
+      // нет хранилища — остаёмся на «всех»
+    }
+  }, [hallsKey]);
+
+  const chooseHalls = useCallback(
+    (selection: HallSelection) => {
+      setHalls(selection);
+      try {
+        window.localStorage.setItem(hallsKey, JSON.stringify(selection));
+      } catch {
+        // не запомнили — не беда
+      }
+    },
+    [hallsKey],
+  );
+
+  // Выбранные залы; сохранённый зал, которого у клуба больше нет, — «все».
+  const hallIds = useMemo(() => {
+    if (!tenant) return null;
+    const known = halls.hallId === null || tenant.halls.some((hall) => hall.id === halls.hallId);
+    return selectedHallIds(tenant.halls, known ? halls : ALL_HALLS);
+  }, [tenant, halls]);
 
   useEffect(() => {
     api
@@ -151,12 +186,15 @@ export default function ClubPage() {
           className="mb-10"
         />
 
+        {tenant && <HallFilter halls={tenant.halls} value={halls} onChange={chooseHalls} />}
+
         <ClubTabs
           slug={slug}
           tenant={tenant}
           catalog={catalog}
           plans={plans}
           viewer={viewer}
+          hallIds={hallIds}
           onShowSchedule={showSchedule}
         />
 
@@ -178,6 +216,7 @@ export default function ClubPage() {
           catalog={catalog}
           filter={filter}
           onFilter={setFilter}
+          hallIds={hallIds}
         />
       </main>
     </div>

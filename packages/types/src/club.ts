@@ -128,6 +128,8 @@ export interface ClubCoachListItem {
   order: number | null;
   /** Скрыт со страницы клуба. */
   hidden: boolean;
+  /** Залы, где тренирует; пусто — во всех. */
+  hallIds: string[];
 }
 
 /** Состав на странице клуба: порядок и скрытые. */
@@ -136,6 +138,11 @@ export interface ClubCoachListRequest {
   coachIds: string[];
   /** Скрытые со страницы клуба. */
   hiddenIds: string[];
+  /**
+   * Где тренирует каждый (решение владельца от 25.09.2026). Не прислано —
+   * привязки не трогаются; пустой список залов — во всех залах.
+   */
+  coachHalls?: { coachId: string; hallIds: string[] }[];
 }
 
 /**
@@ -370,6 +377,8 @@ export interface DaySchedule {
 export interface ClubCoach {
   id: string;
   fullName: string;
+  /** Залы, где тренирует; пусто — во всех. Палитра расписания зала берёт отсюда. */
+  hallIds: string[];
 }
 
 /**
@@ -449,6 +458,11 @@ export interface TrainingType {
   description: string | null;
   /** Сколько окон расписания на неё ссылается — показывается перед снятием. */
   usageCount: number;
+  /**
+   * Залы, где идёт этот вид (решение владельца от 25.09.2026). Пусто — во
+   * всех залах клуба.
+   */
+  hallIds: string[];
 }
 
 export interface TrainingTypeRequest {
@@ -457,6 +471,8 @@ export interface TrainingTypeRequest {
   isActive?: boolean;
   /** Не прислано — не трогать; пусто или `null` — стереть. */
   description?: string | null;
+  /** Не прислано — не трогать; пусто — во всех залах. */
+  hallIds?: string[];
 }
 
 /**
@@ -478,6 +494,11 @@ export interface TournamentType {
   description: string | null;
   /** Сколько турниров заведено по этому типу. */
   tournamentCount: number;
+  /**
+   * Залы, где идёт этот вид (решение владельца от 25.09.2026). Пусто — во
+   * всех залах клуба.
+   */
+  hallIds: string[];
 }
 
 export interface TournamentTypeRequest {
@@ -487,6 +508,8 @@ export interface TournamentTypeRequest {
   isActive?: boolean;
   /** Не прислано — не трогать; пусто или `null` — стереть. */
   description?: string | null;
+  /** Не прислано — не трогать; пусто — во всех залах. */
+  hallIds?: string[];
 }
 
 /** Турнир: конкретное проведение типа в конкретный момент. */

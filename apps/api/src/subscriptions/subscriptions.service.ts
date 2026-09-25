@@ -867,8 +867,8 @@ const PUBLIC_PLANS = {
     visitsCount: true,
     durationDays: true,
     price: true,
-    coveredTrainingTypes: { select: { trainingType: { select: { name: true } } } },
-    coveredTournamentTypes: { select: { tournamentType: { select: { name: true } } } },
+    coveredTrainingTypes: { select: { trainingType: { select: { id: true, name: true } } } },
+    coveredTournamentTypes: { select: { tournamentType: { select: { id: true, name: true } } } },
   } as const,
   // Варианты одного тарифа рядом: по названию, внутри — от меньшего пакета.
   orderBy: [
@@ -884,8 +884,8 @@ function toPublicPlan(plan: {
   visitsCount: number | null;
   durationDays: number | null;
   price: number;
-  coveredTrainingTypes: { trainingType: { name: string } }[];
-  coveredTournamentTypes: { tournamentType: { name: string } }[];
+  coveredTrainingTypes: { trainingType: { id: string; name: string } }[];
+  coveredTournamentTypes: { tournamentType: { id: string; name: string } }[];
 }): PublicPlan {
   return {
     id: plan.id,
@@ -896,6 +896,10 @@ function toPublicPlan(plan: {
     covers: [
       ...plan.coveredTrainingTypes.map((row) => row.trainingType.name),
       ...plan.coveredTournamentTypes.map((row) => row.tournamentType.name),
+    ],
+    typeKeys: [
+      ...plan.coveredTrainingTypes.map((row) => `TRAINING:${row.trainingType.id}`),
+      ...plan.coveredTournamentTypes.map((row) => `TOURNAMENT:${row.tournamentType.id}`),
     ],
   };
 }

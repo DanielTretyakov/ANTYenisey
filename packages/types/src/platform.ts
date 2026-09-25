@@ -245,6 +245,8 @@ export interface ClubCatalogItem {
   nextStartsAt: string | null;
   /** Сколько проведений впереди. */
   upcomingCount: number;
+  /** Залы, где идёт; пусто — во всех. По ним фильтрует страница клуба. */
+  hallIds: string[];
 }
 
 /** Лента ближайших мероприятий моих клубов на стартовой странице. */

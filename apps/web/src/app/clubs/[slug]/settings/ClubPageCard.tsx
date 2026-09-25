@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { ClubCoachListItem, ClubSettings } from '@yenisey/types';
+import type { ClubCoachListItem, ClubSettings, Hall } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
+import { Tab } from '@/components/ui/Tab';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { useClubApi } from '@/lib/useClubApi';
@@ -24,9 +25,11 @@ function messageOf(cause: unknown): string {
  */
 export function ClubPageCard({
   settings,
+  halls,
   onSettings,
 }: {
   settings: ClubSettings;
+  halls: Hall[];
   onSettings: (settings: ClubSettings) => void;
 }) {
   return (
@@ -37,7 +40,7 @@ export function ClubPageCard({
       />
       <CardBody className="grid gap-8">
         <BannerBlock settings={settings} onSettings={onSettings} />
-        <CoachListBlock />
+        <CoachListBlock halls={halls} />
       </CardBody>
     </Card>
   );
@@ -152,11 +155,13 @@ function BannerBlock({
  * перестановку отдельно значило бы на мгновение показывать посетителю два
  * тренера на одном месте.
  */
-function CoachListBlock() {
+function CoachListBlock({ halls }: { halls: Hall[] }) {
   const club = useClubApi();
   const [coaches, setCoaches] = useState<ClubCoachListItem[] | null>(null);
   const [order, setOrder] = useState<string[]>([]);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
+  // Где тренирует каждый (решение владельца от 25.09.2026); пусто — везде.
+  const [hallsOf, setHallsOf] = useState<Record<string, string[]>>({});
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -166,6 +171,18 @@ function CoachListBlock() {
     // Сервер отдаёт уже в порядке страницы: упорядоченные, потом по ФИО.
     setOrder(list.map((coach) => coach.id));
     setHidden(new Set(list.filter((coach) => coach.hidden).map((coach) => coach.id)));
+    setHallsOf(Object.fromEntries(list.map((coach) => [coach.id, coach.hallIds])));
+  }
+
+  function toggleHall(coachId: string, hallId: string): void {
+    setHallsOf((current) => {
+      const list = current[coachId] ?? [];
+      return {
+        ...current,
+        [coachId]: list.includes(hallId) ? list.filter((id) => id !== hallId) : [...list, hallId],
+      };
+    });
+    setSaved(false);
   }
 
   useEffect(() => {
@@ -202,7 +219,13 @@ function CoachListBlock() {
     setError(null);
 
     try {
-      load(await club.setCoachList(order, [...hidden]));
+      load(
+        await club.setCoachList(
+          order,
+          [...hidden],
+          order.map((coachId) => ({ coachId, hallIds: hallsOf[coachId] ?? [] })),
+        ),
+      );
       setSaved(true);
     } catch (cause) {
       setError(messageOf(cause));
@@ -219,6 +242,8 @@ function CoachListBlock() {
       <p className="mt-0.5 text-[0.8125rem] text-text-muted">
         На странице клуба — все тренеры в этом порядке; снимите галочку, чтобы скрыть. Список берётся из людей с
         ролью тренера в «Составе клуба».
+        {halls.length > 1 &&
+          ' Отметьте залы, где тренер работает: без отметок — во всех. По ним фильтрует страница клуба и палитра расписания.'}
       </p>
 
       {error && (
@@ -245,7 +270,7 @@ function CoachListBlock() {
                 <li
                   key={id}
                   className={cn(
-                    'flex items-center gap-2 rounded-control border border-border bg-surface-raised px-3 py-1.5',
+                    'flex flex-wrap items-center gap-2 rounded-control border border-border bg-surface-raised px-3 py-1.5',
                     isHidden && 'bg-surface-sunken text-text-subtle',
                   )}
                 >
@@ -266,6 +291,19 @@ function CoachListBlock() {
                   <IconButton label="Ниже" disabled={index === order.length - 1} onClick={() => move(index, 1)}>
                     ↓
                   </IconButton>
+
+                  {halls.length > 1 && (
+                    <div className="flex basis-full flex-wrap items-center gap-1.5 pb-1 pl-12" role="group" aria-label={`Залы: ${nameOf(id)}`}>
+                      {halls.map((hall) => (
+                        <Tab key={hall.id} active={(hallsOf[id] ?? []).includes(hall.id)} onClick={() => toggleHall(id, hall.id)}>
+                          {hall.name}
+                        </Tab>
+                      ))}
+                      {(hallsOf[id] ?? []).length === 0 && (
+                        <span className="text-[0.8125rem] text-text-subtle">во всех залах</span>
+                      )}
+                    </div>
+                  )}
                 </li>
               );
             })}

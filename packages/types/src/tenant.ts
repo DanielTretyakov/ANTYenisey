@@ -26,6 +26,8 @@ export interface PublicClubCoach {
   individualPrice: number | null;
   /** Какие занятия тренер ведёт в ближайший месяц — названия типов. */
   leads: string[];
+  /** Залы, где тренирует; пусто — во всех. По ним фильтрует страница клуба. */
+  hallIds: string[];
 }
 
 export interface PublicTenant {

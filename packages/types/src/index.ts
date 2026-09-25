@@ -5,6 +5,7 @@ export * from './club';
 export * from './coach';
 export * from './desk';
 export * from './family';
+export * from './halls';
 export * from './names';
 export * from './notification';
 export * from './platform';

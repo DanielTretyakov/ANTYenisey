@@ -44,6 +44,7 @@ export class CatalogService {
         price: true,
         isActive: true,
         description: true,
+        halls: { select: { hallId: true } },
         _count: { select: { closureRules: true, dayClosures: true } },
       },
       // Действующие сверху, дальше по названию: снятые с продажи нужны редко.
@@ -57,6 +58,7 @@ export class CatalogService {
       isActive: type.isActive,
       description: type.description,
       usageCount: type._count.closureRules + type._count.dayClosures,
+      hallIds: type.halls.map((link) => link.hallId),
     }));
   }
 
@@ -71,7 +73,7 @@ export class CatalogService {
       throw new ConflictException(`Тип тренировки «${name}» уже есть`);
     }
 
-    await this.prisma.trainingType.create({
+    const created = await this.prisma.trainingType.create({
       data: {
         tenantId,
         name,
@@ -79,7 +81,10 @@ export class CatalogService {
         isActive: dto.isActive ?? true,
         description: descriptionOf(dto.description) ?? null,
       },
+      select: { id: true },
     });
+
+    await this.replaceHalls('training', tenantId, created.id, dto.hallIds);
 
     return this.findTrainingType(tenantId, name);
   }
@@ -114,6 +119,8 @@ export class CatalogService {
     if (updated.count === 0) {
       throw new NotFoundException('Тип тренировки не найден');
     }
+
+    await this.replaceHalls('training', tenantId, id, dto.hallIds);
 
     return this.findTrainingType(tenantId, name);
   }
@@ -172,6 +179,45 @@ export class CatalogService {
     return found;
   }
 
+  /**
+   * Залы вида целиком: пусто — во всех залах (решение владельца от
+   * 25.09.2026). Не прислано — не трогаем. Залы проверяются здесь ради
+   * внятного ответа; чужой зал база и сама не примет — ключ составной.
+   */
+  private async replaceHalls(
+    kind: 'training' | 'tournament',
+    tenantId: string,
+    typeId: string,
+    hallIds: string[] | undefined,
+  ): Promise<void> {
+    if (hallIds === undefined) {
+      return;
+    }
+
+    const unique = [...new Set(hallIds)];
+    const found = await this.prisma.hall.count({ where: { tenantId, id: { in: unique } } });
+
+    if (found !== unique.length) {
+      throw new BadRequestException('Среди залов вида есть зал не из этого клуба');
+    }
+
+    await this.prisma.$transaction(
+      kind === 'training'
+        ? [
+            this.prisma.trainingTypeHall.deleteMany({ where: { tenantId, trainingTypeId: typeId } }),
+            this.prisma.trainingTypeHall.createMany({
+              data: unique.map((hallId) => ({ tenantId, trainingTypeId: typeId, hallId })),
+            }),
+          ]
+        : [
+            this.prisma.tournamentTypeHall.deleteMany({ where: { tenantId, tournamentTypeId: typeId } }),
+            this.prisma.tournamentTypeHall.createMany({
+              data: unique.map((hallId) => ({ tenantId, tournamentTypeId: typeId, hallId })),
+            }),
+          ],
+    );
+  }
+
   // --- Типы турниров -------------------------------------------------------
 
   async listTournamentTypes(tenantId: string): Promise<TournamentType[]> {
@@ -184,6 +230,7 @@ export class CatalogService {
         price: true,
         isActive: true,
         description: true,
+        halls: { select: { hallId: true } },
         _count: { select: { tournaments: true } },
       },
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
@@ -197,6 +244,7 @@ export class CatalogService {
       isActive: type.isActive,
       description: type.description,
       tournamentCount: type._count.tournaments,
+      hallIds: type.halls.map((link) => link.hallId),
     }));
   }
 
@@ -222,6 +270,8 @@ export class CatalogService {
         },
         select: { id: true },
       });
+
+      await this.replaceHalls('tournament', tenantId, created.id, dto.hallIds);
 
       return this.findTournamentType(tenantId, created.id);
     } catch (error) {
@@ -254,6 +304,8 @@ export class CatalogService {
     if (updated.count === 0) {
       throw new NotFoundException('Тип турнира не найден');
     }
+
+    await this.replaceHalls('tournament', tenantId, id, dto.hallIds);
 
     return this.findTournamentType(tenantId, id);
   }

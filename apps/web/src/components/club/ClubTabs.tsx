@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import type { ClubCatalogItem, PublicPlan, PublicTenant } from '@yenisey/types';
+import { availableInAny, type ClubCatalogItem, type PublicPlan, type PublicTenant } from '@yenisey/types';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { PlanGroups, PLANS_ANCHOR } from '@/components/subscriptions/PlanList';
 import { Button } from '@/components/ui/Button';
@@ -39,6 +39,7 @@ export function ClubTabs({
   catalog,
   plans,
   viewer,
+  hallIds,
   onShowSchedule,
 }: {
   slug: string;
@@ -46,6 +47,8 @@ export function ClubTabs({
   catalog: ClubCatalogItem[] | null;
   plans: PublicPlan[] | null;
   viewer: EventViewer;
+  /** Выбранные фильтром залы; пусто — все (решение владельца от 25.09.2026). */
+  hallIds: string[] | null;
   /** «Показать расписание» у вида — фильтр в «Предстоящих» и прокрутка к ним. */
   onShowSchedule: (item: ClubCatalogItem) => void;
 }) {
@@ -87,11 +90,15 @@ export function ClubTabs({
     window.history.replaceState(null, '', `#${id}`);
   };
 
+  // Фильтр залов: залы — выбранные, виды и тренеры — те, что там есть,
+  // тарифы — те, что покрывают хоть один доступный там вид.
+  const scoped = scopeTo(hallIds, tenant, catalog, plans);
+
   const counts: Record<TabId, number | null> = {
-    zaly: tenant?.halls.length ?? null,
-    meropriyatiya: catalog?.length ?? null,
-    trenery: tenant?.coaches.length ?? null,
-    [PLANS_ANCHOR]: plans?.length ?? null,
+    zaly: scoped.tenant?.halls.length ?? null,
+    meropriyatiya: scoped.catalog?.length ?? null,
+    trenery: scoped.tenant?.coaches.length ?? null,
+    [PLANS_ANCHOR]: scoped.plans?.length ?? null,
   };
 
   return (
@@ -113,13 +120,43 @@ export function ClubTabs({
       </div>
 
       <div role="tabpanel" aria-label={TABS.find((tab) => tab.id === active)?.label}>
-        {active === 'zaly' && <HallsTab slug={slug} tenant={tenant} viewer={viewer} />}
-        {active === 'meropriyatiya' && <CatalogTab catalog={catalog} onShowSchedule={onShowSchedule} />}
-        {active === 'trenery' && <CoachesTab tenant={tenant} />}
-        {active === PLANS_ANCHOR && <PlansTab plans={plans} />}
+        {active === 'zaly' && <HallsTab slug={slug} tenant={scoped.tenant} viewer={viewer} />}
+        {active === 'meropriyatiya' && <CatalogTab catalog={scoped.catalog} onShowSchedule={onShowSchedule} />}
+        {active === 'trenery' && <CoachesTab tenant={scoped.tenant} />}
+        {active === PLANS_ANCHOR && <PlansTab plans={scoped.plans} />}
       </div>
     </section>
   );
+}
+
+/** Всё содержимое вкладок — в пределах выбранных залов. */
+function scopeTo(
+  hallIds: string[] | null,
+  tenant: PublicTenant | null,
+  catalog: ClubCatalogItem[] | null,
+  plans: PublicPlan[] | null,
+): { tenant: PublicTenant | null; catalog: ClubCatalogItem[] | null; plans: PublicPlan[] | null } {
+  if (!hallIds) {
+    return { tenant, catalog, plans };
+  }
+
+  const scopedCatalog = catalog?.filter((item) => availableInAny(item.hallIds, hallIds)) ?? null;
+  const usable = new Set((scopedCatalog ?? []).map((item) => `${item.kind}:${item.typeId}`));
+
+  return {
+    tenant: tenant && {
+      ...tenant,
+      halls: tenant.halls.filter((hall) => hallIds.includes(hall.id)),
+      coaches: tenant.coaches.filter((coach) => availableInAny(coach.hallIds, hallIds)),
+    },
+    catalog: scopedCatalog,
+    // Тариф без покрытия (или пока справочник не приехал) не прячем: нечем
+    // решить, где он пригодится.
+    plans:
+      plans?.filter(
+        (plan) => plan.typeKeys.length === 0 || catalog === null || plan.typeKeys.some((key) => usable.has(key)),
+      ) ?? null,
+  };
 }
 
 /**

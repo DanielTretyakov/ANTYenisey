@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import type { ClubCatalogItem, ClubEvent, EventKind } from '@yenisey/types';
+import { availableInAny, type ClubCatalogItem, type ClubEvent, type EventKind } from '@yenisey/types';
 import { EventDialog } from '@/components/events/EventDialog';
 import { inputClassName } from '@/components/ui/Field';
 import { Tab } from '@/components/ui/Tab';
@@ -50,6 +50,7 @@ export function UpcomingEvents({
   catalog,
   filter,
   onFilter,
+  hallIds,
 }: {
   slug: string;
   /** Растёт после записи или отмены — список перечитывается. */
@@ -62,6 +63,8 @@ export function UpcomingEvents({
   catalog: ClubCatalogItem[] | null;
   filter: KindFilter | null;
   onFilter: (filter: KindFilter | null) => void;
+  /** Залы фильтра страницы; пусто — все. */
+  hallIds: string[] | null;
 }) {
   const club = useClubApi();
   const [view, setView] = useState<'week' | 'month'>('week');
@@ -81,16 +84,20 @@ export function UpcomingEvents({
   const days = useMemo(() => weekDays(week), [week]);
   const month = useMemo(() => monthStart(new Date(), monthOffset), [monthOffset]);
   const searching = view === 'week' && query.trim() !== '';
+  // Залы — строкой: массив новый на каждой отрисовке, а эффекту нужна
+  // стабильная зависимость.
+  const halls = hallIds?.join(',') ?? '';
 
   // Окно списка: неделя, месяц или — при поиске — всё предстоящее. С
   // выбранным ребёнком отметка «записан» в списке — его, а не родителя.
   useEffect(() => {
     let cancelled = false;
+    const inHalls: EventsFilter = halls ? { halls } : {};
     const range: EventsFilter = searching
-      ? {}
+      ? { ...inHalls }
       : view === 'week'
-        ? { from: week.toISOString(), to: weekEnd(week).toISOString() }
-        : { from: month.toISOString(), to: monthEnd(month).toISOString() };
+        ? { from: week.toISOString(), to: weekEnd(week).toISOString(), ...inHalls }
+        : { from: month.toISOString(), to: monthEnd(month).toISOString(), ...inHalls };
 
     setLoaded(null);
 
@@ -112,7 +119,7 @@ export function UpcomingEvents({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [club, forPerson, view, week, month, searching, query, version]);
+  }, [club, forPerson, view, week, month, searching, query, version, halls]);
 
   // Ближайшие проведения выбранного вида — по всем датам, не по окну.
   useEffect(() => {
@@ -125,7 +132,7 @@ export function UpcomingEvents({
     setNearest(null);
 
     club
-      .events(forPerson, { kind: filter.kind, typeId: filter.typeId, limit: NEAREST })
+      .events(forPerson, { kind: filter.kind, typeId: filter.typeId, limit: NEAREST, ...(halls ? { halls } : {}) })
       .then((found) => {
         if (!cancelled) setNearest(found);
       })
@@ -136,7 +143,7 @@ export function UpcomingEvents({
     return () => {
       cancelled = true;
     };
-  }, [club, forPerson, filter, version]);
+  }, [club, forPerson, filter, version, halls]);
 
   const needle = query.trim().toLowerCase();
   const ofKind = (event: ClubEvent): boolean =>
@@ -156,7 +163,9 @@ export function UpcomingEvents({
           ? []
           : inWindow.filter((event) => dayKey(new Date(event.startsAt)) === monthDay);
 
-  const chips = (catalog ?? []).filter((item) => item.upcomingCount > 0);
+  const chips = (catalog ?? []).filter(
+    (item) => item.upcomingCount > 0 && (!hallIds || availableInAny(item.hallIds, hallIds)),
+  );
   const chosen = filter ? (catalog ?? []).find((item) => item.kind === filter.kind && item.typeId === filter.typeId) : null;
   const today = new Date();
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { availableIn } from '@yenisey/types';
 import type {
   ClubCoach,
   ClubPerson,
@@ -47,18 +48,32 @@ export function useScheduleGrid({
 }) {
   const club = useClubApi();
 
+  // Палитра зала — только его виды и тренеры (решение владельца от
+  // 25.09.2026, «строго»; сервер проверяет то же). Подписи окон по-прежнему
+  // берутся из полных списков: окно, поставленное до сужения привязки, должно
+  // читаться своим названием, а не «неизвестно».
+  const hallCoaches = useMemo(() => coaches.filter((coach) => availableIn(coach.hallIds, hallId)), [coaches, hallId]);
+  const hallTrainingTypes = useMemo(
+    () => trainingTypes.filter((type) => availableIn(type.hallIds, hallId)),
+    [trainingTypes, hallId],
+  );
+  const hallTournamentTypes = useMemo(
+    () => tournamentTypes.filter((type) => availableIn(type.hallIds, hallId)),
+    [tournamentTypes, hallId],
+  );
+
   const [cells, setCells] = useState<Cells>(new Map());
   /** Снимок последнего сохранения или загрузки — с ним сравнивается сетка. */
   const [saved, setSaved] = useState<Cells>(new Map());
 
   const [brush, setBrush] = useState<Brush>('TRAINING');
-  const [coachId, setCoachId] = useState<string | null>(coaches[0]?.id ?? null);
+  const [coachId, setCoachId] = useState<string | null>(hallCoaches[0]?.id ?? null);
   const [client, setClient] = useState<ClubPerson | null>(null);
   const [trainingTypeId, setTrainingTypeId] = useState<string | null>(
-    trainingTypes[0]?.id ?? null,
+    hallTrainingTypes[0]?.id ?? null,
   );
   const [tournamentTypeId, setTournamentTypeId] = useState<string | null>(
-    tournamentTypes[0]?.id ?? null,
+    hallTournamentTypes[0]?.id ?? null,
   );
   /**
    * Мест в группе для занятий, которые заведутся из этой правки.
@@ -265,18 +280,18 @@ export function useScheduleGrid({
     palette: {
       brush,
       onBrush: setBrush,
-      coaches,
+      coaches: hallCoaches,
       coachId,
       onCoach: setCoachId,
       client,
       onClient: setClient,
       colors,
-      trainingTypes,
+      trainingTypes: hallTrainingTypes,
       trainingTypeId,
       onTrainingType: setTrainingTypeId,
       capacity,
       onCapacity: setCapacity,
-      tournamentTypes,
+      tournamentTypes: hallTournamentTypes,
       tournamentTypeId,
       onTournamentType: setTournamentTypeId,
     },

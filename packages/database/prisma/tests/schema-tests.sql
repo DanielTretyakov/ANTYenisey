@@ -1473,3 +1473,22 @@ SELECT pg_temp.expect('DX',
 SELECT pg_temp.expect('DY',
   $q$UPDATE "TenantMembership" SET "coachHidden" = true WHERE "userId" = 'u1' AND "tenantId" = 't1'$q$,
   '23514', 'TenantMembership_coach_hidden_only_coach');
+
+-- ---------------------------------------------------------------------------
+-- 32. Залы видов мероприятий и тренеров
+-- ---------------------------------------------------------------------------
+
+-- DZ. Вид занятия клуба t1 не привязать к залу клуба t2: ключ составной.
+SELECT pg_temp.expect('DZ',
+  $q$INSERT INTO "TrainingTypeHall" ("trainingTypeId","hallId","tenantId") VALUES ('tt1','h2','t1')$q$,
+  '23503', 'TrainingTypeHall_hallId_tenantId_fkey');
+
+-- EA. Тренер клуба t1 не тренирует в зале клуба t2.
+SELECT pg_temp.expect('EA',
+  $q$INSERT INTO "CoachHall" ("coachId","hallId","tenantId") VALUES ('c1','h2','t1')$q$,
+  '23503', 'CoachHall_hallId_tenantId_fkey');
+
+-- EB. И под видом «чужого клуба» — тренер t1 записан как тренер t2.
+SELECT pg_temp.expect('EB',
+  $q$INSERT INTO "CoachHall" ("coachId","hallId","tenantId") VALUES ('c1','h2','t2')$q$,
+  '23503', 'CoachHall_coachId_tenantId_fkey');

@@ -64,7 +64,7 @@ export class EventsService {
   async listUpcoming(
     tenantId: string,
     userId: string | null,
-    range: { from?: string; to?: string; kind?: EventKind; typeId?: string; limit?: number } = {},
+    range: { from?: string; to?: string; kind?: EventKind; typeId?: string; limit?: number; halls?: string } = {},
   ): Promise<ClubEvent[]> {
     const now = new Date();
     const from = range.from && new Date(range.from) > now ? new Date(range.from) : now;
@@ -79,6 +79,14 @@ export class EventsService {
     }
 
     const startsAt = { gte: from, ...(to ? { lt: to } : {}) };
+    // Залы страницы клуба (решение владельца от 25.09.2026): мероприятие — в
+    // зале, если стоит в его расписании; без окна в сетке — там, где идёт его
+    // вид (пусто — во всех залах).
+    const halls = range.halls ? range.halls.split(',').filter(Boolean) : null;
+    const typeInHalls = halls
+      ? { OR: [{ halls: { none: {} } }, { halls: { some: { hallId: { in: halls } } } }] }
+      : undefined;
+    const placedInHalls = halls ? { some: { table: { hallId: { in: halls } } } } : undefined;
     // Вид отсекает вторую таблицу целиком: «только детские тренировки» не
     // должны тянуть турниры, чтобы потом их выбросить.
     const take = range.limit;
@@ -87,7 +95,14 @@ export class EventsService {
       range.kind === 'TRAINING'
         ? []
         : this.prisma.tournament.findMany({
-            where: { tenantId, startsAt, ...(range.typeId ? { tournamentTypeId: range.typeId } : {}) },
+            where: {
+              tenantId,
+              startsAt,
+              ...(range.typeId ? { tournamentTypeId: range.typeId } : {}),
+              ...(halls
+                ? { OR: [{ dayClosures: placedInHalls }, { dayClosures: { none: {} }, tournamentType: typeInHalls }] }
+                : {}),
+            },
             select: TOURNAMENT_EVENT_SELECT,
             orderBy: { startsAt: 'asc' },
             take,
@@ -95,7 +110,14 @@ export class EventsService {
       range.kind === 'TOURNAMENT'
         ? []
         : this.prisma.trainingSession.findMany({
-            where: { tenantId, startsAt, ...(range.typeId ? { trainingTypeId: range.typeId } : {}) },
+            where: {
+              tenantId,
+              startsAt,
+              ...(range.typeId ? { trainingTypeId: range.typeId } : {}),
+              ...(halls
+                ? { OR: [{ dayClosures: placedInHalls }, { dayClosures: { none: {} }, trainingType: typeInHalls }] }
+                : {}),
+            },
             select: TRAINING_EVENT_SELECT,
             orderBy: { startsAt: 'asc' },
             take,
@@ -144,11 +166,18 @@ export class EventsService {
     const [trainingTypes, tournamentTypes, trainingNext, tournamentNext] = await Promise.all([
       this.prisma.trainingType.findMany({
         where: { tenantId, isActive: true },
-        select: { id: true, name: true, description: true, price: true },
+        select: { id: true, name: true, description: true, price: true, halls: { select: { hallId: true } } },
       }),
       this.prisma.tournamentType.findMany({
         where: { tenantId, isActive: true },
-        select: { id: true, name: true, description: true, price: true, ratingLabel: true },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          price: true,
+          ratingLabel: true,
+          halls: { select: { hallId: true } },
+        },
       }),
       this.prisma.trainingSession.groupBy({
         by: ['trainingTypeId'],

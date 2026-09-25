@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
 import type {
+  Hall,
   Role,
   SubscriptionPlan,
   Tournament,
@@ -44,6 +45,7 @@ export default function CatalogPage() {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
+  const [halls, setHalls] = useState<Hall[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   // «Типы» первыми: без них нельзя ни поставить занятие, ни завести тариф.
@@ -78,9 +80,11 @@ export default function CatalogPage() {
       club.tournaments(),
       club.trainingSessions(),
       club.subscriptionPlans(),
+      club.halls(),
     ])
-      .then(([training, types, events, training_sessions, subscriptionPlans]) => {
+      .then(([training, types, events, training_sessions, subscriptionPlans, clubHalls]) => {
         if (cancelled) return;
+        setHalls(clubHalls);
         setTrainingTypes(training);
         setTournamentTypes(types);
         setTournaments(events);
@@ -129,9 +133,15 @@ export default function CatalogPage() {
           <div className="grid gap-6">
             {tab === 'types' && (
               <>
-                <TrainingTypesCard types={trainingTypes} onChange={setTrainingTypes} onError={setError} />
+                <TrainingTypesCard
+                  types={trainingTypes}
+                  halls={halls}
+                  onChange={setTrainingTypes}
+                  onError={setError}
+                />
                 <TournamentTypesCard
                   types={tournamentTypes}
+                  halls={halls}
                   onChange={setTournamentTypes}
                   onError={setError}
                 />
@@ -184,10 +194,12 @@ const TAB_HINTS: Record<CatalogTab, string> = {
 /** Типы тренировок: «Общая групповая», «Первая подача». */
 function TrainingTypesCard({
   types,
+  halls,
   onChange,
   onError,
 }: {
   types: TrainingType[];
+  halls: Hall[];
   onChange: (types: TrainingType[]) => void;
   onError: (message: string | null) => void;
 }) {
@@ -246,6 +258,7 @@ function TrainingTypesCard({
                 {editingId === type.id ? (
                   <TypeEditor
                     initial={type}
+                    halls={halls}
                     pending={pending}
                     onError={onError}
                     onCancel={() => setEditingId(null)}
@@ -256,6 +269,7 @@ function TrainingTypesCard({
                           price: values.price,
                           isActive: type.isActive,
                           description: values.description,
+                          hallIds: values.hallIds,
                         });
                         setEditingId(null);
                         return types
@@ -269,6 +283,7 @@ function TrainingTypesCard({
                 <span className={cn('min-w-0 flex-1 text-[0.9375rem]', type.isActive ? 'text-text' : 'text-text-subtle line-through')}>
                   {type.name}
                   <DescriptionHint text={type.description} />
+                  <HallsHint hallIds={type.hallIds} halls={halls} />
                 </span>
                 <span className="text-[0.875rem] text-text-muted">{formatKopecks(type.price)}</span>
                 {type.usageCount > 0 && (
@@ -352,10 +367,12 @@ function TrainingTypesCard({
 /** Типы турниров: «Клуб 100», «Первая подача». */
 function TournamentTypesCard({
   types,
+  halls,
   onChange,
   onError,
 }: {
   types: TournamentType[];
+  halls: Hall[];
   onChange: (types: TournamentType[]) => void;
   onError: (message: string | null) => void;
 }) {
@@ -412,6 +429,7 @@ function TournamentTypesCard({
                 {editingId === type.id ? (
                   <TypeEditor
                     initial={type}
+                    halls={halls}
                     withRating
                     pending={pending}
                     onError={onError}
@@ -427,6 +445,7 @@ function TournamentTypesCard({
                           price: values.price,
                           isActive: type.isActive,
                           description: values.description,
+                          hallIds: values.hallIds,
                         })
                         .then((updated) => {
                           onChange(
@@ -457,6 +476,7 @@ function TournamentTypesCard({
                         </span>
                       )}
                       <DescriptionHint text={type.description} />
+                      <HallsHint hallIds={type.hallIds} halls={halls} />
                     </span>
                     <span className="text-[0.875rem] text-text-muted">
                       {formatKopecks(type.price)}
@@ -752,13 +772,15 @@ function DescriptionHint({ text }: { text: string | null }) {
  */
 function TypeEditor({
   initial,
+  halls,
   withRating = false,
   pending,
   onSave,
   onCancel,
   onError,
 }: {
-  initial: { name: string; ratingLabel?: string | null; price: number; description: string | null };
+  initial: { name: string; ratingLabel?: string | null; price: number; description: string | null; hallIds: string[] };
+  halls: Hall[];
   withRating?: boolean;
   pending: boolean;
   onSave: (values: {
@@ -766,6 +788,7 @@ function TypeEditor({
     ratingLabel: string | null;
     price: number;
     description: string | null;
+    hallIds: string[];
   }) => void;
   onCancel: () => void;
   onError: (message: string | null) => void;
@@ -774,6 +797,7 @@ function TypeEditor({
   const [rating, setRating] = useState(initial.ratingLabel ?? '');
   const [price, setPrice] = useState(kopecksToInput(initial.price));
   const [description, setDescription] = useState(initial.description ?? '');
+  const [hallIds, setHallIds] = useState<string[]>(initial.hallIds);
 
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -791,6 +815,7 @@ function TypeEditor({
       ratingLabel: rating.trim() || null,
       price: kopecks,
       description: description.trim() || null,
+      hallIds,
     });
   }
 
@@ -828,6 +853,8 @@ function TypeEditor({
         className={cn(inputClassName, 'w-full basis-full py-1.5 text-[0.9375rem]')}
       />
 
+      {halls.length > 1 && <HallPicker halls={halls} value={hallIds} onChange={setHallIds} />}
+
       <Button type="submit" size="sm" pending={pending} disabled={name.trim() === ''}>
         Сохранить
       </Button>
@@ -835,5 +862,50 @@ function TypeEditor({
         Отмена
       </Button>
     </form>
+  );
+}
+
+/** «Все залы» или список — под названием вида, когда залов у клуба несколько. */
+function HallsHint({ hallIds, halls }: { hallIds: string[]; halls: Hall[] }) {
+  if (halls.length < 2) {
+    return null;
+  }
+
+  const names = halls.filter((hall) => hallIds.includes(hall.id)).map((hall) => hall.name);
+
+  return (
+    <span className="mt-0.5 block truncate text-[0.8125rem] text-text-subtle">
+      {names.length === 0 ? 'во всех залах' : `залы: ${names.join(', ')}`}
+    </span>
+  );
+}
+
+/**
+ * Где идёт вид (решение владельца от 25.09.2026). Ничего не отмечено — во
+ * всех залах: так новый зал сразу получает непривязанное, а в расписании
+ * зала вид без отметки остаётся доступен.
+ */
+function HallPicker({ halls, value, onChange }: { halls: Hall[]; value: string[]; onChange: (value: string[]) => void }) {
+  return (
+    <fieldset className="w-full basis-full">
+      <legend className="mb-1.5 text-[0.8125rem] text-text-muted">
+        Где проходит{value.length === 0 && ' — сейчас во всех залах'}
+      </legend>
+      <div className="flex flex-wrap gap-1.5">
+        {halls.map((hall) => {
+          const checked = value.includes(hall.id);
+
+          return (
+            <Tab
+              key={hall.id}
+              active={checked}
+              onClick={() => onChange(checked ? value.filter((id) => id !== hall.id) : [...value, hall.id])}
+            >
+              {hall.name}
+            </Tab>
+          );
+        })}
+      </div>
+    </fieldset>
   );
 }

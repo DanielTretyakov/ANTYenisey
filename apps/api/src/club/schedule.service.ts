@@ -9,7 +9,9 @@ import type {
   DaySchedule,
   Weekday,
 } from '@yenisey/types';
+import { shortName } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
+import { hallScopeViolations, refKey, type ScopedRef } from './hall-scope';
 import {
   findOverlap,
   formatMinutes,
@@ -102,6 +104,7 @@ export class ScheduleService {
 
     await this.assertTablesInHall(tenantId, hallId, rules);
     await this.assertCatalogExists(tenantId, rules);
+    await this.assertHallScope(tenantId, hallId, rules, await this.templateSlots(tenantId, hallId));
     this.assertSlotsValid(rules, templateViolations);
     this.assertNoOverlap(rules, ruleGroupKey, (rule) => ` в ${WEEKDAY_NAMES[rule.weekday]}`);
 
@@ -181,6 +184,12 @@ export class ScheduleService {
 
     await this.assertTablesInHall(tenantId, hallId, closures);
     await this.assertCatalogExists(tenantId, closures);
+    // «Было в зале» для даты — и её прежние окна, и шаблон: отвязанный день
+    // начинается с копии шаблона, и тренер из шаблона не должен запирать правку.
+    await this.assertHallScope(tenantId, hallId, closures, [
+      ...(await this.templateSlots(tenantId, hallId)),
+      ...(await this.daySlots(tenantId, hallId, date)),
+    ]);
     this.assertSlotsValid(closures);
     this.assertNoOverlap(closures, (slot) => slot.tableId, () => '');
 
@@ -484,6 +493,129 @@ export class ScheduleService {
         await tx.tournament.update({ where: { id: tournament.id }, data: { endsAt: new Date(end) } });
       }
     }
+  }
+
+  // --- Залы видов и тренеров ------------------------------------------------
+
+  /**
+   * В расписании зала — только виды и тренеры этого зала (решение владельца
+   * от 25.09.2026, «строго»). Проверяется лишь то, чего в зале до правки не
+   * было (`before`): сужение привязки не должно запирать правку уже
+   * заведённых дней. Правило — `hallScopeViolations` в `hall-scope.ts`.
+   */
+  private async assertHallScope(
+    tenantId: string,
+    hallId: string,
+    slots: readonly ClosureSlot[],
+    before: readonly ClosureSlot[],
+  ): Promise<void> {
+    const [refs, previous] = await Promise.all([this.scopedRefs(tenantId, slots), this.scopedRefs(tenantId, before)]);
+    const violations = hallScopeViolations(hallId, refs, new Set(previous.map(refKey)));
+
+    if (violations.length > 0) {
+      throw new BadRequestException(violations);
+    }
+  }
+
+  /**
+   * На кого и на что ссылаются окна: тренер, вид занятия, вид турнира — с
+   * привязкой к залам. Занятие и турнир дня раскрываются в свой вид и тренера.
+   */
+  private async scopedRefs(tenantId: string, slots: readonly ClosureSlot[]): Promise<ScopedRef[]> {
+    const ids = (pick: (slot: ClosureSlot) => string | null | undefined): string[] => [
+      ...new Set(slots.map(pick).filter((id): id is string => typeof id === 'string')),
+    ];
+
+    const sessionIds = ids((slot) => slot.trainingSessionId);
+    const tournamentIds = ids((slot) => slot.tournamentId);
+    const [sessions, tournaments] = await Promise.all([
+      sessionIds.length > 0
+        ? this.prisma.trainingSession.findMany({
+            where: { tenantId, id: { in: sessionIds } },
+            select: { trainingTypeId: true, coachId: true },
+          })
+        : [],
+      tournamentIds.length > 0
+        ? this.prisma.tournament.findMany({
+            where: { tenantId, id: { in: tournamentIds } },
+            select: { tournamentTypeId: true },
+          })
+        : [],
+    ]);
+
+    const coachIds = [...new Set([...ids((slot) => slot.coachId), ...sessions.map((row) => row.coachId)])];
+    const trainingTypeIds = [
+      ...new Set([...ids((slot) => slot.trainingTypeId), ...sessions.map((row) => row.trainingTypeId)]),
+    ];
+    const tournamentTypeIds = [
+      ...new Set([...ids((slot) => slot.tournamentTypeId), ...tournaments.map((row) => row.tournamentTypeId)]),
+    ];
+
+    const [coaches, trainingTypes, tournamentTypes] = await Promise.all([
+      coachIds.length > 0
+        ? this.prisma.coachProfile.findMany({
+            where: { tenantId, userId: { in: coachIds } },
+            select: {
+              userId: true,
+              membership: { select: { user: { select: { fullName: true } } } },
+              halls: { select: { hallId: true } },
+            },
+          })
+        : [],
+      trainingTypeIds.length > 0
+        ? this.prisma.trainingType.findMany({
+            where: { tenantId, id: { in: trainingTypeIds } },
+            select: { id: true, name: true, halls: { select: { hallId: true } } },
+          })
+        : [],
+      tournamentTypeIds.length > 0
+        ? this.prisma.tournamentType.findMany({
+            where: { tenantId, id: { in: tournamentTypeIds } },
+            select: { id: true, name: true, halls: { select: { hallId: true } } },
+          })
+        : [],
+    ]);
+
+    return [
+      ...coaches.map((row) => ({
+        kind: 'coach' as const,
+        id: row.userId,
+        name: shortName(row.membership.user.fullName),
+        links: row.halls.map((link) => link.hallId),
+      })),
+      ...trainingTypes.map((row) => ({
+        kind: 'training' as const,
+        id: row.id,
+        name: row.name,
+        links: row.halls.map((link) => link.hallId),
+      })),
+      ...tournamentTypes.map((row) => ({
+        kind: 'tournament' as const,
+        id: row.id,
+        name: row.name,
+        links: row.halls.map((link) => link.hallId),
+      })),
+    ];
+  }
+
+  /** Окна шаблона недели этого зала — как есть в базе. */
+  private async templateSlots(tenantId: string, hallId: string): Promise<ClosureSlot[]> {
+    const rules = await this.prisma.tableClosureRule.findMany({
+      where: { tenantId, table: { hallId } },
+      select: TEMPLATE_SELECT,
+    });
+
+    return rules.map((rule) => ({ ...rule, tournamentId: null, trainingSessionId: null }));
+  }
+
+  /** Окна даты этого зала — как есть в базе; день не правили — пусто. */
+  private async daySlots(tenantId: string, hallId: string, date: string): Promise<ClosureSlot[]> {
+    const closures = await this.prisma.dayClosure.findMany({
+      where: { tenantId, schedule: { hallId, date: parseDate(date) } },
+      select: { ...SLOT_SELECT, tournamentId: true, trainingSessionId: true },
+    });
+
+    return closures.map((closure) => ({ ...closure, tournamentTypeId: null }));
   }
 
   // --- Общие проверки ------------------------------------------------------
