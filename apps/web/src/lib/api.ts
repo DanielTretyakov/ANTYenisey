@@ -34,6 +34,7 @@ import type {
   EventDetail,
   EventKind,
   FeedEvent,
+  PublicDayBoard,
   StaffPreferences,
   ClubPeoplePage,
   ClubPeopleQuery,
@@ -718,7 +719,15 @@ export function clubApi(slug: string = TENANT_SLUG) {
 
     // --- Бронирование стола клиентом
     /** Залы с ценами и шагом брони — то же, что видит администратор в настройках. */
-    bookingHalls: (): Promise<Hall[]> => authorized(`${club}/booking/halls`),
+    /** Залы с ценами и шагом брони. Открыто без входа — это прайс клуба. */
+    bookingHalls: (): Promise<Hall[]> => optionallyAuthorized(`${club}/booking/halls`),
+
+    /**
+     * Открытая сетка дня: свободное и чем занято остальное (аренда без имён,
+     * занятие, турнир). Без входа — новичок смотрит время до регистрации.
+     */
+    bookingBoard: (hallId: string, date: string): Promise<PublicDayBoard> =>
+      optionallyAuthorized(`${club}/booking/halls/${hallId}/days/${date}/board`),
 
     /** Что свободно в зале на дату. Причина занятости клиенту не раскрывается. */
     bookingDay: (hallId: string, date: string): Promise<BookingDay> =>
@@ -730,7 +739,7 @@ export function clubApi(slug: string = TENANT_SLUG) {
       durationMinutes: number,
       withRobot: boolean,
     ): Promise<BookingQuote> =>
-      authorized(
+      optionallyAuthorized(
         `${club}/booking/quote?hallId=${encodeURIComponent(hallId)}` +
           `&durationMinutes=${durationMinutes}&withRobot=${withRobot}`,
       ),

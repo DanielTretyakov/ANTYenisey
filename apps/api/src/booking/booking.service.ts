@@ -10,10 +10,13 @@ import {
   type BookingDay,
   type BookingQuote,
   type ClientBooking,
+  type ClosureSlot,
   type CreateBookingRequest,
+  type PublicDayBoard,
+  shortName,
 } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
-import { localParts } from '../club/closures';
+import { instantAt, localParts } from '../club/closures';
 import { MembershipService } from '../club/membership.service';
 import { ClientNotifier } from '../notifications/client-notifier.service';
 import {
@@ -25,7 +28,8 @@ import {
   OPEN_MINUTE,
   STEP_MINUTES,
 } from './availability';
-import { assertDateFormat, OccupancyService } from './occupancy.service';
+import { ACTIVE_BOOKING, assertDateFormat, OccupancyService } from './occupancy.service';
+import { boardBlocks, type BoardNames } from './public-board';
 import { quote } from './pricing';
 
 /**
@@ -167,6 +171,90 @@ export class BookingService {
         label: table.label,
         busy: mergeBusy(busyByTable.get(table.id) ?? []),
       })),
+    };
+  }
+
+  /**
+   * Открытая сетка дня: свободное время и чем занято остальное.
+   *
+   * Занятость (`busy`) — та же, что у `findDay`, одним вызовом; блоки с
+   * причинами — поверх неё, из тех же окон расписания и броней. Сведение и
+   * всё, что наружу не уходит (имена, цены), — в `boardBlocks`.
+   */
+  async findBoard(tenantId: string, hallId: string, date: string): Promise<PublicDayBoard> {
+    const day = await this.findDay(tenantId, hallId, date);
+    const hall = await this.hall(tenantId, hallId);
+    const tableIds = day.tables.map((table) => table.tableId);
+
+    const [slots, bookings] = await Promise.all([
+      this.occupancy.slotsOn(tenantId, hallId, date),
+      this.prisma.tableBooking.findMany({
+        where: {
+          tenantId,
+          tableId: { in: tableIds },
+          status: { in: ACTIVE_BOOKING },
+          startsAt: { lt: instantAt(date, CLOSE_MINUTE, hall.timezone) },
+          endsAt: { gt: instantAt(date, 0, hall.timezone) },
+        },
+        select: { tableId: true, startsAt: true, endsAt: true, isSparring: true },
+      }),
+    ]);
+
+    const names = await this.boardNames(tenantId, slots);
+
+    return {
+      ...day,
+      tables: day.tables.map((table) => ({
+        ...table,
+        blocks: boardBlocks(
+          slots.filter((slot) => slot.tableId === table.tableId),
+          bookings
+            .filter((booking) => booking.tableId === table.tableId)
+            .map((booking) => ({
+              tableId: booking.tableId,
+              startMinute: localParts(booking.startsAt, hall.timezone).minutes,
+              // Конец ровно в местную полночь — 1440, а не 0: см. busyByTable.
+              endMinute: localParts(booking.endsAt, hall.timezone).minutes || CLOSE_MINUTE,
+              sparring: booking.isSparring,
+            })),
+          names,
+        ),
+      })),
+    };
+  }
+
+  /** Названия типов, турниров и тренеров из окон — одним заходом на вид. */
+  private async boardNames(tenantId: string, slots: ClosureSlot[]): Promise<BoardNames> {
+    const ids = (pick: (slot: ClosureSlot) => string | null): string[] => [
+      ...new Set(slots.map(pick).filter((id): id is string => id !== null)),
+    ];
+
+    const [trainingTypes, tournaments, tournamentTypes, coaches] = await Promise.all([
+      this.prisma.trainingType.findMany({
+        where: { tenantId, id: { in: ids((slot) => slot.trainingTypeId) } },
+        select: { id: true, name: true },
+      }),
+      this.prisma.tournament.findMany({
+        where: { tenantId, id: { in: ids((slot) => slot.tournamentId) } },
+        select: { id: true, tournamentType: { select: { name: true } } },
+      }),
+      this.prisma.tournamentType.findMany({
+        where: { tenantId, id: { in: ids((slot) => slot.tournamentTypeId) } },
+        select: { id: true, name: true },
+      }),
+      this.prisma.user.findMany({
+        where: { id: { in: ids((slot) => slot.coachId) } },
+        select: { id: true, fullName: true },
+      }),
+    ]);
+
+    return {
+      trainingTypes: new Map(trainingTypes.map((row) => [row.id, row.name])),
+      tournaments: new Map(tournaments.map((row) => [row.id, row.tournamentType.name])),
+      tournamentTypes: new Map(tournamentTypes.map((row) => [row.id, row.name])),
+      // Сокращённо, как везде в открытых списках: полное имя тренера в
+      // открытую сетку не уходит.
+      coaches: new Map(coaches.map((row) => [row.id, shortName(row.fullName)])),
     };
   }
 

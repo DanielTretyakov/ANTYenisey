@@ -4,12 +4,14 @@ import type {
   BookingQuote,
   ClientBooking,
   Hall,
+  PublicDayBoard,
 } from '@yenisey/types';
 import { BookingService } from './booking.service';
 import { CreateBookingDto, QuoteQueryDto } from './dto/booking.dto';
 import { ClubService } from '../club/club.service';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Acting, ClientAction, type ActingClient } from '../guardianship/acting-client.guard';
+import { Public } from '../auth/decorators/public.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { ClubContext } from '../auth/club-context';
 
@@ -42,9 +44,11 @@ export class BookingController {
   /**
    * Залы клуба с ценами и шагом брони.
    *
-   * Открыто любой вошедшей роли, а не только клиенту: прайс — то, что клуб и
-   * так показывает на стене, и прятать его от собственного тренера незачем.
+   * Открыто всем, даже без входа: прайс — то, что клуб и так показывает на
+   * стене (и в карточке клуба), а сетку дня с 24.09.2026 смотрят до
+   * регистрации. Бронь по-прежнему только вошедшему.
    */
+  @Public()
   @Get('halls')
   listHalls(@CurrentClub() club: ClubContext): Promise<Hall[]> {
     return this.club.listHalls(club.tenantId);
@@ -60,7 +64,23 @@ export class BookingController {
     return this.booking.findDay(club.tenantId, hallId, date);
   }
 
-  /** Стоимость аренды до подтверждения: сумму клиент должен видеть заранее. */
+  /**
+   * Открытая сетка дня: свободное время и чем занято остальное — аренда без
+   * имён, занятие с тренером, турнир, «стол занят». Без входа: новичок из
+   * поиска должен увидеть, есть ли смысл регистрироваться.
+   */
+  @Public()
+  @Get('halls/:hallId/days/:date/board')
+  findBoard(
+    @CurrentClub() club: ClubContext,
+    @Param('hallId') hallId: string,
+    @Param('date') date: string,
+  ): Promise<PublicDayBoard> {
+    return this.booking.findBoard(club.tenantId, hallId, date);
+  }
+
+  /** Стоимость аренды до подтверждения: сумму клиент должен видеть заранее. Открыта, как и прайс. */
+  @Public()
   @Get('quote')
   quote(
     @CurrentClub() club: ClubContext,

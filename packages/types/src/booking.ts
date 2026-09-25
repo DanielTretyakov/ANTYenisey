@@ -77,6 +77,38 @@ export interface BookingDay {
   tables: BookingDayTable[];
 }
 
+/** Чем занят кусок стола в открытой сетке дня. */
+export type PublicBlockKind = 'RENT' | 'SPARRING' | 'TRAINING' | 'TOURNAMENT' | 'CLOSED';
+
+/**
+ * Занятое время стола глазами посетителя: не «занято», а чем.
+ *
+ * Имён арендаторов здесь нет никогда: сетка открыта без входа, аренда — просто
+ * «Стол арендован». У занятия и турнира дня есть ссылка на окно мероприятия.
+ */
+export interface PublicBoardBlock {
+  startMinute: number;
+  endMinute: number;
+  kind: PublicBlockKind;
+  title: string;
+  /** Тренер занятия, «Тренер: Фамилия И.». */
+  subtitle: string | null;
+  event: { kind: 'TRAINING' | 'TOURNAMENT'; id: string } | null;
+}
+
+export interface PublicBoardTable extends BookingDayTable {
+  blocks: PublicBoardBlock[];
+}
+
+/**
+ * Открытая сетка дня зала (решение владельца от 24.09.2026): что свободно и
+ * чем занято остальное. Та же сетка, что `BookingDay`, — `busy` у столов
+ * прежний, по нему выбирается время, — плюс блоки с причинами.
+ */
+export interface PublicDayBoard extends Omit<BookingDay, 'tables'> {
+  tables: PublicBoardTable[];
+}
+
 /**
  * Расчёт стоимости до того, как клиент подтвердил бронь.
  *

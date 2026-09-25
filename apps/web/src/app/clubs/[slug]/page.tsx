@@ -252,10 +252,12 @@ function BookingCta({ slug, viewer }: { slug: string; viewer: EventViewer }) {
     );
   }
 
+  // Анониму — тоже сразу на сетку: она открыта без входа, и вход понадобится
+  // только на последнем шаге, с возвратом туда же.
   return (
     <div className="mb-10">
-      <Link href={viewer === 'anonymous' ? loginHref(`/clubs/${slug}/booking`) : `/clubs/${slug}/booking`}>
-        <Button size="lg">{viewer === 'anonymous' ? 'Войти и забронировать стол' : 'Забронировать стол'}</Button>
+      <Link href={`/clubs/${slug}/booking`}>
+        <Button size="lg">Забронировать стол</Button>
       </Link>
     </div>
   );

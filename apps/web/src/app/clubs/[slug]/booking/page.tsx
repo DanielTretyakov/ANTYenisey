@@ -1,15 +1,19 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BOOKING_HORIZON_DAYS,
-  type BookingDay,
-  type BookingDayTable,
   type BookingQuote,
   type ClientBooking,
   type Hall,
+  type PublicBlockKind,
+  type PublicBoardBlock,
+  type PublicBoardTable,
+  type PublicDayBoard,
 } from '@yenisey/types';
+import { EventDialog } from '@/components/events/EventDialog';
 import { WhenSpan } from '@/components/club/When';
 import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { AppShell } from '@/components/layout/AppShell';
@@ -19,6 +23,8 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
 import { ApiError } from '@/lib/api';
+import { loginHref } from '@/lib/next';
+import { tintFill, tintMark } from '@/lib/personColor';
 import { roleInClub } from '@/lib/membership';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import {
@@ -45,6 +51,11 @@ interface Pick {
 
 /**
  * Бронь стола клиентом — и спарринг тренером.
+ *
+ * Сетка открыта и без входа (решение владельца от 24.09.2026): занятое время
+ * подписано — аренда, занятие с тренером, турнир, — и занятие или турнир
+ * открывают окно мероприятия, как на стартовой. Бронировать — после входа, с
+ * возвратом сюда же.
  *
  * Порядок экрана повторяет порядок решения: сначала зал, потом день, потом
  * время. Обратный — «выберите время, а потом посмотрим, в каком зале» — не
@@ -74,7 +85,8 @@ export default function BookingPage() {
   const [halls, setHalls] = useState<Hall[] | null>(null);
   const [hallId, setHallId] = useState('');
   const [date, setDate] = useState('');
-  const [day, setDay] = useState<BookingDay | null>(null);
+  const [day, setDay] = useState<PublicDayBoard | null>(null);
+  const [event, setEvent] = useState<NonNullable<PublicBoardBlock['event']> | null>(null);
 
   const [pick, setPick] = useState<Pick | null>(null);
   const [duration, setDuration] = useState(0);
@@ -83,17 +95,9 @@ export default function BookingPage() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  useEffect(() => {
-    if (session.status === 'anonymous') {
-      router.replace('/login');
-    }
-  }, [session.status, router]);
+  const anonymous = session.status === 'anonymous';
 
   useEffect(() => {
-    if (session.status !== 'ready') {
-      return;
-    }
-
     club
       .bookingHalls()
       .then((loaded) => {
@@ -101,7 +105,7 @@ export default function BookingPage() {
         setHallId((current) => current || (loaded[0]?.id ?? ''));
       })
       .catch((cause: unknown) => setError(messageOf(cause)));
-  }, [session.status, club]);
+  }, [club]);
 
   /**
    * Часовой пояс ВЫБРАННОГО ЗАЛА.
@@ -130,7 +134,7 @@ export default function BookingPage() {
     }
 
     club
-      .bookingDay(hallId, date)
+      .bookingBoard(hallId, date)
       .then((loaded) => {
         setDay(loaded);
         setError(null);
@@ -309,11 +313,14 @@ export default function BookingPage() {
       <Card className="mb-6">
         <CardHeader
           title="Время"
-          description="Плотным серым отмечено занятое. Время, которое уже прошло, в сетке не показывается."
+          description="Свободное — светлым, занятое подписано: аренда, занятие, турнир. На занятие и турнир можно нажать — откроется запись. Прошедшее время не показывается."
         />
         <CardBody>
           {day && day.tables.length > 0 ? (
-            <Grid day={day} pick={pick} onPick={setPick} />
+            <>
+              <Legend />
+              <Grid day={day} pick={pick} onPick={setPick} onEvent={setEvent} />
+            </>
           ) : (
             <p className="text-[0.875rem] text-text-muted">
               {day ? 'В этом зале пока нет столов.' : 'Загружаем расписание…'}
@@ -363,13 +370,21 @@ export default function BookingPage() {
               )}
             </p>
 
-            <Button
-              onClick={() => void handleBook()}
-              pending={pending}
-              disabled={chosenDuration === 0 || (!sparring && family.selfIsChild)}
-            >
-              {sparring ? 'Взять стол' : 'Забронировать'}
-            </Button>
+            {anonymous ? (
+              // Выбор не теряется напрасно: после входа человек вернётся на эту
+              // же сетку и выберет снова — цена та же, её считает сервер.
+              <Link href={loginHref()}>
+                <Button>Войти и забронировать</Button>
+              </Link>
+            ) : (
+              <Button
+                onClick={() => void handleBook()}
+                pending={pending}
+                disabled={chosenDuration === 0 || (!sparring && family.selfIsChild)}
+              >
+                {sparring ? 'Взять стол' : 'Забронировать'}
+              </Button>
+            )}
           </CardBody>
         </Card>
       )}
@@ -416,8 +431,59 @@ export default function BookingPage() {
           </CardBody>
         </Card>
       )}
+
+      {event && (
+        <EventDialog
+          slug={slug}
+          kind={event.kind}
+          id={event.id}
+          forPerson={family.forPerson}
+          selfIsChild={family.selfIsChild}
+          onClose={() => setEvent(null)}
+          onChanged={loadDay}
+        />
+      )}
     </AppShell>
   );
+}
+
+/** Цвет занятого — по виду, те же краски, что в расписании у администратора. */
+const KIND_PAINT: Record<PublicBlockKind, string> = {
+  RENT: 'var(--hue-blue)',
+  SPARRING: 'var(--hue-violet)',
+  TRAINING: 'var(--brand-600)',
+  TOURNAMENT: 'var(--hue-rose)',
+  CLOSED: 'var(--ink-500)',
+};
+
+const KIND_LABEL: Record<PublicBlockKind, string> = {
+  RENT: 'Аренда',
+  SPARRING: 'Спарринг',
+  TRAINING: 'Занятие',
+  TOURNAMENT: 'Турнир',
+  CLOSED: 'Стол занят',
+};
+
+function Legend() {
+  return (
+    <ul className="mb-4 flex flex-wrap gap-x-4 gap-y-1.5 text-[0.8125rem] text-text-muted">
+      <li className="flex items-center gap-1.5">
+        <span className="h-3 w-3 rounded-sm bg-surface-sunken ring-1 ring-border" aria-hidden="true" />
+        Свободно
+      </li>
+      {(Object.keys(KIND_LABEL) as PublicBlockKind[]).map((kind) => (
+        <li key={kind} className="flex items-center gap-1.5">
+          <span className="h-3 w-3 rounded-sm" style={{ background: tintMark(KIND_PAINT[kind]) }} aria-hidden="true" />
+          {KIND_LABEL[kind]}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Блок, который накрывает клетку. */
+function blockAt(table: PublicBoardTable, minute: number): PublicBoardBlock | null {
+  return table.blocks.find((block) => block.startMinute <= minute && minute < block.endMinute) ?? null;
 }
 
 /**
@@ -430,10 +496,12 @@ function Grid({
   day,
   pick,
   onPick,
+  onEvent,
 }: {
-  day: BookingDay;
+  day: PublicDayBoard;
   pick: Pick | null;
   onPick: (pick: Pick | null) => void;
+  onEvent: (event: NonNullable<PublicBoardBlock['event']>) => void;
 }) {
   // Прошедшие клетки не рисуются вовсе: вечером они занимали три четверти
   // сетки, и человек скроллил мимо серого к своему времени.
@@ -452,7 +520,7 @@ function Grid({
     // администратора: столов бывает дюжина, строк времени четыре десятка, и без
     // шапки столбцы на длинной сетке теряют имена.
     <div className="max-h-[calc(100dvh-16rem)] touch-pan-y overflow-auto">
-      <table className="w-full border-separate border-spacing-0 text-[0.8125rem]">
+      <table className="w-full table-fixed border-separate border-spacing-0 text-[0.8125rem]">
         <thead>
           <tr>
             <th className="sticky top-0 z-20 w-16 bg-surface-raised py-2 text-left font-medium text-text-subtle">
@@ -483,8 +551,12 @@ function Grid({
                   day={day}
                   table={table}
                   startMinute={startMinute}
+                  // Подпись блока — в первой видимой его клетке: блок, начавшийся
+                  // до «сейчас», подписывается на первой непрошедшей строке.
+                  firstRow={rows[0] === startMinute}
                   picked={pick?.tableId === table.tableId && pick.startMinute === startMinute}
                   onPick={onPick}
+                  onEvent={onEvent}
                 />
               ))}
             </tr>
@@ -499,17 +571,60 @@ function Cell({
   day,
   table,
   startMinute,
+  firstRow,
   picked,
   onPick,
+  onEvent,
 }: {
-  day: BookingDay;
-  table: BookingDayTable;
+  day: PublicDayBoard;
+  table: PublicBoardTable;
   startMinute: number;
+  /** Первая показанная строка сетки: блок, начавшийся раньше, подписывается здесь. */
+  firstRow: boolean;
   picked: boolean;
   onPick: (pick: Pick | null) => void;
+  onEvent: (event: NonNullable<PublicBoardBlock['event']>) => void;
 }) {
   const state = cellState(day, table, startMinute);
   const available = state === 'free';
+  const block = state === 'busy' ? blockAt(table, startMinute) : null;
+
+  if (block) {
+    const labelled = firstRow || block.startMinute >= startMinute;
+    const reason = block.subtitle ? `${block.title}, ${block.subtitle}` : block.title;
+    const body = labelled ? (
+      <span className="block truncate px-1 text-left text-[0.6875rem] leading-6 text-text">{block.title}</span>
+    ) : null;
+    const style = { background: tintFill(KIND_PAINT[block.kind]) };
+    const target = block.event;
+
+    return (
+      <td className="px-0.5 py-0.5">
+        {target ? (
+          <button
+            type="button"
+            title={`${reason} — открыть`}
+            aria-label={`${table.label}, ${formatMinute(startMinute)}: ${reason}. Открыть мероприятие`}
+            onClick={() => onEvent(target)}
+            className="h-6 w-full rounded-[3px] hover:brightness-95"
+            style={style}
+          >
+            {body}
+          </button>
+        ) : (
+          <span
+            role="img"
+            title={reason}
+            aria-label={`${table.label}, ${formatMinute(startMinute)}: ${reason}`}
+            className="block h-6 w-full cursor-not-allowed rounded-[3px]"
+            style={style}
+          >
+            {body}
+          </span>
+        )}
+      </td>
+    );
+  }
 
   return (
     <td className="px-0.5 py-0.5">

@@ -1222,6 +1222,35 @@ async function main() {
           (reread?.busy ?? []).some((slot) => slot.startMinute === freeMinute),
         );
 
+        // Открытая сетка: без входа, с причиной занятости — но без имени,
+        // телефона и почты арендатора (решение владельца от 24.09.2026).
+        r = await call(`/clubs/yenisey/booking/halls/${bookingHall.id}/days/${bookDate}/board`);
+        check('открытая сетка дня видна без входа', 200, r.status);
+        const boardTable = r.body?.tables?.find((item) => item.tableId === freeTable.tableId);
+        const rentBlock = (boardTable?.blocks ?? []).find((block) => block.startMinute <= freeMinute && freeMinute < block.endMinute);
+        assert('бронь в открытой сетке — «Стол арендован»', rentBlock?.kind === 'RENT' && rentBlock?.title === 'Стол арендован');
+        assert('занятость в открытой сетке та же, что у брони', (boardTable?.busy ?? []).some((slot) => slot.startMinute === freeMinute));
+        const booker = (await asBooker('/auth/me')).body;
+        const boardText = JSON.stringify(r.body ?? {});
+        assert(
+          'ни имени, ни телефона, ни почты арендатора в открытой сетке нет',
+          booker?.fullName && !boardText.includes(booker.fullName.split(' ')[0]) &&
+            (!booker.phone || !boardText.includes(booker.phone)) && !boardText.includes(booker.email),
+        );
+        assert(
+          'блоки — только известных видов',
+          (r.body?.tables ?? []).every((table) => table.blocks.every((block) => ['RENT', 'SPARRING', 'TRAINING', 'TOURNAMENT', 'CLOSED'].includes(block.kind))),
+        );
+
+        r = await call(`/clubs/yenisey/booking/quote?hallId=${bookingHall.id}&durationMinutes=60&withRobot=false`);
+        check('цена считается и без входа — это прайс', 200, r.status);
+
+        r = await call('/clubs/yenisey/booking/bookings', {
+          method: 'POST',
+          json: { tableId: freeTable.tableId, startsAt, durationMinutes: 60, withRobot: false },
+        });
+        check('бронировать без входа нельзя', 401, r.status);
+
         r = await asBooker('/clubs/yenisey/booking/bookings');
         check('список своих броней прочитан', 200, r.status);
         assert(
