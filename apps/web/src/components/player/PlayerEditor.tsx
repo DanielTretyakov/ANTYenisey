@@ -147,7 +147,7 @@ function descriptionOf(
 /** Раздел только для чтения — ребёнок смотрит, что ведёт за него родитель. */
 function ReadOnlySection({ section, profile, name }: { section: PlayerSection; profile: PlayerProfile; name: string }) {
   if (section === 'avatar') {
-    return <PlayerAvatar fileId={profile.avatarFileId} name={name} size="lg" />;
+    return <PlayerAvatar fileId={profile.avatarFileId} name={name} gender={profile.gender} size="lg" />;
   }
 
   if (section === 'equipment') {
@@ -202,7 +202,7 @@ function AvatarBlock({ profile, name, onChange }: { profile: PlayerProfile; name
   return (
     <div>
       <div className="flex flex-wrap items-center gap-5">
-        <PlayerAvatar fileId={profile.avatarFileId} name={name} size="lg" />
+        <PlayerAvatar fileId={profile.avatarFileId} name={name} gender={profile.gender} size="lg" />
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap gap-2">

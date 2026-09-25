@@ -203,6 +203,7 @@ export class CoachesService {
       where: { id: userId, deactivatedAt: null, anonymizedAt: null },
       select: {
         fullName: true,
+        gender: true,
         coachCard: { select: CARD_SELECT },
         memberships: {
           where: { role: 'COACH', deactivatedAt: null, coachProfile: { isNot: null } },
@@ -227,6 +228,7 @@ export class CoachesService {
       // не уходят даже с публичной страницы.
       name: shortName(person.fullName),
       photoFileId: card.photoFileId,
+      gender: person.gender,
       achievements: card.achievements,
       inventory: card.inventory,
       socialLinks: card.socialLinks,

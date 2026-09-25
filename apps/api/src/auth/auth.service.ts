@@ -98,6 +98,7 @@ export class AuthService {
             phone: dto.phone,
             passwordHash,
             fullName: joinFullName(dto),
+            gender: dto.gender,
             birthDate,
           },
         });
@@ -196,7 +197,7 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: userId },
-      data: { fullName: joinFullName(dto), phone: dto.phone },
+      data: { fullName: joinFullName(dto), phone: dto.phone, gender: dto.gender },
     });
 
     return this.publicUser(userId);
@@ -346,6 +347,7 @@ export class AuthService {
         email: true,
         phone: true,
         fullName: true,
+        gender: true,
         birthDate: true,
         memberships: {
           // Отключённые в клубе не показываются: человек этим клубом больше
@@ -366,6 +368,7 @@ export class AuthService {
       email: user.email,
       phone: user.phone,
       fullName: user.fullName,
+      gender: user.gender,
       birthDate: formatBirthDate(user.birthDate),
       memberships: user.memberships.map((membership) => ({
         tenantId: membership.tenantId,

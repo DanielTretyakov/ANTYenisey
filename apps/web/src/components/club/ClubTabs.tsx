@@ -294,7 +294,7 @@ function CoachesTab({ tenant }: { tenant: PublicTenant | null }) {
             href={`/coaches/${coach.id}`}
             className="group flex h-full flex-col items-center rounded-card border border-border bg-surface-raised px-3 py-5 text-center transition-colors hover:border-border-strong sm:px-5 sm:py-6"
           >
-            <PlayerAvatar fileId={coach.photoFileId} name={coach.name} size="lg" />
+            <PlayerAvatar fileId={coach.photoFileId} name={coach.name} gender={coach.gender} size="lg" />
             <span className="mt-4 text-[1.0625rem] text-text group-hover:underline">{coach.name}</span>
             {coach.leads.length > 0 && (
               <span className="mt-1 text-[0.8125rem] text-text-muted">Ведёт: {coach.leads.join(', ')}</span>

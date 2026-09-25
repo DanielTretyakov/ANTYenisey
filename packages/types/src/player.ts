@@ -1,3 +1,5 @@
+import type { Gender } from './auth';
+
 /**
  * Профиль игрока: аватар, инвентарь, достижения, спортивный разряд.
  *
@@ -140,6 +142,8 @@ export interface PlayerRank {
 export interface PlayerProfile {
   userId: string;
   avatarFileId: string | null;
+  /** Пол — для заглушки, когда фотографии нет. */
+  gender: Gender | null;
   equipment: PlayerEquipment;
   achievements: PlayerAchievement[];
   rank: PlayerRank | null;
@@ -183,6 +187,8 @@ export interface PublicPlayer {
   id: string;
   name: string;
   avatarFileId: string | null;
+  /** Пол — для заглушки, когда фотографии нет. */
+  gender: Gender | null;
   equipment: PlayerEquipment;
   achievements: PlayerAchievement[];
   rank: PublicRank | null;

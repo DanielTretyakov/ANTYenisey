@@ -81,13 +81,14 @@ export function canReadFile(
  * список записавшихся стал бы обходом закрытого профиля: по адресам кружков
  * собирался бы список несовершеннолетних с фотографиями.
  */
-export function participantView(
-  person: { userId: string; name: string; birthDate: Date; avatarFileId: string | null },
+export function participantView<G extends string>(
+  person: { userId: string; name: string; birthDate: Date; avatarFileId: string | null; gender: G | null },
   today: Date,
-): { userId: string | null; name: string; avatarFileId: string | null } {
+): { userId: string | null; name: string; avatarFileId: string | null; gender: G | null } {
+  // Пол ребёнка тоже не раскрывается: кружок младше 14 — нейтральный.
   return isProfilePublic(person.birthDate, today)
-    ? { userId: person.userId, name: person.name, avatarFileId: person.avatarFileId }
-    : { userId: null, name: person.name, avatarFileId: null };
+    ? { userId: person.userId, name: person.name, avatarFileId: person.avatarFileId, gender: person.gender }
+    : { userId: null, name: person.name, avatarFileId: null, gender: null };
 }
 
 /**

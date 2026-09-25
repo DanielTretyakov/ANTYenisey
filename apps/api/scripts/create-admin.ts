@@ -10,6 +10,9 @@
  *   pnpm db:create-admin -- --email o@club.ru --password "..." --name "..." --role OWNER
  *   pnpm db:create-admin -- --email t@club.ru --password "..." --name "..." --role COACH
  *
+ * Необязательный --gender MALE|FEMALE — пол для заглушки аватара; без него у
+ * учётки нейтральный силуэт, пока пол не укажут в кабинете.
+ *
  * Повторный запуск с тем же адресом меняет существующей учётке пароль, роль и
  * ФИО — так сбрасывают забытый пароль администратора, не заводя вторую учётку.
  */
@@ -69,6 +72,12 @@ async function main(): Promise<void> {
   // приводим к E.164, как это делает форма регистрации.
   const phone = normalisePhone(args.phone ?? '');
   const birthDate = parseBirthDate(args.birthdate?.trim() ?? '');
+  const genderArg = args.gender?.trim().toUpperCase();
+  const gender = genderArg === 'MALE' || genderArg === 'FEMALE' ? genderArg : undefined;
+
+  if (genderArg && !gender) {
+    fail(`Пол — MALE или FEMALE, получено «${args.gender}»`);
+  }
 
   if (!email || !password || !fullName) {
     fail(
@@ -122,6 +131,7 @@ async function main(): Promise<void> {
             fullName,
             phone,
             birthDate,
+            ...(gender ? { gender } : {}),
             deactivatedAt: null,
             anonymizedAt: null,
           },
@@ -130,7 +140,7 @@ async function main(): Promise<void> {
       ).id
     : (
         await prisma.user.create({
-          data: { email, passwordHash, fullName, phone, birthDate },
+          data: { email, passwordHash, fullName, phone, birthDate, gender },
           select: { id: true },
         })
       ).id;

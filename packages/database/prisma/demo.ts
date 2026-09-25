@@ -243,6 +243,7 @@ async function ensureCoach(tenantId: string): Promise<string> {
       // такого формата не примет вовсе, и вход невозможен.
       passwordHash: 'demo-account-cannot-sign-in',
       fullName: 'Тренеров Сергей Петрович',
+      gender: 'MALE',
     },
     select: { id: true },
   });

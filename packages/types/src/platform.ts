@@ -8,6 +8,7 @@
 
 import type { BookingStatus } from './booking';
 import type { PaidBySubscription } from './subscription';
+import type { Gender } from './auth';
 
 /**
  * Город из справочника платформы.
@@ -262,6 +263,8 @@ export interface EventParticipant {
   userId: string | null;
   name: string;
   avatarFileId: string | null;
+  /** Пол для заглушки; у игрока младше 14 пуст — как и всё остальное о нём. */
+  gender: Gender | null;
 }
 
 /** Где проходит мероприятие. Выводится из окна расписания, иначе неизвестно. */

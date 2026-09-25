@@ -1,4 +1,4 @@
-import { BookingStatus } from '@yenisey/database';
+import { BookingStatus, type Gender } from '@yenisey/database';
 import type { ClubCatalogItem, ClubEvent, ClubRef, EventDetail, EventKind, EventPlace } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
 import { participantView } from '../players/player-rules';
@@ -183,6 +183,7 @@ const DETAIL_PARTICIPANT_SELECT = {
             id: true,
             fullName: true,
             birthDate: true,
+            gender: true,
             playerProfile: { select: { avatarFileId: true } },
           },
         },
@@ -241,6 +242,7 @@ type DetailParticipant = {
         id: string;
         fullName: string;
         birthDate: Date;
+        gender: Gender | null;
         playerProfile: { avatarFileId: string | null } | null;
       };
     };
@@ -308,6 +310,7 @@ function peopleOf(rows: DetailParticipant[], today: Date): EventDetail['people']
           name: shortName(client.membership.user.fullName),
           birthDate: client.membership.user.birthDate,
           avatarFileId: client.membership.user.playerProfile?.avatarFileId ?? null,
+          gender: client.membership.user.gender,
         },
         today,
       ),

@@ -9,6 +9,7 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Field } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
 import { guardianshipLeft } from '@/lib/family';
+import { GenderField, genderFrom } from '@/components/ui/GenderField';
 
 function messageOf(cause: unknown): string {
   return cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером';
@@ -246,12 +247,20 @@ export function CreateChildForm({
   async function send(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const gender = genderFrom(form);
+
+    if (!gender) {
+      setError('Укажите пол ребёнка');
+      return;
+    }
+
     setPending(true);
     setError(null);
 
     try {
       onDone(
         await submit({
+          gender,
           lastName: String(form.get('lastName')),
           firstName: String(form.get('firstName')),
           middleName: String(form.get('middleName')),
@@ -281,6 +290,8 @@ export function CreateChildForm({
         <Field label="Имя" name="firstName" required autoComplete="off" />
         <Field label="Отчество" name="middleName" required autoComplete="off" />
       </div>
+
+      <GenderField hint="По нему рисуем картинку профиля ребёнка, пока нет фотографии." />
 
       <div className="grid gap-x-4 sm:grid-cols-2">
         <Field label="Дата рождения" name="birthDate" type="date" required max={new Date().toISOString().slice(0, 10)} />

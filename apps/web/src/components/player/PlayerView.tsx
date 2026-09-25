@@ -1,9 +1,10 @@
 'use client';
 
-import type { PlayerAchievement, PlayerEquipment, PlayerRank, PublicRank } from '@yenisey/types';
+import type { Gender, PlayerAchievement, PlayerEquipment, PlayerRank, PublicRank } from '@yenisey/types';
 import { cn } from '@/lib/cn';
 import { LEVEL_LABELS, longDate, placeLabel, RANK_LABELS, RANK_TITLES, rankStatusLine } from '@/lib/player';
 import { useFileUrl } from '@/lib/useFileUrl';
+import { AvatarPlaceholder } from './AvatarPlaceholder';
 
 /**
  * Куски профиля игрока, одинаковые в трёх местах: в «Кабинете», на
@@ -18,44 +19,42 @@ const AVATAR_SIZES = {
   lg: 'h-28 w-28 text-3xl',
 } as const;
 
-/** Аватар или инициалы, пока его нет. Байты читаются от имени вошедшего. */
+/**
+ * Аватар, а без фотографии — рисованная заглушка по полу (решение владельца
+ * от 25.09.2026). Байты фотографии читаются от имени вошедшего.
+ */
 export function PlayerAvatar({
   fileId,
   name,
+  gender = null,
   size = 'md',
 }: {
   fileId: string | null;
   name: string;
+  /** Пол для заглушки; пусто — нейтральный силуэт. */
+  gender?: Gender | null;
   size?: keyof typeof AVATAR_SIZES;
 }) {
   const url = useFileUrl(fileId);
 
   return (
     <span
+      role="img"
+      aria-label={url ? `Фотография: ${name}` : name}
       className={cn(
-        'inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full',
-        'border border-border bg-surface-sunken font-display text-text-muted',
+        'inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-border',
         AVATAR_SIZES[size],
       )}
     >
       {url ? (
         // Обычный <img>, а не next/image: адрес — blob:, оптимизатору нечего
         // с ним делать.
-        <img src={url} alt={`Фотография: ${name}`} className="h-full w-full object-cover" />
+        <img src={url} alt="" className="h-full w-full object-cover" />
       ) : (
-        <span aria-hidden="true">{initials(name)}</span>
+        <AvatarPlaceholder gender={gender} />
       )}
     </span>
   );
-}
-
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]!.toUpperCase())
-    .join('');
 }
 
 const EQUIPMENT_ROWS: { key: keyof PlayerEquipment; label: string }[] = [

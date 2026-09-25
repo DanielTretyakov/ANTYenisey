@@ -142,6 +142,7 @@ export class FamilyService {
             phone: dto.phone,
             passwordHash,
             fullName: joinFullName(dto),
+            gender: dto.gender,
             birthDate: childBirthDate,
           },
           select: { id: true, fullName: true, email: true, birthDate: true },

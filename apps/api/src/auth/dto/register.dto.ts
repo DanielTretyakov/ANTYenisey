@@ -1,6 +1,8 @@
-import { IsEmail, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { Transform } from 'class-transformer';
-import type { RegisterRequest } from '@yenisey/types';
+import type { Gender, RegisterRequest } from '@yenisey/types';
+
+const GENDERS: Gender[] = ['MALE', 'FEMALE'];
 
 /**
  * Допустимые символы в частях ФИО: буквы (кириллица и латиница), дефис,
@@ -53,6 +55,14 @@ export class PersonDto {
     message: 'phone: ожидается формат +79991234567',
   })
   phone: string;
+
+  /**
+   * Пол — ради рисованной заглушки вместо фотографии (решение владельца от
+   * 25.09.2026). Обязателен и в регистрации, и в правке личных данных: у
+   * учёток, заведённых раньше, он пуст, и правка его и добавляет.
+   */
+  @IsIn(GENDERS, { message: 'gender: укажите пол — MALE или FEMALE' })
+  gender: Gender;
 }
 
 /**

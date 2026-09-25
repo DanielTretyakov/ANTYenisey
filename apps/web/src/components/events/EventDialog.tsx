@@ -205,7 +205,7 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 function Person({ person }: { person: EventParticipant }) {
   const body = (
     <>
-      <PlayerAvatar fileId={person.avatarFileId} name={person.name} size="xs" />
+      <PlayerAvatar fileId={person.avatarFileId} name={person.name} gender={person.gender} size="xs" />
       <span className="mt-1 block w-20 truncate text-center text-[0.75rem] text-text-muted group-hover:text-text">
         {person.name}
       </span>

@@ -71,7 +71,13 @@ export default function MyCoachCardPage() {
               description="Её видят все, не входя: по ней выбирают, к кому идти заниматься. Карточка одна на все клубы, где вы тренируете."
             />
             <CardBody className="grid gap-7">
-              <CoachEditor profile={profile} name={name} actions={actions} onChange={setProfile} />
+              <CoachEditor
+                profile={profile}
+                name={name}
+                gender={session.status === 'ready' ? (session.user?.gender ?? null) : null}
+                actions={actions}
+                onChange={setProfile}
+              />
 
               <p className="text-[0.875rem]">
                 <Link

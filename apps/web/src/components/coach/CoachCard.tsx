@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback } from 'react';
-import type { CoachInClub, CoachStatsPeriod } from '@yenisey/types';
+import type { CoachInClub, CoachStatsPeriod, Gender } from '@yenisey/types';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { useClubApi } from '@/lib/useClubApi';
@@ -21,10 +21,13 @@ export function CoachCard({
   coach,
   personId,
   personName,
+  gender = null,
 }: {
   coach: CoachInClub;
   personId: string;
   personName: string;
+  /** Пол — для заглушки, пока тренер не загрузил фото. */
+  gender?: Gender | null;
 }) {
   const club = useClubApi();
 
@@ -41,7 +44,7 @@ export function CoachCard({
       />
       <CardBody className="grid gap-7">
         <div className="flex flex-wrap items-start gap-5">
-          <PlayerAvatar fileId={coach.card.photoFileId} name={personName} size="lg" />
+          <PlayerAvatar fileId={coach.card.photoFileId} name={personName} gender={gender} size="lg" />
           <div className="min-w-[12rem] flex-1">
             <CoachCardBody card={coach.card} />
           </div>

@@ -1,4 +1,5 @@
 import type { ClubValue } from './club';
+import type { Gender } from './auth';
 
 /**
  * Публичная карточка клуба.
@@ -18,6 +19,8 @@ export interface PublicClubCoach {
   id: string;
   name: string;
   photoFileId: string | null;
+  /** Пол — для заглушки, когда фотографии нет. */
+  gender: Gender | null;
   /** Цены этого клуба, копейки. Пусто — тренер их не указал. */
   groupPrice: number | null;
   individualPrice: number | null;

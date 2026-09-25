@@ -172,6 +172,7 @@ const registration = (overrides = {}) => ({
   middleName: 'Сергеевич',
   phone: '+79991234567',
   birthDate: '2001-05-17',
+  gender: 'MALE',
   ...overrides,
 });
 
@@ -222,6 +223,12 @@ async function main() {
   console.log('=== 5б. Проверка даты рождения');
   r = await post('/auth/register', registration({ birthDate: undefined }));
   check('без даты рождения отклонено', 400, r.status);
+  // Пол обязателен: по нему рисуется заглушка аватара (решение от 25.09.2026).
+  r = await post('/auth/register', registration({ gender: undefined }));
+  check('регистрация без пола отклонена', 400, r.status);
+  r = await post('/auth/register', registration({ gender: 'OTHER' }));
+  check('пол вне списка отклонён', 400, r.status);
+
   r = await post('/auth/register', registration({ birthDate: '17.05.2001' }));
   check('дата не в том формате отклонена', 400, r.status);
   r = await post('/auth/register', registration({ birthDate: '2099-01-01' }));
@@ -3613,6 +3620,7 @@ async function family() {
     middleName: 'Олегович',
     phone: '+79991234567',
     birthDate: bornYearsAgo(10),
+    gender: 'MALE',
     ...over,
   });
 
@@ -4868,33 +4876,42 @@ async function personalData() {
   // --- ФИО и телефон.
   r = await asMe('/auth/me', {
     method: 'PATCH',
-    json: { lastName: '  Данных ', firstName: 'Правка', middleName: 'Личных', phone: '+7 (999) 765-43-21' },
+    json: { lastName: '  Данных ', firstName: 'Правка', middleName: 'Личных', phone: '+7 (999) 765-43-21', gender: 'FEMALE' },
   });
-  check('ФИО и телефон сохранены', 200, r.status);
+  check('ФИО, телефон и пол сохранены', 200, r.status);
+  assert('пол сменился', r.body?.gender === 'FEMALE');
   assert('ФИО собрано заново и без лишних пробелов', r.body?.fullName === 'Данных Правка Личных');
   assert('телефон приведён к +7…', r.body?.phone === '+79997654321');
   assert('почта не тронута', r.body?.email === form.email);
 
   r = await asMe('/auth/me', {
     method: 'PATCH',
-    json: { lastName: 'Данных', firstName: 'Правка', middleName: 'Личных', phone: '+79997654321', email: 'chuzhoy@example.com' },
+    json: { lastName: 'Данных', firstName: 'Правка', middleName: 'Личных', phone: '+79997654321', gender: 'FEMALE', email: 'chuzhoy@example.com' },
   });
   check('почту правкой профиля не сменить', 400, r.status);
 
   r = await asMe('/auth/me', {
     method: 'PATCH',
-    json: { lastName: 'Данных', firstName: 'Правка', middleName: 'Личных', phone: '+79997654321', birthDate: '2015-01-01' },
+    json: { lastName: 'Данных', firstName: 'Правка', middleName: 'Личных', phone: '+79997654321', gender: 'FEMALE', birthDate: '2015-01-01' },
   });
   check('дату рождения правкой профиля не сменить', 400, r.status);
 
-  r = await asMe('/auth/me', { method: 'PATCH', json: { lastName: '1', firstName: 'Правка', middleName: 'Личных', phone: '+79997654321' } });
+  r = await asMe('/auth/me', { method: 'PATCH', json: { lastName: '1', firstName: 'Правка', middleName: 'Личных', phone: '+79997654321', gender: 'FEMALE' } });
   check('негодная фамилия отклонена', 400, r.status);
+
+  r = await asMe('/auth/me', { method: 'PATCH', json: { lastName: 'Данных', firstName: 'Правка', middleName: 'Личных', phone: '+79997654321' } });
+  check('правка без пола отклонена', 400, r.status);
+
+  r = await asMe('/auth/me');
+  assert('пол виден в своём профиле', r.body?.gender === 'FEMALE');
+  r = await call(`/players/${r.body?.id}`);
+  assert('пол отдан на открытой странице игрока — для заглушки аватара', r.body?.gender === 'FEMALE');
 
   const now = new Date();
   const kidBirth = new Date(Date.UTC(now.getUTCFullYear() - 12, now.getUTCMonth(), 1)).toISOString().slice(0, 10);
   r = await post('/auth/register', registration({ lastName: 'Данных', firstName: 'Ребёнок', birthDate: kidBirth }));
   const asKid = as(r.body?.accessToken ?? '');
-  r = await asKid('/auth/me', { method: 'PATCH', json: { lastName: 'Данных', firstName: 'Сам', middleName: 'Себе', phone: '+79990000000' } });
+  r = await asKid('/auth/me', { method: 'PATCH', json: { lastName: 'Данных', firstName: 'Сам', middleName: 'Себе', phone: '+79990000000', gender: 'MALE' } });
   check('младше 14 данные сам не правит', 403, r.status);
 
   // --- Пароль.

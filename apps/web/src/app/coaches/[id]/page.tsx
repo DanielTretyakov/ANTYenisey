@@ -47,7 +47,7 @@ export default function CoachPage() {
       {coach && (
         <div className="grid gap-8">
           <header className="flex flex-wrap items-center gap-6">
-            <PlayerAvatar fileId={coach.photoFileId} name={coach.name} size="lg" />
+            <PlayerAvatar fileId={coach.photoFileId} name={coach.name} gender={coach.gender} size="lg" />
             <div className="min-w-0">
               <p className="text-[0.75rem] tracking-[0.1em] text-text-subtle uppercase">Тренер</p>
               <h1 className="mt-1 text-[2rem] leading-tight break-words">{coach.name}</h1>

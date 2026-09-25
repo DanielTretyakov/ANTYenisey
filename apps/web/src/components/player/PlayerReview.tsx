@@ -53,7 +53,7 @@ export function PlayerReview({
       />
       <CardBody className="grid gap-7">
         <div className="flex flex-wrap items-center gap-4">
-          <PlayerAvatar fileId={player.avatarFileId} name={personName} size="md" />
+          <PlayerAvatar fileId={player.avatarFileId} name={personName} gender={player.gender} size="md" />
           <div className="text-[0.875rem]">
             <Link href={`/players/${personId}`} className="text-text-accent underline-offset-2 hover:underline">
               Страница игрока →

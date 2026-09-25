@@ -12,6 +12,12 @@
  */
 export type Role = 'CLIENT' | 'ADMIN' | 'COACH' | 'OWNER';
 
+/**
+ * Пол человека — ради рисованной заглушки вместо фотографии (решение
+ * владельца от 25.09.2026). У учёток, заведённых раньше, может отсутствовать.
+ */
+export type Gender = 'MALE' | 'FEMALE';
+
 export interface RegisterRequest {
   /**
    * Код клуба (Tenant.slug), если человек регистрируется со страницы клуба.
@@ -47,6 +53,8 @@ export interface RegisterRequest {
    * значит не спросить никогда.
    */
   birthDate: string;
+  /** Пол. Обязателен: по нему рисуется заглушка аватара без фотографии. */
+  gender: Gender;
 }
 
 export interface LoginRequest {
@@ -90,6 +98,7 @@ export interface UpdateProfileRequest {
   firstName: string;
   middleName: string;
   phone: string;
+  gender: Gender;
 }
 
 /** Смена своего пароля: текущий подтверждает, что меняет владелец. */
@@ -109,6 +118,8 @@ export interface PublicUser {
    * учётки здесь плейсхолдер, а не null, — поле обязательное.
    */
   fullName: string;
+  /** Пол; пусто у учёток, заведённых до 25.09.2026, пока его не указали. */
+  gender: Gender | null;
   /**
    * Клубы этого аккаунта и роль в каждом. Роли «вообще на платформе» нет:
    * пустой список — нормальное состояние человека, который зарегистрировался,

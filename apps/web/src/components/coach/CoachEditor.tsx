@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, type FormEvent } from 'react';
-import type { CoachCard, CoachSocialLink, UpdateCoachCardRequest } from '@yenisey/types';
+import type { CoachCard, CoachSocialLink, UpdateCoachCardRequest, Gender } from '@yenisey/types';
 import { MAX_COACH_SOCIAL_LINKS } from '@yenisey/types';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { Alert } from '@/components/ui/Alert';
@@ -32,18 +32,21 @@ export interface CoachActions {
 export function CoachEditor({
   profile,
   name,
+  gender = null,
   actions,
   onChange,
 }: {
   profile: CoachCard;
-  /** Чьё имя показать вместо фотографии, пока её нет. */
+  /** Чьё имя подписать у картинки, пока фотографии нет. */
   name: string;
+  /** Пол — для заглушки вместо фотографии. */
+  gender?: Gender | null;
   actions: CoachActions;
   onChange: (profile: CoachCard) => void;
 }) {
   return (
     <div className="grid gap-8">
-      <PhotoBlock profile={profile} name={name} actions={actions} onChange={onChange} />
+      <PhotoBlock profile={profile} name={name} gender={gender} actions={actions} onChange={onChange} />
       <TextForm profile={profile} actions={actions} onChange={onChange} />
       <LinksForm profile={profile} actions={actions} onChange={onChange} />
     </div>
@@ -53,11 +56,13 @@ export function CoachEditor({
 function PhotoBlock({
   profile,
   name,
+  gender,
   actions,
   onChange,
 }: {
   profile: CoachCard;
   name: string;
+  gender: Gender | null;
   actions: CoachActions;
   onChange: (profile: CoachCard) => void;
 }) {
@@ -96,7 +101,7 @@ function PhotoBlock({
   return (
     <section>
       <div className="flex flex-wrap items-center gap-5">
-        <PlayerAvatar fileId={profile.photoFileId} name={name} size="lg" />
+        <PlayerAvatar fileId={profile.photoFileId} name={name} gender={gender} size="lg" />
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap gap-2">

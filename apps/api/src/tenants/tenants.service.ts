@@ -153,7 +153,7 @@ export class TenantsService {
           select: {
             userId: true,
             coachListOrder: true,
-            user: { select: { fullName: true, coachCard: { select: { photoFileId: true } } } },
+            user: { select: { fullName: true, gender: true, coachCard: { select: { photoFileId: true } } } },
             coachProfile: {
               select: {
                 groupPrice: true,
@@ -218,6 +218,7 @@ export class TenantsService {
           id: row.userId,
           name: shortName(row.user.fullName),
           photoFileId: row.user.coachCard?.photoFileId ?? null,
+          gender: row.user.gender,
           groupPrice: row.coachProfile?.groupPrice ?? null,
           individualPrice: row.coachProfile?.individualPrice ?? null,
           leads: (row.coachProfile?.trainingSessions ?? [])

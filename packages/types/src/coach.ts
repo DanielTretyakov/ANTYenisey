@@ -1,3 +1,5 @@
+import type { Gender } from './auth';
+
 /**
  * Карточка тренера: фотография, достижения, инвентарь, соцсети.
  *
@@ -61,6 +63,8 @@ export interface PublicCoach {
   id: string;
   name: string;
   photoFileId: string | null;
+  /** Пол — для заглушки, когда фотографии нет. */
+  gender: Gender | null;
   achievements: string | null;
   inventory: string | null;
   socialLinks: CoachSocialLink[];

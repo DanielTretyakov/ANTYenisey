@@ -10,6 +10,7 @@ import { Field } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
 import { isChildBirthDate } from '@/lib/family';
 import { saveSession } from '@/lib/session';
+import { GENDER_LABEL, GenderField, genderFrom } from '@/components/ui/GenderField';
 
 function messageOf(cause: unknown): string {
   return cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером';
@@ -76,6 +77,13 @@ function DataForm({ user, onSaved }: { user: PublicUser; onSaved: (user: PublicU
       return;
     }
 
+    const gender = genderFrom(form);
+
+    if (!gender) {
+      setError('Укажите пол');
+      return;
+    }
+
     setPending(true);
     setError(null);
     setSaved(false);
@@ -87,6 +95,7 @@ function DataForm({ user, onSaved }: { user: PublicUser; onSaved: (user: PublicU
           firstName: String(form.get('firstName')),
           middleName: String(form.get('middleName')),
           phone,
+          gender,
         }),
       );
       setSaved(true);
@@ -107,8 +116,12 @@ function DataForm({ user, onSaved }: { user: PublicUser; onSaved: (user: PublicU
         <Field label="Отчество" name="middleName" defaultValue={parts.middleName} required maxLength={100} autoComplete="additional-name" />
       </div>
 
-      <div className="sm:max-w-xs">
+      <div className="grid gap-x-6 sm:grid-cols-[minmax(0,20rem)_auto]">
         <PhoneField initial={user.phone} />
+        <GenderField
+          defaultValue={user.gender}
+          hint={user.gender ? undefined : 'Укажите — по нему нарисуем картинку профиля, пока нет фотографии.'}
+        />
       </div>
 
       <FixedFacts user={user} />
@@ -129,6 +142,7 @@ function ReadOnlyData({ user }: { user: PublicUser }) {
       <dl className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
         <Fact label="ФИО" value={user.fullName} />
         <Fact label="Телефон" value={user.phone || '—'} />
+        <Fact label="Пол" value={user.gender ? GENDER_LABEL[user.gender] : 'не указан'} />
       </dl>
       <FixedFacts user={user} />
       <p className="mt-4 text-[0.8125rem] text-text-subtle">

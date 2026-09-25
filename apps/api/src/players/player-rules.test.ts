@@ -64,6 +64,7 @@ describe('participantView', () => {
     name: 'Иванов И.',
     birthDate: day(birthDate),
     avatarFileId: 'f1',
+    gender: 'FEMALE' as const,
   });
 
   it('взрослый — кружок с фотографией и ссылкой', () => {
@@ -71,14 +72,16 @@ describe('participantView', () => {
       userId: 'u1',
       name: 'Иванов И.',
       avatarFileId: 'f1',
+      gender: 'FEMALE',
     });
   });
 
-  it('младше 14 — только инициалы, без ссылки и фотографии', () => {
+  it('младше 14 — нейтральный кружок: без ссылки, фотографии и пола', () => {
     assert.deepEqual(participantView(person('2014-01-01'), TODAY), {
       userId: null,
       name: 'Иванов И.',
       avatarFileId: null,
+      gender: null,
     });
   });
 

@@ -34,7 +34,7 @@ export function PlayerPublicView({
       )}
 
       <header className="flex flex-wrap items-center gap-6">
-        <PlayerAvatar fileId={player.avatarFileId} name={player.name} size="lg" />
+        <PlayerAvatar fileId={player.avatarFileId} name={player.name} gender={player.gender} size="lg" />
         <div className="min-w-0 grow">
           <p className="text-[0.75rem] tracking-[0.1em] text-text-subtle uppercase">{eyebrow}</p>
           <h1 className="mt-1 text-[2rem] leading-tight break-words">{player.name}</h1>

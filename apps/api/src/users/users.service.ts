@@ -24,6 +24,7 @@ export class UsersService {
         phone: true,
         birthDate: true,
         fullName: true,
+        gender: true,
         memberships: {
           where: { deactivatedAt: null },
           select: {
@@ -46,6 +47,7 @@ export class UsersService {
       phone: user.phone,
       birthDate: formatBirthDate(user.birthDate),
       fullName: user.fullName,
+      gender: user.gender,
       memberships: user.memberships.map((membership) => ({
         tenantId: membership.tenantId,
         slug: membership.tenant.slug,

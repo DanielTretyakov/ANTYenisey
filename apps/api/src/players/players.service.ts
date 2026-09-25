@@ -57,6 +57,7 @@ const PROFILE_SELECT = {
   id: true,
   fullName: true,
   birthDate: true,
+  gender: true,
   playerProfile: { select: { avatarFileId: true, blade: true, forehandRubber: true, backhandRubber: true } },
   achievements: {
     select: ACHIEVEMENT_SELECT,
@@ -123,6 +124,7 @@ export class PlayersService {
       id: row.id,
       name: shortName(row.fullName),
       avatarFileId: row.playerProfile?.avatarFileId ?? null,
+      gender: row.gender,
       equipment: equipmentOf(row),
       achievements: row.achievements.map(toAchievement),
       // Отклонённый разряд посторонним не показывается вовсе — см. PublicRank.
@@ -352,6 +354,7 @@ function toProfile(row: ProfileRow, today: Date): PlayerProfile {
   return {
     userId: row.id,
     avatarFileId: row.playerProfile?.avatarFileId ?? null,
+    gender: row.gender,
     equipment: equipmentOf(row),
     achievements: row.achievements.map(toAchievement),
     rank: row.sportRank ? toRank(row.sportRank) : null,

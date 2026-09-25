@@ -13,6 +13,7 @@ import { api, ApiError } from '@/lib/api';
 import { isChildBirthDate } from '@/lib/family';
 import { safeNext } from '@/lib/next';
 import { saveSession } from '@/lib/session';
+import { GenderField, genderFrom } from '@/components/ui/GenderField';
 
 /**
  * Регистрация.
@@ -74,6 +75,13 @@ function RegisterForm({ clubSlug, next }: { clubSlug: string | null; next: strin
       return;
     }
 
+    const gender = genderFrom(form);
+
+    if (!gender) {
+      setError('Укажите пол');
+      return;
+    }
+
     setPending(true);
 
     try {
@@ -86,6 +94,7 @@ function RegisterForm({ clubSlug, next }: { clubSlug: string | null; next: strin
         middleName: String(form.get('middleName')),
         phone,
         birthDate: String(form.get('birthDate')),
+        gender,
       });
 
       saveSession(auth);
@@ -117,6 +126,8 @@ function RegisterForm({ clubSlug, next }: { clubSlug: string | null; next: strin
         <Field label="Фамилия" name="lastName" autoComplete="family-name" required />
         <Field label="Имя" name="firstName" autoComplete="given-name" required />
         <Field label="Отчество" name="middleName" autoComplete="additional-name" required />
+
+        <GenderField />
 
         <PhoneField />
 

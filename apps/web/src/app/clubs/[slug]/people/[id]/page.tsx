@@ -128,7 +128,12 @@ export default function PersonPage() {
           />
 
           {card.coach && (
-            <CoachCard coach={card.coach} personId={card.person.id} personName={card.person.fullName} />
+            <CoachCard
+              coach={card.coach}
+              personId={card.person.id}
+              personName={card.person.fullName}
+              gender={card.player.gender}
+            />
           )}
 
           <ClubFamilyBlock
