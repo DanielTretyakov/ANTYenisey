@@ -21,7 +21,7 @@ export interface ProfileViewer {
    * целиком и скан приказа: разряд проверяют именно они.
    */
   managesOwner: boolean;
-  /** Родитель, который ведёт игрока, пока тому нет 16: он и ведёт его профиль. */
+  /** Родитель, который ведёт игрока, пока тому нет 14: он и ведёт его профиль. */
   guardsOwner: boolean;
 }
 
@@ -34,7 +34,7 @@ export interface ProfileOwner {
  * Видна ли страница игрока этому человеку.
  *
  * Сам игрок, его родитель и администраторы его клубов видят её всегда,
- * остальные — с шестнадцати лет.
+ * остальные — с четырнадцати лет.
  */
 export function canSeeProfile(owner: ProfileOwner, viewer: ProfileViewer, today: Date): boolean {
   return (

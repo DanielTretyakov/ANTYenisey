@@ -50,7 +50,7 @@ export default function CabinetSectionPage() {
           sections={['avatar', 'equipment', 'rank', 'achievements']}
           name={child?.fullName ?? user.fullName}
           forPerson={forPerson}
-          // Ребёнок младше 16 смотрит свой профиль, а правит его родитель.
+          // Ребёнок младше 14 смотрит свой профиль, а правит его родитель.
           readOnly={child === null && isChildBirthDate(user.birthDate)}
         />
       )}

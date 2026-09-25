@@ -3196,7 +3196,7 @@ async function playerProfile() {
 
   const minorEmail = `probe-${RUN}-minor-${Math.random().toString(36).slice(2, 6)}@example.com`;
   r = await post('/auth/register', registration({ email: minorEmail, lastName: 'Юнцов', firstName: 'Коля', birthDate: '2014-03-01' }));
-  check('игрок младше 16 заведён', 201, r.status);
+  check('игрок младше 14 заведён', 201, r.status);
   const minorToken = r.body?.accessToken ?? '';
   const minorId = r.body?.user?.id;
 
@@ -3449,13 +3449,13 @@ async function playerProfile() {
   r = await asAdmin('/me/player/rank', { method: 'DELETE' });
   check('разряд администратора убран', 200, r.status);
 
-  console.log('=== 30д. Игрок младше 16');
+  console.log('=== 30д. Игрок младше 14');
   const asMinor = as(minorToken);
   r = await asMinor('/me/player');
   assert('профиль ребёнка закрыт от посторонних', r.body?.isPublic === false);
 
   r = await upload(minorToken, '/me/player/avatar', {}, { bytes: second, type: 'image/png', name: 'kid.png' });
-  check('до 16 профиль сам не правит — ведёт родитель', 403, r.status);
+  check('до 14 профиль сам не правит — ведёт родитель', 403, r.status);
 
   // Игрок-взрослый закрепляет ребёнка за собой: заявка, подтверждение самим
   // ребёнком — и дальше ведёт его профиль параметром ?for=.
@@ -3513,9 +3513,9 @@ async function playerProfile() {
 }
 
 /**
- * Семья: родитель ведёт ребёнка младше 16.
+ * Семья: родитель ведёт ребёнка младше 14.
  *
- * Даты рождения считаются от сегодняшнего дня: граница «ровно 16 лет» и
+ * Даты рождения считаются от сегодняшнего дня: граница «ровно 14 лет» и
  * «ровно 18» должна проверяться в любой день прогона, а не в тот, когда секцию
  * писали.
  */
@@ -3578,9 +3578,9 @@ async function family() {
 
   r = await asParent('/me/children', {
     method: 'POST',
-    json: childForm({ email: newEmail('kid16'), birthDate: bornYearsAgo(16) }),
+    json: childForm({ email: newEmail('kid14'), birthDate: bornYearsAgo(14) }),
   });
-  check('шестнадцатилетнему учётка ребёнка не нужна', 400, r.status);
+  check('четырнадцатилетнему учётка ребёнка не нужна', 400, r.status);
 
   r = await asParent('/me/children', { method: 'POST', json: childForm({ tenantSlug: 'yenisey' }) });
   check('клуб в форме ребёнка — лишнее поле', 400, r.status);
@@ -3588,7 +3588,7 @@ async function family() {
   r = await asParent('/me/children', { method: 'POST', json: childForm() });
   check('ребёнок заведён и закреплён сразу', 201, r.status);
   const childId = r.body?.id;
-  assert('до какого дня опека', r.body?.guardianUntil === bornYearsAgo(10).replace(/^\d{4}/, (y) => String(Number(y) + 16)));
+  assert('до какого дня опека', r.body?.guardianUntil === bornYearsAgo(10).replace(/^\d{4}/, (y) => String(Number(y) + 14)));
 
   r = await asParent('/me/children', { method: 'POST', json: childForm() });
   check('та же почта второй раз', 409, r.status);
@@ -3790,13 +3790,13 @@ async function family() {
   r = await asCoachParent(`/clubs/yenisey/tournaments/${cupId}/registration?for=${coachKidId}`, { method: 'POST' });
   check('а ребёнка записывает как обычный родитель', 201, r.status);
 
-  // --- Граница 16 лет у самостоятельной записи.
-  r = await post('/auth/register', registration({ lastName: 'Именинник', birthDate: bornYearsAgo(16) }));
+  // --- Граница 14 лет у самостоятельной записи.
+  r = await post('/auth/register', registration({ lastName: 'Именинник', birthDate: bornYearsAgo(14) }));
   const asBirthday = as(r.body?.accessToken ?? '');
   r = await asBirthday(`/clubs/yenisey/tournaments/${cupId}/registration`, { method: 'POST' });
-  check('в день шестнадцатилетия записывается сам', 201, r.status);
+  check('в день четырнадцатилетия записывается сам', 201, r.status);
 
-  r = await post('/auth/register', registration({ lastName: 'Почтиименинник', birthDate: bornYearsAgo(16, 1) }));
+  r = await post('/auth/register', registration({ lastName: 'Почтиименинник', birthDate: bornYearsAgo(14, 1) }));
   const asAlmost = as(r.body?.accessToken ?? '');
   r = await asAlmost(`/clubs/yenisey/tournaments/${cupId}/registration`, { method: 'POST' });
   check('накануне — ещё нет', 403, r.status);
@@ -3836,13 +3836,13 @@ async function family() {
   r = await asStranger(`/players/${kidId}`);
   check('и закрыта постороннему', 404, r.status);
 
-  // --- После отвязки ребёнок младше 16 по-прежнему не записывается сам.
+  // --- После отвязки ребёнок младше 14 по-прежнему не записывается сам.
   r = await asParent(`/me/children/${kidId}`, { method: 'DELETE' });
   check('родитель отвязал второго ребёнка', 204, r.status);
   r = await asParent(`/clubs/yenisey/trainings/${sessionId}/booking?for=${kidId}`, { method: 'POST' });
   check('отвязанного больше не записывает', 403, r.status);
   r = await asKid(`/clubs/yenisey/tournaments/${cupId}/registration`, { method: 'POST' });
-  check('а сам он до 16 по-прежнему не записывается', 403, r.status);
+  check('а сам он до 14 по-прежнему не записывается', 403, r.status);
 
   console.log('=== 31в. Семья у стойки');
 
@@ -4739,7 +4739,7 @@ async function personalData() {
   r = await post('/auth/register', registration({ lastName: 'Данных', firstName: 'Ребёнок', birthDate: kidBirth }));
   const asKid = as(r.body?.accessToken ?? '');
   r = await asKid('/auth/me', { method: 'PATCH', json: { lastName: 'Данных', firstName: 'Сам', middleName: 'Себе', phone: '+79990000000' } });
-  check('младше 16 данные сам не правит', 403, r.status);
+  check('младше 14 данные сам не правит', 403, r.status);
 
   // --- Пароль.
   r = await asMe('/auth/password', { method: 'POST', json: { currentPassword: 'не-тот-пароль', newPassword: 'NovyiParol-2026' } });
@@ -4783,4 +4783,25 @@ async function personalData() {
 
   r = await call('/me/subscriptions/offers');
   check('тарифы «моих клубов» без входа не отдаются', 401, r.status);
+
+  // --- В кабинете 3–5 основных тарифов, остальные — на странице клуба.
+  assert(
+    'в предложении клуба не больше пяти тарифов, и сказано, сколько всего',
+    offers.every((offer) => offer.plans.length <= 5 && offer.totalPlans >= offer.plans.length),
+  );
+
+  r = await call('/clubs/yenisey/plans');
+  check('прайс абонементов клуба открыт без входа', 200, r.status);
+  const clubPlans = Array.isArray(r.body) ? r.body : [];
+  const yenisey = offers.find((offer) => offer.club.slug === 'yenisey');
+  if (yenisey) {
+    assert('«всего тарифов» в кабинете совпадает с прайсом клуба', yenisey.totalPlans === clubPlans.length);
+    assert(
+      'в кабинете — тарифы из того же прайса',
+      yenisey.plans.every((plan) => clubPlans.some((item) => item.id === plan.id)),
+    );
+  }
+
+  r = await call('/clubs/net-takogo-kluba/plans');
+  check('прайс несуществующего клуба — 404', 404, r.status);
 }

@@ -49,9 +49,9 @@ describe('fullYears (общий пакет)', () => {
 });
 
 describe('isChild и canBeGuardian', () => {
-  it('в день шестнадцатилетия опека кончается', () => {
-    assert.equal(isChild(day('2010-09-17'), TODAY), false);
-    assert.equal(isChild(day('2010-09-18'), TODAY), true);
+  it('в день четырнадцатилетия опека кончается', () => {
+    assert.equal(isChild(day('2012-09-17'), TODAY), false);
+    assert.equal(isChild(day('2012-09-18'), TODAY), true);
   });
 
   it('родителем — с восемнадцати', () => {
@@ -61,11 +61,11 @@ describe('isChild и canBeGuardian', () => {
 });
 
 describe('guardianHasRights', () => {
-  it('только действующая опека и только до 16', () => {
+  it('только действующая опека и только до 14', () => {
     assert.equal(guardianHasRights('ACTIVE', CHILD, TODAY), true);
     assert.equal(guardianHasRights('PENDING', CHILD, TODAY), false);
     assert.equal(guardianHasRights('REVOKED', CHILD, TODAY), false);
-    assert.equal(guardianHasRights('ACTIVE', day('2010-09-17'), TODAY), false);
+    assert.equal(guardianHasRights('ACTIVE', day('2012-09-17'), TODAY), false);
   });
 });
 
@@ -81,8 +81,8 @@ describe('decideCreateChild', () => {
     assert.equal(!result.ok && result.status, 403);
   });
 
-  it('шестнадцатилетнему учётка ребёнка не нужна', () => {
-    const result = decideCreateChild({ guardianBirthDate: ADULT, childBirthDate: day('2010-09-17'), today: TODAY });
+  it('четырнадцатилетнему учётка ребёнка не нужна', () => {
+    const result = decideCreateChild({ guardianBirthDate: ADULT, childBirthDate: day('2012-09-17'), today: TODAY });
     assert.equal(!result.ok && result.status, 400);
   });
 });
@@ -139,8 +139,8 @@ describe('decideAnswer', () => {
     assert.equal(decideAnswer({ ...base, request: stale, answer: 'REJECT' }).ok, true);
   });
 
-  it('ребёнку исполнилось 16, пока заявка ждала', () => {
-    const result = decideAnswer({ ...base, childBirthDate: day('2010-09-17'), answer: 'CONFIRM' });
+  it('ребёнку исполнилось 14, пока заявка ждала', () => {
+    const result = decideAnswer({ ...base, childBirthDate: day('2012-09-17'), answer: 'CONFIRM' });
     assert.equal(result.ok, false);
   });
 });
@@ -181,7 +181,7 @@ describe('decideActing', () => {
     });
   });
 
-  it('до 16 сам не записывается — и «за себя» через forId тоже', () => {
+  it('до 14 сам не записывается — и «за себя» через forId тоже', () => {
     const kid = {
       mode: 'write' as const,
       callerId: 'kid',
@@ -216,14 +216,14 @@ describe('decideActing', () => {
     );
   });
 
-  it('родитель — за своего ребёнка младше 16', () => {
+  it('родитель — за своего ребёнка младше 14', () => {
     assert.deepEqual(
       decideActing({ ...base, forId: 'kid', guardianship: { status: 'ACTIVE' }, childBirthDate: CHILD }),
       { ok: true, userId: 'kid', byGuardian: true },
     );
   });
 
-  it('за чужого, по заявке без ответа и за шестнадцатилетнего — нет', () => {
+  it('за чужого, по заявке без ответа и за четырнадцатилетнего — нет', () => {
     assert.equal(decideActing({ ...base, forId: 'kid', guardianship: null, childBirthDate: CHILD }).ok, false);
     assert.equal(
       decideActing({ ...base, forId: 'kid', guardianship: { status: 'PENDING' }, childBirthDate: CHILD }).ok,

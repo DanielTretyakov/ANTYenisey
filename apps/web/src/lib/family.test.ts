@@ -5,9 +5,9 @@ import { canBeGuardianBirthDate, guardianshipLeft, isChildBirthDate } from './fa
 const TODAY = new Date('2026-09-17T05:00:00Z');
 
 describe('isChildBirthDate и canBeGuardianBirthDate', () => {
-  it('в день шестнадцатилетия — уже не ребёнок', () => {
-    assert.equal(isChildBirthDate('2010-09-17', TODAY), false);
-    assert.equal(isChildBirthDate('2010-09-18', TODAY), true);
+  it('в день четырнадцатилетия — уже не ребёнок', () => {
+    assert.equal(isChildBirthDate('2012-09-17', TODAY), false);
+    assert.equal(isChildBirthDate('2012-09-18', TODAY), true);
   });
 
   it('родителем — с восемнадцати', () => {

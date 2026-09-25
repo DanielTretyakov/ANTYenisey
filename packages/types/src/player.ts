@@ -63,11 +63,11 @@ export const ACHIEVEMENT_LEVELS: readonly AchievementLevel[] = [
 /**
  * С какого возраста профиль виден посторонним.
  *
- * До шестнадцати страница игрока закрыта от всех, кроме него самого и
+ * До четырнадцати страница игрока закрыта от всех, кроме него самого и
  * администраторов его клубов: фотография ребёнка и список его соревнований —
  * не то, что платформа раздаёт всем подряд.
  */
-export const PUBLIC_PROFILE_AGE = 16;
+export const PUBLIC_PROFILE_AGE = 14;
 
 /** Инвентарь — свободный текст: каталога оснований и накладок нет. */
 export interface PlayerEquipment {
@@ -143,7 +143,7 @@ export interface PlayerProfile {
   equipment: PlayerEquipment;
   achievements: PlayerAchievement[];
   rank: PlayerRank | null;
-  /** Виден ли профиль посторонним. До шестнадцати — нет. */
+  /** Виден ли профиль посторонним. До четырнадцати — нет. */
   isPublic: boolean;
 }
 
@@ -187,7 +187,7 @@ export interface PublicPlayer {
   achievements: PlayerAchievement[];
   rank: PublicRank | null;
   /**
-   * Профиль закрыт от посторонних (игроку нет шестнадцати), а смотрит тот,
+   * Профиль закрыт от посторонних (игроку нет четырнадцати), а смотрит тот,
    * кому можно, — сам игрок или администратор его клуба.
    */
   hiddenFromPublic: boolean;

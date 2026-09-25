@@ -17,9 +17,9 @@ const day = (value: string) => new Date(`${value}T00:00:00Z`);
 const TODAY = new Date('2026-09-13T05:00:00Z');
 
 describe('isProfilePublic', () => {
-  it('в день шестнадцатилетия профиль открывается', () => {
-    assert.equal(isProfilePublic(day('2010-09-13'), TODAY), true);
-    assert.equal(isProfilePublic(day('2010-09-14'), TODAY), false);
+  it('в день четырнадцатилетия профиль открывается', () => {
+    assert.equal(isProfilePublic(day('2012-09-13'), TODAY), true);
+    assert.equal(isProfilePublic(day('2012-09-14'), TODAY), false);
   });
 });
 
@@ -35,7 +35,7 @@ describe('canSeeProfile и canReadFile', () => {
     assert.equal(canReadFile('AVATAR', adult, anonymous, TODAY), true);
   });
 
-  it('младше 16 — только сам и администраторы его клубов', () => {
+  it('младше 14 — только сам и администраторы его клубов', () => {
     assert.equal(canSeeProfile(child, anonymous, TODAY), false);
     assert.equal(canSeeProfile(child, stranger, TODAY), false);
     assert.equal(canSeeProfile(child, { viewerId: 'kid', managesOwner: false, guardsOwner: false }, TODAY), true);
@@ -74,7 +74,7 @@ describe('participantView', () => {
     });
   });
 
-  it('младше 16 — только инициалы, без ссылки и фотографии', () => {
+  it('младше 14 — только инициалы, без ссылки и фотографии', () => {
     assert.deepEqual(participantView(person('2014-01-01'), TODAY), {
       userId: null,
       name: 'Иванов И.',
@@ -82,9 +82,9 @@ describe('participantView', () => {
     });
   });
 
-  it('граница — день шестнадцатилетия, как у самого профиля', () => {
-    assert.equal(participantView(person('2010-09-13'), TODAY).userId, 'u1');
-    assert.equal(participantView(person('2010-09-14'), TODAY).userId, null);
+  it('граница — день четырнадцатилетия, как у самого профиля', () => {
+    assert.equal(participantView(person('2012-09-13'), TODAY).userId, 'u1');
+    assert.equal(participantView(person('2012-09-14'), TODAY).userId, null);
   });
 });
 

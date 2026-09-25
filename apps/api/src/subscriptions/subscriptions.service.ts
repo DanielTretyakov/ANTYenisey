@@ -11,10 +11,12 @@ import type {
   LedgerReasonView,
   PaidBySubscription,
   SubscriptionLedgerRow,
+  PublicPlan,
   SubscriptionOffer,
   SubscriptionPlan,
 } from '@yenisey/types';
 import { MembershipService } from '../club/membership.service';
+import { pickOffers } from './offer-rules';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AdjustSubscriptionDto, ClubLedgerQueryDto, SubscriptionPlanDto } from './dto/subscription.dto';
 import { lockSubscription, writeLedger, type LockedSubscription } from './subscription-ledger';
@@ -170,39 +172,34 @@ export class SubscriptionsService {
         name: true,
         accentColor: true,
         phone: true,
-        subscriptionPlans: {
-          where: { isActive: true },
-          select: {
-            id: true,
-            name: true,
-            visitsCount: true,
-            durationDays: true,
-            price: true,
-            coveredTrainingTypes: { select: { trainingType: { select: { name: true } } } },
-            coveredTournamentTypes: { select: { tournamentType: { select: { name: true } } } },
-          },
-          orderBy: [{ name: 'asc' }, { visitsCount: { sort: 'asc', nulls: 'last' } }, { durationDays: 'asc' }],
-        },
+        subscriptionPlans: PUBLIC_PLANS,
       },
       orderBy: { name: 'asc' },
     });
 
     return tenants
       .filter((tenant) => tenant.subscriptionPlans.length > 0)
-      .map((tenant) => ({
-        club: { slug: tenant.slug, name: tenant.name, accentColor: tenant.accentColor, phone: tenant.phone },
-        plans: tenant.subscriptionPlans.map((plan) => ({
-          id: plan.id,
-          name: plan.name,
-          visitsCount: plan.visitsCount,
-          durationDays: plan.durationDays,
-          price: plan.price,
-          covers: [
-            ...plan.coveredTrainingTypes.map((row) => row.trainingType.name),
-            ...plan.coveredTournamentTypes.map((row) => row.tournamentType.name),
-          ],
-        })),
-      }));
+      .map((tenant) => {
+        const plans = tenant.subscriptionPlans.map(toPublicPlan);
+
+        return {
+          club: { slug: tenant.slug, name: tenant.name, accentColor: tenant.accentColor, phone: tenant.phone },
+          plans: pickOffers(plans),
+          totalPlans: plans.length,
+        };
+      });
+  }
+
+  /** Все действующие тарифы клуба — открыто, как цены залов в карточке клуба. */
+  async publicPlans(tenantId: string): Promise<PublicPlan[]> {
+    // Условие клуба — последним: общий `PUBLIC_PLANS` несёт свой `where`, и
+    // разворот после него стёр бы tenantId — и отдал бы тарифы всех клубов.
+    const plans = await this.prisma.subscriptionPlan.findMany({
+      ...PUBLIC_PLANS,
+      where: { ...PUBLIC_PLANS.where, tenantId },
+    });
+
+    return plans.map(toPublicPlan);
   }
 
   async createPlan(tenantId: string, dto: SubscriptionPlanDto): Promise<SubscriptionPlan> {
@@ -859,4 +856,46 @@ function fail<T>(decision: Decision<T>): { ok: true } & T {
   throw decision.status === 409
     ? new ConflictException(decision.message)
     : new BadRequestException(decision.message);
+}
+
+/** Действующие тарифы в том виде, в каком их видит посетитель. */
+const PUBLIC_PLANS = {
+  where: { isActive: true },
+  select: {
+    id: true,
+    name: true,
+    visitsCount: true,
+    durationDays: true,
+    price: true,
+    coveredTrainingTypes: { select: { trainingType: { select: { name: true } } } },
+    coveredTournamentTypes: { select: { tournamentType: { select: { name: true } } } },
+  } as const,
+  // Варианты одного тарифа рядом: по названию, внутри — от меньшего пакета.
+  orderBy: [
+    { name: 'asc' },
+    { visitsCount: { sort: 'asc', nulls: 'last' } },
+    { durationDays: 'asc' },
+  ] satisfies Prisma.SubscriptionPlanOrderByWithRelationInput[],
+};
+
+function toPublicPlan(plan: {
+  id: string;
+  name: string;
+  visitsCount: number | null;
+  durationDays: number | null;
+  price: number;
+  coveredTrainingTypes: { trainingType: { name: string } }[];
+  coveredTournamentTypes: { tournamentType: { name: string } }[];
+}): PublicPlan {
+  return {
+    id: plan.id,
+    name: plan.name,
+    visitsCount: plan.visitsCount,
+    durationDays: plan.durationDays,
+    price: plan.price,
+    covers: [
+      ...plan.coveredTrainingTypes.map((row) => row.trainingType.name),
+      ...plan.coveredTournamentTypes.map((row) => row.tournamentType.name),
+    ],
+  };
 }

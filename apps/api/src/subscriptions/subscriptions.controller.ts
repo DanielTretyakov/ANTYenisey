@@ -3,11 +3,13 @@ import type {
   ClientSubscription,
   ClubLedgerPage,
   SubscriptionLedgerRow,
+  PublicPlan,
   SubscriptionOffer,
   SubscriptionPlan,
 } from '@yenisey/types';
 import type { ClubContext } from '../auth/club-context';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
+import { Public } from '../auth/decorators/public.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Acting, ClientAction, type ActingClient } from '../guardianship/acting-client.guard';
 import {
@@ -133,5 +135,21 @@ export class MeSubscriptionsController {
   @Get('offers')
   offers(@Acting() acting: ActingClient): Promise<SubscriptionOffer[]> {
     return this.subscriptions.offersFor(acting.userId);
+  }
+}
+
+/**
+ * Тарифы клуба для посетителя — блок «Абонементы» на странице клуба и цель
+ * ссылки «Больше абонементов» из кабинета. Открыто без входа: это прайс,
+ * как цены залов.
+ */
+@Controller('clubs/:slug/plans')
+export class PublicPlansController {
+  constructor(private readonly subscriptions: SubscriptionsService) {}
+
+  @Public()
+  @Get()
+  list(@CurrentClub() club: ClubContext): Promise<PublicPlan[]> {
+    return this.subscriptions.publicPlans(club.tenantId);
   }
 }

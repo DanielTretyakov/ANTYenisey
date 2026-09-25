@@ -5,6 +5,7 @@ import {
   ClubSubscriptionsController,
   MeSubscriptionsController,
   PersonSubscriptionsController,
+  PublicPlansController,
   SubscriptionPlansController,
 } from './subscriptions.controller';
 import { SubscriptionsService } from './subscriptions.service';
@@ -27,6 +28,7 @@ import { SubscriptionsService } from './subscriptions.service';
     ClubSubscriptionsController,
     PersonSubscriptionsController,
     MeSubscriptionsController,
+    PublicPlansController,
   ],
   providers: [SubscriptionsService],
   exports: [SubscriptionsService],

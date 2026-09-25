@@ -177,7 +177,7 @@ export class AuthService {
   }
 
   /**
-   * Правка своих ФИО и телефона. До 16 лет данные ведут родитель и
+   * Правка своих ФИО и телефона. До 14 лет данные ведут родитель и
    * администратор клуба — ровно как профиль игрока: сам ребёнок смотрит.
    */
   async updateProfile(userId: string, dto: UpdateProfileRequest): Promise<PublicUser> {
@@ -191,7 +191,7 @@ export class AuthService {
     }
 
     if (fullYears(user.birthDate, new Date()) < CHILD_UNTIL_AGE) {
-      throw new ForbiddenException('До 16 лет данные меняет родитель или администратор клуба');
+      throw new ForbiddenException('До 14 лет данные меняет родитель или администратор клуба');
     }
 
     await this.prisma.user.update({

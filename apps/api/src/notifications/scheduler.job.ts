@@ -141,7 +141,7 @@ export class NotificationScheduler implements OnApplicationBootstrap, OnModuleDe
     }
 
     // Права родителя по возрасту ребёнка проверит сам ClientNotifier: здесь
-    // лишний ребёнок старше 16 стоит один запрос, а не лишнее сообщение.
+    // лишний ребёнок старше 14 стоит один запрос, а не лишнее сообщение.
     const children = await this.prisma.guardianship.findMany({
       where: { guardianUserId: { in: ids }, status: GuardianshipStatus.ACTIVE },
       select: { childUserId: true },

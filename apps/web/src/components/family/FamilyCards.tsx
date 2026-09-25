@@ -18,7 +18,7 @@ function messageOf(cause: unknown): string {
  * «Мои дети» — в кабинете взрослого.
  *
  * Расширение сверх ТЗ по решениям владельца от 12.09 и 17.09.2026. Родитель
- * ведёт ребёнка младше 16: записывает, отменяет, видит историю, ведёт профиль
+ * ведёт ребёнка младше 14: записывает, отменяет, видит историю, ведёт профиль
  * игрока. Сам список детей и переключатель «за кого» живут в
  * `usePersonSwitch` — эта карточка только меняет состав семьи.
  */
@@ -41,7 +41,7 @@ export function ParentFamilyCard({
     <Card className="mt-6 max-w-2xl">
       <CardHeader
         title="Мои дети"
-        description="Пока ребёнку нет 16, записывает и отменяет за него родитель, он же ведёт профиль игрока. Ребёнок входит своей учёткой и видит, куда записан."
+        description="Пока ребёнку нет 14, записывает и отменяет за него родитель, он же ведёт профиль игрока. Ребёнок входит своей учёткой и видит, куда записан."
       />
       <CardBody className="grid gap-6">
         {kids.length === 0 && mode === null && (
@@ -123,7 +123,7 @@ function ChildRow({
         <div className="min-w-0">
           <p className="text-[0.9375rem]">{child.fullName}</p>
           <p className="mt-0.5 text-[0.8125rem] text-text-muted">
-            {child.email} · до 16 лет {guardianshipLeft(child.guardianUntil)}
+            {child.email} · до 14 лет {guardianshipLeft(child.guardianUntil)}
           </p>
           <p className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[0.8125rem]">
             <Link href={`/my-bookings?for=${child.id}`} className="text-text-accent underline-offset-2 hover:underline">
@@ -195,7 +195,7 @@ function ChildRow({
       {action === 'unlink' && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <span className="text-[0.8125rem] text-text-muted">
-            Отвязать? До 16 лет ребёнок не сможет записываться — ни сам, ни через вас.
+            Отвязать? До 14 лет ребёнок не сможет записываться — ни сам, ни через вас.
           </span>
           <Button
             size="sm"
@@ -385,7 +385,7 @@ function AttachChildForm({ onCancel }: { onCancel: () => void }) {
 }
 
 /**
- * «Семья» — в кабинете ребёнка младше 16: кто его ведёт и кто просит
+ * «Семья» — в кабинете ребёнка младше 14: кто его ведёт и кто просит
  * закрепить. Ответить на заявку может только он сам.
  */
 export function ChildFamilyCard() {
@@ -425,7 +425,7 @@ export function ChildFamilyCard() {
     <Card className="mt-6 max-w-2xl">
       <CardHeader
         title="Семья"
-        description="До 16 лет на занятия и турниры записывает родитель — или администратор клуба у стойки."
+        description="До 14 лет на занятия и турниры записывает родитель — или администратор клуба у стойки."
       />
       <CardBody className="grid gap-4">
         {error && <Alert>{error}</Alert>}

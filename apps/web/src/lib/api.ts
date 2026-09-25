@@ -35,6 +35,7 @@ import type {
   EventKind,
   FeedEvent,
   ChangePasswordRequest,
+  PublicPlan,
   SubscriptionOffer,
   UpdateProfileRequest,
   PublicDayBoard,
@@ -256,10 +257,10 @@ const json = (method: string, body: unknown): RequestInit => ({
 });
 
 /**
- * Адрес с `?for=<id ребёнка>` — действие за своего ребёнка младше 16.
+ * Адрес с `?for=<id ребёнка>` — действие за своего ребёнка младше 14.
  *
  * Пусто — человек действует сам. Решает, можно ли, сервер: он же проверяет,
- * что это действительно ребёнок вошедшего и ему нет 16.
+ * что это действительно ребёнок вошедшего и ему нет 14.
  */
 function withFor(path: string, forPerson?: string | null): string {
   if (!forPerson) {
@@ -414,7 +415,7 @@ export const api = {
   removeRank: (forPerson?: string | null): Promise<PlayerProfile> =>
     authorized(withFor('/me/player/rank', forPerson), { method: 'DELETE' }),
 
-  // --- Семья: родитель ведёт ребёнка младше 16.
+  // --- Семья: родитель ведёт ребёнка младше 14.
   myChildren: (): Promise<FamilyChild[]> => authorized('/me/children'),
 
   /** Учётка ребёнку — закрепляется за родителем сразу. */
@@ -431,7 +432,7 @@ export const api = {
 
   unlinkChild: (id: string): Promise<void> => authorized(`/me/children/${id}`, { method: 'DELETE' }),
 
-  /** Кто ведёт вошедшего. `null` — никто, или ему уже 16. */
+  /** Кто ведёт вошедшего. `null` — никто, или ему уже 14. */
   myGuardian: (): Promise<MyGuardian | null> => authorized('/me/guardianship'),
 
   guardianshipRequests: (): Promise<GuardianshipRequestView[]> =>
@@ -443,7 +444,7 @@ export const api = {
 
   /**
    * Публичная страница игрока. Открыта без входа, но от своего имени, когда
-   * есть от чьего: страницу игрока младше шестнадцати видят только он сам и
+   * есть от чьего: страницу игрока младше четырнадцати видят только он сам и
    * администраторы его клубов.
    */
   player: (id: string): Promise<PublicPlayer> => optionallyAuthorized(`/players/${id}`),
@@ -737,6 +738,9 @@ export function clubApi(slug: string = TENANT_SLUG) {
     // --- Бронирование стола клиентом
     /** Залы с ценами и шагом брони — то же, что видит администратор в настройках. */
     /** Залы с ценами и шагом брони. Открыто без входа — это прайс клуба. */
+    /** Все действующие тарифы клуба — открыто, как цены залов. */
+    publicPlans: (): Promise<PublicPlan[]> => optionallyAuthorized(`${club}/plans`),
+
     bookingHalls: (): Promise<Hall[]> => optionallyAuthorized(`${club}/booking/halls`),
 
     /**

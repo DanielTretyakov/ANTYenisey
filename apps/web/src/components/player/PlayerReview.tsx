@@ -59,7 +59,7 @@ export function PlayerReview({
               Страница игрока →
             </Link>
             {!player.isPublic && (
-              <p className="mt-1 text-text-muted">Младше 16 лет — посторонним страница не видна.</p>
+              <p className="mt-1 text-text-muted">Младше 14 лет — посторонним страница не видна.</p>
             )}
           </div>
         </div>

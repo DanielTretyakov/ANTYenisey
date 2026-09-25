@@ -17,7 +17,7 @@ export class GuardianAccess {
 
   /**
    * Ведёт ли `guardianId` ребёнка `childId` прямо сейчас: опека действует и
-   * ребёнку нет 16. Отключённый и анонимизированный ребёнок не ведётся —
+   * ребёнку нет 14. Отключённый и анонимизированный ребёнок не ведётся —
    * записывать его некуда.
    */
   async hasRights(guardianId: string | null, childId: string, today = new Date()): Promise<boolean> {

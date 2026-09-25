@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { BookingEntry, ClubEvent, PublicTenant } from '@yenisey/types';
+import type { BookingEntry, ClubEvent, PublicPlan, PublicTenant } from '@yenisey/types';
 import { RiverBackdrop } from '@/components/brand/RiverBackdrop';
 import { ClubMark } from '@/components/club/ClubMark';
 import { EventDialog } from '@/components/events/EventDialog';
+import { PlanGroups, PLANS_ANCHOR } from '@/components/subscriptions/PlanList';
 import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { WhenSpan } from '@/components/club/When';
 import { ClubNav } from '@/components/layout/ClubNav';
@@ -130,6 +131,8 @@ export default function ClubPage() {
 
         <Halls tenant={tenant} />
 
+        <Plans tenant={tenant} />
+
         <MyEvents
           entries={mine}
           anonymous={session.status === 'anonymous'}
@@ -237,7 +240,7 @@ function ClubHero({
  * уезжала за второй экран.
  *
  * Сотруднику кнопка не показывается — бронь ссылается на карточку клиента,
- * которой у него нет. Ребёнку — тоже: до 16 за него бронирует родитель.
+ * которой у него нет. Ребёнку — тоже: до 14 за него бронирует родитель.
  */
 function BookingCta({ slug, viewer }: { slug: string; viewer: EventViewer }) {
   if (viewer === 'staff') {
@@ -247,7 +250,7 @@ function BookingCta({ slug, viewer }: { slug: string; viewer: EventViewer }) {
   if (viewer === 'child') {
     return (
       <p className="mb-10 text-[0.875rem] text-text-muted">
-        Пока тебе нет 16, стол бронирует родитель — со своей страницы.
+        Пока тебе нет 14, стол бронирует родитель — со своей страницы.
       </p>
     );
   }
@@ -305,6 +308,60 @@ function Halls({ tenant }: { tenant: PublicTenant | null }) {
         ))}
       </ul>
 
+    </section>
+  );
+}
+
+/**
+ * Все действующие тарифы клуба. Сюда ведёт «Больше абонементов» из кабинета:
+ * там показаны 3–5 основных, здесь — полный прайс.
+ *
+ * Блок грузится после первой отрисовки, и браузер к этому моменту уже искал
+ * якорь и не нашёл — поэтому к нему прокручиваем сами, когда тарифы приехали.
+ */
+function Plans({ tenant }: { tenant: PublicTenant | null }) {
+  const club = useClubApi();
+  const [plans, setPlans] = useState<PublicPlan[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    club
+      .publicPlans()
+      .then((loaded) => {
+        if (!cancelled) setPlans(loaded);
+      })
+      .catch(() => {
+        if (!cancelled) setPlans([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [club]);
+
+  // Ждём и клуб: без него выше нет «Где играют», и прокрутка, сделанная
+  // раньше, уехала бы, когда тот блок появится.
+  const ready = plans !== null && tenant !== null;
+
+  useEffect(() => {
+    if (ready && window.location.hash === `#${PLANS_ANCHOR}`) {
+      document.getElementById(PLANS_ANCHOR)?.scrollIntoView({ block: 'start' });
+    }
+  }, [ready]);
+
+  if (!plans || plans.length === 0) {
+    return null;
+  }
+
+  return (
+    <section id={PLANS_ANCHOR} className="mb-12 scroll-mt-24">
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+        <h2 className="text-[1.25rem]">Абонементы</h2>
+        <p className="text-[0.875rem] text-text-muted">Купить — у администратора клуба</p>
+      </div>
+
+      <PlanGroups plans={plans} />
     </section>
   );
 }
@@ -457,7 +514,7 @@ function MyEvents({
   whose: string | null;
   /** Выбранный ребёнок — «Мои записи» открываются за него. */
   forPerson: string | null;
-  /** Смотрит сам ребёнок младше 16: отменять он не может. */
+  /** Смотрит сам ребёнок младше 14: отменять он не может. */
   readOnly: boolean;
 }) {
   if (anonymous) {
@@ -675,7 +732,7 @@ function Upcoming({
 
       {viewer === 'child' && events && events.length > 0 && (
         <p className="mb-4 text-[0.8125rem] text-text-subtle">
-          До 16 лет на мероприятия записывает родитель — или администратор клуба у стойки.
+          До 14 лет на мероприятия записывает родитель — или администратор клуба у стойки.
         </p>
       )}
 

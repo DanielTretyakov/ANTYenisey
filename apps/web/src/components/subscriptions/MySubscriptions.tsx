@@ -5,11 +5,10 @@ import { useEffect, useState } from 'react';
 import type { ClientSubscription, SubscriptionOffer } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
+import { PlanList, PLANS_ANCHOR } from './PlanList';
 import { api, ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
-import { plural } from '@/lib/plural';
 import { subscriptionAlert, type AlertLevel } from '@/lib/subscriptionAlert';
-import { formatKopecks } from '@/lib/money';
 import { remainingLabel, subscriptionAlertLabel, validUntilLabel } from '@/lib/subscriptions';
 
 /**
@@ -108,9 +107,11 @@ function EndingBadge({ sub }: { sub: ClientSubscription }) {
 }
 
 /**
- * Абонементов нет: так и сказано, а ниже — тарифы клубов человека. Купить
- * онлайн пока нельзя (оплата появится вместе с платёжным шлюзом), поэтому
- * рядом с тарифами — телефон клуба и «у администратора».
+ * Абонементов нет — так и сказано, заметной плашкой, а не строкой среди
+ * прочего (решение владельца от 25.09.2026). Ниже — по 3–5 основных и самых
+ * разных тарифов каждого клуба (отбор на сервере, `pickOffers`), остальные —
+ * ссылкой на страницу клуба. Купить онлайн пока нельзя (оплата появится вместе
+ * с платёжным шлюзом), поэтому рядом — телефон клуба и «у администратора».
  */
 function NoSubscriptions({ forPerson }: { forPerson: string | null }) {
   const [offers, setOffers] = useState<SubscriptionOffer[] | null>(null);
@@ -134,17 +135,22 @@ function NoSubscriptions({ forPerson }: { forPerson: string | null }) {
 
   return (
     <Card className="max-w-2xl">
-      <CardHeader
-        title="Абонементы"
-        description="Абонемент оплачивает записи сам: визит списывается при записи и возвращается при отмене."
-      />
+      <CardHeader title="Абонементы" />
       <CardBody>
-        <p className="text-[0.9375rem] text-text">Абонементов пока нет.</p>
+        <div className="rounded-card border border-border-accent bg-surface-accent-soft px-5 py-4">
+          <p className="text-[1.125rem] font-medium text-text-accent">
+            {forPerson ? 'У ребёнка пока нет абонементов' : 'У вас пока нет абонементов'}
+          </p>
+          <p className="mt-1 text-[0.875rem] text-text">
+            С абонементом записи оплачиваются сами: визит списывается при записи и возвращается при отмене. Купить
+            его можно у администратора клуба — онлайн-оплата появится позже.
+          </p>
+        </div>
 
-        {offers === null && <p className="mt-3 text-[0.875rem] text-text-muted">Загружаю тарифы…</p>}
+        {offers === null && <p className="mt-4 text-[0.875rem] text-text-muted">Загружаю тарифы…</p>}
 
         {offers?.length === 0 && (
-          <p className="mt-2 text-[0.875rem] text-text-muted">
+          <p className="mt-4 text-[0.875rem] text-text-muted">
             В ваших клубах тарифов пока нет.{' '}
             <Link href="/" className="text-text-accent underline-offset-2 hover:underline">
               Найдите клуб
@@ -154,11 +160,7 @@ function NoSubscriptions({ forPerson }: { forPerson: string | null }) {
         )}
 
         {offers && offers.length > 0 && (
-          <div className="mt-5 grid gap-6">
-            <p className="text-[0.875rem] text-text-muted">
-              Купить абонемент можно у администратора клуба — онлайн-оплата появится позже.
-            </p>
-
+          <div className="mt-6 grid gap-6">
             {offers.map((offer) => (
               <section key={offer.club.slug}>
                 <h3 className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-[0.9375rem] font-medium">
@@ -175,20 +177,18 @@ function NoSubscriptions({ forPerson }: { forPerson: string | null }) {
                   )}
                 </h3>
 
-                <ul className="mt-2 divide-y divide-border rounded-control border border-border">
-                  {offer.plans.map((plan) => (
-                    <li key={plan.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-3">
-                      <span className="min-w-0 grow">
-                        <span className="block text-[0.9375rem] text-text">{plan.name}</span>
-                        <span className="block text-[0.8125rem] text-text-muted">
-                          {planTerms(plan)}
-                          {plan.covers.length > 0 && ` · ${plan.covers.join(', ')}`}
-                        </span>
-                      </span>
-                      <span className="text-[0.9375rem] whitespace-nowrap text-text">{formatKopecks(plan.price)}</span>
-                    </li>
-                  ))}
-                </ul>
+                <div className="mt-2">
+                  <PlanList plans={offer.plans} />
+                </div>
+
+                {offer.totalPlans > offer.plans.length && (
+                  <Link
+                    href={`/clubs/${offer.club.slug}#${PLANS_ANCHOR}`}
+                    className="mt-2 inline-block text-[0.875rem] text-text-accent underline-offset-2 hover:underline"
+                  >
+                    Больше абонементов — ещё {offer.totalPlans - offer.plans.length} на странице клуба
+                  </Link>
+                )}
               </section>
             ))}
           </div>
@@ -196,12 +196,4 @@ function NoSubscriptions({ forPerson }: { forPerson: string | null }) {
       </CardBody>
     </Card>
   );
-}
-
-/** «8 визитов · 30 дней», «безлимит · бессрочно». */
-function planTerms(plan: SubscriptionOffer['plans'][number]): string {
-  const visits = plan.visitsCount === null ? 'безлимит' : `${plan.visitsCount} ${plural(plan.visitsCount, 'визит', 'визита', 'визитов')}`;
-  const days = plan.durationDays === null ? 'бессрочно' : `${plan.durationDays} ${plural(plan.durationDays, 'день', 'дня', 'дней')}`;
-
-  return `${visits} · ${days}`;
 }

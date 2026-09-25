@@ -105,7 +105,7 @@ export class PlayersService {
    *
    * Посторонний не отличит «профиль закрыт» от «такого человека нет»: и то и
    * другое — 404. Иначе по адресам страниц можно было бы собрать, кто на
-   * платформе младше шестнадцати.
+   * платформе младше четырнадцати.
    */
   async publicProfile(playerId: string, viewerId: string | null): Promise<PublicPlayer> {
     const row = await this.load(playerId);

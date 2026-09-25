@@ -7,7 +7,7 @@ import { canBeGuardianBirthDate, isChildBirthDate } from './family';
 import { useSession } from './useSession';
 
 /**
- * За кого действует вошедший — за себя или за своего ребёнка младше 16.
+ * За кого действует вошедший — за себя или за своего ребёнка младше 14.
  *
  * Выбор живёт в адресе (`?for=<id>`): страница клуба, бронь стола и «Мои
  * записи» открываются уже с выбранным ребёнком, и ссылку из «Моих детей» можно
@@ -68,7 +68,7 @@ export function usePersonSwitch() {
     forPerson: selected?.id ?? null,
     choose,
     reload,
-    /** Вошедшему нет 16 и он действует сам: менять ничего не может. */
+    /** Вошедшему нет 14 и он действует сам: менять ничего не может. */
     selfIsChild: user !== null && selected === null && isChildBirthDate(user.birthDate),
   };
 }

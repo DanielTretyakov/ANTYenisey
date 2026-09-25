@@ -33,15 +33,24 @@ export interface SubscriptionPlan {
  */
 export interface SubscriptionOffer {
   club: { slug: string; name: string; accentColor: string | null; phone: string | null };
-  plans: {
-    id: string;
-    name: string;
-    visitsCount: number | null;
-    durationDays: number | null;
-    price: number;
-    /** Что покрывает: названия типов занятий и турниров. */
-    covers: string[];
-  }[];
+  /**
+   * 3–5 основных и максимально разных тарифов (решение владельца от
+   * 25.09.2026) — остальные на странице клуба, см. `totalPlans`.
+   */
+  plans: PublicPlan[];
+  /** Сколько действующих тарифов у клуба всего. */
+  totalPlans: number;
+}
+
+/** Действующий тариф клуба для посетителя: прайс, как цены залов. */
+export interface PublicPlan {
+  id: string;
+  name: string;
+  visitsCount: number | null;
+  durationDays: number | null;
+  price: number;
+  /** Что покрывает: названия типов занятий и турниров. */
+  covers: string[];
 }
 
 export interface SubscriptionPlanRequest {
