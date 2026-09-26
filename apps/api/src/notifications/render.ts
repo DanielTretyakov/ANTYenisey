@@ -15,6 +15,7 @@
  * российский сервис, и сокращённое имя в нём допустимо, а больше не нужно.
  * Клиенту — только его собственное.
  */
+import { formatRubles } from '@yenisey/types';
 
 export interface RenderContext {
   /** Адрес сайта без косой черты в конце: https://ant-yenisey.ru. */
@@ -462,13 +463,9 @@ function date(iso: string, timezone: string): string {
   return new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, day: 'numeric', month: 'long' }).format(new Date(iso));
 }
 
-/** Копейки → «700 ₽», «350,50 ₽». */
+/** Копейки → «700 ₽», «12 000 ₽» — тем же `formatRubles`, что на сайте. */
 export function rubles(kopecks: number): string {
-  const whole = Math.trunc(kopecks / 100);
-  const rest = Math.abs(kopecks % 100);
-  const grouped = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-
-  return rest === 0 ? `${grouped} ₽` : `${grouped},${rest.toString().padStart(2, '0')} ₽`;
+  return formatRubles(kopecks);
 }
 
 /**

@@ -1,5 +1,6 @@
 'use client';
 
+import { groupDigits } from '@yenisey/types';
 import { useEffect, useState } from 'react';
 import type { CoachStats, CoachStatsPeriod } from '@yenisey/types';
 import { COACH_STATS_PERIODS } from '@yenisey/types';
@@ -106,7 +107,7 @@ function Figure({ label, value, note }: { label: string; value: string; note?: s
   );
 }
 
-/** «2,5» — с запятой, как пишут по-русски; целое — без хвоста. */
+/** «2,5» — с запятой, как пишут по-русски; целое — без хвоста; «1 200» — с разрядами. */
 function formatOne(value: number): string {
-  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(value);
+  return groupDigits(Math.round(value * 10) / 10);
 }

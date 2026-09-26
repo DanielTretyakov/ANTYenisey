@@ -15,9 +15,15 @@ describe('kopecksToInput', () => {
 });
 
 describe('formatKopecks', () => {
+  it('пробел между разрядами с четырёх знаков, неразрывный', () => {
+    assert.equal(formatKopecks(400_000), '4 000 ₽');
+    assert.equal(formatKopecks(10_000_000), '100 000 ₽');
+    assert.equal(formatKopecks(123_456_78), '123 456,78 ₽');
+  });
+
   it('добавляет знак рубля', () => {
-    assert.equal(formatKopecks(40_000), '400 ₽');
-    assert.equal(formatKopecks(40_050), '400,50 ₽');
+    assert.equal(formatKopecks(40_000), '400 ₽');
+    assert.equal(formatKopecks(40_050), '400,50 ₽');
   });
 });
 

@@ -24,7 +24,7 @@ describe('сообщения о записи', () => {
     assert.match(text, /25 сентября/);
     assert.match(text, /18:00/);
     assert.match(text, /Основной зал · клуб «Енисей»/);
-    assert.match(text, /Стоимость — 700 ₽/);
+    assert.match(text, /Стоимость — 700 ₽/);
     assert.equal(link?.url, 'https://ant-yenisey.ru/my-bookings');
   });
 
@@ -49,7 +49,7 @@ describe('сообщения о записи', () => {
     );
     assert.match(
       renderNotification('BOOKING_CANCELLED', { ...training, charge: 35_000, chargePercent: 50 }, context).text,
-      /к оплате 350 ₽ \(50%\)/,
+      /к оплате 350 ₽ \(50%\)/,
     );
   });
 
@@ -82,7 +82,7 @@ describe('сообщения о записи', () => {
     const { text } = renderNotification('BOOKING_NO_SHOW', { ...training, charge: 70_000, chargePercent: 100 }, context);
 
     assert.match(text, /^Отмечена неявка/);
-    assert.match(text, /к оплате 700 ₽/);
+    assert.match(text, /к оплате 700 ₽/);
     assert.match(text, /обратитесь к администратору/);
   });
 
@@ -136,9 +136,9 @@ describe('абонемент, разряд, семья', () => {
 
 describe('rubles', () => {
   it('рубли с копейками и разрядами', () => {
-    assert.equal(rubles(70_000), '700 ₽');
-    assert.equal(rubles(35_050), '350,50 ₽');
-    assert.equal(rubles(1_200_000), '12 000 ₽');
+    assert.equal(rubles(70_000), '700 ₽');
+    assert.equal(rubles(35_050), '350,50 ₽');
+    assert.equal(rubles(1_200_000), '12 000 ₽');
   });
 });
 
@@ -255,7 +255,7 @@ describe('утренние сводки', () => {
     assert.match(text, /Своим отметили: 2 \(всего 57\) — Иванов И\., Петрова А\./);
     assert.match(text, /Новых клиентов: 0/);
     assert.match(text, /Пришли: 14, не пришли: 2, отмен: 3/);
-    assert.match(text, /Итог дня: 12\u00a0400 ₽, абонементов продано 2 на 9\u00a0000 ₽/);
+    assert.match(text, /Итог дня: 12\u00a0400 ₽, абонементов продано 2 на 9\u00a0000 ₽/);
     assert.match(text, /Сегодня: занятий 5 \(записано 38 из 60\), турниров 1, аренд 7/);
     assert.doesNotMatch(text, /Без отметки|Абонемент кончается|Закончились визиты/);
     assert.doesNotMatch(text, /\n\n\n/);

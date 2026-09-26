@@ -1,3 +1,5 @@
+import { formatRubles } from '@yenisey/types';
+
 /**
  * Перевод денег между хранением и показом.
  *
@@ -16,9 +18,13 @@ export function kopecksToInput(kopecks: number): string {
   return remainder === 0 ? String(rubles) : `${rubles},${String(remainder).padStart(2, '0')}`;
 }
 
-/** Копейки → строка для чтения: «400 ₽», «400,50 ₽». */
+/**
+ * Копейки → строка для чтения: «4 000 ₽», «400,50 ₽» — с пробелом между
+ * разрядами (решение владельца от 26.09.2026). Та же функция, что в
+ * сообщениях бота: `formatRubles` из `@yenisey/types`.
+ */
 export function formatKopecks(kopecks: number): string {
-  return `${kopecksToInput(kopecks)} ₽`;
+  return formatRubles(kopecks);
 }
 
 /**
