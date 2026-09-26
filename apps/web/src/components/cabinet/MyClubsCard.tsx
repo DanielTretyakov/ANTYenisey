@@ -1,5 +1,6 @@
 'use client';
 
+import { rolesLabel } from '@/lib/roles';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import type { ClubCard, FavouriteClub, PublicUser } from '@yenisey/types';
@@ -147,9 +148,9 @@ const ROLE_LABELS: Record<string, string> = {
  * записавшись, и «клиент» в этом случае было бы неправдой.
  */
 function roleLabel(user: PublicUser, slug: string): string {
-  const role = user.memberships.find((membership) => membership.slug === slug)?.role;
+  const roles = user.memberships.find((membership) => membership.slug === slug)?.roles;
 
-  return role ? ` · ${ROLE_LABELS[role] ?? role}` : '';
+  return roles && roles.length > 0 ? ` · ${rolesLabel(roles)}` : '';
 }
 
 /**

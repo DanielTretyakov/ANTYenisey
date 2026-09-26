@@ -19,7 +19,7 @@ import type { ClubContext } from '../auth/club-context';
  * Роли на классе: в карточке телефон, почта, дата рождения и вся история
  * человека. Маршрут, добавленный сюда завтра, окажется закрытым по умолчанию.
  */
-@Roles('ADMIN', 'OWNER')
+@Roles('ADMIN', 'MANAGER', 'OWNER')
 @Controller('clubs/:slug/people')
 export class PeopleController {
   constructor(private readonly people: PeopleService) {}

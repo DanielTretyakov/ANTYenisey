@@ -2,18 +2,18 @@ import type { PublicUser, Role } from '@yenisey/types';
 import { TENANT_SLUG } from './config';
 
 /**
- * Роль человека в клубе, который обслуживает этот экземпляр веба.
+ * Роли человека в клубе — несколько сразу (решение владельца от 26.09.2026).
  *
  * Раньше роль лежала прямо в профиле — `user.role`. Теперь её там нет и быть
  * не может: аккаунт один на всю платформу, а роль — свойство пары «человек +
  * клуб». Один и тот же человек бывает клиентом здесь и владельцем в соседнем
  * клубе, и «роль пользователя» без указания клуба ничего не значит.
  *
- * `null` означает, что в ЭТОМ клубе человек не состоит. Это не ошибка и не
+ * Пустой список означает, что в ЭТОМ клубе человек не состоит. Это не ошибка и не
  * отказ: по ТЗ записаться может любой пользователь платформы, а привязка
  * появится с первой записью. Интерфейсу этого достаточно, чтобы не показывать
  * ему разделы клуба.
  */
-export function roleInClub(user: PublicUser, slug: string = TENANT_SLUG): Role | null {
-  return user.memberships.find((membership) => membership.slug === slug)?.role ?? null;
+export function rolesInClub(user: PublicUser, slug: string = TENANT_SLUG): Role[] {
+  return user.memberships.find((membership) => membership.slug === slug)?.roles ?? [];
 }

@@ -3,7 +3,8 @@
 import { useCallback, useState } from 'react';
 import type { ClubEvent } from '@yenisey/types';
 import { ApiError, clubApi } from './api';
-import { roleInClub } from './membership';
+import { isStaff } from '@yenisey/types';
+import { rolesInClub } from './membership';
 import type { SessionState } from './useSession';
 
 /**
@@ -38,7 +39,7 @@ export function eventViewerOf(
 ): EventViewer {
   if (session.status !== 'ready') return 'anonymous';
   if (forPerson) return 'client';
-  if ((roleInClub(session.user, slug) ?? 'CLIENT') !== 'CLIENT') return 'staff';
+  if (isStaff(rolesInClub(session.user, slug))) return 'staff';
 
   return selfIsChild ? 'child' : 'client';
 }

@@ -147,12 +147,12 @@ export class NotificationsService {
       this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { platformRole: true } }),
       this.prisma.maxLink.findUnique({ where: { userId }, select: { linkedAt: true, blockedAt: true } }),
       this.prisma.pushSubscription.count({ where: { userId } }),
-      this.prisma.tenantMembership.findMany({ where: { userId, deactivatedAt: null }, select: { role: true } }),
+      this.prisma.tenantMembership.findMany({ where: { userId, deactivatedAt: null }, select: { roles: true } }),
       this.prisma.notificationSetting.findMany({ where: { userId }, select: { category: true, enabled: true } }),
     ]);
 
     const categories = availableCategories({
-      clubRoles: memberships.map((membership) => membership.role),
+      clubRoles: memberships.flatMap((membership) => membership.roles),
       platformOwner: user.platformRole === 'OWNER',
     });
     const off = new Set(stored.filter((row) => !row.enabled).map((row) => row.category));

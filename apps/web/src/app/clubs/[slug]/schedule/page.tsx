@@ -2,26 +2,17 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type {
-  ClubCoach,
-  ClubTable,
-  Hall,
-  Role,
-  Tournament,
-  TournamentType,
-  TrainingType,
-} from '@yenisey/types';
+import { hasAnyRole, MANAGING_ROLES, type ClubCoach, type ClubTable, type Hall, type Role, type Tournament, type TournamentType, type TrainingType } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { Tab } from '@/components/ui/Tab';
-import { roleInClub } from '@/lib/membership';
+import { rolesInClub } from '@/lib/membership';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { useSession } from '@/lib/useSession';
 import { DayBoard } from './DayBoard';
 import { messageOf, TemplateBoard } from './TemplateBoard';
 import { initialHallId, PreferredHallButton, usePreferredHall, withPreferredFirst } from '@/components/club/PreferredHall';
 
-const MANAGERS: Role[] = ['ADMIN', 'OWNER'];
 
 type Mode = 'day' | 'template';
 
@@ -52,8 +43,8 @@ export default function SchedulePage() {
   const slug = useClubSlug();
   const club = useClubApi();
 
-  const role = session.status === 'ready' ? roleInClub(session.user, slug) : null;
-  const allowed = role !== null && MANAGERS.includes(role);
+  const roles = session.status === 'ready' ? rolesInClub(session.user, slug) : [];
+  const allowed = hasAnyRole(roles, MANAGING_ROLES);
 
   const [data, setData] = useState<Loaded | null>(null);
   const [hallId, setHallId] = useState('');

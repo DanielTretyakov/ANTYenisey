@@ -57,7 +57,7 @@ export class ClubContextGuard implements CanActivate {
         userId: '',
         tenantId: tenant.id,
         slug,
-        role: Role.CLIENT,
+        roles: [Role.CLIENT],
         joined: false,
       };
       return true;
@@ -65,7 +65,7 @@ export class ClubContextGuard implements CanActivate {
 
     const membership = await this.prisma.tenantMembership.findUnique({
       where: { userId_tenantId: { userId, tenantId: tenant.id } },
-      select: { role: true, deactivatedAt: true },
+      select: { roles: true, deactivatedAt: true },
     });
 
     // Отключённый в этом клубе не возвращается сам собой: без этой проверки
@@ -82,7 +82,7 @@ export class ClubContextGuard implements CanActivate {
       // Привязки нет — значит человек в этом клубе впервые. По ТЗ записаться
       // может любой пользователь платформы, поэтому он проходит как клиент, а
       // строка TenantMembership появится первым же действием.
-      role: membership?.role ?? Role.CLIENT,
+      roles: membership?.roles ?? [Role.CLIENT],
       joined: membership !== null,
     };
 

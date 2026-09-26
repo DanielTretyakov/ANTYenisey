@@ -1125,7 +1125,7 @@ ALTER TABLE "Tenant"
 -- у не показанных тренеров номера нет вовсе.
 ALTER TABLE "TenantMembership"
   ADD CONSTRAINT "TenantMembership_coach_list_only_coach"
-  CHECK ("coachListOrder" IS NULL OR ("role" = 'COACH' AND "coachListOrder" BETWEEN 1 AND 100));
+  CHECK ("coachListOrder" IS NULL OR ('COACH' = ANY ("roles") AND "coachListOrder" BETWEEN 1 AND 100));
 
 CREATE UNIQUE INDEX "TenantMembership_coach_list_order_unique"
   ON "TenantMembership" ("tenantId", "coachListOrder")
@@ -1170,7 +1170,7 @@ ALTER TABLE "Hall"
 -- вместе с местом в списке.
 ALTER TABLE "TenantMembership"
   ADD CONSTRAINT "TenantMembership_coach_hidden_only_coach"
-  CHECK ("coachHidden" = false OR "role" = 'COACH');
+  CHECK ("coachHidden" = false OR 'COACH' = ANY ("roles"));
 
 -- ---------------------------------------------------------------------------
 -- 28. Телефон и почта зала
@@ -1185,3 +1185,18 @@ ALTER TABLE "Hall"
 ALTER TABLE "Hall"
   ADD CONSTRAINT "Hall_email_format"
   CHECK ("email" IS NULL OR (char_length("email") <= 200 AND "email" ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'));
+
+-- ---------------------------------------------------------------------------
+-- 29. Несколько ролей у человека в клубе
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_membership_roles (решение владельца от 26.09.2026).
+-- Роли непусты; CLIENT — «сотрудником не является» — только одна. Остальные
+-- сочетания правила разрешают: руководитель или управляющий бывает ещё
+-- администратором и тренером, администратор — тренером.
+ALTER TABLE "TenantMembership"
+  ADD CONSTRAINT "TenantMembership_roles_sane"
+  CHECK (
+    cardinality("roles") BETWEEN 1 AND 5
+    AND ('CLIENT' <> ALL ("roles") OR cardinality("roles") = 1)
+  );

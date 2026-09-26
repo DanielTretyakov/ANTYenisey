@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsIn,
   IsInt,
@@ -9,9 +10,9 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import type { ChangeRoleRequest, ClubPeopleQuery, Role } from '@yenisey/types';
+import type { ChangeRolesRequest, ClubPeopleQuery, Role } from '@yenisey/types';
 
-const ROLES: Role[] = ['CLIENT', 'ADMIN', 'COACH', 'OWNER'];
+const ROLES: Role[] = ['CLIENT', 'ADMIN', 'COACH', 'MANAGER', 'OWNER'];
 
 /**
  * Фильтр списка людей клуба.
@@ -63,8 +64,10 @@ export class ClubPeopleQueryDto implements ClubPeopleQuery {
   offset?: number;
 }
 
-/** Смена роли: повышение клиента до тренера и обратно. */
-export class ChangeRoleDto implements ChangeRoleRequest {
-  @IsIn(ROLES, { message: 'Неизвестная роль' })
-  role: Role;
+/** Роли человека целиком — несколько сразу (решение владельца от 26.09.2026). */
+export class ChangeRolesDto implements ChangeRolesRequest {
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsIn(ROLES, { each: true, message: 'Неизвестная роль' })
+  roles: Role[];
 }

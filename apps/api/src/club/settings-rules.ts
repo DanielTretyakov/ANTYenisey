@@ -54,7 +54,10 @@ export function clubSettingsViolations(settings: ClubSettings): string[] {
 
 /** Список нарушений в настройках зала. */
 /** Поля зала, которые проверяются правилами; адрес проверяет справочник. */
-export type HallRulesInput = Omit<Hall, 'id' | 'address' | 'addressFiasId' | 'latitude' | 'longitude' | 'phone' | 'email'>;
+export type HallRulesInput = Omit<
+  Hall,
+  'id' | 'address' | 'addressFiasId' | 'latitude' | 'longitude' | 'phone' | 'email' | 'managerId'
+>;
 
 export function hallViolations(hall: HallRulesInput): string[] {
   const violations: string[] = [];

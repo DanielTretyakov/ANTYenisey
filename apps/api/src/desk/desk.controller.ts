@@ -23,7 +23,7 @@ import type { ClubContext } from '../auth/club-context';
  * `TenantMembership` на каждый запрос: администратор «Енисея», подставивший в
  * адрес чужой клуб, окажется там клиентом и получит 403 от строки ниже.
  */
-@Roles('ADMIN', 'OWNER')
+@Roles('ADMIN', 'MANAGER', 'OWNER')
 @Controller('clubs/:slug/desk')
 export class DeskController {
   constructor(private readonly desk: DeskService) {}

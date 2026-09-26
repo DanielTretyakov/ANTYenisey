@@ -220,7 +220,7 @@ async function main(): Promise<void> {
   // Администратор ищется по привязке к клубу, а не по учётной записи: роль теперь
   // свойство пары «человек + клуб», а не человека.
   const admin = await prisma.tenantMembership.findFirst({
-    where: { tenantId: tenant.id, role: Role.ADMIN },
+    where: { tenantId: tenant.id, roles: { has: Role.ADMIN } },
     select: { user: { select: { email: true } } },
   });
 

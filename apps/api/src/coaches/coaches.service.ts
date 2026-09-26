@@ -206,7 +206,7 @@ export class CoachesService {
         gender: true,
         coachCard: { select: CARD_SELECT },
         memberships: {
-          where: { role: 'COACH', deactivatedAt: null, coachProfile: { isNot: null } },
+          where: { roles: { has: 'COACH' }, deactivatedAt: null, coachProfile: { isNot: null } },
           select: {
             tenant: { select: { name: true, slug: true } },
             coachProfile: { select: PRICES_SELECT },
@@ -349,7 +349,7 @@ export class CoachesService {
    */
   private async assertCoach(userId: string): Promise<void> {
     const coach = await this.prisma.coachProfile.findFirst({
-      where: { userId, membership: { role: 'COACH', deactivatedAt: null } },
+      where: { userId, membership: { roles: { has: 'COACH' }, deactivatedAt: null } },
       select: { userId: true },
     });
 

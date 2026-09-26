@@ -8,9 +8,10 @@
 
 /**
  * Роль пользователя внутри клуба. Значения совпадают с enum `Role` из
- * schema.prisma — при добавлении роли править оба места.
+ * schema.prisma — при добавлении роли править оба места. Ролей у человека в
+ * клубе бывает несколько сразу — см. `roles.ts`.
  */
-export type Role = 'CLIENT' | 'ADMIN' | 'COACH' | 'OWNER';
+export type Role = 'CLIENT' | 'ADMIN' | 'COACH' | 'MANAGER' | 'OWNER';
 
 /**
  * Пол человека — ради рисованной заглушки вместо фотографии (решение
@@ -88,7 +89,8 @@ export interface UserMembership {
   /** Код клуба — он же участок адреса: /api/clubs/:slug/... */
   slug: string;
   name: string;
-  role: Role;
+  /** Роли в этом клубе — несколько сразу; клиент — `['CLIENT']`. */
+  roles: Role[];
 }
 
 /** Пользователь в том виде, в каком его отдаёт API — без секретов. */

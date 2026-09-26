@@ -224,7 +224,7 @@ async function main(): Promise<void> {
  */
 async function ensureCoach(tenantId: string): Promise<string> {
   const existing = await prisma.tenantMembership.findFirst({
-    where: { tenantId, role: Role.COACH, coachProfile: { isNot: null } },
+    where: { tenantId, roles: { has: Role.COACH }, coachProfile: { isNot: null } },
     select: { userId: true },
   });
 
@@ -250,8 +250,8 @@ async function ensureCoach(tenantId: string): Promise<string> {
 
   await prisma.tenantMembership.upsert({
     where: { userId_tenantId: { userId: user.id, tenantId } },
-    update: { role: Role.COACH },
-    create: { userId: user.id, tenantId, role: Role.COACH },
+    update: { roles: { has: Role.COACH } },
+    create: { userId: user.id, tenantId, roles: [Role.COACH] },
   });
 
   await prisma.coachProfile.upsert({

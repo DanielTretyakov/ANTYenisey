@@ -2,15 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
-import type {
-  Hall,
-  Role,
-  SubscriptionPlan,
-  Tournament,
-  TournamentType,
-  TrainingSession,
-  TrainingType,
-} from '@yenisey/types';
+import { hasAnyRole, MANAGING_ROLES, type Hall, type Role, type SubscriptionPlan, type Tournament, type TournamentType, type TrainingSession, type TrainingType } from '@yenisey/types';
 import { SubscriptionPlansCard } from './SubscriptionPlansCard';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
@@ -19,14 +11,13 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { inputClassName } from '@/components/ui/Field';
 import { MoneyField } from '@/components/ui/MoneyField';
 import { Tab } from '@/components/ui/Tab';
-import { roleInClub } from '@/lib/membership';
+import { rolesInClub } from '@/lib/membership';
 import { ApiError } from '@/lib/api';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { cn } from '@/lib/cn';
 import { formatKopecks, inputToKopecks, kopecksToInput } from '@/lib/money';
 import { useSession } from '@/lib/useSession';
 
-const MANAGERS: Role[] = ['ADMIN', 'OWNER'];
 
 /**
  * Занятия и турниры: справочники, из которых собирается расписание.
@@ -58,8 +49,8 @@ export default function CatalogPage() {
   // получал отказ. Настоящий доступ это не открывало (сервер проверяет
   // TenantMembership на каждый запрос), но показывало не то.
   const slug = useClubSlug();
-  const role = session.status === 'ready' ? roleInClub(session.user, slug) : null;
-  const allowed = role !== null && MANAGERS.includes(role);
+  const roles = session.status === 'ready' ? rolesInClub(session.user, slug) : [];
+  const allowed = hasAnyRole(roles, MANAGING_ROLES);
 
   useEffect(() => {
     if (session.status === 'anonymous') {

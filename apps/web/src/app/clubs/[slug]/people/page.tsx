@@ -3,39 +3,35 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import type { ClubPeoplePage, ClubPerson, Role } from '@yenisey/types';
+import { hasAnyRole, MANAGING_ROLES, type ClubPeoplePage, type ClubPerson, type Role } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Tab } from '@/components/ui/Tab';
 import { inputClassName } from '@/components/ui/Field';
-import { roleInClub } from '@/lib/membership';
+import { rolesInClub } from '@/lib/membership';
+import { ROLE_LABELS, rolesLabel } from '@/lib/roles';
 import { ApiError } from '@/lib/api';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { cn } from '@/lib/cn';
 import { useSession } from '@/lib/useSession';
 
-/** Роли, которым доступен состав клуба. */
-const MANAGERS: Role[] = ['ADMIN', 'OWNER'];
-
-const ROLE_LABELS: Record<Role, string> = {
-  CLIENT: 'Клиент',
-  COACH: 'Тренер',
-  ADMIN: 'Администратор',
-  OWNER: 'Руководство',
-};
 
 /** Вкладки. «Все» первой: чаще нужно найти человека, чем перебрать роль. */
 const TABS: { value: Role | 'ALL'; label: string }[] = [
   { value: 'ALL', label: 'Все' },
-  { value: 'OWNER', label: 'Руководство' },
+  { value: 'OWNER', label: 'Руководители' },
+  { value: 'MANAGER', label: 'Управляющие' },
   { value: 'ADMIN', label: 'Администраторы' },
   { value: 'COACH', label: 'Тренеры' },
   { value: 'CLIENT', label: 'Клиенты' },
 ];
 
 const PAGE_SIZE = 50;
+
+/** Роли, которые переключаются в строке; клиент — когда не выбрана ни одна. */
+const EDITABLE_ROLES: Role[] = ['OWNER', 'MANAGER', 'ADMIN', 'COACH'];
 
 /**
  * Состав клуба: сотрудники и клиенты.
@@ -63,8 +59,8 @@ export default function PeoplePage() {
   // получал отказ. Настоящий доступ это не открывало (сервер проверяет
   // TenantMembership на каждый запрос), но показывало не то.
   const slug = useClubSlug();
-  const role = session.status === 'ready' ? roleInClub(session.user, slug) : null;
-  const allowed = role !== null && MANAGERS.includes(role);
+  const roles = session.status === 'ready' ? rolesInClub(session.user, slug) : [];
+  const allowed = hasAnyRole(roles, MANAGING_ROLES);
 
   useEffect(() => {
     if (session.status === 'anonymous') {
@@ -167,7 +163,7 @@ export default function PeoplePage() {
                       <th className="py-2 pr-4 font-medium">Почта</th>
                       <th className="py-2 pr-4 font-medium">Телефон</th>
                       <th className="py-2 pr-4 font-medium">Дата рождения</th>
-                      <th className="py-2 font-medium">Роль</th>
+                      <th className="py-2 font-medium">Роли</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -176,6 +172,7 @@ export default function PeoplePage() {
                         key={person.id}
                         person={person}
                         self={session.status === 'ready' && session.user.id === person.id}
+                        viewerRoles={roles}
                         onChanged={(updated) =>
                           setPage((previous) =>
                             previous
@@ -238,12 +235,15 @@ export default function PeoplePage() {
 function PersonRow({
   person,
   self,
+  viewerRoles,
   onChanged,
   onError,
 }: {
   person: ClubPerson;
   /** Свою роль изменить нельзя — сервер это тоже запрещает. */
   self: boolean;
+  /** Роли смотрящего: руководство назначает только руководитель. */
+  viewerRoles: Role[];
   onChanged: (person: ClubPerson) => void;
   onError: (message: string) => void;
 }) {
@@ -251,13 +251,16 @@ function PersonRow({
   const slug = useClubSlug();
   const [pending, setPending] = useState(false);
 
-  async function change(role: Role): Promise<void> {
-    if (role === person.role) return;
+  // Роли — переключателями, их несколько сразу (решение владельца от
+  // 26.09.2026). Ни одной сотруднической — клиент.
+  async function toggle(role: Role): Promise<void> {
+    const staff: Role[] = person.roles.filter((item) => item !== 'CLIENT');
+    const next = staff.includes(role) ? staff.filter((item) => item !== role) : [...staff, role];
 
     setPending(true);
 
     try {
-      onChanged(await club.changeRole(person.id, role));
+      onChanged(await club.changeRoles(person.id, next.length > 0 ? next : ['CLIENT']));
     } catch (cause) {
       onError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
     } finally {
@@ -285,23 +288,36 @@ function PersonRow({
       <td className="py-2.5 pr-4 text-text-muted">{formatDate(person.birthDate)}</td>
       <td className="py-2.5">
         {self ? (
-          <span className="text-text-muted" title="Свою собственную роль изменить нельзя">
-            {ROLE_LABELS[person.role]}
+          <span className="text-text-muted" title="Свои роли изменить нельзя">
+            {rolesLabel(person.roles)}
           </span>
         ) : (
-          <select
-            aria-label={`Роль: ${person.fullName}`}
-            value={person.role}
-            disabled={pending}
-            onChange={(event) => void change(event.target.value as Role)}
-            className={cn(inputClassName, 'w-auto py-1 text-[0.8125rem]')}
-          >
-            {(Object.keys(ROLE_LABELS) as Role[]).map((role) => (
-              <option key={role} value={role}>
-                {ROLE_LABELS[role]}
-              </option>
-            ))}
-          </select>
+          <div className="flex flex-wrap gap-1" role="group" aria-label={`Роли: ${person.fullName}`}>
+            {EDITABLE_ROLES.map((role) => {
+              // Руководство назначает руководитель — остальным переключатель
+              // виден, но заперт.
+              const locked = (role === 'OWNER' || role === 'MANAGER') && !viewerRoles.includes('OWNER');
+
+              return (
+                <button
+                  key={role}
+                  type="button"
+                  aria-pressed={person.roles.includes(role)}
+                  disabled={pending || locked}
+                  title={locked ? 'Назначает руководитель клуба' : undefined}
+                  onClick={() => void toggle(role)}
+                  className={cn(
+                    'rounded-full border px-2.5 py-0.5 text-[0.75rem] transition-colors disabled:opacity-40',
+                    person.roles.includes(role)
+                      ? 'border-border-accent bg-surface-accent-soft text-text-accent'
+                      : 'border-border text-text-muted hover:bg-surface-sunken',
+                  )}
+                >
+                  {ROLE_LABELS[role]}
+                </button>
+              );
+            })}
+          </div>
         )}
       </td>
     </tr>

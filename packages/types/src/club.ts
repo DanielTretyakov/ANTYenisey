@@ -183,6 +183,11 @@ export interface Hall {
    */
   phone: string | null;
   email: string | null;
+  /**
+   * Управляющий зала (решение владельца от 26.09.2026) — назначает
+   * администраторов на смены. Ставит руководитель отдельным маршрутом.
+   */
+  managerId: string | null;
 
   bookingStep: BookingStep;
   /** Цена первого часа аренды стола без робота, копейки. */
@@ -206,7 +211,7 @@ export interface Hall {
  */
 export type CreateHallRequest = Omit<
   Hall,
-  'id' | 'address' | 'addressFiasId' | 'latitude' | 'longitude' | 'phone' | 'email'
+  'id' | 'address' | 'addressFiasId' | 'latitude' | 'longitude' | 'phone' | 'email' | 'managerId'
 > & {
   addressFiasId: string;
   /** Не прислано — у зала своих контактов нет, звонят в клуб. */
@@ -406,7 +411,8 @@ export interface ClubPerson {
   phone: string;
   /** Дата рождения, «2001-05-17». */
   birthDate: string;
-  role: Role;
+  /** Роли в клубе, по старшинству; клиент — `['CLIENT']`. */
+  roles: Role[];
   /** Когда учётка заведена — по ней список и сортируется по умолчанию. */
   createdAt: string;
   /**
@@ -424,17 +430,18 @@ export interface ClubPeoplePage {
 }
 
 /**
- * Смена роли человека.
+ * Роли человека целиком (решение владельца от 26.09.2026: несколько сразу).
  *
  * Повышение клиента до тренера и обратно — обычная жизнь клуба, и делать это
- * должен администратор, а не разработчик командой в консоли.
+ * должен администратор, а не разработчик командой в консоли. Руководителя и
+ * управляющего назначает только руководитель.
  */
-export interface ChangeRoleRequest {
-  role: Role;
+export interface ChangeRolesRequest {
+  roles: Role[];
 }
 
 export interface ClubPeopleQuery {
-  /** Пусто — все роли. */
+  /** Пусто — все; иначе — у кого среди ролей есть эта. */
   role?: Role;
   /** Поиск по ФИО, почте и телефону. */
   search?: string;

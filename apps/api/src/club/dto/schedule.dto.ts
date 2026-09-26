@@ -387,3 +387,11 @@ export class ReplaceDayDto implements ReplaceDayRequest {
 function ValidateIfNotNull(): PropertyDecorator {
   return ValidateIf((_object: unknown, value: unknown) => value !== null);
 }
+
+/** Управляющий зала: идентификатор человека или null — снять. */
+export class HallManagerDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  managerId?: string | null;
+}

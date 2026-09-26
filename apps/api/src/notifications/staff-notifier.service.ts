@@ -202,7 +202,7 @@ export async function clubStaff(db: Db, tenantId: string): Promise<string[]> {
   const rows = await db.tenantMembership.findMany({
     where: {
       tenantId,
-      role: { in: [Role.ADMIN, Role.OWNER] },
+      roles: { hasSome: [Role.ADMIN, Role.MANAGER, Role.OWNER] },
       deactivatedAt: null,
       user: { deactivatedAt: null },
     },

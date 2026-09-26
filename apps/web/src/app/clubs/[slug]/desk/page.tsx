@@ -2,15 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type {
-  ClubPerson,
-  DeskBooking,
-  DeskDay,
-  DeskEvent,
-  DeskTableNow,
-  Hall,
-  Role,
-} from '@yenisey/types';
+import { hasAnyRole, MANAGING_ROLES, type ClubPerson, type DeskBooking, type DeskDay, type DeskEvent, type DeskTableNow, type Hall, type Role } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -25,13 +17,12 @@ import { ApiError } from '@/lib/api';
 import { pendingCounts } from '@/lib/attendance';
 import { formatDate, formatMinute, todayIn } from '@/lib/bookingGrid';
 import { cn } from '@/lib/cn';
-import { roleInClub } from '@/lib/membership';
+import { rolesInClub } from '@/lib/membership';
 import { formatKopecks } from '@/lib/money';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { useSession } from '@/lib/useSession';
 import { initialHallId, PreferredHallButton, usePreferredHall, withPreferredFirst } from '@/components/club/PreferredHall';
 
-const MANAGERS: Role[] = ['ADMIN', 'OWNER'];
 
 /**
  * Экран смены — главная страница администратора клуба.
@@ -61,8 +52,8 @@ export default function DeskPage() {
   const slug = useClubSlug();
   const club = useClubApi();
 
-  const role = session.status === 'ready' ? roleInClub(session.user, slug) : null;
-  const allowed = role !== null && MANAGERS.includes(role);
+  const roles = session.status === 'ready' ? rolesInClub(session.user, slug) : [];
+  const allowed = hasAnyRole(roles, MANAGING_ROLES);
 
   const [halls, setHalls] = useState<Hall[] | null>(null);
   const [hallId, setHallId] = useState('');

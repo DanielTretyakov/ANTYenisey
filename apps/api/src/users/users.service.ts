@@ -28,7 +28,7 @@ export class UsersService {
         memberships: {
           where: { deactivatedAt: null },
           select: {
-            role: true,
+            roles: true,
             tenantId: true,
             tenant: { select: { slug: true, name: true } },
           },
@@ -52,7 +52,7 @@ export class UsersService {
         tenantId: membership.tenantId,
         slug: membership.tenant.slug,
         name: membership.tenant.name,
-        role: membership.role,
+        roles: membership.roles,
       })),
     };
   }

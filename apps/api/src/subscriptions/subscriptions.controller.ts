@@ -27,7 +27,7 @@ import { SubscriptionsService } from './subscriptions.service';
  * Удаления тарифа нет: на проданный абонемент он ссылается с Restrict, а
  * снятый с продажи тариф просто не предлагается.
  */
-@Roles('ADMIN', 'OWNER')
+@Roles('ADMIN', 'MANAGER', 'OWNER')
 @Controller('clubs/:slug/subscription-plans')
 export class SubscriptionPlansController {
   constructor(private readonly subscriptions: SubscriptionsService) {}
@@ -59,7 +59,7 @@ export class SubscriptionPlansController {
  * приходят мимо системы, и этот журнал — единственный след того, кто что продал
  * и кому что вернули.
  */
-@Roles('ADMIN', 'OWNER')
+@Roles('ADMIN', 'MANAGER', 'OWNER')
 @Controller('clubs/:slug/subscriptions')
 export class ClubSubscriptionsController {
   constructor(private readonly subscriptions: SubscriptionsService) {}
@@ -74,7 +74,7 @@ export class ClubSubscriptionsController {
  * Абонементы человека — из его карточки у администратора. Сами абонементы
  * приходят вместе с карточкой; здесь продажа, корректировка и история.
  */
-@Roles('ADMIN', 'OWNER')
+@Roles('ADMIN', 'MANAGER', 'OWNER')
 @Controller('clubs/:slug/people/:id/subscriptions')
 export class PersonSubscriptionsController {
   constructor(private readonly subscriptions: SubscriptionsService) {}

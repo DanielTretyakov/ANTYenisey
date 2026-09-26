@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import type { BookingStatus, ClubPersonCard, ClubPersonEntry, Role } from '@yenisey/types';
+import { hasAnyRole, MANAGING_ROLES, type BookingStatus, type ClubPersonCard, type ClubPersonEntry, type Role } from '@yenisey/types';
 import { fullYears } from '@yenisey/types';
 import { CoachCard } from '@/components/coach/CoachCard';
 import { ClubFamilyBlock } from '@/components/family/ClubFamilyBlock';
@@ -15,18 +15,11 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { formatKopecks } from '@/lib/money';
-import { roleInClub } from '@/lib/membership';
+import { rolesInClub } from '@/lib/membership';
+import { rolesLabel } from '@/lib/roles';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { useSession } from '@/lib/useSession';
 
-const MANAGERS: Role[] = ['ADMIN', 'OWNER'];
-
-const ROLE_LABELS: Record<Role, string> = {
-  CLIENT: 'клиент',
-  COACH: 'тренер',
-  ADMIN: 'администратор',
-  OWNER: 'руководство',
-};
 
 /**
  * Карточка человека в клубе.
@@ -47,8 +40,8 @@ export default function PersonPage() {
   const params = useParams<{ id: string }>();
   const personId = params.id;
 
-  const role = session.status === 'ready' ? roleInClub(session.user, slug) : null;
-  const allowed = role !== null && MANAGERS.includes(role);
+  const roles = session.status === 'ready' ? rolesInClub(session.user, slug) : [];
+  const allowed = hasAnyRole(roles, MANAGING_ROLES);
 
   const [card, setCard] = useState<ClubPersonCard | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -98,7 +91,7 @@ export default function PersonPage() {
           <header>
             <h1 className="text-[1.75rem]">{card.person.fullName}</h1>
             <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.9375rem] text-text-muted">
-              <span>{ROLE_LABELS[card.person.role]}</span>
+              <span>{rolesLabel(card.person.roles)}</span>
               <a href={`tel:${card.person.phone}`} className="hover:text-text">
                 {card.person.phone}
               </a>

@@ -145,7 +145,7 @@ export class TenantsService {
         // странице сам. Уволенный остаётся без роли — и из списка уходит.
         memberships: {
           where: {
-            role: Role.COACH,
+            roles: { has: Role.COACH },
             coachHidden: false,
             deactivatedAt: null,
             user: { deactivatedAt: null, anonymizedAt: null },

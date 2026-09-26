@@ -37,7 +37,9 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Недостаточно прав');
     }
 
-    if (!required.includes(club.role)) {
+    // Ролей у человека несколько (решение владельца от 26.09.2026): пускаем,
+    // если подходит хоть одна.
+    if (!club.roles.some((role) => required.includes(role))) {
       throw new ForbiddenException('Недостаточно прав');
     }
 

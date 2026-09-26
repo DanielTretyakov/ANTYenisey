@@ -82,6 +82,7 @@ import type {
   UpdateEquipmentRequest,
   RecordVisitRequest,
   RegisterRequest,
+  Role,
   Tournament,
   TournamentRequest,
   TournamentType,
@@ -641,9 +642,13 @@ export function clubApi(slug: string = TENANT_SLUG) {
     attachPerson: (id: string): Promise<ClubPerson> =>
       authorized(`${club}/people/${id}/attach`, json('POST', {})),
 
-    /** Повышение клиента до тренера и обратно. */
-    changeRole: (userId: string, role: ClubPerson['role']): Promise<ClubPerson> =>
-      authorized(`${club}/people/${userId}/role`, json('PATCH', { role })),
+    /** Роли человека целиком — несколько сразу (решение владельца от 26.09.2026). */
+    changeRoles: (userId: string, roles: Role[]): Promise<ClubPerson> =>
+      authorized(`${club}/people/${userId}/roles`, json('PUT', { roles })),
+
+    /** Управляющий зала — ставит руководитель; null — снять. */
+    setHallManager: (hallId: string, managerId: string | null): Promise<Hall> =>
+      authorized(`${club}/halls/${hallId}/manager`, json('PUT', { managerId })),
 
     // --- Справочники: типы тренировок, типы турниров, турниры
     trainingTypes: (): Promise<TrainingType[]> => authorized(`${club}/training-types`),

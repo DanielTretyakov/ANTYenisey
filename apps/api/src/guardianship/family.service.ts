@@ -164,7 +164,7 @@ export class FamilyService {
           // Ребёнка заводят у стойки, чтобы он ходил в этот клуб: привязка и
           // анкета клиента — сразу, тем же рецептом, что MembershipService.
           await tx.tenantMembership.create({
-            data: { userId: created.id, tenantId: desk.tenantId, role: Role.CLIENT },
+            data: { userId: created.id, tenantId: desk.tenantId, roles: [Role.CLIENT] },
           });
           await tx.clientProfile.create({ data: { userId: created.id, tenantId: desk.tenantId } });
 

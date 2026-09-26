@@ -52,10 +52,10 @@ VALUES ('u1','a@a.ru','+79990000001',DATE '1990-01-01','x','Иванов Ива�
 
 -- Кем каждый является в каком клубе. Роль живёт здесь, и на эту пару
 -- ссылается всё клубное.
-INSERT INTO "TenantMembership" ("userId","tenantId",role,"createdAt","updatedAt")
-VALUES ('u1','t1','CLIENT',now(),now()),
-       ('c1','t1','COACH',now(),now()),
-       ('u2','t2','CLIENT',now(),now());
+INSERT INTO "TenantMembership" ("userId","tenantId",roles,"createdAt","updatedAt")
+VALUES ('u1','t1',ARRAY['CLIENT']::"Role"[],now(),now()),
+       ('c1','t1',ARRAY['COACH']::"Role"[],now(),now()),
+       ('u2','t2',ARRAY['CLIENT']::"Role"[],now(),now());
 
 INSERT INTO "ClientProfile" ("userId","tenantId","createdAt","updatedAt")
 VALUES ('u1','t1',now(),now()),
@@ -272,8 +272,8 @@ EXCEPTION WHEN others THEN RAISE NOTICE 'R. Противоречие во фла
 -- V. Один человек — клиент в двух клубах. Ради этого и затевался единый
 --    аккаунт: раньше это были две учётные записи с одной почтой.
 DO $$ BEGIN
-  INSERT INTO "TenantMembership" ("userId","tenantId",role,"createdAt","updatedAt")
-  VALUES ('u1','t2','CLIENT',now(),now());
+  INSERT INTO "TenantMembership" ("userId","tenantId",roles,"createdAt","updatedAt")
+  VALUES ('u1','t2',ARRAY['CLIENT']::"Role"[],now(),now());
   INSERT INTO "ClientProfile" ("userId","tenantId","createdAt","updatedAt")
   VALUES ('u1','t2',now(),now());
   RAISE NOTICE 'V. Один аккаунт клиентом в двух клубах..... OK (ожидалось)';
@@ -318,8 +318,8 @@ END $$;
 -- Y. Роль — свойство пары, а не человека: тот же аккаунт тренером во втором
 --    клубе, оставаясь клиентом в первом.
 DO $$ BEGIN
-  INSERT INTO "TenantMembership" ("userId","tenantId",role,"createdAt","updatedAt")
-  VALUES ('c1','t2','COACH',now(),now());
+  INSERT INTO "TenantMembership" ("userId","tenantId",roles,"createdAt","updatedAt")
+  VALUES ('c1','t2',ARRAY['COACH']::"Role"[],now(),now());
   RAISE NOTICE 'Y. Разные роли в разных клубах............. OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'Y. ПРОВАЛ: %', SQLERRM; END $$;
 
@@ -1148,8 +1148,8 @@ EXCEPTION WHEN others THEN RAISE NOTICE 'CL. ПРОВАЛ: %', SQLERRM; END $$;
 
 INSERT INTO "User" (id,email,phone,"birthDate","passwordHash","fullName","createdAt","updatedAt")
 VALUES ('u3','u3@a.ru','+79990000013',DATE '1995-01-01','x','Сидоров Семён',now(),now());
-INSERT INTO "TenantMembership" ("userId","tenantId",role,"createdAt","updatedAt")
-VALUES ('u3','t1','CLIENT',now(),now());
+INSERT INTO "TenantMembership" ("userId","tenantId",roles,"createdAt","updatedAt")
+VALUES ('u3','t1',ARRAY['CLIENT']::"Role"[],now(),now());
 INSERT INTO "ClientProfile" ("userId","tenantId","createdAt","updatedAt") VALUES ('u3','t1',now(),now());
 
 INSERT INTO "SubscriptionPlan" (id,"tenantId",name,"visitsCount","durationDays",price,"updatedAt")
@@ -1506,3 +1506,29 @@ SELECT pg_temp.expect('EC',
 SELECT pg_temp.expect('ED',
   $q$UPDATE "Hall" SET email = 'zal.example.ru' WHERE id = 'h1'$q$,
   '23514', 'Hall_email_format');
+
+-- ---------------------------------------------------------------------------
+-- 34. Несколько ролей и управляющий зала
+-- ---------------------------------------------------------------------------
+
+-- EE. Администратор и тренер сразу — законно.
+DO $$ BEGIN
+  UPDATE "TenantMembership" SET roles = ARRAY['ADMIN','COACH']::"Role"[] WHERE "userId" = 'c1' AND "tenantId" = 't1';
+  RAISE NOTICE 'EE. Две роли сразу........................... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'EE. ПРОВАЛ: %', SQLERRM; END $$;
+UPDATE "TenantMembership" SET roles = ARRAY['COACH']::"Role"[] WHERE "userId" = 'c1' AND "tenantId" = 't1';
+
+-- EF. «Клиент и администратор» — противоречие: клиент — это «не сотрудник».
+SELECT pg_temp.expect('EF',
+  $q$UPDATE "TenantMembership" SET roles = ARRAY['CLIENT','ADMIN']::"Role"[] WHERE "userId" = 'u1' AND "tenantId" = 't1'$q$,
+  '23514', 'TenantMembership_roles_sane');
+
+-- EG. Без ролей вовсе.
+SELECT pg_temp.expect('EG',
+  $q$UPDATE "TenantMembership" SET roles = ARRAY[]::"Role"[] WHERE "userId" = 'u1' AND "tenantId" = 't1'$q$,
+  '23514', 'TenantMembership_roles_sane');
+
+-- EH. Управляющий зала — только человек этого клуба.
+SELECT pg_temp.expect('EH',
+  $q$UPDATE "Hall" SET "managerId" = 'u2' WHERE id = 'h1'$q$,
+  '23503', 'Hall_managerId_tenantId_fkey');

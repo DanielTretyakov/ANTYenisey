@@ -39,15 +39,14 @@ import {
   RenameTableDto,
   ReplaceDayDto,
   ReplaceTemplateDto,
-  UpdateHallDto,
-} from './dto/schedule.dto';
+  UpdateHallDto, HallManagerDto } from './dto/schedule.dto';
 import {
   TournamentDto,
   TournamentTypeDto,
   TrainingSessionDto,
   TrainingTypeDto,
 } from './dto/catalog.dto';
-import { ChangeRoleDto, ClubPeopleQueryDto } from './dto/people.dto';
+import { ChangeRolesDto, ClubPeopleQueryDto } from './dto/people.dto';
 import { ClubCoachListDto } from './dto/coach-list.dto';
 import { StaffPreferencesDto } from './dto/preferences.dto';
 import { UpdateClubSettingsDto } from './dto/update-settings.dto';
@@ -73,7 +72,7 @@ const UPLOAD_LIMIT = { default: { limit: 20, ttl: 60_000 } };
  * TenantMembership на каждый запрос: администратор «Енисея» в чужом клубе
  * окажется клиентом и получит 403 от строки @Roles ниже.
  */
-@Roles('ADMIN', 'OWNER')
+@Roles('ADMIN', 'MANAGER', 'OWNER')
 @Controller('clubs/:slug')
 export class ClubController {
   constructor(
@@ -165,6 +164,17 @@ export class ClubController {
     return this.club.updateHall(club.tenantId, hallId, dto);
   }
 
+  /** Управляющий зала — назначает только руководитель (решение от 26.09.2026). */
+  @Roles('OWNER')
+  @Put('halls/:id/manager')
+  setHallManager(
+    @CurrentClub() club: ClubContext,
+    @Param('id') hallId: string,
+    @Body() dto: HallManagerDto,
+  ): Promise<Hall> {
+    return this.club.setHallManager(club.tenantId, hallId, dto.managerId ?? null);
+  }
+
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete('halls/:id')
   deleteHall(
@@ -231,13 +241,13 @@ export class ClubController {
    * Кто именно меняет, важно: свою собственную роль изменить нельзя, иначе
    * единственный владелец мог бы запереть клуб.
    */
-  @Patch('people/:id/role')
+  @Put('people/:id/roles')
   changeRole(
     @CurrentClub() club: ClubContext,
     @Param('id') userId: string,
-    @Body() dto: ChangeRoleDto,
+    @Body() dto: ChangeRolesDto,
   ): Promise<ClubPerson> {
-    return this.club.changeRole(club.tenantId, club.userId, userId, dto.role);
+    return this.club.changeRoles(club.tenantId, club.roles, club.userId, userId, dto.roles);
   }
 
   // --- Типы тренировок -----------------------------------------------------

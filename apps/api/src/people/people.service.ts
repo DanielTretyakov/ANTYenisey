@@ -202,7 +202,7 @@ export class PeopleService {
       },
       select: {
         userId: true,
-        role: true,
+        roles: true,
         createdAt: true,
         deactivatedAt: true,
         user: { select: { fullName: true, email: true, phone: true, birthDate: true } },
@@ -220,7 +220,7 @@ export class PeopleService {
       this.family.familyOf(userId, tenantId),
       // Карточка тренера — только у тренера, и её может ещё не быть: роль
       // могли назначить минуту назад.
-      membership.role === Role.COACH ? this.coaches.inClub(tenantId, userId) : null,
+      membership.roles.includes(Role.COACH) ? this.coaches.inClub(tenantId, userId) : null,
       this.subscriptions.forCard(tenantId, userId),
     ]);
 
@@ -247,7 +247,7 @@ export class PeopleService {
         email: membership.user.email,
         phone: membership.user.phone,
         birthDate: formatBirthDate(membership.user.birthDate),
-        role: membership.role,
+        roles: membership.roles,
         createdAt: membership.createdAt.toISOString(),
         deactivated: membership.deactivatedAt !== null,
       },

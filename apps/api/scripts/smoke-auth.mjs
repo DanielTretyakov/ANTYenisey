@@ -192,7 +192,7 @@ async function main() {
   assert('в профиле нет роли и клуба — аккаунт платформенный',
     !('role' in (r.body?.user ?? {})) && !('tenantId' in (r.body?.user ?? {})));
   assert('регистрация со страницы клуба сразу дала роль CLIENT в нём',
-    r.body?.user?.memberships?.some((m) => m.slug === 'yenisey' && m.role === 'CLIENT') === true);
+    r.body?.user?.memberships?.some((m) => m.slug === 'yenisey' && m.roles?.includes('CLIENT')) === true);
 
   console.log('=== 2. Повторная регистрация того же адреса');
   r = await post('/auth/register', registration({ email: first.email }));
@@ -941,7 +941,7 @@ async function main() {
     check('фильтр по роли', 200, r.status);
     assert(
       'в выборке только тренеры',
-      Array.isArray(r.body?.items) && r.body.items.every((p) => p.role === 'COACH'),
+      Array.isArray(r.body?.items) && r.body.items.every((p) => p.roles?.includes('COACH')),
     );
 
     r = await asAdmin('/clubs/yenisey/people?role=NEIZVESTNAYA');
@@ -958,9 +958,9 @@ async function main() {
     assert('телефон и дата рождения пришли', Boolean(probe?.phone) && Boolean(probe?.birthDate));
 
     console.log('=== 21г. Смена роли');
-    r = await asAdmin(`/clubs/yenisey/people/${probe.id}/role`, { method: 'PATCH', json: { role: 'COACH' } });
+    r = await asAdmin(`/clubs/yenisey/people/${probe.id}/roles`, { method: 'PUT', json: { roles: ['COACH'] } });
     check('клиент повышен до тренера', 200, r.status);
-    assert('роль изменилась', r.body?.role === 'COACH');
+    assert('роль изменилась', JSON.stringify(r.body?.roles) === JSON.stringify(['COACH']));
 
     r = await asAdmin('/clubs/yenisey/coaches');
     assert(
@@ -968,20 +968,56 @@ async function main() {
       Array.isArray(r.body) && r.body.some((coach) => coach.id === probe.id),
     );
 
-    r = await asAdmin(`/clubs/yenisey/people/${probe.id}/role`, { method: 'PATCH', json: { role: 'CLIENT' } });
+    r = await asAdmin(`/clubs/yenisey/people/${probe.id}/roles`, { method: 'PUT', json: { roles: ['CLIENT'] } });
     check('и разжалован обратно', 200, r.status);
 
-    r = await asAdmin(`/clubs/yenisey/people/${probe.id}/role`, { method: 'PATCH', json: { role: 'CLIENT' } });
+    r = await asAdmin(`/clubs/yenisey/people/${probe.id}/roles`, { method: 'PUT', json: { roles: ['CLIENT'] } });
     check('повтор той же роли отклонён', 409, r.status);
 
-    r = await asAdmin(`/clubs/yenisey/people/${probe.id}/role`, { method: 'PATCH', json: { role: 'KTO-TO' } });
+    r = await asAdmin(`/clubs/yenisey/people/${probe.id}/roles`, { method: 'PUT', json: { roles: ['KTO-TO'] } });
     check('неизвестная роль отклонена', 400, r.status);
 
     // Себе роль менять нельзя: единственный владелец, разжаловавший себя,
     // запер бы клуб — вернуть роль было бы уже некому.
     const me = (await asAdmin('/auth/me')).body;
-    r = await asAdmin(`/clubs/yenisey/people/${me?.id}/role`, { method: 'PATCH', json: { role: 'CLIENT' } });
+    r = await asAdmin(`/clubs/yenisey/people/${me?.id}/roles`, { method: 'PUT', json: { roles: ['CLIENT'] } });
     check('свою роль изменить нельзя', 409, r.status);
+
+    // Несколько ролей сразу (решение владельца от 26.09.2026).
+    r = await asAdmin(`/clubs/yenisey/people/${probe.id}/roles`, { method: 'PUT', json: { roles: ['COACH', 'ADMIN'] } });
+    check('администратор и тренер сразу', 200, r.status);
+    assert('роли по старшинству', JSON.stringify(r.body?.roles) === JSON.stringify(['ADMIN', 'COACH']));
+    r = await asAdmin('/clubs/yenisey/coaches');
+    assert('администратор-тренер — в списке тренеров', (r.body ?? []).some((coach) => coach.id === probe.id));
+
+    r = await asAdmin(`/clubs/yenisey/people/${probe.id}/roles`, { method: 'PUT', json: { roles: ['CLIENT', 'ADMIN'] } });
+    check('«клиент и администратор» сводится к администратору', 200, r.status);
+    assert('клиента среди ролей сотрудника нет', JSON.stringify(r.body?.roles) === JSON.stringify(['ADMIN']));
+
+    const iAmOwner = (me?.memberships ?? []).some((m) => m.slug === 'yenisey' && m.roles?.includes('OWNER'));
+    r = await asAdmin(`/clubs/yenisey/people/${probe.id}/roles`, { method: 'PUT', json: { roles: ['MANAGER', 'ADMIN'] } });
+
+    if (iAmOwner) {
+      check('руководитель назначает управляющего', 200, r.status);
+      r = await asAdmin(`/clubs/yenisey/halls/${hallId}/manager`, { method: 'PUT', json: { managerId: probe.id } });
+      check('управляющий поставлен на зал', 200, r.status);
+      assert('у зала — управляющий', r.body?.managerId === probe.id);
+
+      r = await asAdmin(`/clubs/yenisey/people/${probe.id}/roles`, { method: 'PUT', json: { roles: ['ADMIN'] } });
+      check('роль управляющего снята', 200, r.status);
+      r = await asAdmin('/clubs/yenisey/halls');
+      assert('вместе с ролью снят и зал', (r.body ?? []).find((hall) => hall.id === hallId)?.managerId === null);
+
+      r = await asAdmin(`/clubs/yenisey/halls/${hallId}/manager`, { method: 'PUT', json: { managerId: probe.id } });
+      check('управляющим зала — только человек с этой ролью', 400, r.status);
+    } else {
+      check('управляющего назначает только руководитель', 409, r.status);
+      r = await asAdmin(`/clubs/yenisey/halls/${hallId}/manager`, { method: 'PUT', json: { managerId: probe.id } });
+      check('управляющего на зал ставит только руководитель', 403, r.status);
+    }
+
+    r = await asAdmin(`/clubs/yenisey/people/${probe.id}/roles`, { method: 'PUT', json: { roles: ['CLIENT'] } });
+    check('роли сняты — снова клиент', 200, r.status);
 
     // Стол СОСЕДНЕГО зала в расписание этого зала попасть не должен: составной
     // внешний ключ проверяет клуб, но не зал.
@@ -1382,7 +1418,7 @@ async function main() {
         r = await asOutsider('/auth/me');
         assert(
           'привязка к клубу завелась первой же бронью',
-          (r.body?.memberships ?? []).some((m) => m.slug === 'yenisey' && m.role === 'CLIENT'),
+          (r.body?.memberships ?? []).some((m) => m.slug === 'yenisey' && m.roles?.includes('CLIENT')),
         );
 
         r = await asOutsider(`/clubs/yenisey/booking/bookings/${outsiderBooking}`, {
@@ -1858,7 +1894,7 @@ async function main() {
 
     r = await asAdmin(`/clubs/yenisey/people/${walkInId}/attach`, { method: 'POST' });
     check('привязан к клубу', 200, r.status);
-    assert('привязан клиентом', r.body?.role === 'CLIENT' && r.body?.id === walkInId);
+    assert('привязан клиентом', r.body?.roles?.includes('CLIENT') && r.body?.id === walkInId);
 
     r = await asAdmin(`/clubs/yenisey/people/${walkInId}/attach`, { method: 'POST' });
     check('повторная привязка — то же состояние, а не ошибка', 200, r.status);
@@ -1890,7 +1926,7 @@ async function main() {
 
     const card = r.body;
     assert('в карточке человек с телефоном', card?.person?.phone?.startsWith('+7') === true);
-    assert('роль в клубе — клиент', card?.person?.role === 'CLIENT');
+    assert('роль в клубе — клиент', card?.person?.roles?.includes('CLIENT'));
 
     // Сводка считается по тем же записям, что показаны ниже: две брони
     // «пришёл» плюс визит с порога, одна неявка, одна отмена, одна впереди.
@@ -2666,7 +2702,7 @@ async function subscriptions() {
   }
 
   const coachId = r.body?.user?.id;
-  await asAdmin(`/clubs/yenisey/people/${coachId}/role`, { method: 'PATCH', json: { role: 'COACH' } });
+  await asAdmin(`/clubs/yenisey/people/${coachId}/roles`, { method: 'PUT', json: { roles: ['COACH'] } });
 
   r = await asAdmin('/clubs/yenisey/training-types');
   const trainingTypeId = (r.body ?? [])[0]?.id;
@@ -2928,7 +2964,7 @@ async function sparring() {
   r = await asClient('/clubs/yenisey/coach/sparring');
   check('клиенту спарринг закрыт', 403, r.status);
 
-  r = await asAdmin(`/clubs/yenisey/people/${coachId}/role`, { method: 'PATCH', json: { role: 'COACH' } });
+  r = await asAdmin(`/clubs/yenisey/people/${coachId}/roles`, { method: 'PUT', json: { roles: ['COACH'] } });
   check('роль тренера выдана', 200, r.status);
 
   r = await asCoach('/clubs/yenisey/booking/halls');
@@ -3075,7 +3111,7 @@ async function coachCard() {
   r = await asCoach('/me/coach-card');
   check('не тренеру карточка закрыта', 403, r.status);
 
-  r = await asAdmin(`/clubs/yenisey/people/${coachId}/role`, { method: 'PATCH', json: { role: 'COACH' } });
+  r = await asAdmin(`/clubs/yenisey/people/${coachId}/roles`, { method: 'PUT', json: { roles: ['COACH'] } });
   check('роль тренера выдана', 200, r.status);
 
   r = await asCoach('/me/coach-card');
@@ -3848,7 +3884,7 @@ async function family() {
   r = await post('/auth/register', registration({ lastName: 'Тренеров', firstName: 'Папа' }));
   const coachParentId = r.body?.user?.id;
   const asCoachParent = as(r.body?.accessToken ?? '');
-  r = await asAdmin(`/clubs/yenisey/people/${coachParentId}/role`, { method: 'PATCH', json: { role: 'COACH' } });
+  r = await asAdmin(`/clubs/yenisey/people/${coachParentId}/roles`, { method: 'PUT', json: { roles: ['COACH'] } });
   check('родитель стал тренером клуба', 200, r.status);
 
   r = await asCoachParent('/me/children', { method: 'POST', json: childForm({ email: newEmail('coachkid'), lastName: 'Тренеров' }) });
@@ -4357,7 +4393,7 @@ async function staffNotifications() {
   r = await post('/auth/register', registration({ lastName: 'Тренеров', firstName: 'Игнат' }));
   const coachId = r.body?.user?.id;
   const asCoach = as(r.body?.accessToken ?? '');
-  r = await asAdmin(`/clubs/yenisey/people/${coachId}/role`, { method: 'PATCH', json: { role: 'COACH' } });
+  r = await asAdmin(`/clubs/yenisey/people/${coachId}/roles`, { method: 'PUT', json: { roles: ['COACH'] } });
   check('пробному тренеру выдана роль', 200, r.status);
   await linkMax(asCoach, maxCoach);
 
@@ -4766,7 +4802,7 @@ async function clubPage() {
   r = await asAdmin('/clubs/yenisey/settings/coaches', { method: 'PUT', json: { coachIds: [probeCoachId] } });
   check('клиента в тренерский состав не поставить', 400, r.status);
 
-  r = await asAdmin(`/clubs/yenisey/people/${probeCoachId}/role`, { method: 'PATCH', json: { role: 'COACH' } });
+  r = await asAdmin(`/clubs/yenisey/people/${probeCoachId}/roles`, { method: 'PUT', json: { roles: ['COACH'] } });
   check('пробному тренеру выдана роль', 200, r.status);
 
   r = await call('/clubs/yenisey');
@@ -4806,7 +4842,7 @@ async function clubPage() {
   });
   check('скрыть можно только тренера этого клуба', 400, r.status);
 
-  r = await asAdmin(`/clubs/yenisey/people/${probeCoachId}/role`, { method: 'PATCH', json: { role: 'CLIENT' } });
+  r = await asAdmin(`/clubs/yenisey/people/${probeCoachId}/roles`, { method: 'PUT', json: { roles: ['CLIENT'] } });
   check('роль тренера снята', 200, r.status);
   r = await call('/clubs/yenisey');
   assert('бывший тренер ушёл из состава', !(r.body?.coaches ?? []).some((coach) => coach.id === probeCoachId));

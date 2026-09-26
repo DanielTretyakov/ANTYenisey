@@ -25,7 +25,7 @@ import { Toggle } from '@/components/ui/Toggle';
 import { ApiError } from '@/lib/api';
 import { loginHref } from '@/lib/next';
 import { tintFill, tintMark } from '@/lib/personColor';
-import { roleInClub } from '@/lib/membership';
+import { rolesInClub } from '@/lib/membership';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import {
   bookableDates,
@@ -78,8 +78,8 @@ export default function BookingPage() {
   const club = useClubApi();
   const slug = useClubSlug();
 
-  const role = session.status === 'ready' ? (roleInClub(session.user, slug) ?? 'CLIENT') : 'CLIENT';
-  const sparring = role === 'COACH';
+  const roles = session.status === 'ready' ? rolesInClub(session.user, slug) : [];
+  const sparring = roles.includes('COACH');
   const [sparrings, setSparrings] = useState<ClientBooking[] | null>(null);
 
   const [halls, setHalls] = useState<Hall[] | null>(null);

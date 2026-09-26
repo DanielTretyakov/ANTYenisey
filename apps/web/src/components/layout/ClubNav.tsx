@@ -3,7 +3,7 @@
 import { usePathname } from 'next/navigation';
 import type { Role } from '@yenisey/types';
 import { NavLink } from '@/components/layout/SiteHeader';
-import { roleInClub } from '@/lib/membership';
+import { rolesInClub } from '@/lib/membership';
 import { useSession } from '@/lib/useSession';
 
 /**
@@ -22,7 +22,7 @@ const SECTIONS: { path: string; label: string; roles: Role[] }[] = [
   // колонке AdminShell: их шесть, они делятся на две группы с разной частотой
   // обращения, и в горизонтальной строке эта разница не выражается никак — а
   // восемь ссылок подряд вдобавок ломают неизменную высоту шапки.
-  { path: '/desk', label: 'Рабочее место', roles: ['ADMIN', 'OWNER'] },
+  { path: '/desk', label: 'Рабочее место', roles: ['ADMIN', 'MANAGER', 'OWNER'] },
   // У тренера две ссылки, и обе горизонтальные: отдельной колонки, как у
   // администратора, они не оправдывают. Появятся статистика и спарринг —
   // тогда и колонка.
@@ -58,11 +58,14 @@ export function ClubNav({ slug }: { slug: string }) {
   // Человек без привязки к этому клубу видит то же, что клиент: записаться
   // может любой пользователь платформы, и прятать от него кнопку брони значило
   // бы закрыть единственный вход в клуб.
-  const role = roleInClub(session.user, slug) ?? 'CLIENT';
+  // Ролей несколько (решение владельца от 26.09.2026): администратор-тренер
+  // видит и рабочее место, и свои группы.
+  const own = rolesInClub(session.user, slug);
+  const roles = own.length > 0 ? own : ['CLIENT'];
 
   return (
     <nav className="flex items-center gap-1 sm:gap-2" aria-label="Разделы клуба">
-      {SECTIONS.filter((section) => section.roles.includes(role)).map((section) => {
+      {SECTIONS.filter((section) => section.roles.some((role) => roles.includes(role))).map((section) => {
         const href = clubPath(slug, section.path);
 
         return (

@@ -26,6 +26,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { formatBirthDate } from '../auth/birth-date';
 import { AddressProvider } from '../address/address.provider';
 import { checkAddress } from '../address/address-rules';
+import { decideRoles } from '../people/role-rules';
 import {
   clubSettingsViolations,
   hallViolations,
@@ -69,6 +70,7 @@ const HALL_SELECT = {
   longitude: true,
   phone: true,
   email: true,
+  managerId: true,
   bookingStep: true,
   tableHourPrice: true,
   tableExtra30MinPrice: true,
@@ -316,7 +318,7 @@ export class ClubService {
   /** Все действующие тренеры клуба; упорядоченные — первыми, по месту. */
   async listCoachList(tenantId: string): Promise<ClubCoachListItem[]> {
     const rows = await this.prisma.tenantMembership.findMany({
-      where: { tenantId, role: Role.COACH, deactivatedAt: null, user: { deactivatedAt: null, anonymizedAt: null } },
+      where: { tenantId, roles: { has: Role.COACH }, deactivatedAt: null, user: { deactivatedAt: null, anonymizedAt: null } },
       select: {
         userId: true,
         coachListOrder: true,
@@ -380,7 +382,7 @@ export class ClubService {
         data: { coachListOrder: null, coachHidden: false },
       }),
       this.prisma.tenantMembership.updateMany({
-        where: { tenantId, role: Role.COACH, userId: { in: hiddenIds } },
+        where: { tenantId, roles: { has: Role.COACH }, userId: { in: hiddenIds } },
         data: { coachHidden: true },
       }),
       // Залы тренеров — только тех, про кого прислано: остальных не трогаем.
@@ -436,6 +438,38 @@ export class ClubService {
     }
 
     return { preferredHallId: hallId };
+  }
+
+  /**
+   * Управляющий зала (решение владельца от 26.09.2026): у зала не больше
+   * одного, у управляющего бывает несколько залов. Ставит руководитель —
+   * `@Roles('OWNER')` на маршруте. Роль MANAGER проверяется здесь: база видит
+   * только, что человек из этого клуба.
+   */
+  async setHallManager(tenantId: string, hallId: string, managerId: string | null): Promise<Hall> {
+    const hall = await this.findHall(tenantId, hallId);
+
+    // Зал, заведённый до 25.09.2026 без адреса, не принимает никакой правки
+    // строки: CHECK Hall_address_verified проверяет каждую обновлённую. Без
+    // этой проверки здесь был бы ответ 500 вместо объяснения.
+    if (!hall.addressFiasId) {
+      throw new BadRequestException('У зала нет адреса — сначала укажите его в настройках зала');
+    }
+
+    if (managerId) {
+      const manager = await this.prisma.tenantMembership.findFirst({
+        where: { tenantId, userId: managerId, roles: { has: Role.MANAGER }, deactivatedAt: null },
+        select: { userId: true },
+      });
+
+      if (!manager) {
+        throw new BadRequestException('Управляющим зала можно поставить только человека с ролью «управляющий»');
+      }
+    }
+
+    await this.prisma.hall.updateMany({ where: { id: hallId, tenantId }, data: { managerId } });
+
+    return this.findHall(tenantId, hallId);
   }
 
   /**
@@ -598,7 +632,7 @@ export class ClubService {
     const coaches = await this.prisma.tenantMembership.findMany({
       where: {
         tenantId,
-        role: Role.COACH,
+        roles: { has: Role.COACH },
         // Отключён в ЭТОМ клубе — и отдельно отключён на платформе: после
         // перехода на единый аккаунт это два разных события, и проверять надо оба.
         deactivatedAt: null,
@@ -652,7 +686,7 @@ export class ClubService {
             }
           : {}),
       },
-      ...(query.role ? { role: query.role } : {}),
+      ...(query.role ? { roles: { has: query.role } } : {}),
     };
 
     const [items, total] = await Promise.all([
@@ -660,7 +694,7 @@ export class ClubService {
         where,
         select: {
           userId: true,
-          role: true,
+          roles: true,
           createdAt: true,
           deactivatedAt: true,
           user: {
@@ -679,7 +713,9 @@ export class ClubService {
         // именно `desc`. Взаимный порядок админов и тренеров при этом
         // произволен, и выбирать между ними незачем: на вкладке «Все»
         // администратор ищет поиском, а роль целиком открывает вкладкой.
-        orderBy: [{ role: 'desc' }, { user: { fullName: 'asc' } }],
+        // По старшинству ролей база сортировать не умеет — ролей несколько;
+        // по ФИО, а роли видны в строке.
+        orderBy: [{ user: { fullName: 'asc' } }],
         take: Math.min(query.limit ?? 50, 200),
         skip: query.offset ?? 0,
       }),
@@ -693,7 +729,7 @@ export class ClubService {
         email: person.user.email,
         phone: person.user.phone,
         birthDate: formatBirthDate(person.user.birthDate),
-        role: person.role,
+        roles: person.roles,
         createdAt: person.createdAt.toISOString(),
         deactivated: person.deactivatedAt !== null,
       })),
@@ -702,77 +738,81 @@ export class ClubService {
   }
 
   /**
-   * Смена роли человека.
+   * Роли человека целиком (решение владельца от 26.09.2026: несколько сразу).
    *
-   * Повышение клиента до тренера и обратно — обычная жизнь клуба, и делать это
-   * должен администратор, а не разработчик командой в консоли.
+   * Правила — чистая `decideRoles` (`people/role-rules.ts`): себе не меняют,
+   * руководство назначает руководитель, последнего руководителя не снять.
    *
-   * Профили ролей при этом не удаляются, а заводятся по мере надобности:
-   * тренер, разжалованный в клиенты, сохраняет карточку с достижениями, и
-   * повышение обратно не начинается с чистого листа. Заодно на профили
-   * ссылается расписание, и удаление упёрлось бы во внешний ключ.
+   * Профили ролей не удаляются, а заводятся по мере надобности: тренер,
+   * переставший быть тренером, сохраняет карточку, и возвращение роли не
+   * начинается с чистого листа. Анкета клиента заводится всем — сотрудник
+   * тоже записывается на мероприятия клуба.
    */
-  async changeRole(
+  async changeRoles(
     tenantId: string,
+    actorRoles: RoleName[],
     actorId: string,
     userId: string,
-    role: RoleName,
+    requested: RoleName[],
   ): Promise<ClubPerson> {
-    // Себе роль не меняют: единственный владелец, разжаловавший себя в
-    // клиенты, запирает клуб — вернуть роль будет уже некому.
-    if (actorId === userId) {
-      throw new ConflictException('Свою собственную роль изменить нельзя');
-    }
-
     // Роль меняется у ПРИВЯЗКИ, а не у человека: тот же аккаунт остаётся
     // клиентом в соседнем клубе, и трогать его администратор этого клуба
     // не вправе.
     const person = await this.prisma.tenantMembership.findFirst({
       where: { userId, tenantId, user: { anonymizedAt: null } },
-      select: { role: true },
+      select: { roles: true },
     });
 
     if (!person) {
       throw new NotFoundException('Человек не найден');
     }
 
-    if (person.role === role) {
-      throw new ConflictException('У человека уже эта роль');
+    const otherOwners = await this.prisma.tenantMembership.count({
+      where: {
+        tenantId,
+        userId: { not: userId },
+        roles: { has: Role.OWNER },
+        deactivatedAt: null,
+        user: { deactivatedAt: null, anonymizedAt: null },
+      },
+    });
+
+    const decision = decideRoles({
+      actorRoles,
+      self: actorId === userId,
+      before: person.roles,
+      requested,
+      otherOwners,
+    });
+
+    if (!decision.ok) {
+      throw new ConflictException(decision.message);
     }
 
-    // Последнего владельца не разжаловать: клуб без владельца остаётся без
-    // того, кто может назначить нового.
-    if (person.role === Role.OWNER) {
-      const owners = await this.prisma.tenantMembership.count({
-        where: {
-          tenantId,
-          role: Role.OWNER,
-          deactivatedAt: null,
-          user: { deactivatedAt: null, anonymizedAt: null },
-        },
-      });
-
-      if (owners <= 1) {
-        throw new ConflictException('Это единственное руководство клуба, роль менять нельзя');
-      }
-    }
+    const { roles, removed } = decision;
+    const coach = roles.includes(Role.COACH);
 
     await this.prisma.$transaction(async (tx) => {
       // Уходя из тренеров, человек уходит и из тренерского состава на
-      // странице клуба: место в списке — только у роли COACH (CHECK), и без
-      // этого база отклонила бы саму смену роли.
+      // странице клуба: место в списке — только у тренера (CHECK), и без
+      // этого база отклонила бы саму смену ролей.
       await tx.tenantMembership.update({
         where: { userId_tenantId: { userId, tenantId } },
-        data: { role, ...(role === Role.COACH ? {} : { coachListOrder: null, coachHidden: false }) },
+        data: { roles, ...(coach ? {} : { coachListOrder: null, coachHidden: false }) },
       });
 
       // Залы тренера — тоже свойство роли: вернувшись тренером, человек
       // начинает «во всех залах», а не с прошлогодней привязкой.
-      if (role !== Role.COACH) {
+      if (removed.includes(Role.COACH)) {
         await tx.coachHall.deleteMany({ where: { tenantId, coachId: userId } });
       }
 
-      if (role === Role.COACH) {
+      // Перестав быть управляющим, человек перестаёт управлять и залами.
+      if (removed.includes(Role.MANAGER)) {
+        await tx.hall.updateMany({ where: { tenantId, managerId: userId }, data: { managerId: null } });
+      }
+
+      if (coach) {
         await tx.coachProfile.upsert({
           where: { userId_tenantId: { userId, tenantId } },
           update: {},
@@ -780,13 +820,11 @@ export class ClubService {
         });
       }
 
-      if (role === Role.CLIENT) {
-        await tx.clientProfile.upsert({
-          where: { userId_tenantId: { userId, tenantId } },
-          update: {},
-          create: { userId, tenantId },
-        });
-      }
+      await tx.clientProfile.upsert({
+        where: { userId_tenantId: { userId, tenantId } },
+        update: {},
+        create: { userId, tenantId },
+      });
     });
 
     const updated = await this.listPeople(tenantId, { ids: [userId], limit: 1 });

@@ -105,7 +105,7 @@ export class AuthService {
 
         if (tenant) {
           await tx.tenantMembership.create({
-            data: { userId: created.id, tenantId: tenant.id, role: Role.CLIENT },
+            data: { userId: created.id, tenantId: tenant.id, roles: [Role.CLIENT] },
           });
 
           await tx.clientProfile.create({
@@ -354,7 +354,7 @@ export class AuthService {
           // не пользуется, и держать его в шапке незачем.
           where: { deactivatedAt: null },
           select: {
-            role: true,
+            roles: true,
             tenantId: true,
             tenant: { select: { slug: true, name: true } },
           },
@@ -374,7 +374,7 @@ export class AuthService {
         tenantId: membership.tenantId,
         slug: membership.tenant.slug,
         name: membership.tenant.name,
-        role: membership.role,
+        roles: membership.roles,
       })),
     };
   }

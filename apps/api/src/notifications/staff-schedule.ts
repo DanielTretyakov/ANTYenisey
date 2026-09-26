@@ -54,12 +54,20 @@ export class StaffSchedule {
     }
 
     const roles = await this.prisma.tenantMembership.findMany({
-      where: { userId: { in: linked }, deactivatedAt: null, role: { in: [Role.ADMIN, Role.OWNER, Role.COACH] } },
-      select: { userId: true, tenantId: true, role: true },
+      where: { userId: { in: linked }, deactivatedAt: null, roles: { hasSome: [Role.ADMIN, Role.MANAGER, Role.OWNER, Role.COACH] } },
+      select: { userId: true, tenantId: true, roles: true },
     });
 
-    const staffTenants = [...new Set(roles.filter((row) => row.role !== Role.COACH).map((row) => row.tenantId))];
-    const coaches = roles.filter((row) => row.role === Role.COACH);
+    // Ролей у человека несколько: администратор-тренер получает и эскалации
+    // клуба, и планы своих групп.
+    const staffTenants = [
+      ...new Set(
+        roles
+          .filter((row) => row.roles.some((role) => role === Role.ADMIN || role === Role.MANAGER || role === Role.OWNER))
+          .map((row) => row.tenantId),
+      ),
+    ];
+    const coaches = roles.filter((row) => row.roles.includes(Role.COACH));
 
     let escalations = 0;
     let coachPlans = 0;

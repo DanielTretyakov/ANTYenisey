@@ -87,7 +87,7 @@ export class MeCoachController {
  * спрашивает отдельно. ТЗ просит её в разделе CRM; карточку он только видит,
  * вместе с карточкой человека.
  */
-@Roles('ADMIN', 'OWNER')
+@Roles('ADMIN', 'MANAGER', 'OWNER')
 @Controller('clubs/:slug/coaches/:id')
 export class CoachAdminController {
   constructor(private readonly coaches: CoachesService) {}

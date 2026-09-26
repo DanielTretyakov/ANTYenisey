@@ -40,7 +40,7 @@ export class PlayerAccess {
       where: {
         userId: viewerId,
         deactivatedAt: null,
-        role: { in: [Role.ADMIN, Role.OWNER] },
+        roles: { hasSome: [Role.ADMIN, Role.MANAGER, Role.OWNER] },
         tenant: { memberships: { some: { userId: ownerId, deactivatedAt: null } } },
       },
       select: { tenantId: true },

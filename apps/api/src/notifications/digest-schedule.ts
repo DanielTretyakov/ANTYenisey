@@ -58,7 +58,7 @@ export class DigestSchedule {
     }
 
     const tenants = await this.prisma.tenantMembership.findMany({
-      where: { userId: { in: linked }, deactivatedAt: null, role: { in: [Role.ADMIN, Role.OWNER] } },
+      where: { userId: { in: linked }, deactivatedAt: null, roles: { hasSome: [Role.ADMIN, Role.MANAGER, Role.OWNER] } },
       select: { tenantId: true },
       distinct: ['tenantId'],
     });
@@ -109,7 +109,7 @@ export class DigestSchedule {
       db.userClub.findMany({ where: { tenantId, createdAt: window }, select: name, orderBy: { createdAt: 'asc' } }),
       db.userClub.count({ where: { tenantId } }),
       db.tenantMembership.findMany({
-        where: { tenantId, role: Role.CLIENT, createdAt: window },
+        where: { tenantId, roles: { has: Role.CLIENT }, createdAt: window },
         select: name,
         orderBy: { createdAt: 'asc' },
       }),

@@ -9,6 +9,7 @@
  *   pnpm db:create-admin -- --email a@club.ru --password "..." --name "Иванов Иван Иванович"
  *   pnpm db:create-admin -- --email o@club.ru --password "..." --name "..." --role OWNER
  *   pnpm db:create-admin -- --email t@club.ru --password "..." --name "..." --role COACH
+ *   pnpm db:create-admin -- ... --role ADMIN,COACH   (ролей несколько сразу)
  *
  * Необязательный --gender MALE|FEMALE — пол для заглушки аватара; без него у
  * учётки нейтральный силуэт, пока пол не укажут в кабинете.
@@ -17,6 +18,7 @@
  * ФИО — так сбрасывают забытый пароль администратора, не заводя вторую учётку.
  */
 import { PrismaClient, Role } from '@yenisey/database';
+import { normalizeRoles } from '@yenisey/types';
 import { parseBirthDate } from '../src/auth/birth-date.ts';
 import { hashPassword } from '../src/auth/password.ts';
 
@@ -67,7 +69,13 @@ async function main(): Promise<void> {
   const password = args.password;
   const fullName = args.name?.trim();
   const slug = args.club?.trim() ?? 'yenisey';
-  const role = (args.role ?? 'ADMIN').toUpperCase();
+  // Ролей несколько сразу (решение владельца от 26.09.2026): «ADMIN,COACH».
+  const roles = (args.role ?? 'ADMIN')
+    .toUpperCase()
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean) as Role[];
+  const role = roles.join(', ');
   // Телефон приходит как угодно — «8 (999) 123-45-67» тоже: чистим до цифр и
   // приводим к E.164, как это делает форма регистрации.
   const phone = normalisePhone(args.phone ?? '');
@@ -96,8 +104,10 @@ async function main(): Promise<void> {
     fail('Нужен --birthdate в виде 1985-03-12 — не в будущем и не раньше 1900 года');
   }
 
-  if (role !== Role.ADMIN && role !== Role.OWNER && role !== Role.COACH) {
-    fail(`Роль должна быть ADMIN, OWNER или COACH, получено «${role}»`);
+  const allowed: Role[] = [Role.ADMIN, Role.MANAGER, Role.OWNER, Role.COACH];
+
+  if (roles.length === 0 || roles.some((item) => !allowed.includes(item))) {
+    fail(`Роли — ADMIN, MANAGER, OWNER или COACH через запятую, получено «${role}»`);
   }
 
   // Порог тот же, что в форме регистрации: короткий пароль у администратора
@@ -148,13 +158,28 @@ async function main(): Promise<void> {
   // Роль — у привязки к клубу. Здесь же снимается клубное отключение: без
   // этого команда меняла бы пароль человеку, которого ClubContextGuard всё
   // равно не пустит в клуб.
+  // Роли добавляются к тем, что уже есть: команда не должна снимать с
+  // руководителя роль тренера, выдавая ему администратора.
+  const current = await prisma.tenantMembership.findUnique({
+    where: { userId_tenantId: { userId, tenantId: tenant.id } },
+    select: { roles: true },
+  });
+  const merged = normalizeRoles([...(current?.roles ?? []), ...roles]);
+
   await prisma.tenantMembership.upsert({
     where: { userId_tenantId: { userId, tenantId: tenant.id } },
-    update: { role, deactivatedAt: null },
-    create: { userId, tenantId: tenant.id, role },
+    update: { roles: merged, deactivatedAt: null },
+    create: { userId, tenantId: tenant.id, roles: merged },
   });
 
-  await ensureCoachProfile(userId, tenant.id, role);
+  // Анкета клиента — всем: сотрудник тоже записывается на мероприятия клуба.
+  await prisma.clientProfile.upsert({
+    where: { userId_tenantId: { userId, tenantId: tenant.id } },
+    update: {},
+    create: { userId, tenantId: tenant.id },
+  });
+
+  await ensureCoachProfile(userId, tenant.id, merged);
 
   console.log(
     existing
@@ -181,8 +206,8 @@ function normalisePhone(raw: string): string {
  * профиль, а не на пользователя. Карточка при этом остаётся пустой — фото,
  * достижения и контакты тренер заполняет сам.
  */
-async function ensureCoachProfile(userId: string, tenantId: string, role: string): Promise<void> {
-  if (role !== Role.COACH) {
+async function ensureCoachProfile(userId: string, tenantId: string, roles: Role[]): Promise<void> {
+  if (!roles.includes(Role.COACH)) {
     return;
   }
 

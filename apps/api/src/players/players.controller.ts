@@ -262,7 +262,7 @@ function extension(contentType: string): string {
  * Решение клуба по разряду. Роли на классе: маршрут, добавленный сюда завтра,
  * окажется закрытым по умолчанию.
  */
-@Roles('ADMIN', 'OWNER')
+@Roles('ADMIN', 'MANAGER', 'OWNER')
 @Controller('clubs/:slug/people/:id/rank')
 export class RankReviewController {
   constructor(private readonly reviews: RankReviewService) {}

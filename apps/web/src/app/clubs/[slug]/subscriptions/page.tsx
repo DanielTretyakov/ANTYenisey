@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import type { ClubLedgerPage, ClubLedgerRow, Role } from '@yenisey/types';
+import { hasAnyRole, MANAGING_ROLES, type ClubLedgerPage, type ClubLedgerRow, type Role } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -11,13 +11,12 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { inputClassName } from '@/components/ui/Field';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
-import { roleInClub } from '@/lib/membership';
+import { rolesInClub } from '@/lib/membership';
 import { plural } from '@/lib/plural';
 import { ledgerLabel } from '@/lib/subscriptions';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { useSession } from '@/lib/useSession';
 
-const MANAGERS: Role[] = ['ADMIN', 'OWNER'];
 const PAGE_SIZE = 50;
 
 /**
@@ -40,8 +39,8 @@ export default function ClubSubscriptionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const role = session.status === 'ready' ? roleInClub(session.user, slug) : null;
-  const allowed = role !== null && MANAGERS.includes(role);
+  const roles = session.status === 'ready' ? rolesInClub(session.user, slug) : [];
+  const allowed = hasAnyRole(roles, MANAGING_ROLES);
 
   useEffect(() => {
     if (session.status === 'anonymous') {

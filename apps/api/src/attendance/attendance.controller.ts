@@ -38,7 +38,7 @@ const KIND_BY_SEGMENT: Record<string, AttendanceKind> = {
  * Автор отметки — из клубного контекста, а не из тела: иначе неявку можно было
  * бы подписать чужим именем, и журнал аудита перестал бы что-либо доказывать.
  */
-@Roles('ADMIN', 'OWNER')
+@Roles('ADMIN', 'MANAGER', 'OWNER')
 @Controller('clubs/:slug/desk')
 export class AttendanceController {
   constructor(private readonly attendance: AttendanceService) {}

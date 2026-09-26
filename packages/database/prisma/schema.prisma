@@ -74,11 +74,18 @@ generator client {
 
 /// Роль пользователя внутри одного клуба (tenant). Один и тот же человек в
 /// разных клубах может иметь разные роли — роль хранится на User, а не глобально.
+/// Роль человека в клубе. С 26.09.2026 (решение владельца) у привязки их
+/// может быть несколько сразу: руководитель или управляющий бывает ещё и
+/// администратором и тренером, администратор — тренером. CLIENT — только
+/// одна: это «сотрудником не является» (CHECK TenantMembership_roles_sane).
+///
+/// Порядок значений — старшинство: список людей клуба сортируется по нему.
 enum Role {
   CLIENT // клиент клуба
-  ADMIN // администратор клуба
+  ADMIN // администратор клуба: смена — в дни, на которые назначен
   COACH // тренер
-  OWNER // руководство клуба: те же права, что ADMIN, плюс управление персоналом
+  MANAGER // управляющий: руководство своих залов, назначает администраторов на смены
+  OWNER // руководитель: всё, что ADMIN и MANAGER, по всему клубу, плюс назначение ролей руководства
 }
 
 /// Роль на уровне ПЛАТФОРМЫ, а не клуба (решение владельца от 23.09.2026).
@@ -967,7 +974,10 @@ model TenantMembership {
   /// Роль В ЭТОМ клубе. Один аккаунт бывает клиентом в одном клубе, тренером
   /// во втором и владельцем в третьем — «прав вообще на платформе» нет ни у
   /// кого (ТЗ → «Роли и права доступа»).
-  role Role @default(CLIENT)
+  /// Роли в этом клубе — несколько сразу (решение владельца от 26.09.2026).
+  /// Непусты; CLIENT — только одна. Правила — `decideRoles` в
+  /// `people/role-rules.ts`, форма — CHECK TenantMembership_roles_sane.
+  roles Role[] @default([CLIENT])
 
   /// Отключение человека В ЭТОМ клубе: уволенный тренер, ушедший клиент.
   /// Аккаунт при этом жив и работает в других клубах. Строка не удаляется —
@@ -998,8 +1008,8 @@ model TenantMembership {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  clientProfile    ClientProfile? // заполнен, если role = CLIENT
-  coachProfile     CoachProfile? // заполнен, если role = COACH
+  clientProfile    ClientProfile? // анкета клиента: у сотрудника тоже — он может записываться на мероприятия
+  coachProfile     CoachProfile? // заполнен, если среди ролей есть COACH
   visitsRecorded   VisitLog[]        @relation("VisitRecordedBy")
   legalAcceptances LegalAcceptance[]
   auditEntries     AuditLog[]        @relation("AuditActor")
@@ -1023,8 +1033,12 @@ model TenantMembership {
   ledgerEntriesAdded SubscriptionLedger[] @relation("SubscriptionLedgerAuthor")
 
   // Первичный ключ и одновременно мишень всех составных FK клубных таблиц.
+  /// Залы, которыми этот человек управляет (роль MANAGER).
+  managedHalls Hall[] @relation("HallManager")
+
   @@id([userId, tenantId])
-  @@index([tenantId, role])
+  @@index([tenantId])
+  @@index([roles], type: Gin)
 }
 
 /// Данные клиента: анкета + всё, что с ним связано (брони, абонементы,
@@ -1434,6 +1448,13 @@ model Hall {
   // Мишень для составных FK: стол не может попасть в зал чужого клуба.
   preferredBy TenantMembership[] @relation("PreferredHall")
 
+  /// Управляющий зала (решение владельца от 26.09.2026): у зала не больше
+  /// одного, у управляющего бывает несколько залов. Ключ составной — человек
+  /// другого клуба сюда не встанет; что у него есть роль MANAGER, держит
+  /// сервис (CHECK не видит чужую таблицу), и снятие роли снимает залы.
+  managerId String?
+  manager   TenantMembership? @relation("HallManager", fields: [managerId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
   // Что идёт в этом зале и кто в нём тренирует (решение владельца от
   // 25.09.2026: у одной организации залы в разных городах).
   trainingTypeLinks   TrainingTypeHall[]
@@ -1444,6 +1465,7 @@ model Hall {
   @@unique([tenantId, name])
   @@index([tenantId])
   @@index([cityId])
+  @@index([managerId])
 }
 
 model Table {

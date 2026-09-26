@@ -164,7 +164,7 @@ export class SubscriptionsService {
       where: {
         OR: [
           { favouritedBy: { some: { userId } } },
-          { memberships: { some: { userId, role: 'CLIENT', deactivatedAt: null } } },
+          { memberships: { some: { userId, roles: { has: 'CLIENT' }, deactivatedAt: null } } },
         ],
       },
       select: {

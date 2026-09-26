@@ -1,3 +1,4 @@
+import { isStaff } from '@yenisey/types';
 import {
   applyDecorators,
   CanActivate,
@@ -141,7 +142,7 @@ export class ActingClientGuard implements CanActivate {
     }
 
     if (!acting.byGuardian) {
-      if (mode === 'write' && club.role !== Role.CLIENT) {
+      if (mode === 'write' && isStaff(club.roles)) {
         throw new ForbiddenException('Недостаточно прав');
       }
       return;
@@ -149,14 +150,14 @@ export class ActingClientGuard implements CanActivate {
 
     const membership = await this.prisma.tenantMembership.findUnique({
       where: { userId_tenantId: { userId: acting.userId, tenantId: club.tenantId } },
-      select: { role: true, deactivatedAt: true },
+      select: { roles: true, deactivatedAt: true },
     });
 
     if (membership?.deactivatedAt) {
       throw new ForbiddenException('Доступ ребёнка в этот клуб закрыт');
     }
 
-    if (mode === 'write' && membership && membership.role !== Role.CLIENT) {
+    if (mode === 'write' && membership && isStaff(membership.roles)) {
       throw new ForbiddenException('Недостаточно прав');
     }
   }

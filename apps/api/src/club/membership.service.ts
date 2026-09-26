@@ -34,7 +34,7 @@ export class MembershipService {
       await tx.tenantMembership.upsert({
         where: { userId_tenantId: { userId, tenantId } },
         update: {},
-        create: { userId, tenantId, role: Role.CLIENT },
+        create: { userId, tenantId, roles: [Role.CLIENT] },
       });
 
       await tx.clientProfile.upsert({

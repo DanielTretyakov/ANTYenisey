@@ -30,7 +30,7 @@ export class AddressQueryDto {
  * весь продукт, и открытый маршрут выбрал бы его чужими руками. Частота —
  * отдельным ограничением: форма шлёт запрос на каждую паузу в наборе.
  */
-@Roles('ADMIN', 'OWNER')
+@Roles('ADMIN', 'MANAGER', 'OWNER')
 @Controller('clubs/:slug/address-suggestions')
 export class AddressController {
   constructor(

@@ -78,7 +78,7 @@ export interface Recipient {
  * клиенту — с делами клуба.
  */
 export function availableCategories(recipient: Recipient): ToggleableCategory[] {
-  const staff = recipient.clubRoles.some((role) => role === 'ADMIN' || role === 'OWNER');
+  const staff = recipient.clubRoles.some((role) => role === 'ADMIN' || role === 'MANAGER' || role === 'OWNER');
   const coach = recipient.clubRoles.includes('COACH');
   const result: ToggleableCategory[] = ['MY_BOOKINGS', 'MY_SUBSCRIPTION'];
 

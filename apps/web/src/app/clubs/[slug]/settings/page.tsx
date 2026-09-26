@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { ClubSettings, ClubTable, Hall, Role } from '@yenisey/types';
+import { hasAnyRole, MANAGING_ROLES, type ClubSettings, type ClubTable, type Hall, type Role } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { clubPath } from '@/components/layout/ClubNav';
 import { Alert } from '@/components/ui/Alert';
@@ -14,7 +14,7 @@ import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Tab } from '@/components/ui/Tab';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
-import { roleInClub } from '@/lib/membership';
+import { rolesInClub } from '@/lib/membership';
 import { ApiError } from '@/lib/api';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { useSession } from '@/lib/useSession';
@@ -23,8 +23,6 @@ import { HallForm } from './HallForm';
 import { SettingsForm } from './SettingsForm';
 import { TablesCard } from './TablesCard';
 
-/** Роли, которым доступен профиль клуба. */
-const CLUB_MANAGERS: Role[] = ['ADMIN', 'OWNER'];
 
 type Loaded = {
   settings: ClubSettings;
@@ -65,8 +63,8 @@ export default function ClubPage() {
   // получал отказ. Настоящий доступ это не открывало (сервер проверяет
   // TenantMembership на каждый запрос), но показывало не то.
   const slug = useClubSlug();
-  const role = session.status === 'ready' ? roleInClub(session.user, slug) : null;
-  const allowed = role !== null && CLUB_MANAGERS.includes(role);
+  const roles = session.status === 'ready' ? rolesInClub(session.user, slug) : [];
+  const allowed = hasAnyRole(roles, MANAGING_ROLES);
 
   useEffect(() => {
     if (session.status === 'anonymous') {
