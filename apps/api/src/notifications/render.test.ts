@@ -309,3 +309,46 @@ describe('quoted', () => {
     assert.equal(quoted('АНТ «Енисей»'), 'АНТ «Енисей»');
   });
 });
+
+describe('смены и настройки клуба', () => {
+  const context = { webOrigin: 'https://ant-yenisey.ru' };
+
+  it('назначение на смену — день, зал, кто назначил и ссылка на смену', () => {
+    const { text, link } = renderNotification(
+      'STAFF_SHIFT_ASSIGNED',
+      { club: 'Енисей', slug: 'yenisey', hall: 'Основной зал', date: '2026-09-27', by: 'Иванов И.' },
+      context,
+    );
+    assert.match(text, /Вы на смене · вс, 27 сентября/);
+    assert.match(text, /«Основной зал»/);
+    assert.match(text, /Назначил: Иванов И\.$/m);
+    assert.equal(link?.url, 'https://ant-yenisey.ru/clubs/yenisey/desk');
+  });
+
+  it('изменение настроек — кто, что было и стало, когда вступит', () => {
+    const { text } = renderNotification(
+      'CLUB_SETTINGS_CHANGED',
+      {
+        club: 'Енисей',
+        slug: 'yenisey',
+        author: 'Иванов И.',
+        changes: ['Цена стола, зал «Пироги»: 400 ₽ → 450 ₽'],
+        effective: '27 сентября в 00:00',
+      },
+      context,
+    );
+    assert.match(text, /Изменил: Иванов И\./);
+    assert.match(text, /400 ₽ → 450 ₽/);
+    assert.match(text, /Вступит в силу 27 сентября в 00:00/);
+  });
+
+  it('отмена изменения', () => {
+    const { text } = renderNotification(
+      'CLUB_SETTINGS_CHANGED',
+      { club: 'Енисей', slug: 'yenisey', author: 'Иванов И.', changes: ['Название клуба'], effective: '', cancelled: true },
+      context,
+    );
+    assert.match(text, /отменено/);
+    assert.match(text, /остаётся как было/);
+  });
+});

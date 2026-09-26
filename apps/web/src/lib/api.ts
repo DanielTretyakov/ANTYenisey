@@ -82,6 +82,10 @@ import type {
   UpdateEquipmentRequest,
   RecordVisitRequest,
   RegisterRequest,
+  StaffCandidate,
+  StaffHall,
+  StaffSchedule,
+  DeskAccess,
   Role,
   Tournament,
   TournamentRequest,
@@ -645,6 +649,17 @@ export function clubApi(slug: string = TENANT_SLUG) {
     /** Роли человека целиком — несколько сразу (решение владельца от 26.09.2026). */
     changeRoles: (userId: string, roles: Role[]): Promise<ClubPerson> =>
       authorized(`${club}/people/${userId}/roles`, json('PUT', { roles })),
+
+    // --- Смены администраторов (решение владельца от 26.09.2026).
+    staffHalls: (): Promise<StaffHall[]> => authorized(`${club}/staff-schedule/halls`),
+    staffManagers: (): Promise<StaffCandidate[]> => authorized(`${club}/staff-schedule/managers`),
+    staffSchedule: (hallId: string, from?: string): Promise<StaffSchedule> =>
+      authorized(`${club}/staff-schedule/${hallId}${from ? `?from=${from}` : ''}`),
+    setStaffDay: (hallId: string, date: string, adminIds: string[]): Promise<StaffSchedule> =>
+      authorized(`${club}/staff-schedule/${hallId}/${date}`, json('PUT', { adminIds })),
+    /** Можно ли сегодня открыть «Смену» в этом зале и кто на ней. */
+    deskAccess: (hallId: string): Promise<DeskAccess> =>
+      authorized(`${club}/desk-access?${new URLSearchParams({ hallId })}`),
 
     /** Управляющий зала — ставит руководитель; null — снять. */
     setHallManager: (hallId: string, managerId: string | null): Promise<Hall> =>

@@ -209,6 +209,8 @@ enum NotificationType {
   CLUB_DIGEST // руководству клуба: утренняя сводка за вчера и план на сегодня
   PLATFORM_DIGEST // владельцу платформы: утренняя сводка по всей платформе
   SUBSCRIPTION_PAST_DUE // клубу — про просрочку подписки на платформу
+  STAFF_SHIFT_ASSIGNED // администратору: его назначили на смену в зале
+  CLUB_SETTINGS_CHANGED // сотрудникам: кто и что поменял в настройках клуба, когда вступит в силу
 }
 
 /// Судьба строки очереди уведомлений.
@@ -458,6 +460,7 @@ model Tenant {
   trainingTypeHalls       TrainingTypeHall[]
   tournamentTypeHalls     TournamentTypeHall[]
   coachHalls              CoachHall[]
+  staffShifts             StaffShift[]
   subscriptions           Subscription[]
   subscriptionLedger      SubscriptionLedger[]
   payments                Payment[]
@@ -1036,6 +1039,10 @@ model TenantMembership {
   /// Залы, которыми этот человек управляет (роль MANAGER).
   managedHalls Hall[] @relation("HallManager")
 
+  /// Смены администратора и смены, которые назначил этот человек.
+  shifts         StaffShift[] @relation("ShiftAdmin")
+  shiftsAssigned StaffShift[] @relation("ShiftAssigner")
+
   @@id([userId, tenantId])
   @@index([tenantId])
   @@index([roles], type: Gin)
@@ -1460,6 +1467,9 @@ model Hall {
   trainingTypeLinks   TrainingTypeHall[]
   tournamentTypeLinks TournamentTypeHall[]
   coachLinks          CoachHall[]
+
+  /// Кто из администраторов работает в зале в какой день.
+  shifts StaffShift[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, name])
@@ -2386,4 +2396,35 @@ model CoachHall {
   @@id([coachId, hallId])
   @@index([hallId])
   @@index([tenantId])
+}
+
+// ---------------------------------------------------------------------------
+// Смены администраторов
+// ---------------------------------------------------------------------------
+
+/// Администратор на смене в зале в этот день (решение владельца от
+/// 26.09.2026). Назначает управляющий зала или руководитель в «Расписании
+/// персонала»; открыть «Смену» администратор может только в свой день и в
+/// своём зале — чтобы никто другой случайно ничего не внёс. Руководство
+/// работает на смене всегда. Дата — местная дата ЗАЛА.
+///
+/// Ключ — (зал, день, человек): администраторов на день может быть несколько,
+/// дважды один и тот же — нет. Ссылки составные по клубу: администратор
+/// другого клуба сюда не встанет.
+model StaffShift {
+  tenantId     String
+  hallId       String
+  date         DateTime @db.Date
+  userId       String
+  assignedById String
+  createdAt    DateTime @default(now())
+
+  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  hall       Hall             @relation(fields: [hallId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  admin      TenantMembership @relation("ShiftAdmin", fields: [userId, tenantId], references: [userId, tenantId], onDelete: Cascade)
+  assignedBy TenantMembership @relation("ShiftAssigner", fields: [assignedById, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
+  @@id([hallId, date, userId])
+  @@index([tenantId, date])
+  @@index([userId, date])
 }

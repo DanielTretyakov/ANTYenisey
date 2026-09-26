@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { StaffModule } from '../staff/staff.module';
 import { DeskController } from './desk.controller';
 import { DeskService } from './desk.service';
 import { AttendanceModule } from '../attendance/attendance.module';
@@ -22,7 +23,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
  * отметил, а бронь задним числом сразу становится «пришёл».
  */
 @Module({
-  imports: [AttendanceModule, BookingModule, ClubModule, NotificationsModule],
+  imports: [AttendanceModule, BookingModule, ClubModule, NotificationsModule, StaffModule],
   controllers: [DeskController],
   providers: [DeskService],
 })

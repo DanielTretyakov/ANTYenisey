@@ -1,5 +1,7 @@
 'use client';
 
+import type { Role } from '@yenisey/types';
+import { rolesInClub } from '@/lib/membership';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -27,6 +29,8 @@ interface Section {
   /** Хвост адреса после /clubs/:slug. */
   path: string;
   label: string;
+  /** Только для этих ролей; пусто — для всех, кто в админке. */
+  roles?: Role[];
 }
 
 /**
@@ -43,7 +47,10 @@ interface Section {
  */
 const SHIFT: Section[] = [
   { path: '/desk', label: 'Смена' },
-  { path: '/schedule', label: 'Расписание' },
+  { path: '/schedule', label: 'Расписание залов' },
+  // Кто из администраторов в какой день на смене (решение владельца от
+  // 26.09.2026) — назначает управляющий, раздел только руководству.
+  { path: '/staff', label: 'Расписание персонала', roles: ['OWNER', 'MANAGER'] },
   // История абонементов — операционка, а не устройство клуба: сюда приходят с
   // вопросом «куда делся визит», и приходят посреди смены.
   { path: '/subscriptions', label: 'Абонементы' },
@@ -94,7 +101,7 @@ export function AdminShell({
           wide ? 'max-w-[112rem]' : 'max-w-6xl',
         )}
       >
-        <AdminNav slug={slug} clubName={clubName} />
+        <AdminNav slug={slug} clubName={clubName} roles={session.status === 'ready' ? rolesInClub(session.user, slug) : []} />
 
         <main className="min-w-0 flex-1 py-8 sm:py-10">{children}</main>
       </div>
@@ -111,7 +118,7 @@ export function AdminShell({
  * Заголовки групп там же скрываются: подписи над однострочной лентой заняли бы
  * больше места, чем сама лента.
  */
-function AdminNav({ slug, clubName }: { slug: string; clubName: string | null }) {
+function AdminNav({ slug, clubName, roles }: { slug: string; clubName: string | null; roles: Role[] }) {
   return (
     <nav
       aria-label="Рабочее место"
@@ -135,11 +142,16 @@ function AdminNav({ slug, clubName }: { slug: string; clubName: string | null })
           'lg:mx-0 lg:flex-col lg:overflow-visible lg:border-0 lg:px-0 lg:py-0',
         )}
       >
-        <Group title="Операционка" sections={SHIFT} slug={slug} />
-        <Group title="Устройство клуба" sections={SETUP} slug={slug} />
+        <Group title="Операционка" sections={SHIFT.filter(visibleTo(roles))} slug={slug} />
+        <Group title="Устройство клуба" sections={SETUP.filter(visibleTo(roles))} slug={slug} />
       </div>
     </nav>
   );
+}
+
+/** Раздел без ролей — всем в админке; с ролями — тем, у кого есть хоть одна. */
+function visibleTo(roles: Role[]): (section: Section) => boolean {
+  return (section) => !section.roles || section.roles.some((role) => roles.includes(role));
 }
 
 function Group({

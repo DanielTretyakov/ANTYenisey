@@ -8,6 +8,7 @@ import {
   Param,
   Post,
   Put,
+  UseGuards,
 } from '@nestjs/common';
 import type {
   AttendanceHistoryItem,
@@ -19,6 +20,7 @@ import { AttendanceService } from './attendance.service';
 import { MarkAttendanceBatchDto, MarkAttendanceDto, RecordVisitDto } from './dto/attendance.dto';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { DeskShiftGuard } from '../staff/desk-shift.guard';
 import type { ClubContext } from '../auth/club-context';
 
 /** Вид записи участком адреса — строчными, как принято в адресах. */
@@ -39,6 +41,8 @@ const KIND_BY_SEGMENT: Record<string, AttendanceKind> = {
  * бы подписать чужим именем, и журнал аудита перестал бы что-либо доказывать.
  */
 @Roles('ADMIN', 'MANAGER', 'OWNER')
+// Смена — только тем, кто сегодня на ней (решение владельца от 26.09.2026).
+@UseGuards(DeskShiftGuard)
 @Controller('clubs/:slug/desk')
 export class AttendanceController {
   constructor(private readonly attendance: AttendanceService) {}

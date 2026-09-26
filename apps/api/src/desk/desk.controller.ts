@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Ip, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Ip, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import type { DeskBooking, DeskDay } from '@yenisey/types';
 import { DeskService } from './desk.service';
 import {
@@ -9,6 +9,7 @@ import {
 } from './dto/desk.dto';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { DeskShiftGuard } from '../staff/desk-shift.guard';
 import type { ClubContext } from '../auth/club-context';
 
 /**
@@ -24,6 +25,8 @@ import type { ClubContext } from '../auth/club-context';
  * адрес чужой клуб, окажется там клиентом и получит 403 от строки ниже.
  */
 @Roles('ADMIN', 'MANAGER', 'OWNER')
+// Смена — только тем, кто сегодня на ней (решение владельца от 26.09.2026).
+@UseGuards(DeskShiftGuard)
 @Controller('clubs/:slug/desk')
 export class DeskController {
   constructor(private readonly desk: DeskService) {}

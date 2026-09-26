@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { StaffModule } from '../staff/staff.module';
 import { AttendanceController } from './attendance.controller';
 import { AttendanceService } from './attendance.service';
 import { AutoNoShowJob } from './auto-no-show.job';
@@ -23,7 +24,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
  * возвращает визит в той же транзакции, что меняет отметку.
  */
 @Module({
-  imports: [ClubModule, SubscriptionsModule, NotificationsModule],
+  imports: [ClubModule, SubscriptionsModule, NotificationsModule, StaffModule],
   controllers: [AttendanceController],
   providers: [AttendanceService, AutoNoShowJob],
   exports: [AttendanceService],

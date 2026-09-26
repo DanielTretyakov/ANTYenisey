@@ -17,6 +17,7 @@ import { MeModule } from './me/me.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PeopleModule } from './people/people.module';
 import { PlayersModule } from './players/players.module';
+import { StaffModule } from './staff/staff.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { parseDuration } from './auth/tokens';
 import { isLoopback } from './common/network';
@@ -64,6 +65,7 @@ import { validateEnv, type Env } from './config/env';
     UsersModule,
     AuthModule,
     ClubModule,
+    StaffModule,
     BookingModule,
     DeskModule,
     AttendanceModule,

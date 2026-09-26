@@ -1532,3 +1532,19 @@ SELECT pg_temp.expect('EG',
 SELECT pg_temp.expect('EH',
   $q$UPDATE "Hall" SET "managerId" = 'u2' WHERE id = 'h1'$q$,
   '23503', 'Hall_managerId_tenantId_fkey');
+
+-- ---------------------------------------------------------------------------
+-- 35. Смены администраторов
+-- ---------------------------------------------------------------------------
+
+-- EI. Человек клуба t1 не ставится на смену в зал клуба t2.
+SELECT pg_temp.expect('EI',
+  $q$INSERT INTO "StaffShift" ("tenantId","hallId",date,"userId","assignedById") VALUES ('t2','h2',DATE '2026-10-01','u3','u2')$q$,
+  '23503', 'StaffShift_userId_tenantId_fkey');
+
+-- EJ. Дважды один и тот же на один день в один зал.
+DO $$ BEGIN
+  INSERT INTO "StaffShift" ("tenantId","hallId",date,"userId","assignedById") VALUES ('t1','h1',DATE '2026-10-01','c1','c1');
+  INSERT INTO "StaffShift" ("tenantId","hallId",date,"userId","assignedById") VALUES ('t1','h1',DATE '2026-10-01','c1','c1');
+  RAISE NOTICE 'EJ. ПРОВАЛ: одна смена записана дважды';
+EXCEPTION WHEN unique_violation THEN RAISE NOTICE 'EJ. Повтор смены отклонён................. OK (ожидалось)'; END $$;

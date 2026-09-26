@@ -22,7 +22,9 @@ export type NotificationKind =
   | 'RANK_PENDING'
   | 'CLUB_DIGEST'
   | 'PLATFORM_DIGEST'
-  | 'SUBSCRIPTION_PAST_DUE';
+  | 'SUBSCRIPTION_PAST_DUE'
+  | 'STAFF_SHIFT_ASSIGNED'
+  | 'CLUB_SETTINGS_CHANGED';
 
 export type Category =
   | 'SERVICE'
@@ -61,6 +63,10 @@ export const CATEGORY_OF: Record<NotificationKind, Category> = {
   CLUB_DIGEST: 'CLUB_DIGEST',
   PLATFORM_DIGEST: 'PLATFORM_DIGEST',
   SUBSCRIPTION_PAST_DUE: 'CLUB_ALERTS',
+  // Назначение на смену — служебное: пропустить его, выключив категорию,
+  // значит не выйти на работу (решение владельца от 26.09.2026).
+  STAFF_SHIFT_ASSIGNED: 'SERVICE',
+  CLUB_SETTINGS_CHANGED: 'CLUB_ALERTS',
 };
 
 /** Кем человек является — ровно то, от чего зависят его категории. */

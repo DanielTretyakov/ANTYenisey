@@ -121,6 +121,35 @@ export interface AutoNoShowPayload {
 }
 
 /** Администраторам: разряд ждёт проверки. */
+/** Администратора назначили на смену (решение владельца от 26.09.2026). */
+export interface ShiftAssignedPayload {
+  club: string;
+  slug: string;
+  hall: string;
+  /** «2026-09-27» — местная дата зала. */
+  date: string;
+  /** Кто назначил — «Фамилия И.». */
+  by: string;
+}
+
+/**
+ * Настройки клуба изменены (решение владельца от 26.09.2026): кто, что было →
+ * что стало, когда вступит в силу. Сотрудникам — сразу при сохранении, чтобы
+ * ошибку успели заметить и отменить до 00:00.
+ */
+export interface SettingsChangedPayload {
+  club: string;
+  slug: string;
+  /** «Фамилия И.». */
+  author: string;
+  /** Что поменялось: «Цена стола, зал «Пироги»: 400 ₽ → 450 ₽». */
+  changes: string[];
+  /** Когда вступит в силу — «27 сентября в 00:00». */
+  effective: string;
+  /** Правку отменили до вступления в силу. */
+  cancelled?: boolean;
+}
+
 export interface RankPendingPayload {
   person: string;
   personId: string;
@@ -316,6 +345,35 @@ export function renderNotification(type: string, payload: unknown, context: Rend
       };
     }
 
+    case 'STAFF_SHIFT_ASSIGNED': {
+      const p = payload as ShiftAssignedPayload;
+
+      return {
+        text: lines(
+          `Вы на смене · ${dayLabel(p.date)}`,
+          `Администратор в зале «${p.hall}», клуб «${p.club}».`,
+          p.by ? `Назначил: ${p.by}` : null,
+          'Экран смены откроется в этот день.',
+        ),
+        link: { label: 'Экран смены', url: `${context.webOrigin}/clubs/${p.slug}/desk` },
+      };
+    }
+
+    case 'CLUB_SETTINGS_CHANGED': {
+      const p = payload as SettingsChangedPayload;
+
+      return {
+        text: lines(
+          p.cancelled ? `Изменение настроек отменено · ${p.club}` : `Настройки клуба изменены · ${p.club}`,
+          `${p.cancelled ? 'Отменил' : 'Изменил'}: ${p.author}.`,
+          ...p.changes.slice(0, 10).map((change) => `— ${change}`),
+          p.changes.length > 10 ? `…и ещё ${p.changes.length - 10}` : null,
+          p.cancelled ? 'Всё остаётся как было.' : `Вступит в силу ${p.effective}.`,
+        ),
+        link: { label: 'Настройки клуба', url: `${context.webOrigin}/clubs/${p.slug}/settings` },
+      };
+    }
+
     case 'RANK_PENDING': {
       const p = payload as RankPendingPayload;
 
@@ -418,6 +476,13 @@ function cancelMoney(p: EntryPayload): string {
 }
 
 /** Строки через перевод строки; null пропускается, '' — намеренный отступ между блоками. */
+/** «2026-09-27» → «сб, 27 сентября». Дата — местная, без часового пояса. */
+function dayLabel(date: string): string {
+  return new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'long' }).format(
+    new Date(`${date}T00:00:00Z`),
+  );
+}
+
 function lines(...parts: (string | null | undefined)[]): string {
   return parts
     .filter((part): part is string => part !== null && part !== undefined)

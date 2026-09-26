@@ -994,27 +994,72 @@ async function main() {
     check('«клиент и администратор» сводится к администратору', 200, r.status);
     assert('клиента среди ролей сотрудника нет', JSON.stringify(r.body?.roles) === JSON.stringify(['ADMIN']));
 
+    // Учётка смоука — руководитель клуба (в CI её так и заводят): иначе
+    // сценарии смены упёрлись бы в «сегодня вы не работаете», а назначение
+    // управляющего и смен осталось бы без проверки.
     const iAmOwner = (me?.memberships ?? []).some((m) => m.slug === 'yenisey' && m.roles?.includes('OWNER'));
+    assert('учётка смоука — руководитель клуба (роль OWNER)', iAmOwner);
+
     r = await asAdmin(`/clubs/yenisey/people/${probe.id}/roles`, { method: 'PUT', json: { roles: ['MANAGER', 'ADMIN'] } });
+    check('руководитель назначает управляющего', 200, r.status);
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}/manager`, { method: 'PUT', json: { managerId: probe.id } });
+    check('управляющий поставлен на зал', 200, r.status);
+    assert('у зала — управляющий', r.body?.managerId === probe.id);
 
-    if (iAmOwner) {
-      check('руководитель назначает управляющего', 200, r.status);
-      r = await asAdmin(`/clubs/yenisey/halls/${hallId}/manager`, { method: 'PUT', json: { managerId: probe.id } });
-      check('управляющий поставлен на зал', 200, r.status);
-      assert('у зала — управляющий', r.body?.managerId === probe.id);
+    r = await asAdmin(`/clubs/yenisey/people/${probe.id}/roles`, { method: 'PUT', json: { roles: ['ADMIN'] } });
+    check('роль управляющего снята', 200, r.status);
+    r = await asAdmin('/clubs/yenisey/halls');
+    assert('вместе с ролью снят и зал', (r.body ?? []).find((hall) => hall.id === hallId)?.managerId === null);
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}/manager`, { method: 'PUT', json: { managerId: probe.id } });
+    check('управляющим зала — только человек с этой ролью', 400, r.status);
 
-      r = await asAdmin(`/clubs/yenisey/people/${probe.id}/roles`, { method: 'PUT', json: { roles: ['ADMIN'] } });
-      check('роль управляющего снята', 200, r.status);
-      r = await asAdmin('/clubs/yenisey/halls');
-      assert('вместе с ролью снят и зал', (r.body ?? []).find((hall) => hall.id === hallId)?.managerId === null);
+    // --- Пробный администратор: что ему нельзя и смены (решение от 26.09.2026).
+    r = await post('/auth/login', { email: probe.email, password: PASSWORD });
+    const probeToken = r.body?.accessToken ?? '';
+    const asStaffProbe = (path, options = {}) =>
+      call(path, { ...options, headers: { Authorization: `Bearer ${probeToken}`, ...(options.headers ?? {}) } });
 
-      r = await asAdmin(`/clubs/yenisey/halls/${hallId}/manager`, { method: 'PUT', json: { managerId: probe.id } });
-      check('управляющим зала — только человек с этой ролью', 400, r.status);
-    } else {
-      check('управляющего назначает только руководитель', 409, r.status);
-      r = await asAdmin(`/clubs/yenisey/halls/${hallId}/manager`, { method: 'PUT', json: { managerId: probe.id } });
-      check('управляющего на зал ставит только руководитель', 403, r.status);
-    }
+    r = await asStaffProbe(`/clubs/yenisey/people/${me?.id}/roles`, { method: 'PUT', json: { roles: ['OWNER', 'MANAGER'] } });
+    check('администратор руководство не назначает', 409, r.status);
+    r = await asStaffProbe(`/clubs/yenisey/halls/${hallId}/manager`, { method: 'PUT', json: { managerId: null } });
+    check('управляющего на зал ставит только руководитель', 403, r.status);
+    r = await asStaffProbe('/clubs/yenisey/staff-schedule/halls');
+    check('«Расписание персонала» администратору закрыто', 403, r.status);
+
+    const today = dateIn('Asia/Krasnoyarsk', 0);
+    r = await asStaffProbe(`/clubs/yenisey/desk/halls/${hallId}/days/${today}`);
+    check('без смены «Смена» закрыта', 403, r.status);
+    assert('и сказано почему', JSON.stringify(r.body?.message ?? '').includes('не работаете'));
+    r = await asStaffProbe(`/clubs/yenisey/desk-access?${new URLSearchParams({ hallId })}`);
+    assert('доступ к смене — «нет»', r.body?.allowed === false);
+
+    r = await asAdmin('/clubs/yenisey/staff-schedule/halls');
+    check('руководитель видит залы расписания персонала', 200, r.status);
+    assert('и может планировать любой', (r.body ?? []).every((hall) => hall.canPlan === true));
+
+    r = await post('/auth/register', registration({ lastName: 'Клиентов', firstName: 'Несмена' }));
+    const bystanderId = r.body?.user?.id;
+    r = await asAdmin(`/clubs/yenisey/staff-schedule/${hallId}/${today}`, { method: 'PUT', json: { adminIds: [bystanderId] } });
+    check('на смену ставится только администратор', 400, r.status);
+    r = await asAdmin(`/clubs/yenisey/staff-schedule/${hallId}/${dateIn('Asia/Krasnoyarsk', -1)}`, { method: 'PUT', json: { adminIds: [] } });
+    check('на прошедший день смену не назначить', 400, r.status);
+
+    r = await asAdmin(`/clubs/yenisey/staff-schedule/${hallId}/${today}`, { method: 'PUT', json: { adminIds: [probe.id] } });
+    check('администратор назначен на смену сегодня', 200, r.status);
+    assert('смена видна в расписании', (r.body?.days ?? []).some((day) => day.date === today && day.adminIds.includes(probe.id)));
+
+    r = await asStaffProbe(`/clubs/yenisey/desk/halls/${hallId}/days/${today}`);
+    check('в день смены «Смена» открыта', 200, r.status);
+    r = await asStaffProbe(`/clubs/yenisey/desk/halls/${mainHall?.id}/days/${today}`);
+    check('в чужом зале — нет', 403, r.status);
+    assert('и сказано, что смена в другом зале', JSON.stringify(r.body?.message ?? '').includes('другом зале'));
+    r = await asStaffProbe(`/clubs/yenisey/desk-access?${new URLSearchParams({ hallId })}`);
+    assert('на смене — названо, кто работает', r.body?.allowed === true && (r.body?.onShift ?? []).length === 1);
+
+    r = await asAdmin(`/clubs/yenisey/staff-schedule/${hallId}/${today}`, { method: 'PUT', json: { adminIds: [] } });
+    check('смена снята', 200, r.status);
+    r = await asStaffProbe(`/clubs/yenisey/desk/halls/${hallId}/days/${today}`);
+    check('снятому — снова закрыто', 403, r.status);
 
     r = await asAdmin(`/clubs/yenisey/people/${probe.id}/roles`, { method: 'PUT', json: { roles: ['CLIENT'] } });
     check('роли сняты — снова клиент', 200, r.status);

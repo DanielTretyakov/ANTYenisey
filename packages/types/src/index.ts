@@ -12,5 +12,6 @@ export * from './notification';
 export * from './platform';
 export * from './player';
 export * from './roles';
+export * from './staff';
 export * from './subscription';
 export * from './tenant';

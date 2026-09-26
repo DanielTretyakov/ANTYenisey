@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { hasAnyRole, MANAGING_ROLES, type ClubPerson, type DeskBooking, type DeskDay, type DeskEvent, type DeskTableNow, type Hall, type Role } from '@yenisey/types';
+import { hasAnyRole, MANAGING_ROLES, type ClubPerson, type DeskBooking, type DeskDay, type DeskEvent, type DeskTableNow, type DeskAccess, type Hall, type Role } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -60,6 +60,9 @@ export default function DeskPage() {
   const [date, setDate] = useState('');
   const [day, setDay] = useState<DeskDay | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Можно ли сегодня работать на смене в этом зале (решение владельца от
+  // 26.09.2026): администратору — только в день и в зале своей смены.
+  const [access, setAccess] = useState<DeskAccess | null>(null);
   const [seating, setSeating] = useState(false);
   const [visiting, setVisiting] = useState(false);
   const [newClient, setNewClient] = useState(false);
@@ -91,6 +94,26 @@ export default function DeskPage() {
 
   const hall = halls?.find((item) => item.id === hallId) ?? null;
 
+  useEffect(() => {
+    if (!hallId) return;
+
+    let cancelled = false;
+    setAccess(null);
+
+    club
+      .deskAccess(hallId)
+      .then((loaded) => {
+        if (!cancelled) setAccess(loaded);
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setError(messageOf(cause));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [club, hallId]);
+
   // «Сегодня» считается по поясу ЗАЛА, а не браузера: залы одной организации
   // бывают в разных регионах, и у зала в Абакане свой день. Пока залы не
   // загружены, дата не выбирается вовсе — иначе первый же ответ сервера
@@ -102,7 +125,9 @@ export default function DeskPage() {
   }, [hall]);
 
   const load = useCallback(() => {
-    if (!hallId || !date) return;
+    // Пока не ясно, пускают ли, день не грузится: иначе на экране мелькнул бы
+    // отказ сервера вместо внятного «сегодня вы не работаете».
+    if (!hallId || !date || !access?.allowed) return;
 
     club
       .deskDay(hallId, date)
@@ -114,7 +139,7 @@ export default function DeskPage() {
         setDay(null);
         setError(messageOf(cause));
       });
-  }, [club, hallId, date]);
+  }, [club, hallId, date, access]);
 
   useEffect(() => {
     // Сетка сбрасывается вместе с залом и датой: состояние прошлого зала,
@@ -214,6 +239,8 @@ export default function DeskPage() {
           </span>
         )}
       </div>
+
+      {access && !access.allowed && <OffShift access={access} />}
 
       {newClient && (
         <NewClientDialog
@@ -819,4 +846,27 @@ function duration(startsAt: string, endsAt: string): string {
 
 function messageOf(cause: unknown): string {
   return cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером';
+}
+
+/**
+ * «Сегодня вы не работаете» (решение владельца от 26.09.2026): смену открывает
+ * только назначенный на этот день администратор — чтобы никто другой
+ * случайно ничего не внёс. Кто на смене — назван, чтобы было к кому идти.
+ */
+function OffShift({ access }: { access: DeskAccess }) {
+  return (
+    <Card className="max-w-2xl">
+      <CardHeader title="Сегодня вы не работаете" description={access.message ?? undefined} />
+      <CardBody>
+        <p className="text-[0.9375rem] text-text">
+          {access.onShift.length > 0
+            ? `На смене в этом зале: ${access.onShift.join(', ')}.`
+            : 'На смену в этом зале сегодня никто не назначен.'}
+        </p>
+        <p className="mt-2 text-[0.875rem] text-text-muted">
+          Смены назначает управляющий зала в «Расписании персонала». В свой день смена откроется сама.
+        </p>
+      </CardBody>
+    </Card>
+  );
 }
