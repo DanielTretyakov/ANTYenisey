@@ -1061,6 +1061,39 @@ async function main() {
     r = await asStaffProbe(`/clubs/yenisey/desk/halls/${hallId}/days/${today}`);
     check('снятому — снова закрыто', 403, r.status);
 
+    // --- Запись сотрудника на мероприятие: администратору в день смены — нет.
+    r = await call('/clubs/yenisey/events');
+    const joinable = (r.body ?? []).find(
+      (event) => new Date(event.startsAt).getTime() > Date.now() + 3_600_000 && event.freeSeats !== 0,
+    );
+
+    if (!joinable) {
+      console.log('  ПРОПУЩЕНО: в расписании клуба нет будущего мероприятия со свободными местами');
+    } else {
+      const eventDay = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Krasnoyarsk',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date(joinable.startsAt));
+      const joinPath =
+        joinable.kind === 'TRAINING'
+          ? `/clubs/yenisey/trainings/${joinable.id}/booking`
+          : `/clubs/yenisey/tournaments/${joinable.id}/registration`;
+
+      r = await asAdmin(`/clubs/yenisey/staff-schedule/${hallId}/${eventDay}`, { method: 'PUT', json: { adminIds: [probe.id] } });
+      check('смена на день мероприятия назначена', 200, r.status);
+      r = await asStaffProbe(joinPath, { method: 'POST' });
+      check('администратор в день своей смены на мероприятие не записывается', 403, r.status);
+      assert('и сказано почему', JSON.stringify(r.body?.message ?? '').includes('смена'));
+
+      r = await asAdmin(`/clubs/yenisey/staff-schedule/${hallId}/${eventDay}`, { method: 'PUT', json: { adminIds: [] } });
+      r = await asStaffProbe(joinPath, { method: 'POST' });
+      check('без смены администратор записывается как все', 201, r.status);
+      r = await asStaffProbe(joinPath, { method: 'DELETE' });
+      check('и отменяет запись', 200, r.status);
+    }
+
     r = await asAdmin(`/clubs/yenisey/people/${probe.id}/roles`, { method: 'PUT', json: { roles: ['CLIENT'] } });
     check('роли сняты — снова клиент', 200, r.status);
 
@@ -3936,8 +3969,12 @@ async function family() {
   check('тренер завёл ребёнка', 201, r.status);
   const coachKidId = r.body?.id;
 
+  // Сотрудники записываются на мероприятия клуба как все (решение владельца
+  // от 26.09.2026).
   r = await asCoachParent(`/clubs/yenisey/tournaments/${cupId}/registration`, { method: 'POST' });
-  check('сам тренер клиентом не записывается', 403, r.status);
+  check('тренер записывается на турнир клуба как все', 201, r.status);
+  r = await asCoachParent(`/clubs/yenisey/tournaments/${cupId}/registration`, { method: 'DELETE' });
+  check('и отменяет запись', 200, r.status);
 
   r = await asCoachParent(`/clubs/yenisey/tournaments/${cupId}/registration?for=${coachKidId}`, { method: 'POST' });
   check('а ребёнка записывает как обычный родитель', 201, r.status);

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { StaffModule } from '../staff/staff.module';
 import { ClubModule } from '../club/club.module';
 import { EntriesModule } from '../entries/entries.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
@@ -10,7 +11,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
   // ClubModule — ради MembershipService: привязку человека к клубу заводят
   // три сценария, и общая копия у них должна быть одна. SubscriptionsModule —
   // ради оплаты записи абонементом.
-  imports: [ClubModule, EntriesModule, SubscriptionsModule, NotificationsModule],
+  imports: [ClubModule, EntriesModule, SubscriptionsModule, NotificationsModule, StaffModule],
   controllers: [EventsController],
   providers: [EventsService],
 })

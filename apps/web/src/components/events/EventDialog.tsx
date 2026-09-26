@@ -266,7 +266,7 @@ function EventActions({
 
   return (
     <div className="flex flex-wrap items-center gap-3 border-t border-border pt-5">
-      {viewer === 'client' && (
+      {(viewer === 'client' || viewer === 'staff') && (
         <Button
           variant={event.registered ? 'secondary' : 'primary'}
           pending={pending}
@@ -283,9 +283,9 @@ function EventActions({
         </Link>
       )}
 
-      {viewer === 'staff' && (
-        <p className="text-[0.875rem] text-text-muted">
-          Вы сотрудник этого клуба: записаться на его мероприятие нельзя.
+      {viewer === 'staff' && !event.registered && (
+        <p className="text-[0.8125rem] text-text-subtle">
+          Сотрудники записываются как все — кроме администратора в день его смены.
         </p>
       )}
 
@@ -295,7 +295,7 @@ function EventActions({
         </p>
       )}
 
-      {event.registered && viewer === 'client' && (
+      {event.registered && (viewer === 'client' || viewer === 'staff') && (
         <span className="text-[0.875rem] text-text-muted">Вы записаны</span>
       )}
 

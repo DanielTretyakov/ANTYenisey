@@ -45,8 +45,19 @@ const ACTING_MODE_KEY = 'actingMode';
  * Порядок глобальных guard'ов (`auth.module.ts`) не меняется: этот
  * выполняется после них, когда токен разобран и клуб определён.
  */
-export const ClientAction = (mode: ActingMode = 'write') =>
-  applyDecorators(SetMetadata(ACTING_MODE_KEY, mode), UseGuards(ActingClientGuard));
+export const ClientAction = (mode: ActingMode = 'write', options: { staff?: boolean } = {}) =>
+  applyDecorators(
+    SetMetadata(ACTING_MODE_KEY, mode),
+    SetMetadata(STAFF_MAY_ACT_KEY, options.staff === true),
+    UseGuards(ActingClientGuard),
+  );
+
+/**
+ * Сотрудник действует как клиент только там, где это разрешено явно: запись
+ * и отмена мероприятий (решение владельца от 26.09.2026). Бронь стола
+ * сотруднику по-прежнему закрыта.
+ */
+const STAFF_MAY_ACT_KEY = 'yenisey:staffMayAct';
 
 /** За кого действие — то, что решил `ActingClientGuard`. */
 export const Acting = createParamDecorator((_data: unknown, context: ExecutionContext) => {
@@ -120,7 +131,10 @@ export class ActingClientGuard implements CanActivate {
       throw new HttpException(decision.message, decision.status);
     }
 
-    await this.checkClubRole(request, decision, mode);
+    const staffMayAct =
+      this.reflector.getAllAndOverride<boolean>(STAFF_MAY_ACT_KEY, [context.getHandler(), context.getClass()]) ?? false;
+
+    await this.checkClubRole(request, decision, mode, staffMayAct);
 
     request.actingClient = { userId: decision.userId, byGuardian: decision.byGuardian };
     return true;
@@ -134,7 +148,12 @@ export class ActingClientGuard implements CanActivate {
    * записывается через рабочее место), а отключённым в клубе — не может.
    * Смотреть свои списки роль не мешает никому.
    */
-  private async checkClubRole(request: ActingRequest, acting: ActingClient, mode: ActingMode): Promise<void> {
+  private async checkClubRole(
+    request: ActingRequest,
+    acting: ActingClient,
+    mode: ActingMode,
+    staffMayAct: boolean,
+  ): Promise<void> {
     const club = request.club;
 
     if (!club) {
@@ -142,7 +161,7 @@ export class ActingClientGuard implements CanActivate {
     }
 
     if (!acting.byGuardian) {
-      if (mode === 'write' && isStaff(club.roles)) {
+      if (mode === 'write' && isStaff(club.roles) && !staffMayAct) {
         throw new ForbiddenException('Недостаточно прав');
       }
       return;

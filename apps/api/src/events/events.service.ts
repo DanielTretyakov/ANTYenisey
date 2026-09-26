@@ -1,11 +1,12 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { BookingStatus, Prisma } from '@yenisey/database';
-import type { BookingEntry, ClubCatalogItem, ClubEvent, EventDetail, EventKind } from '@yenisey/types';
+import { isStaff, type BookingEntry, type ClubCatalogItem, type ClubEvent, type EventDetail, type EventKind } from '@yenisey/types';
 import { cancellationOpen, cancellationPercent } from '../booking/availability';
 import {
   catalogItem,
@@ -25,6 +26,10 @@ import { EntriesService } from '../entries/entries.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { consumed, subscriptionCancelRatio } from '../subscriptions/subscription-rules';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { clubTimezone } from '../notifications/clock';
+import { localParts } from '../club/closures';
+import { staffJoinProblem } from '../staff/shift-rules';
+import { StaffService } from '../staff/staff.service';
 
 /**
  * Мероприятия клуба и запись на них: занятия и турниры одним списком.
@@ -50,7 +55,8 @@ export class EventsService {
     private readonly membership: MembershipService,
     private readonly subscriptions: SubscriptionsService,
     private readonly notifier: ClientNotifier,
-    private readonly staff: StaffNotifier,
+    private readonly staffNotifier: StaffNotifier,
+    private readonly staff: StaffService,
   ) {}
 
   /**
@@ -292,6 +298,7 @@ export class EventsService {
       throw new BadRequestException('Запись на этот турнир закрыта');
     }
 
+    await this.assertStaffMayJoin(tenantId, userId, tournament.startsAt, null);
     await this.membership.ensureClient(tenantId, userId);
 
     let entryId: string;
@@ -376,6 +383,7 @@ export class EventsService {
         id: true,
         startsAt: true,
         trainingTypeId: true,
+        coachId: true,
         trainingType: { select: { price: true, isActive: true } },
       },
     });
@@ -392,6 +400,7 @@ export class EventsService {
       throw new BadRequestException('Запись на это занятие закрыта');
     }
 
+    await this.assertStaffMayJoin(tenantId, userId, session.startsAt, session.coachId);
     await this.membership.ensureClient(tenantId, userId);
 
     let entryId: string;
@@ -443,7 +452,7 @@ export class EventsService {
         }
 
         await this.notifier.entryBooked(tx, tenantId, 'TRAINING', created.id, 'self');
-        await this.staff.trainingChanged(tx, tenantId, created.id, 'BOOKED');
+        await this.staffNotifier.trainingChanged(tx, tenantId, created.id, 'BOOKED');
 
         return created.id;
       });
@@ -564,7 +573,7 @@ export class EventsService {
       }
 
       await this.notifier.entryCancelled(tx, tenantId, 'TRAINING', booking.id, 'self');
-      await this.staff.trainingChanged(tx, tenantId, booking.id, 'CANCELLED');
+      await this.staffNotifier.trainingChanged(tx, tenantId, booking.id, 'CANCELLED');
     });
 
     return this.entryFor(tenantId, userId, booking.id);
@@ -578,6 +587,39 @@ export class EventsService {
    * процент лёг бы вторым, другим. Условие на статус превращает гонку в
    * внятный отказ.
    */
+  /**
+   * Сотрудник записывается на мероприятия своего клуба (решение владельца от
+   * 26.09.2026), кроме администратора со сменой в этот день — по местной дате
+   * клуба — и тренера на собственное занятие. Правило — `staffJoinProblem`.
+   */
+  private async assertStaffMayJoin(
+    tenantId: string,
+    userId: string,
+    startsAt: Date,
+    coachId: string | null,
+  ): Promise<void> {
+    const membership = await this.prisma.tenantMembership.findUnique({
+      where: { userId_tenantId: { userId, tenantId } },
+      select: { roles: true },
+    });
+    const roles = membership?.roles ?? [];
+
+    if (!isStaff(roles)) {
+      return;
+    }
+
+    const day = localParts(startsAt, await clubTimezone(this.prisma, tenantId)).date;
+    const problem = staffJoinProblem({
+      roles,
+      shiftOnDay: roles.includes('ADMIN') && (await this.staff.hasShiftOn(tenantId, userId, day)),
+      ownSession: coachId === userId,
+    });
+
+    if (problem) {
+      throw new ForbiddenException(problem);
+    }
+  }
+
   private async cancelEntry(update: Promise<{ count: number }>): Promise<void> {
     if ((await update).count === 0) {
       throw new ConflictException('Запись уже изменилась — обновите страницу');

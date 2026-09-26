@@ -97,7 +97,7 @@ export class EventsController {
    * запись»: человек без привязки проходит как клиент, и запись заводит
    * привязку сама; родитель записывает ребёнка младше 14 параметром `?for=`.
    */
-  @ClientAction()
+  @ClientAction('write', { staff: true })
   @Post('tournaments/:id/registration')
   register(
     @CurrentClub() club: ClubContext,
@@ -108,7 +108,7 @@ export class EventsController {
   }
 
   /** Отмена возвращает саму запись: человек должен увидеть, сколько с него списалось. */
-  @ClientAction()
+  @ClientAction('write', { staff: true })
   @Delete('tournaments/:id/registration')
   cancel(
     @CurrentClub() club: ClubContext,
@@ -125,7 +125,7 @@ export class EventsController {
    * записи лежат в разных таблицах, и «мероприятие вообще» — понятие
    * интерфейса, а не базы. Идентификатор в адресе — сессии.
    */
-  @ClientAction()
+  @ClientAction('write', { staff: true })
   @Post('trainings/:id/booking')
   registerForTraining(
     @CurrentClub() club: ClubContext,
@@ -135,7 +135,7 @@ export class EventsController {
     return this.events.registerForTraining(club.tenantId, acting.userId, id);
   }
 
-  @ClientAction()
+  @ClientAction('write', { staff: true })
   @Delete('trainings/:id/booking')
   cancelTraining(
     @CurrentClub() club: ClubContext,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { addDays, canPlanHall, canWorkDesk, shiftDateProblem } from './shift-rules.ts';
+import { addDays, canPlanHall, canWorkDesk, shiftDateProblem, staffJoinProblem } from './shift-rules.ts';
 
 const none = { managedHallIds: [], shiftHallIdsToday: [] };
 
@@ -52,5 +52,24 @@ describe('shiftDateProblem', () => {
     assert.equal(shiftDateProblem('2026-09-26', '2026-09-26'), null);
     assert.equal(shiftDateProblem(addDays('2026-09-26', 60), '2026-09-26'), null);
     assert.match(shiftDateProblem(addDays('2026-09-26', 61), '2026-09-26') ?? '', /вперёд/);
+  });
+});
+
+describe('staffJoinProblem', () => {
+  it('тренер и администратор без смены — записываются', () => {
+    assert.equal(staffJoinProblem({ roles: ['COACH'], shiftOnDay: false, ownSession: false }), null);
+    assert.equal(staffJoinProblem({ roles: ['ADMIN'], shiftOnDay: false, ownSession: false }), null);
+  });
+
+  it('администратор со сменой в этот день — нет', () => {
+    assert.match(staffJoinProblem({ roles: ['ADMIN', 'COACH'], shiftOnDay: true, ownSession: false }) ?? '', /смена/);
+  });
+
+  it('смена у тренера без роли администратора не считается', () => {
+    assert.equal(staffJoinProblem({ roles: ['COACH'], shiftOnDay: true, ownSession: false }), null);
+  });
+
+  it('на своё занятие — нет', () => {
+    assert.match(staffJoinProblem({ roles: ['COACH'], shiftOnDay: false, ownSession: true }) ?? '', /ведёте вы/);
   });
 });

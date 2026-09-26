@@ -113,7 +113,7 @@ export function EventRow({
           )}
         </span>
 
-        {viewer === 'client' && (
+        {(viewer === 'client' || viewer === 'staff') && (
           <Button
             variant={event.registered ? 'secondary' : 'primary'}
             size="sm"

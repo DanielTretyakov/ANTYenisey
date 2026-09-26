@@ -76,3 +76,26 @@ export function shiftDateProblem(date: string, today: string): string | null {
 
   return null;
 }
+
+/**
+ * Может ли сотрудник записаться на мероприятие своего клуба (решение
+ * владельца от 26.09.2026): может, кроме администратора со сменой в этот день
+ * в любом зале клуба — он работает — и тренера на собственное занятие.
+ */
+export function staffJoinProblem(input: {
+  roles: readonly Role[];
+  /** Есть ли у человека смена в местный день мероприятия. */
+  shiftOnDay: boolean;
+  /** Мероприятие — занятие, которое ведёт он сам. */
+  ownSession: boolean;
+}): string | null {
+  if (input.ownSession) {
+    return 'Это занятие ведёте вы — записаться на него нельзя';
+  }
+
+  if (input.roles.includes('ADMIN') && input.shiftOnDay) {
+    return 'В этот день у вас смена — на мероприятия клуба записаться нельзя';
+  }
+
+  return null;
+}
