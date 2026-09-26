@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { clubTimezone, zoneClock } from './clock';
 import { sendAfterFor } from './notification-rules';
 import { NotificationsService } from './notifications.service';
-import type { AutoNoShowPayload, CoachEntryPayload, RankPendingPayload } from './render';
+import type { AutoNoShowPayload, CoachEntryPayload, RankPendingPayload, SettingsChangedPayload } from './render';
 
 type Db = Prisma.TransactionClient | PrismaService;
 
@@ -155,6 +155,38 @@ export class StaffNotifier {
   }
 
   /**
+   * Правка настроек клуба — всем сотрудникам, тренерам тоже (решение
+   * владельца от 26.09.2026): кто, что и когда вступит в силу. Автор знает
+   * сам. Тихие часы соблюдаются — правка ночью ждёт утра, а в силу вступает
+   * всё равно в полночь.
+   */
+  async settingsChanged(
+    db: Db,
+    tenantId: string,
+    payload: SettingsChangedPayload,
+    dedupeKey: string,
+    now: Date,
+    except: readonly string[],
+  ): Promise<number> {
+    const staff = await clubStaff(db, tenantId, [Role.ADMIN, Role.MANAGER, Role.OWNER, Role.COACH]);
+    const clock = zoneClock(await clubTimezone(db, tenantId));
+
+    return this.notifications.enqueue(
+      db,
+      staff
+        .filter((userId) => !except.includes(userId))
+        .map((userId) => ({
+          userId,
+          tenantId,
+          type: 'CLUB_SETTINGS_CHANGED' as NotificationType,
+          payload: payload as unknown as Prisma.InputJsonValue,
+          dedupeKey,
+          sendAfter: sendAfterFor(now, clock, false),
+        })),
+    );
+  }
+
+  /**
    * Администраторам и руководству клуба — с действующим членством.
    *
    * Ключ идемпотентности обязан нести клуб: администратор двух клубов иначе
@@ -197,12 +229,16 @@ export class StaffNotifier {
   }
 }
 
-/** Администраторы и руководство клуба, которые в нём ещё работают. */
-export async function clubStaff(db: Db, tenantId: string): Promise<string[]> {
+/** Администраторы и руководство клуба (или все с `roles`), которые в нём ещё работают. */
+export async function clubStaff(
+  db: Db,
+  tenantId: string,
+  roles: Role[] = [Role.ADMIN, Role.MANAGER, Role.OWNER],
+): Promise<string[]> {
   const rows = await db.tenantMembership.findMany({
     where: {
       tenantId,
-      roles: { hasSome: [Role.ADMIN, Role.MANAGER, Role.OWNER] },
+      roles: { hasSome: roles },
       deactivatedAt: null,
       user: { deactivatedAt: null },
     },

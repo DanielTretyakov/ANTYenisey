@@ -12,6 +12,7 @@ export * from './notification';
 export * from './platform';
 export * from './player';
 export * from './roles';
+export * from './settings-changes';
 export * from './staff';
 export * from './subscription';
 export * from './tenant';

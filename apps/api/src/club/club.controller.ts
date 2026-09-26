@@ -9,10 +9,12 @@ import {
   Patch,
   Post,
   Put,
+  NotFoundException,
   Query,
   Req,
   UseInterceptors,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import type {
   ClosureRule,
@@ -24,6 +26,7 @@ import type {
   ClubTable,
   DaySchedule,
   Hall,
+  SettingsChange,
   StaffPreferences,
   Tournament,
   TournamentType,
@@ -33,6 +36,7 @@ import type {
 import { CatalogService } from './catalog.service';
 import { ClubService } from './club.service';
 import { ScheduleService } from './schedule.service';
+import { SettingsChangesService } from './settings-changes.service';
 import {
   CreateHallDto,
   CreateTableDto,
@@ -55,6 +59,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import type { ClubContext } from '../auth/club-context';
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { SingleFileUpload, uploadedBytes } from '../files/single-file-upload.interceptor';
+import type { Env } from '../config/env';
 
 /** Загрузка баннера — тот же предел, что у аватара и фото тренера. */
 const UPLOAD_LIMIT = { default: { limit: 20, ttl: 60_000 } };
@@ -79,6 +84,8 @@ export class ClubController {
     private readonly club: ClubService,
     private readonly schedule: ScheduleService,
     private readonly catalog: CatalogService,
+    private readonly changes: SettingsChangesService,
+    private readonly config: ConfigService<Env, true>,
   ) {}
 
   // --- Настройки клуба -----------------------------------------------------
@@ -88,12 +95,43 @@ export class ClubController {
     return this.club.findSettings(club.tenantId);
   }
 
+  /**
+   * Правка настроек. Оформление страницы — сразу, остальное — в ближайшую
+   * полночь (решение владельца от 26.09.2026). Ответ — настройки такими,
+   * какими они станут; что и когда вступит в силу — `settings/changes`.
+   */
   @Patch('settings')
   updateSettings(
     @CurrentClub() club: ClubContext,
     @Body() dto: UpdateClubSettingsDto,
   ): Promise<ClubSettings> {
-    return this.club.updateSettings(club.tenantId, dto);
+    return this.changes.updateSettings(club, dto);
+  }
+
+  // --- Отложенные правки ---------------------------------------------------
+
+  @Get('settings/changes')
+  settingsChanges(@CurrentClub() club: ClubContext): Promise<SettingsChange[]> {
+    return this.changes.list(club.tenantId);
+  }
+
+  @Post('settings/changes/:id/cancel')
+  cancelSettingsChange(@CurrentClub() club: ClubContext, @Param('id') id: string): Promise<SettingsChange[]> {
+    return this.changes.cancel(club, id);
+  }
+
+  /**
+   * Применить всё запланированное сейчас, не дожидаясь полуночи. Только вне
+   * production: смоук проверяет цены и столы сразу после правки, а на стенде
+   * такая кнопка отменила бы само решение.
+   */
+  @Post('settings/changes/apply-now')
+  applySettingsNow(@CurrentClub() club: ClubContext): Promise<{ applied: number; failed: number }> {
+    if (this.config.get('NODE_ENV', { infer: true }) === 'production') {
+      throw new NotFoundException();
+    }
+
+    return this.changes.applyDue({ tenantId: club.tenantId, force: true });
   }
 
   // --- Страница клуба: баннер и тренерский состав -------------------------
@@ -152,7 +190,7 @@ export class ClubController {
     @CurrentClub() club: ClubContext,
     @Body() dto: CreateHallDto,
   ): Promise<Hall> {
-    return this.club.createHall(club.tenantId, dto);
+    return this.changes.createHall(club, dto);
   }
 
   @Patch('halls/:id')
@@ -161,7 +199,7 @@ export class ClubController {
     @Param('id') hallId: string,
     @Body() dto: UpdateHallDto,
   ): Promise<Hall> {
-    return this.club.updateHall(club.tenantId, hallId, dto);
+    return this.changes.updateHall(club, hallId, dto);
   }
 
   /** Управляющий зала — назначает только руководитель (решение от 26.09.2026). */
@@ -181,7 +219,7 @@ export class ClubController {
     @CurrentClub() club: ClubContext,
     @Param('id') hallId: string,
   ): Promise<void> {
-    return this.club.deleteHall(club.tenantId, hallId);
+    return this.changes.deleteHall(club, hallId);
   }
 
   // --- Столы ---------------------------------------------------------------
@@ -196,7 +234,7 @@ export class ClubController {
     @CurrentClub() club: ClubContext,
     @Body() dto: CreateTableDto,
   ): Promise<ClubTable> {
-    return this.club.createTable(club.tenantId, dto.hallId, dto.label);
+    return this.changes.createTable(club, dto.hallId, dto.label);
   }
 
   @Patch('tables/:id')
@@ -205,7 +243,7 @@ export class ClubController {
     @Param('id') tableId: string,
     @Body() dto: RenameTableDto,
   ): Promise<ClubTable> {
-    return this.club.renameTable(club.tenantId, tableId, dto.label);
+    return this.changes.renameTable(club, tableId, dto.label);
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -214,7 +252,7 @@ export class ClubController {
     @CurrentClub() club: ClubContext,
     @Param('id') tableId: string,
   ): Promise<void> {
-    return this.club.deleteTable(club.tenantId, tableId);
+    return this.changes.deleteTable(club, tableId);
   }
 
   // --- Тренеры -------------------------------------------------------------

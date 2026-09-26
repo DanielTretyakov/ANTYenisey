@@ -148,6 +148,8 @@ export interface SettingsChangedPayload {
   effective: string;
   /** Правку отменили до вступления в силу. */
   cancelled?: boolean;
+  /** Правка не применилась в полночь — почему. */
+  failed?: string;
 }
 
 export interface RankPendingPayload {
@@ -363,13 +365,21 @@ export function renderNotification(type: string, payload: unknown, context: Rend
       const p = payload as SettingsChangedPayload;
 
       return {
-        text: lines(
-          p.cancelled ? `Изменение настроек отменено · ${p.club}` : `Настройки клуба изменены · ${p.club}`,
-          `${p.cancelled ? 'Отменил' : 'Изменил'}: ${p.author}.`,
-          ...p.changes.slice(0, 10).map((change) => `— ${change}`),
-          p.changes.length > 10 ? `…и ещё ${p.changes.length - 10}` : null,
-          p.cancelled ? 'Всё остаётся как было.' : `Вступит в силу ${p.effective}.`,
-        ),
+        text: p.failed
+          ? lines(
+              `Изменение настроек не применилось · ${p.club}`,
+              `Вносил: ${p.author}.`,
+              ...p.changes.slice(0, 10).map((change) => `— ${change}`),
+              `Причина: ${p.failed}`,
+              'Всё осталось как было — поправьте настройки заново.',
+            )
+          : lines(
+              p.cancelled ? `Изменение настроек отменено · ${p.club}` : `Настройки клуба изменены · ${p.club}`,
+              `${p.cancelled ? 'Отменил' : 'Изменил'}: ${p.author}.`,
+              ...p.changes.slice(0, 10).map((change) => `— ${change}`),
+              p.changes.length > 10 ? `…и ещё ${p.changes.length - 10}` : null,
+              p.cancelled ? 'Всё остаётся как было.' : `Вступит в силу ${p.effective}.`,
+            ),
         link: { label: 'Настройки клуба', url: `${context.webOrigin}/clubs/${p.slug}/settings` },
       };
     }

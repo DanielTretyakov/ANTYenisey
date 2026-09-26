@@ -9,6 +9,7 @@ import { Field, inputClassName } from '@/components/ui/Field';
 import { CityCombobox } from '@/components/ui/CityCombobox';
 import { Toggle } from '@/components/ui/Toggle';
 import { ApiError } from '@/lib/api';
+import { changedOnly } from '@/lib/changed';
 import { useClubApi } from '@/lib/useClubApi';
 import { cn } from '@/lib/cn';
 
@@ -79,6 +80,9 @@ export function SettingsForm({
   onSaved: (settings: ClubSettings) => void;
 }) {
   const [form, setForm] = useState<FormState>(() => toForm(initial));
+  // С чем сравнивать форму: что она показала при загрузке или после
+  // последнего сохранения. Шлётся только отличное от этого.
+  const [baseline, setBaseline] = useState<ClubSettings>(initial);
   const [errors, setErrors] = useState<string[]>([]);
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
@@ -107,10 +111,9 @@ export function SettingsForm({
     }
 
     setErrors([]);
-    setPending(true);
 
-    try {
-      const updated = await club.updateClubSettings({
+    const changes = changedOnly(
+      {
         name: form.name.trim(),
         // Пустое поле означает «не задано», а не пустую строку: базе нужен
         // либо настоящий идентификатор города, либо NULL.
@@ -131,9 +134,22 @@ export function SettingsForm({
         attendanceReminderAfterMinutes,
         attendanceAutoNoShowAfterMinutes,
         subscriptionBurnsOnNoShowOnly: form.subscriptionBurnsOnNoShowOnly,
-      });
+      },
+      baseline,
+    );
+
+    if (Object.keys(changes).length === 0) {
+      setSaved(true);
+      return;
+    }
+
+    setPending(true);
+
+    try {
+      const updated = await club.updateClubSettings(changes);
 
       setForm(toForm(updated));
+      setBaseline(updated);
       setSaved(true);
       onSaved(updated);
     } catch (cause) {
@@ -163,7 +179,12 @@ export function SettingsForm({
         </Alert>
       )}
 
-      {saved && <Alert tone="info">Настройки клуба сохранены.</Alert>}
+      {saved && (
+        <Alert tone="info">
+          Сохранено. Оформление страницы уже на месте, остальное вступит в силу в ближайшие 00:00 — это видно в
+          «Запланированных изменениях».
+        </Alert>
+      )}
 
       <Card>
         <CardHeader

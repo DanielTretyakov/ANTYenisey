@@ -12,6 +12,7 @@ import { CityCombobox } from '@/components/ui/CityCombobox';
 import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
 import { ApiError } from '@/lib/api';
+import { changedOnly } from '@/lib/changed';
 import { useClubApi } from '@/lib/useClubApi';
 import { inputToKopecks, kopecksToInput } from '@/lib/money';
 import { timezoneOptions } from '@/lib/timezones';
@@ -93,18 +94,22 @@ export function HallForm({
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteQueued, setDeleteQueued] = useState(false);
 
   const club = useClubApi();
 
 
   // Переключение зала вкладками не размонтирует форму — состояние надо
-  // перезалить руками, иначе в новом зале окажутся цены предыдущего.
+  // перезалить руками, иначе в новом зале окажутся цены предыдущего. Только
+  // по смене зала, а не по новому объекту: после сохранения родитель кладёт
+  // зал «каким он станет», и сброс по нему стёр бы «Сохранено».
   useEffect(() => {
     setForm(toForm(hall));
     setErrors([]);
     setSaved(false);
     setConfirmingDelete(false);
-  }, [hall]);
+    setDeleteQueued(false);
+  }, [hall.id]);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((previous) => ({ ...previous, [key]: value }));
@@ -145,10 +150,11 @@ export function HallForm({
     }
 
     setErrors([]);
-    setPending(true);
 
-    try {
-      const updated = await club.updateHall(hall.id, {
+    // Только изменённое относительно показанного: зал с запланированной
+    // правкой иначе получил бы её в очередь второй раз.
+    const changes = changedOnly(
+      {
         name: form.name.trim(),
         timezone: form.timezone,
         // Пустое поле означает «не задано», а не пустую строку.
@@ -164,7 +170,19 @@ export function HallForm({
         tableExtra30MinPrice,
         hasRobotOption: form.hasRobotOption,
         ...robotPrices,
-      });
+      },
+      hall,
+    );
+
+    if (Object.keys(changes).length === 0) {
+      setSaved(true);
+      return;
+    }
+
+    setPending(true);
+
+    try {
+      const updated = await club.updateHall(hall.id, changes);
 
       // Форма перезаполняется ответом сервера, а не тем, что человек ввёл:
       // «400,5» превращается в «400,50», и видно, что именно сохранилось.
@@ -188,6 +206,8 @@ export function HallForm({
 
     try {
       await club.deleteHall(hall.id);
+      setConfirmingDelete(false);
+      setDeleteQueued(true);
       onDeleted(hall.id);
     } catch (cause) {
       setErrors([cause instanceof ApiError ? cause.message : 'Сервис недоступен']);
@@ -219,7 +239,14 @@ export function HallForm({
             </Alert>
           )}
 
-          {saved && <Alert tone="info">Настройки зала сохранены.</Alert>}
+          {saved && (
+            <Alert tone="info">Сохранено. Вступит в силу в ближайшие 00:00 по времени зала.</Alert>
+          )}
+          {deleteQueued && (
+            <Alert tone="info">
+              Зал будет удалён в ближайшие 00:00. Передумали — отмените в «Запланированных изменениях».
+            </Alert>
+          )}
 
           <div className="grid gap-x-6 sm:grid-cols-2">
             <Field

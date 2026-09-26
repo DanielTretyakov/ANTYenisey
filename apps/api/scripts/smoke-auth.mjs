@@ -76,8 +76,28 @@ async function call(path, options = {}) {
     body = text;
   }
 
+  // Настройки клуба, залы и столы вступают в силу в полночь (решение
+  // владельца от 26.09.2026), а смоук проверяет цены и столы сразу после
+  // правки. Поэтому после каждой успешной правки очередь применяется сейчас —
+  // маршрутом, которого нет в production. `deferred: true` — не применять:
+  // так раздел 20а проверяет саму отсрочку.
+  const settings = SETTINGS_PATH.exec(path);
+
+  if (settings && !options.deferred && options.method && options.method !== 'GET' && response.ok) {
+    await fetch(`${API}/clubs/${settings[1]}/settings/changes/apply-now`, {
+      method: 'POST',
+      headers: {
+        ...(options.cookie ? { Cookie: options.cookie } : {}),
+        ...options.headers,
+      },
+    });
+  }
+
   return { status: response.status, body, setCookie: response.headers.getSetCookie() };
 }
+
+/** Правки, которые ждут полуночи: настройки клуба, залы, столы. */
+const SETTINGS_PATH = /^\/clubs\/([^/?]+)\/(?:settings|halls(?:\/[^/?]+)?|tables(?:\/[^/?]+)?)$/;
 
 /** Мобильный клиент: токен приезжает в теле. */
 const post = (path, json) => call(path, { method: 'POST', json, headers: MOBILE });
@@ -652,6 +672,89 @@ async function main() {
 
     r = await asAdmin(`/clubs/yenisey/halls/${hallId}`, { method: 'DELETE' });
     check('зал со столами удалить нельзя', 409, r.status);
+
+    console.log('=== 20а. Настройки вступают в силу в полночь');
+    // Решение владельца от 26.09.2026: всё со страницы «Настройки», кроме
+    // оформления, ждёт ближайших 00:00 по времени зала.
+    const deferred = (path, options) => asAdmin(path, { ...options, deferred: true });
+    const hallNow = async () => ((await asAdmin('/clubs/yenisey/halls')).body ?? []).find((hall) => hall.id === hallId);
+    const changesNow = async () => (await asAdmin('/clubs/yenisey/settings/changes')).body ?? [];
+    const priceBefore = (await hallNow())?.tableHourPrice;
+
+    r = await deferred(`/clubs/yenisey/halls/${hallId}`, { method: 'PATCH', json: { tableHourPrice: priceBefore + 10000 } });
+    check('правка цены зала принята', 200, r.status);
+    assert('ответ — зал таким, каким он станет', r.body?.tableHourPrice === priceBefore + 10000);
+    assert('а сейчас цена прежняя', (await hallNow())?.tableHourPrice === priceBefore);
+    let changes = await changesNow();
+    const priceChange = changes.find((item) => item.status === 'PENDING' && item.targetId === hallId && item.kind === 'HALL_UPDATE');
+    assert('правка в списке запланированных', Boolean(priceChange));
+    assert('в сводке — что было и что станет', (priceChange?.summary ?? []).some((line) => line.includes('час аренды') && line.includes('→')));
+    assert('вступит в силу в 00:00', /в 00:00$/.test(priceChange?.effectiveLabel ?? ''));
+    assert('автор назван сокращённо', typeof priceChange?.authorName === 'string' && priceChange.authorName.length > 0);
+
+    r = await deferred(`/clubs/yenisey/halls/${hallId}`, { method: 'PATCH', json: { tableHourPrice: priceBefore } });
+    check('та же цена, что сейчас, — принята', 200, r.status);
+    assert('и в очередь не встала', (await changesNow()).filter((item) => item.status === 'PENDING').length === changes.filter((item) => item.status === 'PENDING').length);
+
+    r = await asAdmin(`/clubs/yenisey/settings/changes/${priceChange?.id}/cancel`, { method: 'POST' });
+    check('правка отменена', 201, r.status);
+    assert('отменённая — в истории с отменившим', (r.body ?? []).some((item) => item.id === priceChange?.id && item.status === 'CANCELLED' && item.cancelledByName));
+    r = await asAdmin(`/clubs/yenisey/settings/changes/${priceChange?.id}/cancel`, { method: 'POST' });
+    check('второй раз не отменить', 409, r.status);
+    r = await asAdmin('/clubs/yenisey/settings/changes/net-takoy/cancel', { method: 'POST' });
+    check('чужая или несуществующая правка — 404', 404, r.status);
+    r = await asAdmin('/clubs/yenisey/settings/changes/apply-now', { method: 'POST' });
+    assert('отменённая не применяется', (await hallNow())?.tableHourPrice === priceBefore);
+
+    r = await deferred(`/clubs/yenisey/halls/${hallId}`, { method: 'PATCH', json: { tableHourPrice: priceBefore + 5000 } });
+    r = await asAdmin('/clubs/yenisey/settings/changes/apply-now', { method: 'POST' });
+    check('очередь применена', 201, r.status);
+    assert('применена ровно одна правка', r.body?.applied === 1 && r.body?.failed === 0);
+    assert('цена зала изменилась', (await hallNow())?.tableHourPrice === priceBefore + 5000);
+    assert('правка — «в силе»', (await changesNow()).some((item) => item.targetId === hallId && item.status === 'APPLIED'));
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}`, { method: 'PATCH', json: { tableHourPrice: priceBefore } });
+    assert('цена возвращена', (await hallNow())?.tableHourPrice === priceBefore);
+
+    // Столы: удаление ждёт полуночи, стол до тех пор на месте.
+    r = await deferred(`/clubs/yenisey/tables/${tableId}`, { method: 'DELETE' });
+    check('удаление стола запланировано', 204, r.status);
+    r = await asAdmin('/clubs/yenisey/tables');
+    assert('стол пока на месте', (r.body ?? []).some((table) => table.id === tableId));
+    r = await deferred(`/clubs/yenisey/tables/${tableId}`, { method: 'DELETE' });
+    check('второе удаление того же стола отклонено', 409, r.status);
+    r = await deferred('/clubs/yenisey/tables', { method: 'POST', json: { hallId, label: `${label} (будущий)` } });
+    check('новый стол запланирован', 201, r.status);
+    const futureTableId = r.body?.id;
+    r = await deferred('/clubs/yenisey/tables', { method: 'POST', json: { hallId, label: `${label} (будущий)` } });
+    check('название будущего стола уже занято', 409, r.status);
+    changes = await changesNow();
+    const tableDelete = changes.find((item) => item.status === 'PENDING' && item.kind === 'TABLE_DELETE' && item.targetId === tableId);
+    const tableCreate = changes.find((item) => item.status === 'PENDING' && item.kind === 'TABLE_CREATE' && item.targetId === futureTableId);
+    assert('у будущего стола есть название и зал', tableCreate?.newName === `${label} (будущий)` && tableCreate?.hallId === hallId);
+    for (const change of [tableDelete, tableCreate]) {
+      r = await asAdmin(`/clubs/yenisey/settings/changes/${change?.id}/cancel`, { method: 'POST' });
+      check('правка стола отменена', 201, r.status);
+    }
+    r = await asAdmin('/clubs/yenisey/tables');
+    assert('будущего стола нет, а прежний на месте', !(r.body ?? []).some((table) => table.id === futureTableId) && (r.body ?? []).some((table) => table.id === tableId));
+
+    // Оформление страницы — сразу, без очереди.
+    r = await asAdmin('/clubs/yenisey/settings');
+    const descriptionBefore = r.body?.description ?? null;
+    const pendingBefore = (await changesNow()).filter((item) => item.status === 'PENDING').length;
+    r = await deferred('/clubs/yenisey/settings', { method: 'PATCH', json: { description: `Описание проверки ${RUN}` } });
+    check('описание клуба сохранено', 200, r.status);
+    r = await asAdmin('/clubs/yenisey/settings');
+    assert('описание — сразу, без полуночи', r.body?.description === `Описание проверки ${RUN}`);
+    assert('и в очередь не встало', (await changesNow()).filter((item) => item.status === 'PENDING').length === pendingBefore);
+    await deferred('/clubs/yenisey/settings', { method: 'PATCH', json: { description: descriptionBefore ?? '' } });
+
+    // Правило «неявка позже напоминания» проверяется при сохранении, а не в полночь.
+    r = await deferred('/clubs/yenisey/settings', {
+      method: 'PATCH',
+      json: { attendanceReminderAfterMinutes: 120, attendanceAutoNoShowAfterMinutes: 60 },
+    });
+    check('неверная правка отклонена сразу, а не в полночь', 400, r.status);
 
     console.log('=== 21. Шаблон недели');
     const coaches = (await asAdmin('/clubs/yenisey/coaches')).body ?? [];
@@ -1482,6 +1585,10 @@ async function main() {
 
         r = await asOutsider('/clubs/yenisey/settings');
         check('чужому человеку настройки клуба закрыты', 403, r.status);
+        r = await asOutsider('/clubs/yenisey/settings/changes');
+        check('и запланированные правки тоже', 403, r.status);
+        r = await asOutsider('/clubs/yenisey/settings/changes/apply-now', { method: 'POST' });
+        check('применить очередь чужой не может', 403, r.status);
 
         r = await asOutsider('/clubs/net-takogo-kluba/booking/halls');
         check('несуществующий клуб в адресе — 404, а не пустой ответ', 404, r.status);

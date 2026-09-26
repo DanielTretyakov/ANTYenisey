@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import type { ClubTable } from '@yenisey/types';
+import type { ClubTable, SettingsChange } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -20,16 +20,24 @@ import { cn } from '@/lib/cn';
  * Удаление стола уносит и его расписание — все окна занятого времени в
  * шаблоне недели и в правленых днях. Поэтому их число показано рядом с
  * кнопкой, а не выясняется потом по пропаже.
+ *
+ * Новый стол, переименование и удаление вступают в силу в ближайшие 00:00
+ * (решение владельца от 26.09.2026): до тех пор список показывает столы как
+ * есть, а запланированное — пометками «появится», «станет», «удаляется».
  */
 export function TablesCard({
   hallId,
   tables,
-  onChange,
+  changes,
+  onQueued,
 }: {
   hallId: string;
   /** Столы всего клуба; здесь показываются только столы этого зала. */
   tables: ClubTable[];
-  onChange: (tables: ClubTable[]) => void;
+  /** Запланированные правки клуба — отсюда пометки столов. */
+  changes: SettingsChange[];
+  /** Правка ушла в очередь — перечитать запланированное. */
+  onQueued: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [label, setLabel] = useState('');
@@ -38,15 +46,23 @@ export function TablesCard({
   /** Стол, удаление которого ждёт подтверждения. Одновременно — только один. */
   const [confirming, setConfirming] = useState<string | null>(null);
 
+  const [queued, setQueued] = useState<string | null>(null);
+
   const club = useClubApi();
   const own = tables.filter((table) => table.hallId === hallId);
+  const waiting = changes.filter((change) => change.status === 'PENDING' && change.hallId === hallId);
+  const planned = (tableId: string, kind: SettingsChange['kind']): SettingsChange | undefined =>
+    waiting.filter((change) => change.targetId === tableId && change.kind === kind).at(-1);
+  const upcoming = waiting.filter((change) => change.kind === 'TABLE_CREATE');
 
-  async function run(action: () => Promise<ClubTable[]>): Promise<void> {
+  async function run(action: () => Promise<string>): Promise<void> {
     setError(null);
+    setQueued(null);
     setPending(true);
 
     try {
-      onChange(await action());
+      setQueued(await action());
+      onQueued();
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен, попробуйте позже');
     } finally {
@@ -60,9 +76,7 @@ export function TablesCard({
     await run(async () => {
       const created = await club.createTable(hallId, label);
       setLabel('');
-      // Порядок тот же, что на сервере, — по названию: иначе новый стол
-      // встанет в конец, а после перезагрузки прыгнет на своё место.
-      return [...tables, created].sort(byLabel);
+      return `Стол «${created.label}» появится в ближайшие 00:00.`;
     });
   }
 
@@ -75,7 +89,7 @@ export function TablesCard({
 
     await run(async () => {
       const updated = await club.renameTable(table.id, next);
-      return tables.map((item) => (item.id === table.id ? updated : item)).sort(byLabel);
+      return `Стол «${table.label}» станет «${updated.label}» в ближайшие 00:00.`;
     });
   }
 
@@ -84,7 +98,7 @@ export function TablesCard({
 
     await run(async () => {
       await club.deleteTable(table.id);
-      return tables.filter((item) => item.id !== table.id);
+      return `Стол «${table.label}» будет удалён в ближайшие 00:00.`;
     });
   }
 
@@ -96,8 +110,9 @@ export function TablesCard({
       />
       <CardBody>
         {error && <Alert>{error}</Alert>}
+        {queued && <Alert tone="info">{queued} Передумали — отмените в «Запланированных изменениях».</Alert>}
 
-        {own.length === 0 ? (
+        {own.length === 0 && upcoming.length === 0 ? (
           <p className="mb-4 text-[0.9375rem] text-text-muted">
             В зале пока нет столов. Пока их нет, ни забронировать, ни составить расписание нечего.
           </p>
@@ -142,7 +157,20 @@ export function TablesCard({
                   </>
                 ) : (
                   <>
-                    <span className="flex-1 text-[0.9375rem] text-text">{table.label}</span>
+                    <span className="flex-1 text-[0.9375rem] text-text">
+                      {table.label}
+                      {planned(table.id, 'TABLE_RENAME') && (
+                        <span className="ml-2 text-[0.8125rem] text-text-subtle">
+                          → «{planned(table.id, 'TABLE_RENAME')?.newName}» · {planned(table.id, 'TABLE_RENAME')?.effectiveLabel}
+                        </span>
+                      )}
+                    </span>
+
+                    {planned(table.id, 'TABLE_DELETE') && (
+                      <span className="text-[0.75rem] tracking-[0.06em] text-warning uppercase">
+                        удаляется {planned(table.id, 'TABLE_DELETE')?.effectiveLabel}
+                      </span>
+                    )}
 
                     {table.closureCount > 0 && (
                       <span className="text-[0.75rem] tracking-[0.06em] text-text-subtle uppercase">
@@ -184,6 +212,14 @@ export function TablesCard({
                     </Button>
                   </>
                 )}
+              </li>
+            ))}
+            {upcoming.map((change) => (
+              <li key={change.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5">
+                <span className="flex-1 text-[0.9375rem] text-text-muted">{change.newName}</span>
+                <span className="text-[0.75rem] tracking-[0.06em] text-text-accent uppercase">
+                  появится {change.effectiveLabel}
+                </span>
               </li>
             ))}
           </ul>
@@ -238,8 +274,6 @@ function RenameInput({ initial, onDone }: { initial: string; onDone: (label: str
     />
   );
 }
-
-const byLabel = (a: ClubTable, b: ClubTable): number => a.label.localeCompare(b.label, 'ru');
 
 /** Русское склонение по числу: 1 окно, 2 окна, 5 окон. */
 function plural(count: number, one: string, few: string, many: string): string {

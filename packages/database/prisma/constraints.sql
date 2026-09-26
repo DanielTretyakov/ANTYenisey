@@ -1200,3 +1200,35 @@ ALTER TABLE "TenantMembership"
     cardinality("roles") BETWEEN 1 AND 5
     AND ('CLIENT' <> ALL ("roles") OR cardinality("roles") = 1)
   );
+
+-- ---------------------------------------------------------------------------
+-- 30. Отложенные правки настроек
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_settings_changes (решение владельца от 26.09.2026):
+-- настройки клуба вступают в силу в ближайшую полночь. Исход у правки ровно
+-- один — применена, отменена или не применилась; у неудачи есть причина, у
+-- правки клуба нет цели, у зала и стола — есть.
+ALTER TABLE "SettingsChange"
+  ADD CONSTRAINT "SettingsChange_one_outcome"
+  CHECK (
+    (("appliedAt" IS NOT NULL)::int + ("cancelledAt" IS NOT NULL)::int + ("failedAt" IS NOT NULL)::int) <= 1
+  );
+
+ALTER TABLE "SettingsChange"
+  ADD CONSTRAINT "SettingsChange_failure_explained"
+  CHECK (("failedAt" IS NULL) = ("failure" IS NULL));
+
+-- Отменивший может исчезнуть (SET NULL при уборке пробных учёток), поэтому
+-- связь односторонняя: без отмены отменившего нет.
+ALTER TABLE "SettingsChange"
+  ADD CONSTRAINT "SettingsChange_canceller_only_if_cancelled"
+  CHECK ("cancelledById" IS NULL OR "cancelledAt" IS NOT NULL);
+
+ALTER TABLE "SettingsChange"
+  ADD CONSTRAINT "SettingsChange_target_matches_kind"
+  CHECK (("kind" = 'CLUB') = ("targetId" IS NULL));
+
+ALTER TABLE "SettingsChange"
+  ADD CONSTRAINT "SettingsChange_summary_present"
+  CHECK (cardinality("summary") BETWEEN 1 AND 60);

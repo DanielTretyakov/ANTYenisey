@@ -82,6 +82,7 @@ import type {
   UpdateEquipmentRequest,
   RecordVisitRequest,
   RegisterRequest,
+  SettingsChange,
   StaffCandidate,
   StaffHall,
   StaffSchedule,
@@ -553,6 +554,11 @@ export function clubApi(slug: string = TENANT_SLUG) {
 
     updateClubSettings: (patch: UpdateClubSettingsRequest): Promise<ClubSettings> =>
       authorized(`${club}/settings`, json('PATCH', patch)),
+
+    /** Запланированные на полночь правки настроек и недавняя история. */
+    settingsChanges: (): Promise<SettingsChange[]> => authorized(`${club}/settings/changes`),
+    cancelSettingsChange: (id: string): Promise<SettingsChange[]> =>
+      authorized(`${club}/settings/changes/${id}/cancel`, { method: 'POST' }),
 
     /** Баннер страницы клуба: файл в поле `file`, новый заменяет старый. */
     setClubBanner: (file: File): Promise<ClubSettings> => authorized(`${club}/settings/banner`, form('PUT', {}, file)),

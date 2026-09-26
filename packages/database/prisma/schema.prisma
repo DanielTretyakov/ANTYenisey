@@ -461,6 +461,7 @@ model Tenant {
   tournamentTypeHalls     TournamentTypeHall[]
   coachHalls              CoachHall[]
   staffShifts             StaffShift[]
+  settingsChanges         SettingsChange[]
   subscriptions           Subscription[]
   subscriptionLedger      SubscriptionLedger[]
   payments                Payment[]
@@ -677,6 +678,8 @@ model User {
   maxLink              MaxLink?
   maxLinkTokens        MaxLinkToken[]
   pushSubscriptions    PushSubscription[]
+
+  settingsChangesCancelled SettingsChange[] @relation("SettingsChangeCanceller")
 }
 
 // ---------------------------------------------------------------------------
@@ -1042,6 +1045,7 @@ model TenantMembership {
   /// Смены администратора и смены, которые назначил этот человек.
   shifts         StaffShift[] @relation("ShiftAdmin")
   shiftsAssigned StaffShift[] @relation("ShiftAssigner")
+  settingsChanges SettingsChange[] @relation("SettingsChangeAuthor")
 
   @@id([userId, tenantId])
   @@index([tenantId])
@@ -2427,4 +2431,58 @@ model StaffShift {
   @@id([hallId, date, userId])
   @@index([tenantId, date])
   @@index([userId, date])
+}
+
+/// Что меняет отложенная правка настроек.
+enum SettingsChangeKind {
+  CLUB
+  HALL_CREATE
+  HALL_UPDATE
+  HALL_DELETE
+  TABLE_CREATE
+  TABLE_RENAME
+  TABLE_DELETE
+}
+
+/// Правка настроек клуба, ждущая ближайшей полуночи (решение владельца от
+/// 26.09.2026): всё со страницы «Настройки», кроме оформления страницы клуба,
+/// вступает в силу в 00:00 по поясу зала (у правки клуба — старшего зала), а
+/// не посреди рабочего дня.
+///
+/// Строка остаётся и после применения — это история, которую видят
+/// администраторы: кто, что и когда поменял. Исход ровно один: применена,
+/// отменена или не применилась (CHECK SettingsChange_one_outcome).
+///
+/// `targetId` — зал или стол, а у создания — идентификатор, выданный заранее:
+/// веб и смоук получают будущий зал сразу, а в полночь он появляется под тем
+/// же id. Внешнего ключа на цель нет: её ещё нет (создание) или уже нет
+/// (удаление).
+///
+/// `payload` — готовые к записи поля, проверенные при сохранении: адрес уже
+/// взят у DaData, ссылки нормализованы. В полночь справочник не зовётся.
+model SettingsChange {
+  id            String             @id @default(cuid())
+  tenantId      String
+  kind          SettingsChangeKind
+  targetId      String?
+  payload       Json
+  /// Человеку: «Час аренды: 400 ₽ → 450 ₽». Им же пишется уведомление.
+  summary       String[]
+  authorId      String
+  effectiveAt   DateTime
+  createdAt     DateTime           @default(now())
+  appliedAt     DateTime?
+  cancelledAt   DateTime?
+  cancelledById String?
+  failedAt      DateTime?
+  failure       String?
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  // Составной ключ: автор — человек ЭТОГО клуба. Каскад — ради уборки пробных
+  // учёток; в продукте привязки не удаляются.
+  author      TenantMembership @relation("SettingsChangeAuthor", fields: [authorId, tenantId], references: [userId, tenantId], onDelete: Cascade)
+  cancelledBy User?            @relation("SettingsChangeCanceller", fields: [cancelledById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([effectiveAt])
 }

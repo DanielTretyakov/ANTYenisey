@@ -1548,3 +1548,27 @@ DO $$ BEGIN
   INSERT INTO "StaffShift" ("tenantId","hallId",date,"userId","assignedById") VALUES ('t1','h1',DATE '2026-10-01','c1','c1');
   RAISE NOTICE 'EJ. ПРОВАЛ: одна смена записана дважды';
 EXCEPTION WHEN unique_violation THEN RAISE NOTICE 'EJ. Повтор смены отклонён................. OK (ожидалось)'; END $$;
+
+-- ---------------------------------------------------------------------------
+-- 36. Отложенные правки настроек
+-- ---------------------------------------------------------------------------
+
+-- EK. Автор правки — человек этого клуба, а не соседнего.
+SELECT pg_temp.expect('EK',
+  $q$INSERT INTO "SettingsChange" (id,"tenantId",kind,payload,summary,"authorId","effectiveAt") VALUES ('sc1','t1','CLUB','{}',ARRAY['Название: А → Б'],'u2',now())$q$,
+  '23503', 'SettingsChange_authorId_tenantId_fkey');
+
+-- EL. Правка и применена, и отменена разом.
+SELECT pg_temp.expect('EL',
+  $q$INSERT INTO "SettingsChange" (id,"tenantId",kind,payload,summary,"authorId","effectiveAt","appliedAt","cancelledAt") VALUES ('sc2','t1','CLUB','{}',ARRAY['Название: А → Б'],'c1',now(),now(),now())$q$,
+  '23514', 'SettingsChange_one_outcome');
+
+-- EM. Правка зала без зала.
+SELECT pg_temp.expect('EM',
+  $q$INSERT INTO "SettingsChange" (id,"tenantId",kind,payload,summary,"authorId","effectiveAt") VALUES ('sc3','t1','HALL_UPDATE','{}',ARRAY['Час аренды: 400 ₽ → 450 ₽'],'c1',now())$q$,
+  '23514', 'SettingsChange_target_matches_kind');
+
+-- EN. Неудача без причины.
+SELECT pg_temp.expect('EN',
+  $q$INSERT INTO "SettingsChange" (id,"tenantId",kind,payload,summary,"authorId","effectiveAt","failedAt") VALUES ('sc4','t1','CLUB','{}',ARRAY['Название: А → Б'],'c1',now(),now())$q$,
+  '23514', 'SettingsChange_failure_explained');

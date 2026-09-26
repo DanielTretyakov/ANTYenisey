@@ -351,4 +351,21 @@ describe('смены и настройки клуба', () => {
     assert.match(text, /отменено/);
     assert.match(text, /остаётся как было/);
   });
+
+  it('правка не применилась — с причиной', () => {
+    const { text } = renderNotification(
+      'CLUB_SETTINGS_CHANGED',
+      {
+        club: 'Енисей',
+        slug: 'yenisey',
+        author: 'Иванов И.',
+        changes: ['Удаление стола «Стол 3»'],
+        effective: '27 сентября в 00:00',
+        failed: 'У стола появились брони',
+      },
+      context,
+    );
+    assert.match(text, /не применилось/);
+    assert.match(text, /Причина: У стола появились брони/);
+  });
 });

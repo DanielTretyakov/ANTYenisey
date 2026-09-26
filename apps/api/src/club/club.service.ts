@@ -105,17 +105,22 @@ export class ClubService {
   }
 
   /**
-   * Частичная правка настроек.
+   * Правка настроек — разбор и проверка без записи (решение владельца от
+   * 26.09.2026: настройки вступают в силу в полночь, пишет их очередь
+   * `SettingsChangesService`).
    *
    * Проверять приходится слитое состояние, а не пришедшие поля: сдвинуть срок
    * напоминания одним запросом, а срок автонеявки другим — законный сценарий
    * формы, и «одно позже другого» проверяется только на объединении нового со
    * старым.
+   *
+   * Возвращает текущее состояние и присланные поля в том виде, в каком их
+   * запишут: ссылки нормализованы, ценности разобраны.
    */
-  async updateSettings(
+  async prepareSettings(
     tenantId: string,
     patch: UpdateClubSettingsRequest,
-  ): Promise<ClubSettings> {
+  ): Promise<{ current: ClubSettings; next: Record<string, unknown> }> {
     const current = await this.findSettings(tenantId);
     const violations = clubSettingsViolations({ ...current, ...defined(patch) });
 
@@ -127,7 +132,7 @@ export class ClubService {
     }
 
     const { values, vkUrl, maxUrl, ...rest } = patch;
-    const data: Prisma.TenantUpdateInput = { ...rest };
+    const next: Record<string, unknown> = { ...defined(rest) };
 
     // Ценности и ссылки — через правила: база проверяет лишь форму, а
     // человеку нужна внятная причина отказа и нормализованная ссылка.
@@ -138,7 +143,7 @@ export class ClubService {
         throw new BadRequestException(parsed.message);
       }
 
-      data.values = parsed.value ? (parsed.value as unknown as Prisma.InputJsonArray) : Prisma.DbNull;
+      next.values = parsed.value ?? [];
     }
 
     for (const [field, kind, raw] of [
@@ -155,16 +160,23 @@ export class ClubService {
         throw new BadRequestException(parsed.message);
       }
 
-      data[field] = parsed.value;
+      next[field] = parsed.value;
     }
 
-    const tenant = await this.prisma.tenant.update({
-      where: { id: tenantId },
-      data,
-      select: SETTINGS_SELECT,
-    });
+    return { current, next };
+  }
 
-    return toSettings(tenant);
+  /** Оформление страницы клуба — сразу, без очереди: это не правила работы. */
+  async writeSettingsNow(tenantId: string, data: Record<string, unknown>): Promise<void> {
+    const { values, ...rest } = data;
+    const update: Prisma.TenantUpdateInput = { ...rest };
+
+    if (values !== undefined) {
+      const list = values as unknown[];
+      update.values = list.length > 0 ? (list as Prisma.InputJsonArray) : Prisma.DbNull;
+    }
+
+    await this.prisma.tenant.update({ where: { id: tenantId }, data: update });
   }
 
   // --- Залы ----------------------------------------------------------------
@@ -177,26 +189,39 @@ export class ClubService {
     });
   }
 
-  async createHall(tenantId: string, dto: CreateHallRequest): Promise<Hall> {
-    const violations = hallViolations(dto);
+  /**
+   * Новый зал — разбор и проверка без записи: поля в том виде, в каком их
+   * запишут в полночь. Адрес берётся у DaData сейчас, а не в полночь: в
+   * полночь справочник может не ответить, и правка тихо не применилась бы.
+   */
+  async prepareHallCreate(dto: CreateHallRequest): Promise<Omit<Hall, 'id' | 'managerId'>> {
+    const { tableCount: _tables, ...fields } = dto;
+    const violations = hallViolations(fields);
 
     if (violations.length > 0) {
       throw new BadRequestException(violations);
     }
 
-    const address = await this.verifiedAddress(dto.addressFiasId, dto.cityId);
+    const address = await this.verifiedAddress(fields.addressFiasId, fields.cityId);
 
-    try {
-      return await this.prisma.hall.create({
-        data: { ...dto, ...address, name: dto.name.trim(), tenantId },
-        select: HALL_SELECT,
-      });
-    } catch (error) {
-      throw this.translateHallError(error, dto.name);
-    }
+    return {
+      ...fields,
+      ...address,
+      name: fields.name.trim(),
+      phone: fields.phone ?? null,
+      email: fields.email ?? null,
+    };
   }
 
-  async updateHall(tenantId: string, hallId: string, patch: UpdateHallRequest): Promise<Hall> {
+  /**
+   * Правка зала — разбор и проверка без записи. `next` — присланные поля в
+   * записываемом виде, с адресом от DaData, если он менялся.
+   */
+  async prepareHallUpdate(
+    tenantId: string,
+    hallId: string,
+    patch: UpdateHallRequest,
+  ): Promise<{ current: Hall; next: Record<string, unknown> }> {
     const current = await this.findHall(tenantId, hallId);
     const violations = hallViolations({ ...current, ...defined(patch) });
 
@@ -221,61 +246,14 @@ export class ClubService {
       address = await this.verifiedAddress(current.addressFiasId, cityId);
     }
 
-    try {
-      // tenantId в условии обязателен, хотя id и так уникален: иначе
-      // администратор одного клуба правил бы зал другого, подставив чужой
-      // идентификатор.
-      await this.prisma.hall.updateMany({
-        where: { id: hallId, tenantId },
-        data: { ...rest, ...address, ...(rest.name === undefined ? {} : { name: rest.name.trim() }) },
-      });
-    } catch (error) {
-      throw this.translateHallError(error, patch.name ?? current.name);
-    }
-
-    return this.findHall(tenantId, hallId);
-  }
-
-  /**
-   * Удаление зала.
-   *
-   * Зал со столами удалить нельзя: за столами стоят брони и расписание, и
-   * каскад унёс бы их молча. Сначала админ убирает столы — тогда он видит,
-   * сколько всего теряет.
-   */
-  async deleteHall(tenantId: string, hallId: string): Promise<void> {
-    const [hall, tables, halls] = await Promise.all([
-      this.prisma.hall.findFirst({ where: { id: hallId, tenantId }, select: { id: true } }),
-      this.prisma.table.count({ where: { hallId, tenantId } }),
-      this.prisma.hall.count({ where: { tenantId } }),
-    ]);
-
-    if (!hall) {
-      throw new NotFoundException('Зал не найден');
-    }
-
-    if (tables > 0) {
-      throw new ConflictException(
-        `В зале ${tables} ${plural(tables, 'стол', 'стола', 'столов')} — сначала уберите их`,
-      );
-    }
-
-    // Клуб без единого зала не может ни назначить цену, ни завести стол:
-    // настройки аренды живут только у зала.
-    if (halls <= 1) {
-      throw new ConflictException('Это единственный зал клуба, удалить его нельзя');
-    }
-
-    // Приоритетный зал сотрудников снимается той же транзакцией: ключ на зал
-    // RESTRICT (SET NULL обнулил бы и tenantId привязки), и без этого зал,
-    // который кто-то выбрал основным, не удалялся бы вовсе.
-    await this.prisma.$transaction([
-      this.prisma.tenantMembership.updateMany({
-        where: { tenantId, preferredHallId: hallId },
-        data: { preferredHallId: null },
-      }),
-      this.prisma.hall.delete({ where: { id: hallId } }),
-    ]);
+    return {
+      current,
+      next: {
+        ...defined(rest),
+        ...address,
+        ...(rest.name === undefined ? {} : { name: rest.name.trim() }),
+      },
+    };
   }
 
   // --- Баннер клуба ---------------------------------------------------------
@@ -499,7 +477,7 @@ export class ClubService {
     };
   }
 
-  private async findHall(tenantId: string, hallId: string): Promise<Hall> {
+  async findHall(tenantId: string, hallId: string): Promise<Hall> {
     const hall = await this.prisma.hall.findFirst({
       where: { id: hallId, tenantId },
       select: HALL_SELECT,
@@ -540,83 +518,6 @@ export class ClubService {
       hasBookings: table._count.bookings > 0,
       closureCount: table._count.closureRules + table._count.dayClosures,
     }));
-  }
-
-  async createTable(tenantId: string, hallId: string, label: string): Promise<ClubTable> {
-    // Зал проверяется отдельно: составной внешний ключ не дал бы записать
-    // чужой зал и сам, но отдал бы это ошибкой базы.
-    await this.findHall(tenantId, hallId);
-
-    try {
-      const created = await this.prisma.table.create({
-        data: { tenantId, hallId, label },
-        select: { id: true, hallId: true, label: true },
-      });
-
-      return { ...created, hasBookings: false, closureCount: 0 };
-    } catch (error) {
-      throw this.translateTableError(error, label);
-    }
-  }
-
-  async renameTable(tenantId: string, tableId: string, label: string): Promise<ClubTable> {
-    const updated = await this.prisma.table
-      .updateMany({ where: { id: tableId, tenantId }, data: { label } })
-      .catch((error: unknown) => {
-        throw this.translateTableError(error, label);
-      });
-
-    if (updated.count === 0) {
-      throw new NotFoundException('Стол не найден');
-    }
-
-    const tables = await this.listTables(tenantId);
-    const table = tables.find((item) => item.id === tableId);
-
-    if (!table) {
-      throw new NotFoundException('Стол не найден');
-    }
-
-    return table;
-  }
-
-  /**
-   * Удаление стола.
-   *
-   * Стол с бронями удалить нельзя: за бронями висят платежи, нужные
-   * бухгалтерии, и внешний ключ стоит на `Restrict`. Проверка здесь — ради
-   * внятного ответа; последнее слово всё равно за базой, потому что между
-   * проверкой и удалением бронь может появиться.
-   *
-   * Окна занятого времени удалению не мешают и уходят каскадом — их число
-   * администратор видел в списке столов до нажатия.
-   */
-  async deleteTable(tenantId: string, tableId: string): Promise<void> {
-    const table = await this.prisma.table.findFirst({
-      where: { id: tableId, tenantId },
-      select: { id: true, _count: { select: { bookings: true } } },
-    });
-
-    if (!table) {
-      throw new NotFoundException('Стол не найден');
-    }
-
-    if (table._count.bookings > 0) {
-      throw new ConflictException(
-        'У стола есть брони, поэтому удалить его нельзя — за бронями стоят платежи',
-      );
-    }
-
-    try {
-      await this.prisma.table.delete({ where: { id: tableId } });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
-        throw new ConflictException(
-          'У стола есть брони, поэтому удалить его нельзя — за бронями стоят платежи',
-        );
-      }
-      throw error;
-    }
   }
 
   // --- Тренеры -------------------------------------------------------------
@@ -837,24 +738,6 @@ export class ClubService {
     return result;
   }
 
-  // --- Разбор ошибок базы --------------------------------------------------
-
-  /** P2002 — нарушение @@unique([hallId, label]): такое название уже занято. */
-  private translateTableError(error: unknown, label: string): unknown {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      return new ConflictException(`Стол «${label}» в этом зале уже есть`);
-    }
-
-    return error;
-  }
-
-  private translateHallError(error: unknown, name: string): unknown {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      return new ConflictException(`Зал «${name}» в клубе уже есть`);
-    }
-
-    return error;
-  }
 }
 
 /**
@@ -874,16 +757,4 @@ function defined<T extends object>(patch: T): Partial<T> {
   return Object.fromEntries(
     Object.entries(patch).filter(([, value]) => value !== undefined),
   ) as Partial<T>;
-}
-
-/** Русское склонение по числу: 1 стол, 2 стола, 5 столов. */
-function plural(count: number, one: string, few: string, many: string): string {
-  const mod100 = count % 100;
-  const mod10 = count % 10;
-
-  if (mod100 >= 11 && mod100 <= 14) return many;
-  if (mod10 === 1) return one;
-  if (mod10 >= 2 && mod10 <= 4) return few;
-
-  return many;
 }

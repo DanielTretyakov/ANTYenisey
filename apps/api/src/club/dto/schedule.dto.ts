@@ -28,6 +28,7 @@ import type {
   UpdateHallRequest,
   Weekday,
 } from '@yenisey/types';
+import { MAX_TABLES_WITH_HALL } from '@yenisey/types';
 import { MINUTES_IN_DAY } from '../closures';
 
 const BOOKING_STEPS: BookingStep[] = ['MIN_10', 'MIN_15', 'MIN_20', 'MIN_30', 'HOUR_1'];
@@ -137,6 +138,13 @@ export class CreateHallDto implements CreateHallRequest {
   @ValidateIfNotNull()
   @MoneyField()
   robotExtra30MinPrice: number | null;
+
+  /** Столы нового зала — «Стол 1» … «Стол N». */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(MAX_TABLES_WITH_HALL)
+  tableCount?: number;
 }
 
 /** Правка зала: форма шлёт только изменённое. */

@@ -217,9 +217,15 @@ export type CreateHallRequest = Omit<
   /** Не прислано — у зала своих контактов нет, звонят в клуб. */
   phone?: string | null;
   email?: string | null;
+  /**
+   * Сколько столов завести вместе с залом — «Стол 1» … «Стол N». Зал
+   * появляется в ближайшую полночь (решение владельца от 26.09.2026), и без
+   * этого поля столы в нём можно было бы добавить только ещё сутками позже.
+   */
+  tableCount?: number;
 };
 /** Правка зала: код ФИАС — только если адрес меняется. */
-export type UpdateHallRequest = Partial<CreateHallRequest>;
+export type UpdateHallRequest = Partial<Omit<CreateHallRequest, 'tableCount'>>;
 
 /** Подсказка адреса для формы зала — дом из справочника DaData. */
 export interface AddressSuggestion {
