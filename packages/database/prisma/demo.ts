@@ -250,7 +250,7 @@ async function ensureCoach(tenantId: string): Promise<string> {
 
   await prisma.tenantMembership.upsert({
     where: { userId_tenantId: { userId: user.id, tenantId } },
-    update: { roles: { has: Role.COACH } },
+    update: { roles: [Role.COACH] },
     create: { userId: user.id, tenantId, roles: [Role.COACH] },
   });
 
