@@ -1572,3 +1572,17 @@ SELECT pg_temp.expect('EM',
 SELECT pg_temp.expect('EN',
   $q$INSERT INTO "SettingsChange" (id,"tenantId",kind,payload,summary,"authorId","effectiveAt","failedAt") VALUES ('sc4','t1','CLUB','{}',ARRAY['Название: А → Б'],'c1',now(),now())$q$,
   '23514', 'SettingsChange_failure_explained');
+
+-- ---------------------------------------------------------------------------
+-- 37. Новости платформы
+-- ---------------------------------------------------------------------------
+
+-- EO. Новость без заголовка.
+SELECT pg_temp.expect('EO',
+  $q$INSERT INTO "PlatformNews" (id,section,title,body,"authorId","updatedAt") VALUES ('n1','GENERAL','   ','Текст','u1',now())$q$,
+  '23514', 'PlatformNews_title_sane');
+
+-- EP. Новость без текста.
+SELECT pg_temp.expect('EP',
+  $q$INSERT INTO "PlatformNews" (id,section,title,body,"authorId","updatedAt") VALUES ('n2','UPDATES','Заголовок','','u1',now())$q$,
+  '23514', 'PlatformNews_body_sane');

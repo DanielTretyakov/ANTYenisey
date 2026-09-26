@@ -7,6 +7,7 @@ export * from './desk';
 export * from './family';
 export * from './halls';
 export * from './names';
+export * from './news';
 export * from './numbers';
 export * from './notification';
 export * from './platform';

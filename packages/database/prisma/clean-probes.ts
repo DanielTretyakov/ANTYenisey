@@ -22,6 +22,7 @@ const PROBE_EMAIL_PREFIX = 'probe-';
 // брать нельзя по той же причине, что и с почтой.
 const PROBE_HALL_PREFIX = 'Зал проверки ';
 const PROBE_TABLE_PREFIX = 'Стол проверки ';
+const PROBE_NEWS_PREFIX = 'Новость проверки ';
 
 async function main(): Promise<void> {
   const users = await prisma.user.findMany({
@@ -118,6 +119,9 @@ async function main(): Promise<void> {
   const subscriptions = await prisma.subscription.deleteMany({ where: { clientId: { in: ids } } });
 
   await prisma.clientProfile.deleteMany({ where: { userId: { in: ids } } });
+  // Новости, написанные пробной учёткой-владельцем платформы: у автора
+  // Restrict, и без этого учётка не удалилась бы.
+  await prisma.platformNews.deleteMany({ where: { authorId: { in: ids } } });
 
   const removed = await prisma.user.deleteMany({ where });
 
@@ -282,7 +286,11 @@ async function removeProbeRooms(): Promise<void> {
     where: { name: { startsWith: PROBE_PLAN_PREFIX }, subscriptions: { none: {} } },
   });
 
-  console.log(`Убрано залов смоука: ${halls.count}, столов: ${tables.count}, тарифов: ${plans.count}`);
+  // Новости смоука — по точному префиксу заголовка: прогон, упавший до своей
+  // уборки, иначе оставил бы их в ленте платформы навсегда.
+  const news = await prisma.platformNews.deleteMany({ where: { title: { startsWith: PROBE_NEWS_PREFIX } } });
+
+  console.log(`Убрано залов смоука: ${halls.count}, столов: ${tables.count}, тарифов: ${plans.count}, новостей: ${news.count}`);
 }
 
 main()

@@ -680,6 +680,7 @@ model User {
   pushSubscriptions    PushSubscription[]
 
   settingsChangesCancelled SettingsChange[] @relation("SettingsChangeCanceller")
+  newsWritten              PlatformNews[]
 }
 
 // ---------------------------------------------------------------------------
@@ -2485,4 +2486,39 @@ model SettingsChange {
 
   @@index([tenantId, createdAt])
   @@index([effectiveAt])
+}
+
+/// Раздел новостей платформы.
+enum NewsSection {
+  /// Общие — для всех.
+  GENERAL
+  /// Что нового в продукте — для всех.
+  UPDATES
+  /// Для клубов — только сотрудникам клубов.
+  CLUBS
+}
+
+/// Новость платформы (решение владельца от 26.09.2026). Пишет только
+/// владелец платформы (`User.platformRole = OWNER`), читают все без входа —
+/// кроме раздела «Для клубов», который видят только сотрудники клубов. В MAX
+/// не рассылается.
+///
+/// Клуба у новости нет: она про платформу, а не про клуб. `publishedAt`
+/// пусто — черновик, его видит только владелец. Дата публикации ставится
+/// при первой публикации и правкой текста не сдвигается: иначе исправленная
+/// опечатка поднимала бы старую новость наверх ленты.
+model PlatformNews {
+  id          String      @id @default(cuid())
+  section     NewsSection
+  title       String
+  body        String
+  publishedAt DateTime?
+  authorId    String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  author User @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([publishedAt])
+  @@index([section, publishedAt])
 }

@@ -25,6 +25,7 @@ export class UsersService {
         birthDate: true,
         fullName: true,
         gender: true,
+        platformRole: true,
         memberships: {
           where: { deactivatedAt: null },
           select: {
@@ -54,6 +55,7 @@ export class UsersService {
         name: membership.tenant.name,
         roles: membership.roles,
       })),
+      platformOwner: user.platformRole === 'OWNER',
     };
   }
 }

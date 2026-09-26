@@ -1,4 +1,8 @@
 import type {
+  NewsDraft,
+  NewsFeed,
+  NewsItem,
+  NewsSection,
   AttendanceHistoryItem,
   AttendanceKind,
   AttendanceResult,
@@ -502,6 +506,30 @@ export const api = {
 
   /** Проверочное сообщение. Не чаще раза в минуту. */
   sendTestNotification: (): Promise<void> => authorized('/me/notifications/test', { method: 'POST' }),
+
+  // --- Новости платформы (решение владельца от 26.09.2026).
+
+  /**
+   * Лента. С токеном, если он есть: сотрудник клуба видит и раздел «Для
+   * клубов», и какие разделы видны — отвечает сервер.
+   */
+  news: (query: { section?: NewsSection; limit?: number; before?: string } = {}): Promise<NewsFeed> => {
+    const params = new URLSearchParams();
+    if (query.section) params.set('section', query.section);
+    if (query.limit) params.set('limit', String(query.limit));
+    if (query.before) params.set('before', query.before);
+    const suffix = params.size > 0 ? `?${params}` : '';
+
+    return optionallyAuthorized(`/news${suffix}`);
+  },
+  newsItem: (id: string): Promise<NewsItem> => optionallyAuthorized(`/news/${encodeURIComponent(id)}`),
+
+  /** Редактор — только владелец платформы; черновики тоже. */
+  platformNews: (): Promise<NewsItem[]> => authorized('/platform/news'),
+  createNews: (draft: NewsDraft): Promise<NewsItem> => authorized('/platform/news', json('POST', draft)),
+  updateNews: (id: string, draft: NewsDraft): Promise<NewsItem> =>
+    authorized(`/platform/news/${id}`, json('PATCH', draft)),
+  deleteNews: (id: string): Promise<void> => authorized(`/platform/news/${id}`, { method: 'DELETE' }),
 
   /**
    * Файл — байтами, а не адресом для `<img src>`. Картинка по адресу ушла бы

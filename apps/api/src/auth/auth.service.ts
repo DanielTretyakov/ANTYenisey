@@ -349,6 +349,7 @@ export class AuthService {
         fullName: true,
         gender: true,
         birthDate: true,
+        platformRole: true,
         memberships: {
           // Отключённые в клубе не показываются: человек этим клубом больше
           // не пользуется, и держать его в шапке незачем.
@@ -376,6 +377,7 @@ export class AuthService {
         name: membership.tenant.name,
         roles: membership.roles,
       })),
+      platformOwner: user.platformRole === 'OWNER',
     };
   }
 

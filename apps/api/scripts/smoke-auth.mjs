@@ -2323,6 +2323,7 @@ async function main() {
   await staffNotifications();
   await digests();
   await webPush();
+  await platformNews();
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
@@ -5284,6 +5285,121 @@ async function hallScope() {
   await asAdmin(`/clubs/yenisey/tables/${probeTable}`, { method: 'DELETE' });
   r = await asAdmin(`/clubs/yenisey/halls/${probeHall}`, { method: 'DELETE' });
   check('пробный зал убран вместе со связями', 204, r.status);
+}
+
+/**
+ * Новости платформы (решение владельца от 26.09.2026): читают все без входа,
+ * «Для клубов» — только сотрудники клубов, пишет только владелец платформы.
+ * Заголовки — с префиксом уборки «Новость проверки »: упавший прогон не
+ * оставит их в ленте.
+ */
+async function platformNews() {
+  console.log('\n=== 42. Новости платформы');
+
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+
+  let r = await call('/news');
+  check('лента открыта без входа', 200, r.status);
+  assert('гостю — без раздела «Для клубов»', JSON.stringify(r.body?.sections) === JSON.stringify(['GENERAL', 'UPDATES']));
+
+  r = await post('/auth/register', registration({ lastName: 'Новостей', firstName: 'Читатель', middleName: 'Проверки' }));
+  check('читатель заведён', 201, r.status);
+  const asReader = as(r.body?.accessToken ?? '');
+  assert('читатель — не владелец платформы', r.body?.user?.platformOwner === false);
+
+  r = await asReader('/platform/news', { method: 'POST', json: { section: 'GENERAL', title: 'Новость проверки чужая', body: 'x', published: true } });
+  check('писать новости может только владелец платформы', 403, r.status);
+  r = await asReader('/platform/news');
+  check('и редактор ему закрыт', 403, r.status);
+
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('     Редактор новостей — ПРОПУЩЕН (нет учётки администратора)');
+    return;
+  }
+
+  r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const asOwner = as(r.body?.accessToken ?? '');
+
+  if (r.body?.user?.platformOwner !== true) {
+    console.log('     Редактор новостей — ПРОПУЩЕН (SMOKE_ADMIN не владелец платформы: pnpm db:grant-platform)');
+    return;
+  }
+
+  const draft = (section, title, published = true) => ({
+    section,
+    title: `Новость проверки ${RUN} ${title}`,
+    body: 'Первый абзац.\n\nВторой абзац.',
+    published,
+  });
+
+  r = await asOwner('/platform/news', { method: 'POST', json: draft('GENERAL', 'общая') });
+  check('общая новость опубликована', 201, r.status);
+  const general = r.body;
+  assert('у опубликованной есть дата', typeof general?.publishedAt === 'string');
+  r = await asOwner('/platform/news', { method: 'POST', json: draft('CLUBS', 'для клубов') });
+  check('новость для клубов опубликована', 201, r.status);
+  const forClubs = r.body;
+  r = await asOwner('/platform/news', { method: 'POST', json: draft('UPDATES', 'черновик', false) });
+  check('черновик сохранён', 201, r.status);
+  const hidden = r.body;
+  assert('у черновика даты нет', hidden?.publishedAt === null);
+
+  r = await asOwner('/platform/news', { method: 'POST', json: { ...draft('GENERAL', ''), title: '   ' } });
+  check('без заголовка — нельзя', 400, r.status);
+  r = await asOwner('/platform/news', { method: 'POST', json: { ...draft('GENERAL', ''), title: 'Н'.repeat(161) } });
+  check('заголовок длиннее 160 — нельзя', 400, r.status);
+  r = await asOwner('/platform/news', { method: 'POST', json: { ...draft('GENERAL', ''), section: 'SECRET' } });
+  check('раздела «SECRET» нет', 400, r.status);
+
+  const ids = (feed) => (feed?.items ?? []).map((item) => item.id);
+
+  r = await call('/news?limit=50');
+  assert('гость видит общую', ids(r.body).includes(general?.id));
+  assert('гость не видит «Для клубов» и черновик', !ids(r.body).includes(forClubs?.id) && !ids(r.body).includes(hidden?.id));
+  r = await call('/news?section=CLUBS');
+  assert('раздел «Для клубов» гостю — пустой, а не ошибка', r.status === 200 && (r.body?.items ?? []).length === 0);
+  r = await call(`/news/${forClubs?.id}`);
+  check('новость для клубов гостю — как несуществующая', 404, r.status);
+  r = await call(`/news/${hidden?.id}`);
+  check('черновик — тоже', 404, r.status);
+  r = await asReader(`/news/${forClubs?.id}`);
+  check('и клиенту «Для клубов» закрыта', 404, r.status);
+  r = await call(`/news/${general?.id}`);
+  check('общая открывается по ссылке', 200, r.status);
+  assert('текст — как написан', r.body?.body === 'Первый абзац.\n\nВторой абзац.');
+
+  r = await asOwner('/news?section=CLUBS');
+  assert('сотруднику клуба «Для клубов» видна', ids(r.body).includes(forClubs?.id) && (r.body?.sections ?? []).includes('CLUBS'));
+
+  r = await call('/news?limit=1');
+  assert('лента соблюдает limit', (r.body?.items ?? []).length === 1);
+  r = await call(`/news?limit=50&before=${encodeURIComponent(general?.publishedAt ?? '')}`);
+  assert('«старше чего» не отдаёт саму новость', !ids(r.body).includes(general?.id));
+  r = await call('/news?before=vchera');
+  check('кривая дата отклонена', 400, r.status);
+
+  r = await asOwner(`/platform/news/${general?.id}`, { method: 'PATCH', json: draft('GENERAL', 'общая (правка)') });
+  check('новость поправлена', 200, r.status);
+  assert('правка не сдвинула дату публикации', r.body?.publishedAt === general?.publishedAt);
+  r = await asOwner(`/platform/news/${general?.id}`, { method: 'PATCH', json: draft('GENERAL', 'общая (правка)', false) });
+  assert('снята с публикации — снова черновик', r.body?.publishedAt === null);
+  r = await call(`/news/${general?.id}`);
+  check('снятая с ленты больше не открывается', 404, r.status);
+
+  r = await asOwner('/platform/news');
+  check('редактор владельца открыт', 200, r.status);
+  assert('в редакторе видны и черновики', (r.body ?? []).some((item) => item.id === hidden?.id));
+
+  for (const item of [general, forClubs, hidden]) {
+    r = await asOwner(`/platform/news/${item?.id}`, { method: 'DELETE' });
+    check('новость проверки удалена', 204, r.status);
+  }
+  r = await asOwner(`/platform/news/${general?.id}`, { method: 'DELETE' });
+  check('дважды не удалить', 404, r.status);
 }
 
 async function personalData() {

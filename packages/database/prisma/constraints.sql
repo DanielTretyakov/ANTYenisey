@@ -1232,3 +1232,18 @@ ALTER TABLE "SettingsChange"
 ALTER TABLE "SettingsChange"
   ADD CONSTRAINT "SettingsChange_summary_present"
   CHECK (cardinality("summary") BETWEEN 1 AND 60);
+
+-- ---------------------------------------------------------------------------
+-- 31. Новости платформы
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_platform_news (решение владельца от 26.09.2026).
+-- Заголовок и текст не пусты и не бесконечны: лента на стартовой странице
+-- показывает заголовок целиком.
+ALTER TABLE "PlatformNews"
+  ADD CONSTRAINT "PlatformNews_title_sane"
+  CHECK (btrim("title") <> '' AND char_length("title") <= 160);
+
+ALTER TABLE "PlatformNews"
+  ADD CONSTRAINT "PlatformNews_body_sane"
+  CHECK (btrim("body") <> '' AND char_length("body") <= 20000);

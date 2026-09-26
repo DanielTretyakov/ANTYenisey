@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import type { BookingEntry, City, ClubCard, FavouriteClub, FeedEvent } from '@yenisey/types';
+import type { BookingEntry, City, ClubCard, FavouriteClub, FeedEvent, NewsItem } from '@yenisey/types';
 import { PlatformMark } from '@/components/brand/PlatformLogo';
 import { RiverBackdrop } from '@/components/brand/RiverBackdrop';
 import { ClubMark } from '@/components/club/ClubMark';
 import { When, WhenSpan } from '@/components/club/When';
 import { EventDialog } from '@/components/events/EventDialog';
+import { NewsRow } from '@/components/news/NewsParts';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -28,7 +29,8 @@ import { useSession } from '@/lib/useSession';
  * Сверху вниз (решение владельца от 24.09.2026):
  *  1. баннер с поиском — изумрудная плоскость с рекой, как разворот входа;
  *  2. клубы, где играют в выбранном городе (по умолчанию Красноярск);
- *  3. вошедшему — «Мои записи», «Мои клубы» и «Ближайшее в моих клубах».
+ *  3. вошедшему — «Мои записи», «Мои клубы» и «Ближайшее в моих клубах»;
+ *  4. последние три новости платформы — всем (решение от 26.09.2026).
  *
  * Фотографий залов здесь нет намеренно. Стоковый снимок чужого зала под
  * названием клуба — это ложь о клубе; различает их фирменный цвет и логотип,
@@ -118,12 +120,17 @@ export default function StartPage() {
             <Nearest />
           </>
         )}
+
+        {session.status !== 'loading' && <LatestNews />}
       </main>
 
       <footer className="mt-20 border-t border-border">
-        <div className="mx-auto flex w-full max-w-6xl items-center gap-2.5 px-5 py-9 text-[0.8125rem] text-text-subtle sm:px-8">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-2.5 px-5 py-9 text-[0.8125rem] text-text-subtle sm:px-8">
           <PlatformMark className="text-[1.25rem]" />
           КНТ — платформа клубов настольного тенниса
+          <Link href="/news" className="ml-auto text-text-muted underline-offset-2 hover:underline">
+            Новости платформы
+          </Link>
         </div>
       </footer>
     </div>
@@ -491,6 +498,48 @@ function Nearest() {
           onChanged={load}
         />
       )}
+    </section>
+  );
+}
+
+/**
+ * Последние три новости платформы (решение владельца от 26.09.2026). Ждёт
+ * сессию: вошедшему сотруднику клуба сервер отдаёт и «Для клубов». Новостей
+ * нет — блока нет: пустой заголовок на стартовой ничего не сообщает.
+ */
+function LatestNews() {
+  const [items, setItems] = useState<NewsItem[] | null>(null);
+
+  useEffect(() => {
+    api
+      .news({ limit: 3 })
+      .then((feed) => setItems(feed.items))
+      .catch(() => setItems([]));
+  }, []);
+
+  if (!items || items.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="mt-16">
+      <SectionTitle
+        action={
+          <Link href="/news">
+            <Button variant="secondary" size="sm">
+              Все новости
+            </Button>
+          </Link>
+        }
+      >
+        Новости платформы
+      </SectionTitle>
+
+      <ul className="border-t border-border">
+        {items.map((item) => (
+          <NewsRow key={item.id} item={item} />
+        ))}
+      </ul>
     </section>
   );
 }

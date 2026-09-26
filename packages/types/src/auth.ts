@@ -128,6 +128,11 @@ export interface PublicUser {
    * но пока никуда не записывался.
    */
   memberships: UserMembership[];
+  /**
+   * Владелец платформы (`pnpm db:grant-platform`): пишет новости платформы.
+   * Интерфейсу — чтобы показать ссылку на редактор; запрет стоит на сервере.
+   */
+  platformOwner: boolean;
 }
 
 export interface AuthTokens {

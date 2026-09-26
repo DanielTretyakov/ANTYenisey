@@ -17,6 +17,7 @@ import { MeModule } from './me/me.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PeopleModule } from './people/people.module';
 import { PlayersModule } from './players/players.module';
+import { NewsModule } from './news/news.module';
 import { StaffModule } from './staff/staff.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { parseDuration } from './auth/tokens';
@@ -75,6 +76,7 @@ import { validateEnv, type Env } from './config/env';
     SubscriptionsModule,
     GuardianshipModule,
     TenantsModule,
+    NewsModule,
     EntriesModule,
     EventsModule,
     MeModule,
