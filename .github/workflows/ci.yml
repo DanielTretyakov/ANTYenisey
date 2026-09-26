@@ -128,6 +128,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
+      # Скрипты базы и create-admin импортируют @yenisey/types из собранного
+      # dist — до сборки API его нет, и заведение администратора падает.
+      - run: pnpm --filter @yenisey/types build
 
       - name: Завести базу прогона
         run: psql "postgresql://postgres:postgres@localhost:5432/postgres" -c 'CREATE DATABASE yenisey_ci'
