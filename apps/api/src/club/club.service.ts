@@ -67,6 +67,8 @@ const HALL_SELECT = {
   addressFiasId: true,
   latitude: true,
   longitude: true,
+  phone: true,
+  email: true,
   bookingStep: true,
   tableHourPrice: true,
   tableExtra30MinPrice: true,

@@ -7,6 +7,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -93,6 +94,21 @@ export class CreateHallDto implements CreateHallRequest {
   @MaxLength(64)
   addressFiasId: string;
 
+  /**
+   * Телефон и почта зала — как у клуба (update-settings.dto.ts): телефон
+   * уходит в ссылку `tel:`, пустое — «нет своего», звонят в клуб.
+   */
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (typeof value === 'string' && value.trim() === '' ? null : value))
+  @Matches(/^\+7[0-9]{10}$/, { message: 'phone: телефон зала в формате +79991234567' })
+  phone: string | null;
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (typeof value === 'string' && value.trim() === '' ? null : value))
+  @Matches(/^[^@\s]+@[^@\s]+\.[^@\s]+$/, { message: 'email: ожидается адрес почты' })
+  @MaxLength(200)
+  email: string | null;
+
   @IsIn(BOOKING_STEPS, { message: 'bookingStep: недопустимый шаг бронирования' })
   bookingStep: BookingStep;
 
@@ -148,6 +164,21 @@ export class UpdateHallDto implements UpdateHallRequest {
   @MinLength(1)
   @MaxLength(64)
   addressFiasId?: string;
+
+  /**
+   * Телефон и почта зала — как у клуба (update-settings.dto.ts): телефон
+   * уходит в ссылку `tel:`, пустое — «нет своего», звонят в клуб.
+   */
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (typeof value === 'string' && value.trim() === '' ? null : value))
+  @Matches(/^\+7[0-9]{10}$/, { message: 'phone: телефон зала в формате +79991234567' })
+  phone?: string | null;
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (typeof value === 'string' && value.trim() === '' ? null : value))
+  @Matches(/^[^@\s]+@[^@\s]+\.[^@\s]+$/, { message: 'email: ожидается адрес почты' })
+  @MaxLength(200)
+  email?: string | null;
 
   @IsOptional()
   @IsIn(BOOKING_STEPS, { message: 'bookingStep: недопустимый шаг бронирования' })

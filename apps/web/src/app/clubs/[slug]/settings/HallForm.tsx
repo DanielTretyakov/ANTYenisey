@@ -30,6 +30,8 @@ type FormState = {
   cityId: string;
   /** Дом из справочника; пусто — зал заведён до 25.09.2026 и адреса не имеет. */
   address: ChosenAddress | null;
+  phone: string;
+  email: string;
   bookingStep: BookingStep;
   tableHourPrice: string;
   tableExtra30MinPrice: string;
@@ -50,6 +52,8 @@ function toForm(hall: Hall): FormState {
     timezone: hall.timezone,
     cityId: hall.cityId ?? '',
     address: hall.address && hall.addressFiasId ? { value: hall.address, fiasId: hall.addressFiasId } : null,
+    phone: hall.phone ?? '',
+    email: hall.email ?? '',
     bookingStep: hall.bookingStep,
     tableHourPrice: kopecksToInput(hall.tableHourPrice),
     tableExtra30MinPrice: kopecksToInput(hall.tableExtra30MinPrice),
@@ -152,6 +156,9 @@ export function HallForm({
         // Код дома — только если адрес сменили: сервер перепроверяет его у
         // справочника, и незачем тратить запрос на неизменённый.
         ...(form.address.fiasId !== hall.addressFiasId ? { addressFiasId: form.address.fiasId } : {}),
+        // Пусто — «своих контактов нет», посетитель звонит в клуб.
+        phone: form.phone.trim() || null,
+        email: form.email.trim() || null,
         bookingStep: form.bookingStep,
         tableHourPrice,
         tableExtra30MinPrice,
@@ -255,6 +262,25 @@ export function HallForm({
             value={form.address}
             onChange={(address) => set('address', address)}
           />
+
+          <div className="grid gap-x-6 sm:grid-cols-2">
+            <Field
+              label="Телефон зала"
+              hint="Если у зала свой администратор. Пусто — посетитель звонит в клуб."
+              value={form.phone}
+              onChange={(event) => set('phone', event.target.value)}
+              placeholder="+79991234567"
+              inputMode="tel"
+            />
+            <Field
+              label="Почта зала"
+              hint="Тоже необязательна: пусто — пишут на почту клуба."
+              value={form.email}
+              onChange={(event) => set('email', event.target.value)}
+              placeholder="zal@example.ru"
+              inputMode="email"
+            />
+          </div>
 
           <div className="grid gap-x-6 sm:grid-cols-2">
             <MoneyField

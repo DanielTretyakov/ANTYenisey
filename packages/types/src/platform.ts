@@ -274,6 +274,8 @@ export interface EventPlace {
   hallName: string;
   city: string | null;
   address: string | null;
+  /** Телефон зала — кому звонить про это мероприятие; пусто — клуба. */
+  phone: string | null;
 }
 
 /**

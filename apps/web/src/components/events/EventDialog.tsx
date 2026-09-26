@@ -107,6 +107,14 @@ export function EventDialog({
                   <>
                     <span className="block">{event.place.hallName}</span>
                     <span className="block text-[0.875rem] text-text-muted">{placeLine(event.place)}</span>
+                    {event.place.phone && (
+                      <a
+                        href={`tel:${event.place.phone}`}
+                        className="mt-0.5 block text-[0.875rem] text-text-accent underline-offset-2 hover:underline"
+                      >
+                        {event.place.phone}
+                      </a>
+                    )}
                   </>
                 ) : (
                   <span className="text-text-muted">Зал не указан — уточните в клубе</span>

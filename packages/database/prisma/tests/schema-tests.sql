@@ -1492,3 +1492,17 @@ SELECT pg_temp.expect('EA',
 SELECT pg_temp.expect('EB',
   $q$INSERT INTO "CoachHall" ("coachId","hallId","tenantId") VALUES ('c1','h2','t2')$q$,
   '23503', 'CoachHall_coachId_tenantId_fkey');
+
+-- ---------------------------------------------------------------------------
+-- 33. Телефон и почта зала
+-- ---------------------------------------------------------------------------
+
+-- EC. Телефон зала «8 (391) …» — ссылка tel: из него дозванивается не везде.
+SELECT pg_temp.expect('EC',
+  $q$UPDATE "Hall" SET phone = '8 (391) 200-00-00' WHERE id = 'h1'$q$,
+  '23514', 'Hall_phone_format');
+
+-- ED. Почта зала без собаки.
+SELECT pg_temp.expect('ED',
+  $q$UPDATE "Hall" SET email = 'zal.example.ru' WHERE id = 'h1'$q$,
+  '23514', 'Hall_email_format');

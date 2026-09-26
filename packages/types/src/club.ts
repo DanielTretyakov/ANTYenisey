@@ -177,6 +177,12 @@ export interface Hall {
   /** Координаты дома — для ссылки «На карте». */
   latitude: number | null;
   longitude: number | null;
+  /**
+   * Свои телефон и почта зала (решение владельца от 25.09.2026): у залов в
+   * разных городах свои администраторы. Пусто — звонить в клуб.
+   */
+  phone: string | null;
+  email: string | null;
 
   bookingStep: BookingStep;
   /** Цена первого часа аренды стола без робота, копейки. */
@@ -198,8 +204,14 @@ export interface Hall {
  * подсказки: строку и координаты сервер берёт у DaData сам, иначе «ул.
  * Крутых Ключей, 777» прошла бы, подставленная в запрос руками.
  */
-export type CreateHallRequest = Omit<Hall, 'id' | 'address' | 'addressFiasId' | 'latitude' | 'longitude'> & {
+export type CreateHallRequest = Omit<
+  Hall,
+  'id' | 'address' | 'addressFiasId' | 'latitude' | 'longitude' | 'phone' | 'email'
+> & {
   addressFiasId: string;
+  /** Не прислано — у зала своих контактов нет, звонят в клуб. */
+  phone?: string | null;
+  email?: string | null;
 };
 /** Правка зала: код ФИАС — только если адрес меняется. */
 export type UpdateHallRequest = Partial<CreateHallRequest>;

@@ -176,6 +176,8 @@ export class TenantsService {
             address: true,
             latitude: true,
             longitude: true,
+            phone: true,
+            email: true,
             tableHourPrice: true,
             tableExtra30MinPrice: true,
             hasRobotOption: true,
@@ -234,6 +236,8 @@ export class TenantsService {
         address: hall.address,
         latitude: hall.latitude,
         longitude: hall.longitude,
+        phone: hall.phone,
+        email: hall.email,
         tableHourPrice: hall.tableHourPrice,
         tableExtra30MinPrice: hall.tableExtra30MinPrice,
         // Час с роботом показывается только там, где робот есть: цена без

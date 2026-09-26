@@ -211,6 +211,8 @@ function HallsTab({ slug, tenant, viewer }: { slug: string; tenant: PublicTenant
             </div>
           </div>
 
+          <HallContacts hall={hall} tenant={tenant} />
+
           <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 border-t border-border pt-4 text-[0.875rem]">
             <div>
               <dt className="text-text-subtle">Стол, час</dt>
@@ -246,6 +248,36 @@ function HallsTab({ slug, tenant, viewer }: { slug: string; tenant: PublicTenant
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * Кому звонить про этот зал: свои телефон и почта зала (решение владельца от
+ * 25.09.2026), а без них — клуба, с пометкой, что это общий номер.
+ */
+function HallContacts({ hall, tenant }: { hall: PublicTenant['halls'][number]; tenant: PublicTenant }) {
+  const own = hall.phone !== null || hall.email !== null;
+  const phone = hall.phone ?? tenant.phone;
+  const email = hall.email ?? tenant.email;
+
+  if (!phone && !email) {
+    return null;
+  }
+
+  return (
+    <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.875rem]">
+      {phone && (
+        <a href={`tel:${phone}`} className="text-text-accent underline-offset-2 hover:underline">
+          {phone}
+        </a>
+      )}
+      {email && (
+        <a href={`mailto:${email}`} className="text-text-accent underline-offset-2 hover:underline">
+          {email}
+        </a>
+      )}
+      {!own && <span className="text-[0.8125rem] text-text-subtle">общий номер клуба</span>}
+    </p>
   );
 }
 

@@ -596,6 +596,22 @@ async function main() {
 
     r = await asAdmin(`/clubs/yenisey/halls/${hallId}`, { method: 'PATCH', json: { bookingStep: 'MIN_15' } });
     check('шаг бронирования зала изменён', 200, r.status);
+
+    // Свои телефон и почта зала (решение владельца от 25.09.2026).
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}`, { method: 'PATCH', json: { phone: '8 (391) 200-00-00' } });
+    check('телефон зала не в формате +7… отклонён', 400, r.status);
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}`, { method: 'PATCH', json: { email: 'zal.example.ru' } });
+    check('почта зала без собаки отклонена', 400, r.status);
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}`, {
+      method: 'PATCH',
+      json: { phone: '+79990002233', email: 'zal@example.ru' },
+    });
+    check('телефон и почта зала сохранены', 200, r.status);
+    r = await call('/clubs/yenisey');
+    const publicProbeHall = (r.body?.halls ?? []).find((hall) => hall.id === hallId);
+    assert('контакты зала видны на открытой странице', publicProbeHall?.phone === '+79990002233' && publicProbeHall?.email === 'zal@example.ru');
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}`, { method: 'PATCH', json: { phone: '', email: '' } });
+    assert('пустое — «своих контактов нет»', r.body?.phone === null && r.body?.email === null);
     assert('ответ отдал новое значение', r.body?.bookingStep === 'MIN_15');
 
     // Приоритетный зал — личный выбор сотрудника; прежний возвращается в
@@ -4935,6 +4951,35 @@ async function hallScope() {
 
   r = await call(`/clubs/yenisey/events?${new URLSearchParams({ halls: otherHall ?? 'x' })}`);
   check('список мероприятий по залу', 200, r.status);
+
+  // «Предстоящие» по залам: занятие без окна в сетке — там, где идёт его вид.
+  const anyCoach = ((await asAdmin('/clubs/yenisey/coaches')).body ?? [])[0];
+  if (anyCoach && otherHall) {
+    const start = new Date(Date.now() + 5 * 86400_000);
+    start.setUTCMinutes(0, 0, 0);
+    r = await asAdmin('/clubs/yenisey/training-sessions', {
+      method: 'POST',
+      json: {
+        trainingTypeId: type.id,
+        coachId: anyCoach.id,
+        startsAt: start.toISOString(),
+        endsAt: new Date(start.getTime() + 3600_000).toISOString(),
+        capacity: 4,
+      },
+    });
+    check('занятие вида, привязанного к пробному залу, заведено', 201, r.status);
+    const scopedSession = r.body?.id;
+
+    r = await call(`/clubs/yenisey/events?${new URLSearchParams({ halls: probeHall, kind: 'TRAINING', typeId: type.id })}`);
+    assert('в «своём» зале занятие видно', (r.body ?? []).some((event) => event.id === scopedSession));
+    r = await call(`/clubs/yenisey/events?${new URLSearchParams({ halls: otherHall, kind: 'TRAINING', typeId: type.id })}`);
+    assert('в другом зале — нет', !(r.body ?? []).some((event) => event.id === scopedSession));
+    r = await call(`/clubs/yenisey/events?${new URLSearchParams({ kind: 'TRAINING', typeId: type.id })}`);
+    assert('без фильтра — видно', (r.body ?? []).some((event) => event.id === scopedSession));
+
+    r = await asAdmin(`/clubs/yenisey/training-sessions/${scopedSession}`, { method: 'DELETE' });
+    check('пробное занятие убрано', 204, r.status);
+  }
   r = await call('/clubs/yenisey/events?halls=,,');
   check('мусор в фильтре залов отклонён', 400, r.status);
 

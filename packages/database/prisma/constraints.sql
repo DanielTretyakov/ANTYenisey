@@ -1171,3 +1171,17 @@ ALTER TABLE "Hall"
 ALTER TABLE "TenantMembership"
   ADD CONSTRAINT "TenantMembership_coach_hidden_only_coach"
   CHECK ("coachHidden" = false OR "role" = 'COACH');
+
+-- ---------------------------------------------------------------------------
+-- 28. Телефон и почта зала
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_hall_contacts (решение владельца от 25.09.2026): у
+-- залов в разных городах свои администраторы. Формат — как у клуба, раздел 15.
+ALTER TABLE "Hall"
+  ADD CONSTRAINT "Hall_phone_format"
+  CHECK ("phone" IS NULL OR "phone" ~ '^\+7[0-9]{10}$');
+
+ALTER TABLE "Hall"
+  ADD CONSTRAINT "Hall_email_format"
+  CHECK ("email" IS NULL OR (char_length("email") <= 200 AND "email" ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'));

@@ -209,7 +209,7 @@ const PLACE_SELECT = {
   select: {
     table: {
       select: {
-        hall: { select: { name: true, address: true, city: { select: { name: true } } } },
+        hall: { select: { name: true, address: true, phone: true, city: { select: { name: true } } } },
       },
     },
   },
@@ -258,7 +258,7 @@ type DetailParticipant = {
 };
 
 type PlaceRow = {
-  table: { hall: { name: string; address: string | null; city: { name: string } | null } };
+  table: { hall: { name: string; address: string | null; phone: string | null; city: { name: string } | null } };
 };
 
 type DetailExtras = { dayClosures: PlaceRow[]; tenant: ClubRef };
@@ -305,7 +305,9 @@ export function trainingDetail(
 function placeOf(rows: PlaceRow[]): EventPlace | null {
   const hall = rows[0]?.table.hall;
 
-  return hall ? { hallName: hall.name, city: hall.city?.name ?? null, address: hall.address } : null;
+  return hall
+    ? { hallName: hall.name, city: hall.city?.name ?? null, address: hall.address, phone: hall.phone }
+    : null;
 }
 
 /** Те же люди, что в `participants`, и в том же порядке — но кружками. */
