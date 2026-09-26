@@ -81,6 +81,9 @@ services:
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}
       WEB_ORIGIN: https://${DOMAIN}
       PLATFORM_TIMEZONE: ${PLATFORM_TIMEZONE:-Asia/Krasnoyarsk}
+      # Подсказки и проверка адреса зала. Пусто — в production справочник
+      # выключен: новый зал не завести, старый без адреса не поправить.
+      DADATA_API_KEY: ${DADATA_API_KEY:-}
     expose:
       - '3001'
     healthcheck:
