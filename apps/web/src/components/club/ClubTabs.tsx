@@ -2,7 +2,13 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { availableInAny, type ClubCatalogItem, type PublicPlan, type PublicTenant } from '@yenisey/types';
+import {
+  availableInAny,
+  workingHoursLines,
+  type ClubCatalogItem,
+  type PublicPlan,
+  type PublicTenant,
+} from '@yenisey/types';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { PlanGroups, PLANS_ANCHOR } from '@/components/subscriptions/PlanList';
 import { Button } from '@/components/ui/Button';
@@ -13,8 +19,10 @@ import { plural } from '@/lib/plural';
 import { KindBadge, shortWhen } from './EventRow';
 
 /**
- * Четыре вкладки страницы клуба (решение владельца от 25.09.2026): залы,
- * что есть в клубе, тренерский состав и абонементы.
+ * Вкладки выбранного зала (решения владельца от 25 и 27.09.2026): сам зал,
+ * мероприятия, тренеры и абонементы. Всё — в пределах зала, выбранного выше;
+ * новости и рейтинг общие для клуба и стоят над выбором зала отдельными
+ * блоками.
  *
  * Выбранная вкладка живёт в адресе (`#zaly`…): ссылка «Больше абонементов»
  * из кабинета ведёт на `#abonementy` и обязана открыть именно её. Адрес
@@ -23,8 +31,8 @@ import { KindBadge, shortWhen } from './EventRow';
  */
 const TABS = [
   { id: 'zaly', label: 'Залы' },
-  { id: 'meropriyatiya', label: 'Мероприятия клуба' },
-  { id: 'trenery', label: 'Тренерский состав' },
+  { id: 'meropriyatiya', label: 'Мероприятия' },
+  { id: 'trenery', label: 'Тренеры' },
   { id: PLANS_ANCHOR, label: 'Абонементы' },
 ] as const;
 
@@ -101,6 +109,10 @@ export function ClubTabs({
     [PLANS_ANCHOR]: scoped.plans?.length ?? null,
   };
 
+  // Выбран один зал — вкладка про него, в единственном числе.
+  const oneHall = hallIds?.length === 1;
+  const labelOf = (tab: (typeof TABS)[number]): string => (tab.id === 'zaly' && oneHall ? 'Зал' : tab.label);
+
   return (
     <section id={TABS_ANCHOR} className="mb-14 scroll-mt-24">
       <div className="-mx-1 mb-6 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
@@ -111,15 +123,16 @@ export function ClubTabs({
               inTablist
               active={active === tab.id}
               onClick={() => choose(tab.id)}
-              badge={counts[tab.id] || undefined}
+              // У одного зала счётчик «1» ничего не сообщает.
+              badge={(tab.id === 'zaly' && oneHall ? null : counts[tab.id]) || undefined}
             >
-              {tab.label}
+              {labelOf(tab)}
             </Tab>
           ))}
         </div>
       </div>
 
-      <div role="tabpanel" aria-label={TABS.find((tab) => tab.id === active)?.label}>
+      <div role="tabpanel" aria-label={labelOf(TABS.find((tab) => tab.id === active)!)}>
         {active === 'zaly' && <HallsTab slug={slug} tenant={scoped.tenant} viewer={viewer} />}
         {active === 'meropriyatiya' && <CatalogTab catalog={scoped.catalog} onShowSchedule={onShowSchedule} />}
         {active === 'trenery' && <CoachesTab tenant={scoped.tenant} />}
@@ -135,7 +148,11 @@ function scopeTo(
   tenant: PublicTenant | null,
   catalog: ClubCatalogItem[] | null,
   plans: PublicPlan[] | null,
-): { tenant: PublicTenant | null; catalog: ClubCatalogItem[] | null; plans: PublicPlan[] | null } {
+): {
+  tenant: PublicTenant | null;
+  catalog: ClubCatalogItem[] | null;
+  plans: PublicPlan[] | null;
+} {
   if (!hallIds) {
     return { tenant, catalog, plans };
   }
@@ -154,7 +171,11 @@ function scopeTo(
     // решить, где он пригодится.
     plans:
       plans?.filter(
-        (plan) => plan.typeKeys.length === 0 || catalog === null || plan.typeKeys.some((key) => usable.has(key)),
+        // Аренда стола есть в любом зале — тариф с ней пригодится везде.
+        (plan) =>
+          plan.typeKeys.length === 0 ||
+          catalog === null ||
+          plan.typeKeys.some((key) => key === 'TABLE' || usable.has(key)),
       ) ?? null,
   };
 }
@@ -212,6 +233,17 @@ function HallsTab({ slug, tenant, viewer }: { slug: string; tenant: PublicTenant
           </div>
 
           <HallContacts hall={hall} tenant={tenant} />
+
+          {hall.workingHours && (
+            <div className="mt-3 flex items-start gap-2.5 text-[0.875rem]">
+              <ClockIcon />
+              <ul className="text-text" aria-label="Часы работы">
+                {workingHoursLines(hall.workingHours).map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 border-t border-border pt-4 text-[0.875rem]">
             <div>
@@ -281,9 +313,25 @@ function HallContacts({ hall, tenant }: { hall: PublicTenant['halls'][number]; t
   );
 }
 
+/** Фильтр вкладки «Мероприятия» (решение владельца от 27.09.2026). */
+type CatalogKind = 'ALL' | ClubCatalogItem['kind'];
+
+const CATALOG_KINDS: { value: CatalogKind; label: string }[] = [
+  { value: 'ALL', label: 'Все' },
+  { value: 'TOURNAMENT', label: 'Турниры' },
+  { value: 'TRAINING', label: 'Тренировки' },
+];
+
+const CATALOG_EMPTY: Record<CatalogKind, string> = {
+  ALL: 'Занятий и турниров здесь пока нет.',
+  TOURNAMENT: 'Турниров здесь пока нет.',
+  TRAINING: 'Тренировок здесь пока нет.',
+};
+
 /**
- * Что вообще есть в клубе — все виды занятий и турниров, а не ближайшая
- * неделя: человек выбирает клуб по тому, чем в нём занимаются.
+ * Что вообще есть в зале — все виды занятий и турниров, а не ближайшая
+ * неделя: человек выбирает клуб по тому, чем в нём занимаются. Сверху —
+ * «Все · Турниры · Тренировки».
  */
 function CatalogTab({
   catalog,
@@ -292,56 +340,75 @@ function CatalogTab({
   catalog: ClubCatalogItem[] | null;
   onShowSchedule: (item: ClubCatalogItem) => void;
 }) {
+  const [kind, setKind] = useState<CatalogKind>('ALL');
+
   if (!catalog) {
     return <CardsSkeleton />;
   }
 
-  if (catalog.length === 0) {
-    return <Empty>Занятий и турниров клуб пока не завёл.</Empty>;
-  }
+  const count = (value: CatalogKind): number =>
+    value === 'ALL' ? catalog.length : catalog.filter((item) => item.kind === value).length;
+  const shown = kind === 'ALL' ? catalog : catalog.filter((item) => item.kind === kind);
 
   return (
-    <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {catalog.map((item) => (
-        <li
-          key={`${item.kind}-${item.typeId}`}
-          className="flex flex-col rounded-card border border-border bg-surface-raised px-5 py-5"
-        >
-          <KindBadge kind={item.kind} />
-          <h3 className="mt-3 text-[1.125rem] leading-snug">
-            {item.name}
-            {item.ratingLabel && !item.name.includes(item.ratingLabel) && (
-              <span className="ml-2 text-[0.8125rem] text-text-subtle">рейтинг до {item.ratingLabel}</span>
-            )}
-          </h3>
-          {item.description && (
-            <p className="mt-2 line-clamp-4 text-[0.875rem] leading-relaxed whitespace-pre-line text-text-muted">
-              {item.description}
-            </p>
-          )}
+    <div>
+      <div className="mb-4 flex flex-wrap items-center gap-1.5" role="group" aria-label="Вид мероприятий">
+        {CATALOG_KINDS.map((item) => (
+          <Tab
+            key={item.value}
+            active={kind === item.value}
+            onClick={() => setKind(item.value)}
+            badge={count(item.value)}
+          >
+            {item.label}
+          </Tab>
+        ))}
+      </div>
 
-          <div className="mt-auto pt-4">
-            <p className="font-display text-[1.125rem] text-text">{formatKopecks(item.price)}</p>
-            <p className="mt-0.5 text-[0.8125rem] text-text-muted">
-              {item.nextStartsAt
-                ? `Ближайшее: ${shortWhen(item.nextStartsAt)}`
-                : 'Сейчас в расписании нет'}
-              {item.upcomingCount > 1 && ` · всего впереди ${item.upcomingCount}`}
-            </p>
+      {shown.length === 0 ? (
+        <Empty>{CATALOG_EMPTY[kind]}</Empty>
+      ) : (
+        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {shown.map((item) => (
+            <li
+              key={`${item.kind}-${item.typeId}`}
+              className="flex flex-col rounded-card border border-border bg-surface-raised px-5 py-5"
+            >
+              <KindBadge kind={item.kind} />
+              <h3 className="mt-3 text-[1.125rem] leading-snug">
+                {item.name}
+                {item.ratingLabel && !item.name.includes(item.ratingLabel) && (
+                  <span className="ml-2 text-[0.8125rem] text-text-subtle">рейтинг до {item.ratingLabel}</span>
+                )}
+              </h3>
+              {item.description && (
+                <p className="mt-2 line-clamp-4 text-[0.875rem] leading-relaxed whitespace-pre-line text-text-muted">
+                  {item.description}
+                </p>
+              )}
 
-            {item.upcomingCount > 0 && (
-              <button
-                type="button"
-                onClick={() => onShowSchedule(item)}
-                className="mt-3 text-[0.875rem] text-text-accent underline-offset-2 hover:underline"
-              >
-                Показать расписание →
-              </button>
-            )}
-          </div>
-        </li>
-      ))}
-    </ul>
+              <div className="mt-auto pt-4">
+                <p className="font-display text-[1.125rem] text-text">{formatKopecks(item.price)}</p>
+                <p className="mt-0.5 text-[0.8125rem] text-text-muted">
+                  {item.nextStartsAt ? `Ближайшее: ${shortWhen(item.nextStartsAt)}` : 'Сейчас в расписании нет'}
+                  {item.upcomingCount > 1 && ` · всего впереди ${item.upcomingCount}`}
+                </p>
+
+                {item.upcomingCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onShowSchedule(item)}
+                    className="mt-3 text-[0.875rem] text-text-accent underline-offset-2 hover:underline"
+                  >
+                    Показать расписание →
+                  </button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -412,7 +479,11 @@ function PlansTab({ plans }: { plans: PublicPlan[] | null }) {
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="rounded-card border border-dashed border-border px-5 py-8 text-[0.9375rem] text-text-muted">{children}</p>;
+  return (
+    <p className="rounded-card border border-dashed border-border px-5 py-8 text-[0.9375rem] text-text-muted">
+      {children}
+    </p>
+  );
 }
 
 function CardsSkeleton() {
@@ -425,9 +496,25 @@ function CardsSkeleton() {
   );
 }
 
-function PinIcon() {
+function ClockIcon() {
   return (
     <svg viewBox="0 0 16 16" className="mt-0.5 h-4 w-4 shrink-0 text-text-accent" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <circle cx="8" cy="8" r="6.2" />
+      <path d="M8 4.8V8l2.2 1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PinIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      className="mt-0.5 h-4 w-4 shrink-0 text-text-accent"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      aria-hidden="true"
+    >
       <path d="M8 14.5s4.5-4.2 4.5-7.7a4.5 4.5 0 1 0-9 0c0 3.5 4.5 7.7 4.5 7.7Z" />
       <circle cx="8" cy="6.8" r="1.6" />
     </svg>

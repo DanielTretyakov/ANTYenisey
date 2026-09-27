@@ -12,7 +12,10 @@ import {
   type PublicBoardBlock,
   type PublicBoardTable,
   type PublicDayBoard,
+  type SparringStudent,
+  type SparringType,
 } from '@yenisey/types';
+import { SparringStudentPicker } from './SparringStudent';
 import { EventDialog } from '@/components/events/EventDialog';
 import { WhenSpan } from '@/components/club/When';
 import { PersonSwitch } from '@/components/family/PersonSwitch';
@@ -81,6 +84,12 @@ export default function BookingPage() {
   const roles = session.status === 'ready' ? rolesInClub(session.user, slug) : [];
   const sparring = roles.includes('COACH');
   const [sparrings, setSparrings] = useState<ClientBooking[] | null>(null);
+  // Спарринг с учеником (решение владельца от 26.09.2026): ученик платит цену
+  // типа. Без ученика — стол под спарринг на тренере, как прежде.
+  const [sparringTypes, setSparringTypes] = useState<SparringType[]>([]);
+  const [student, setStudent] = useState<SparringStudent | null>(null);
+  const [sparringTypeId, setSparringTypeId] = useState('');
+  const withStudent = sparring && student !== null && sparringTypeId !== '';
 
   const [halls, setHalls] = useState<Hall[] | null>(null);
   const [hallId, setHallId] = useState('');
@@ -187,8 +196,11 @@ export default function BookingPage() {
 
     let cancelled = false;
 
-    club
-      .bookingQuote(hallId, chosenDuration, withRobot && (hall?.hasRobotOption ?? false))
+    // Спарринг с учеником стоит по типу — эту цену тоже считает сервер.
+    (withStudent
+      ? club.sparringQuote(sparringTypeId, chosenDuration)
+      : club.bookingQuote(hallId, chosenDuration, withRobot && (hall?.hasRobotOption ?? false))
+    )
       .then((loaded) => {
         if (!cancelled) setQuote(loaded);
       })
@@ -199,7 +211,16 @@ export default function BookingPage() {
     return () => {
       cancelled = true;
     };
-  }, [hallId, chosenDuration, withRobot, hall?.hasRobotOption, club]);
+  }, [hallId, chosenDuration, withRobot, hall?.hasRobotOption, club, withStudent, sparringTypeId]);
+
+  useEffect(() => {
+    if (!sparring) return;
+
+    club
+      .sparringTypes()
+      .then(setSparringTypes)
+      .catch(() => setSparringTypes([]));
+  }, [club, sparring]);
 
   const loadSparrings = useCallback(() => {
     if (!sparring) {
@@ -240,12 +261,14 @@ export default function BookingPage() {
       tableId: pick.tableId,
       startsAt: instantAt(day.date, pick.startMinute, timezone),
       durationMinutes: chosenDuration,
-      withRobot: withRobot && (hall?.hasRobotOption ?? false),
+      withRobot: withRobot && (hall?.hasRobotOption ?? false) && !withStudent,
     };
 
     try {
       if (sparring) {
-        await club.createSparring(payload);
+        await club.createSparring(
+          withStudent ? { ...payload, studentId: student!.id, sparringTypeId } : payload,
+        );
         // Тренер остаётся здесь: его спарринги живут на этой же странице, а в
         // «Мои записи» не попадают — там записи клиента.
         setPick(null);
@@ -352,7 +375,7 @@ export default function BookingPage() {
                 }))}
               />
 
-              {hall?.hasRobotOption && (
+              {hall?.hasRobotOption && !withStudent && (
                 <Toggle
                   label="Со столовым роботом"
                   hint="Отдельная услуга со своей ценой, а не наценка поверх аренды."
@@ -362,12 +385,22 @@ export default function BookingPage() {
               )}
             </div>
 
+            {sparring && !anonymous && (
+              <SparringStudentPicker
+                types={sparringTypes}
+                student={student}
+                typeId={sparringTypeId}
+                onStudent={setStudent}
+                onType={setSparringTypeId}
+              />
+            )}
+
             <p className="mb-5 text-[0.9375rem]">
-              Стоимость:{' '}
+              {withStudent ? 'Стоимость для ученика:' : 'Стоимость:'}{' '}
               <span className="text-lg text-text">
                 {quote === null ? '—' : formatKopecks(quote.price)}
               </span>
-              {quote !== null && quote.billedMinutes !== quote.durationMinutes && (
+              {!withStudent && quote !== null && quote.billedMinutes !== quote.durationMinutes && (
                 <span className="ml-2 text-[0.8125rem] text-text-muted">
                   оплачивается {formatDuration(quote.billedMinutes)}: начатые полчаса считаются
                   полными
@@ -385,9 +418,13 @@ export default function BookingPage() {
               <Button
                 onClick={() => void handleBook()}
                 pending={pending}
-                disabled={chosenDuration === 0 || (!sparring && family.selfIsChild)}
+                disabled={
+                  chosenDuration === 0 ||
+                  (!sparring && family.selfIsChild) ||
+                  (sparring && student !== null && sparringTypeId === '')
+                }
               >
-                {sparring ? 'Взять стол' : 'Забронировать'}
+                {sparring ? (withStudent ? 'Записать на спарринг' : 'Взять стол') : 'Забронировать'}
               </Button>
             )}
           </CardBody>
@@ -398,7 +435,7 @@ export default function BookingPage() {
         <Card className="mt-6">
           <CardHeader
             title="Мои спарринги"
-            description="Стол занят на вас. С кем именно вы играете, платформа не спрашивает."
+            description="С учеником — он видит спарринг в «Моих записях» и платит цену типа. Без ученика стол занят на вас."
           />
           <CardBody>
             {sparrings === null && <p className="text-[0.875rem] text-text-muted">Загружаем…</p>}
@@ -411,10 +448,12 @@ export default function BookingPage() {
                   <li key={booking.id} className="flex flex-wrap items-start gap-x-6 gap-y-2 py-3 first:pt-0 last:pb-0">
                     <WhenSpan startsAt={booking.startsAt} endsAt={booking.endsAt} />
                     <span className="min-w-0 flex-1 text-[0.9375rem]">
-                      {booking.tableLabel}
-                      <span className="text-text-muted"> · {booking.hallName}</span>
+                      {booking.sparring?.partner ?? 'Без ученика'}
+                      {booking.sparring?.typeName && (
+                        <span className="text-text-muted"> · {booking.sparring.typeName}</span>
+                      )}
                       <span className="mt-0.5 block text-[0.8125rem] text-text-muted">
-                        {formatKopecks(booking.price)}
+                        {booking.tableLabel} · {booking.hallName} · {formatKopecks(booking.price)}
                         {booking.status === 'CANCELLED' && ' · отменён'}
                         {booking.status === 'NO_SHOW' && ' · неявка'}
                         {booking.status === 'ATTENDED' && ' · состоялся'}

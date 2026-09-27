@@ -43,7 +43,11 @@ export class EntriesService {
           priceAtBooking: true,
           status: true,
           chargeRatio: true,
+          isSparring: true,
           tenant: CLUB_SELECT,
+          subscription: SUBSCRIPTION_SELECT,
+          sparringType: { select: { name: true } },
+          coach: { select: { membership: { select: { user: { select: { fullName: true } } } } } },
           table: { select: { label: true, hall: { select: { name: true } } } },
         },
       }),
@@ -98,9 +102,18 @@ export class EntriesService {
         kind: 'TABLE' as const,
         club: clubOf(booking.tenant),
         softRule: booking.tenant.subscriptionBurnsOnNoShowOnly,
-        paidBy: null,
-        title: booking.withRobot ? 'Аренда стола с роботом' : 'Аренда стола',
-        subtitle: `${booking.table.hall.name}, ${booking.table.label}`,
+        paidBy: paidByOf(booking.subscription),
+        // Спарринг ученика с тренером — его запись (решение от 26.09.2026):
+        // называется типом, а тренер — в подписи, как у занятия.
+        title: booking.isSparring
+          ? `Спарринг${booking.sparringType ? `: ${booking.sparringType.name}` : ''}`
+          : booking.withRobot
+            ? 'Аренда стола с роботом'
+            : 'Аренда стола',
+        subtitle:
+          booking.isSparring && booking.coach
+            ? `Тренер: ${shortName(booking.coach.membership.user.fullName)} · ${booking.table.hall.name}, ${booking.table.label}`
+            : `${booking.table.hall.name}, ${booking.table.label}`,
         startsAt: booking.startsAt.toISOString(),
         endsAt: booking.endsAt.toISOString(),
         price: booking.priceAtBooking,

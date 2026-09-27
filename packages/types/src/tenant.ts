@@ -1,3 +1,4 @@
+import type { WorkingHours } from './working-hours';
 import type { ClubValue } from './club';
 import type { Gender } from './auth';
 
@@ -99,4 +100,6 @@ export interface PublicHall {
   robotHourPrice: number | null;
   /** Сколько столов в зале — по ним видно, велик ли зал. */
   tables: number;
+  /** Часы работы: семь дней с понедельника; пусто — зал их не указал. */
+  workingHours: WorkingHours | null;
 }

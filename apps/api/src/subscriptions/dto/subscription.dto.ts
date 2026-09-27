@@ -2,6 +2,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -14,6 +15,7 @@ import { Type } from 'class-transformer';
 import type {
   AdjustSubscriptionRequest,
   ClubLedgerQuery,
+  SubscriptionHoldersQuery,
   IssueSubscriptionRequest,
   SubscriptionPlanRequest,
 } from '@yenisey/types';
@@ -58,6 +60,11 @@ export class SubscriptionPlanDto implements SubscriptionPlanRequest {
   @ArrayMaxSize(100)
   @IsString({ each: true })
   tournamentTypeIds: string[];
+
+  /** Аренда стола: бронь любой длины — один визит (решение владельца от 26.09.2026). */
+  @IsOptional()
+  @IsBoolean()
+  coversTableRental?: boolean;
 }
 
 export class IssueSubscriptionDto implements IssueSubscriptionRequest {
@@ -93,6 +100,30 @@ export class AdjustSubscriptionDto implements AdjustSubscriptionRequest {
  * Фильтр истории абонементов клуба. Числа приходят строками из адреса, поэтому
  * `@Type(() => Number)`: без него `limit=50` не прошёл бы `@IsInt`.
  */
+/** Вкладки «Действующие» и «Архив» раздела «Абонементы». */
+export class SubscriptionHoldersQueryDto implements SubscriptionHoldersQuery {
+  @IsIn(['active', 'archive'], { message: 'Вкладка — active или archive' })
+  status: 'active' | 'archive';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100, { message: 'Поиск — не длиннее 100 символов' })
+  search?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  limit?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  offset?: number;
+}
+
 export class ClubLedgerQueryDto implements ClubLedgerQuery {
   @IsOptional()
   @IsString()

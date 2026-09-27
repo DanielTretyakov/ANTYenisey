@@ -113,7 +113,7 @@ export class DigestSchedule {
         select: name,
         orderBy: { createdAt: 'asc' },
       }),
-      db.tableBooking.findMany({ where: { tenantId, startsAt: window }, select: { status: true, priceAtBooking: true, chargeRatio: true } }),
+      db.tableBooking.findMany({ where: { tenantId, startsAt: window }, select: { status: true, priceAtBooking: true, chargeRatio: true, subscriptionId: true } }),
       db.trainingBooking.findMany({
         where: { tenantId, session: { startsAt: window } },
         select: { status: true, priceAtBooking: true, chargeRatio: true, subscriptionId: true },

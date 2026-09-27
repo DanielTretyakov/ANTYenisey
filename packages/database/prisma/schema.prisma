@@ -211,6 +211,7 @@ enum NotificationType {
   SUBSCRIPTION_PAST_DUE // клубу — про просрочку подписки на платформу
   STAFF_SHIFT_ASSIGNED // администратору: его назначили на смену в зале
   CLUB_SETTINGS_CHANGED // сотрудникам: кто и что поменял в настройках клуба, когда вступит в силу
+  CLUB_POST // клиентам клуба: новая публикация в ленте клуба — акция, объявление
 }
 
 /// Судьба строки очереди уведомлений.
@@ -234,6 +235,7 @@ enum NotificationCategory {
   CLUB_ALERTS // администратору: что ждёт решения клуба
   CLUB_DIGEST // руководству клуба: утренняя сводка
   PLATFORM_DIGEST // владельцу платформы: утренняя сводка
+  CLUB_NEWS // клиенту: акции и объявления его клубов
 }
 
 /// Кто выполнил действие в журнале аудита. Далеко не всё делают люди:
@@ -460,6 +462,8 @@ model Tenant {
   trainingTypeHalls       TrainingTypeHall[]
   tournamentTypeHalls     TournamentTypeHall[]
   coachHalls              CoachHall[]
+  sparringTypes           SparringType[]
+  clubPosts               ClubPost[]
   staffShifts             StaffShift[]
   settingsChanges         SettingsChange[]
   subscriptions           Subscription[]
@@ -624,6 +628,12 @@ model User {
 
   /// Роль на платформе. У всех, кроме владельца платформы, — пусто.
   platformRole PlatformRole?
+
+  /// Не показывать человека в открытом рейтинге посещений клубов (решение
+  /// владельца от 26.09.2026: рейтинг публичный, но с выключателем «не
+  /// показывать меня»). Флаг человека, а не членства: рейтинг — про
+  /// человека, и прятаться поштучно в каждом клубе никто не станет.
+  ratingHidden Boolean @default(false)
 
   // --- Мягкое удаление и анонимизация (152-ФЗ).
   //
@@ -1044,9 +1054,12 @@ model TenantMembership {
   managedHalls Hall[] @relation("HallManager")
 
   /// Смены администратора и смены, которые назначил этот человек.
-  shifts         StaffShift[] @relation("ShiftAdmin")
-  shiftsAssigned StaffShift[] @relation("ShiftAssigner")
+  shifts          StaffShift[]     @relation("ShiftAdmin")
+  shiftsAssigned  StaffShift[]     @relation("ShiftAssigner")
   settingsChanges SettingsChange[] @relation("SettingsChangeAuthor")
+
+  /// Публикации ленты клуба, написанные этим сотрудником.
+  clubPosts ClubPost[] @relation("ClubPostAuthor")
 
   @@id([userId, tenantId])
   @@index([tenantId])
@@ -1417,8 +1430,8 @@ model Hall {
 
   /// Фактический город зала. У клуба свой, «основной», — поиск по городу
   /// находит клуб по совпадению любого из них.
-  cityId  String?
-  city    City?   @relation(fields: [cityId], references: [id], onDelete: Restrict)
+  cityId        String?
+  city          City?   @relation(fields: [cityId], references: [id], onDelete: Restrict)
   /// Адрес зала для клиента. Поиском не используется — для него есть город.
   ///
   /// С 25.09.2026 (решение владельца) адрес обязателен и настоящий: его
@@ -1449,6 +1462,13 @@ model Hall {
   robot30MinPrice      Int? // цена 30 минут с роботом (своя сетка цен)
   robot60MinPrice      Int? // цена 60 минут с роботом
   robotExtra30MinPrice Int? // доплата за каждые следующие 30 минут с роботом
+
+  /// Часы работы (решение владельца от 27.09.2026): семь дней с понедельника,
+  /// день — {open, close} «ЧЧ:ММ» местного времени зала или null — выходной.
+  /// Пусто — не указаны. Форму держит `parseWorkingHours` в @yenisey/types,
+  /// длину — CHECK Hall_working_hours_shape. Пока только для посетителя: сетка
+  /// брони по-прежнему 06:00–24:00.
+  workingHours Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1680,9 +1700,11 @@ model TableBooking {
   tableId  String
   table    Table  @relation(fields: [tableId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
-  // Ровно одно из двух полей заполнено: клиент бронирует сам себе (clientId),
-  // либо тренер инициирует спарринг (coachId + isSparring = true).
-  // Проверяется check-констрейнтом, см. schema-constraints.sql.
+  // Кто за столом: клиент бронирует сам себе (clientId), либо тренер
+  // заводит спарринг (coachId + isSparring = true). С 26.09.2026 у спарринга
+  // бывает и ученик — тогда заполнены оба, ученик в clientId и платит цену
+  // типа спарринга (решение владельца). Форму держит CHECK
+  // TableBooking_owner_shape в constraints.sql.
   clientId String?
   client   ClientProfile? @relation("ClientTableBookings", fields: [clientId, tenantId], references: [userId, tenantId], onDelete: Restrict)
   coachId  String?
@@ -1690,6 +1712,20 @@ model TableBooking {
 
   isSparring Boolean @default(false)
   withRobot  Boolean @default(false) // отдельная услуга со своей сеткой цен, не наценка поверх обычной аренды
+
+  /// Тип спарринга с учеником: «Детский», «Льготный»… Тренер выбирает его,
+  /// и цена брони — цена типа, а не аренда стола: стол в неё входит. Есть
+  /// ровно тогда, когда у спарринга есть ученик (CHECK TableBooking_owner_shape).
+  sparringTypeId String?
+  sparringType   SparringType? @relation(fields: [sparringTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  /// Абонемент, которым оплачена аренда (решение владельца от 26.09.2026:
+  /// бронь любой длины — один визит). Ключ составной и несёт клиента — бронь
+  /// ссылается на абонемент СВОЕГО клиента, как запись на занятие. Спарринг и
+  /// стол с роботом абонементом не оплачиваются (CHECK
+  /// TableBooking_subscription_plain_rental).
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId, clientId, tenantId], references: [id, clientId, tenantId], onDelete: Restrict)
 
   /// Как появилась бронь: клиент занял стол сам или её завёл администратор.
   ///
@@ -1871,6 +1907,7 @@ model Subscription {
   ledger                  SubscriptionLedger[]
   trainingBookings        TrainingBooking[]
   tournamentRegistrations TournamentRegistration[]
+  tableBookings           TableBooking[]
 
   @@unique([id, tenantId])
   // Мишень составного ключа записи: запись оплачивается абонементом ЕЁ ЖЕ
@@ -2521,4 +2558,71 @@ model PlatformNews {
 
   @@index([publishedAt])
   @@index([section, publishedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Типы спаррингов
+// ---------------------------------------------------------------------------
+
+/// Тип спарринга: «Взрослый», «Детский», «Льготный» (решение владельца от
+/// 26.09.2026). Конструктор — у клуба; тренер выбирает тип, записывая ученика
+/// на спарринг, и ученик платит цену типа. Стол входит в цену. Документов о
+/// льготе система не хранит: тип выбирает тренер, сервер проверяет только
+/// возраст.
+model SparringType {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  name     String
+
+  /// Цена часа, копейки. Спарринг другой длины — пропорционально.
+  hourPrice Int
+
+  /// Возраст ученика в полных годах на день спарринга; пусто — без предела.
+  minAge Int?
+  maxAge Int?
+
+  /// Для кого и что входит — видно тренеру при выборе.
+  description String?
+
+  /// Снятый тип тренеру не предлагается; удаления нет — на тип ссылаются брони.
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bookings TableBooking[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, name])
+}
+
+// ---------------------------------------------------------------------------
+// Лента клуба
+// ---------------------------------------------------------------------------
+
+/// Публикация клуба: акция, объявление (решение владельца от 26.09.2026).
+/// Пишут руководитель, управляющий и администратор; видна вкладкой на
+/// странице клуба и на стартовой «из моих клубов», клиентам — сообщение в MAX
+/// и браузер (категория CLUB_NEWS). Черновик — `publishedAt` пуст.
+model ClubPost {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  /// Автор — сотрудник ЭТОГО клуба: ключ составной на членство.
+  authorId String
+  author   TenantMembership @relation("ClubPostAuthor", fields: [authorId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
+  title String
+  body  String
+
+  /// Ставится при первой публикации и дальше не сдвигается правкой текста —
+  /// как у новостей платформы; снятие с публикации возвращает в черновики.
+  publishedAt DateTime? @db.Timestamptz(3)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, publishedAt])
 }

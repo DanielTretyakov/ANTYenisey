@@ -1586,3 +1586,118 @@ SELECT pg_temp.expect('EO',
 SELECT pg_temp.expect('EP',
   $q$INSERT INTO "PlatformNews" (id,section,title,body,"authorId","updatedAt") VALUES ('n2','UPDATES','Заголовок','','u1',now())$q$,
   '23514', 'PlatformNews_body_sane');
+
+-- ---------------------------------------------------------------------------
+-- 38. Типы спаррингов, аренда по абонементу, лента клуба (решения от 26.09.2026)
+-- ---------------------------------------------------------------------------
+--
+-- Тип st1 — клуба t1, st2 — клуба t2. Брони — в декабре, чтобы не задеть
+-- сетку сценариев выше на том же столе tb1. Абонемент s1 — клиента u1.
+
+INSERT INTO "SparringType" (id,"tenantId",name,"hourPrice","updatedAt")
+VALUES ('st1','t1','Взрослый',150000,now()),
+       ('st2','t2','Чужой',150000,now());
+
+-- EQ. Возраст «от» больше «до» — тип не подошёл бы никому.
+SELECT pg_temp.expect('EQ',
+  $q$INSERT INTO "SparringType" (id,"tenantId",name,"hourPrice","minAge","maxAge","updatedAt") VALUES ('stx','t1','Странный',100,20,10,now())$q$,
+  '23514', 'SparringType_ages_sane');
+
+-- ER. Отрицательная цена часа.
+SELECT pg_temp.expect('ER',
+  $q$INSERT INTO "SparringType" (id,"tenantId",name,"hourPrice","updatedAt") VALUES ('stx','t1','Даром',-1,now())$q$,
+  '23514', 'SparringType_price_sane');
+
+-- ES. Спарринг с учеником без типа — неизвестно, по какой цене он платит.
+SELECT pg_temp.expect('ES',
+  $q$INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","coachId","isSparring","startsAt","endsAt","priceAtBooking","updatedAt")
+     VALUES ('sp_x','t1','tb1','u1','c1',true,'2026-12-01 10:00+07','2026-12-01 11:00+07',150000,now())$q$,
+  '23514', 'TableBooking_owner_shape');
+
+-- ET. Аренда (не спарринг) с тренером и клиентом сразу.
+SELECT pg_temp.expect('ET',
+  $q$INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","coachId","startsAt","endsAt","priceAtBooking","updatedAt")
+     VALUES ('sp_x','t1','tb1','u1','c1','2026-12-01 10:00+07','2026-12-01 11:00+07',40000,now())$q$,
+  '23514', 'TableBooking_owner_shape');
+
+-- EU. Тренер — сам себе ученик.
+SELECT pg_temp.expect('EU',
+  $q$INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","coachId","isSparring","sparringTypeId","startsAt","endsAt","priceAtBooking","updatedAt")
+     VALUES ('sp_x','t1','tb1','c1','c1',true,'st1','2026-12-01 10:00+07','2026-12-01 11:00+07',150000,now())$q$,
+  '23514', 'TableBooking_owner_shape');
+
+-- EV. Спарринг с учеником и типом своего клуба — законен.
+DO $$ BEGIN
+  INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","coachId","isSparring","sparringTypeId","startsAt","endsAt","priceAtBooking","updatedAt")
+  VALUES ('sp_1','t1','tb1','u1','c1',true,'st1','2026-12-01 10:00+07','2026-12-01 11:00+07',150000,now());
+  RAISE NOTICE 'EV. Спарринг с учеником и типом создан...... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'EV. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- EW. Тип спарринга чужого клуба.
+SELECT pg_temp.expect('EW',
+  $q$INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","coachId","isSparring","sparringTypeId","startsAt","endsAt","priceAtBooking","updatedAt")
+     VALUES ('sp_x','t1','tb1','u1','c1',true,'st2','2026-12-01 12:00+07','2026-12-01 13:00+07',150000,now())$q$,
+  '23503', 'TableBooking_sparringTypeId_tenantId_fkey');
+
+-- EX. Спарринг, оплаченный абонементом: ученик платит деньгами.
+SELECT pg_temp.expect('EX',
+  $q$INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","coachId","isSparring","sparringTypeId","subscriptionId","startsAt","endsAt","priceAtBooking","updatedAt")
+     VALUES ('sp_x','t1','tb1','u1','c1',true,'st1','s1','2026-12-01 12:00+07','2026-12-01 13:00+07',150000,now())$q$,
+  '23514', 'TableBooking_subscription_plain_rental');
+
+-- EY. Стол с роботом по абонементу — отдельная услуга, абонемент её не покрывает.
+SELECT pg_temp.expect('EY',
+  $q$INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","withRobot","subscriptionId","startsAt","endsAt","priceAtBooking","updatedAt")
+     VALUES ('sp_x','t1','tb1','u1',true,'s1','2026-12-01 12:00+07','2026-12-01 13:00+07',60000,now())$q$,
+  '23514', 'TableBooking_subscription_plain_rental');
+
+-- EZ. Аренда клиента u3 абонементом клиента u1.
+SELECT pg_temp.expect('EZ',
+  $q$INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","subscriptionId","startsAt","endsAt","priceAtBooking","updatedAt")
+     VALUES ('sp_x','t1','tb1','u3','s1','2026-12-01 12:00+07','2026-12-01 13:00+07',40000,now())$q$,
+  '23503', 'TableBooking_subscriptionId_clientId_tenantId_fkey');
+
+-- FA. Полвизита: у брони по абонементу процент — судьба визита, 0 или 100.
+SELECT pg_temp.expect('FA',
+  $q$INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","subscriptionId",status,"cancelledAt","chargeRatio","startsAt","endsAt","priceAtBooking","updatedAt")
+     VALUES ('sp_x','t1','tb1','u1','s1','CANCELLED',now(),50,'2026-12-01 12:00+07','2026-12-01 13:00+07',40000,now())$q$,
+  '23514', 'TableBooking_subscription_ratio');
+
+-- FB. Аренда своим абонементом — законна, и движение журнала ссылается на неё.
+DO $$ BEGIN
+  INSERT INTO "TableBooking" (id,"tenantId","tableId","clientId","subscriptionId","startsAt","endsAt","priceAtBooking","updatedAt")
+  VALUES ('rent_1','t1','tb1','u1','s1','2026-12-02 10:00+07','2026-12-02 11:00+07',40000,now());
+  INSERT INTO "SubscriptionLedger" (id,"tenantId","subscriptionId",delta,"balanceAfter",reason,"tableBookingId")
+  VALUES ('lg_rent','t1','s1',-1,4,'VISIT_CHARGED','rent_1');
+  RAISE NOTICE 'FB. Аренда по абонементу и её списание........ OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'FB. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- FC. Одно движение — сразу за занятие и за аренду.
+SELECT pg_temp.expect('FC',
+  $q$INSERT INTO "SubscriptionLedger" (id,"tenantId","subscriptionId",delta,"balanceAfter",reason,"trainingBookingId","tableBookingId")
+     VALUES ('lg_x','t1','s1',-1,3,'VISIT_CHARGED','tb_1','rent_1')$q$,
+  '23514', 'SubscriptionLedger_link_matches_reason');
+
+-- FD. Публикацию клуба t1 пишет человек клуба t2.
+SELECT pg_temp.expect('FD',
+  $q$INSERT INTO "ClubPost" (id,"tenantId","authorId",title,body,"updatedAt") VALUES ('cp_x','t1','u2','Акция','Текст',now())$q$,
+  '23503', 'ClubPost_authorId_tenantId_fkey');
+
+-- FE. Публикация без заголовка.
+SELECT pg_temp.expect('FE',
+  $q$INSERT INTO "ClubPost" (id,"tenantId","authorId",title,body,"updatedAt") VALUES ('cp_x','t1','c1','  ','Текст',now())$q$,
+  '23514', 'ClubPost_title_sane');
+
+-- ---------------------------------------------------------------------------
+-- 39. Часы работы зала
+-- ---------------------------------------------------------------------------
+
+-- FF. Шесть дней вместо семи.
+SELECT pg_temp.expect('FF',
+  $q$UPDATE "Hall" SET "workingHours" = '[null,null,null,null,null,null]' WHERE id = 'h1'$q$,
+  '23514', 'Hall_working_hours_shape');
+
+-- FG. Не массив, а строка.
+SELECT pg_temp.expect('FG',
+  $q$UPDATE "Hall" SET "workingHours" = '"08:00-23:00"' WHERE id = 'h1'$q$,
+  '23514', 'Hall_working_hours_shape');

@@ -29,6 +29,7 @@ interface Draft {
   price: string;
   trainingTypeIds: string[];
   tournamentTypeIds: string[];
+  tableRental: boolean;
 }
 
 const EMPTY: Draft = {
@@ -40,6 +41,7 @@ const EMPTY: Draft = {
   price: '',
   trainingTypeIds: [],
   tournamentTypeIds: [],
+  tableRental: false,
 };
 
 function draftOf(plan: SubscriptionPlan): Draft {
@@ -52,6 +54,7 @@ function draftOf(plan: SubscriptionPlan): Draft {
     price: kopecksToInput(plan.price),
     trainingTypeIds: plan.trainingTypeIds,
     tournamentTypeIds: plan.tournamentTypeIds,
+    tableRental: plan.coversTableRental,
   };
 }
 
@@ -133,6 +136,7 @@ export function SubscriptionPlansCard({
       isActive,
       trainingTypeIds: from.trainingTypeIds,
       tournamentTypeIds: from.tournamentTypeIds,
+      coversTableRental: from.tableRental,
     };
   }
 
@@ -176,6 +180,7 @@ export function SubscriptionPlansCard({
       ? [...editedPlan.trainingTypeIds, ...editedPlan.tournamentTypeIds]
       : [],
   );
+  const rentalLocked = Boolean(editedPlan && editedPlan.activeSubscriptions > 0 && editedPlan.coversTableRental);
 
   return (
     <Card>
@@ -201,9 +206,10 @@ export function SubscriptionPlansCard({
                       {planTermsLabel(plan.visitsCount, plan.durationDays)} · {formatKopecks(plan.price)}
                     </span>
                     <span className="block text-[0.8125rem] text-text-muted">
-                      {[...plan.trainingTypeIds, ...plan.tournamentTypeIds]
-                        .map((id) => typeName.get(id) ?? '—')
-                        .join(', ')}
+                      {[
+                        ...[...plan.trainingTypeIds, ...plan.tournamentTypeIds].map((id) => typeName.get(id) ?? '—'),
+                        ...(plan.coversTableRental ? ['Аренда стола'] : []),
+                      ].join(', ')}
                     </span>
                   </span>
                   {plan.activeSubscriptions > 0 && (
@@ -305,7 +311,26 @@ export function SubscriptionPlansCard({
               onChange={(tournamentTypeIds) => setDraft({ ...draft, tournamentTypeIds })}
             />
 
-            {locked.size > 0 && (
+            {/* Аренда — одним визитом за бронь любой длины (решение владельца
+                от 26.09.2026); стол с роботом и спарринг абонементом не
+                оплачиваются. */}
+            <fieldset className="mb-4">
+              <legend className="mb-1.5 text-[0.8125rem] font-medium text-text-muted">Аренда</legend>
+              <label className={cn('flex items-center gap-2 text-[0.9375rem]', rentalLocked && 'text-text-muted')}>
+                <input
+                  type="checkbox"
+                  checked={draft.tableRental}
+                  disabled={rentalLocked}
+                  onChange={(event) => setDraft({ ...draft, tableRental: event.target.checked })}
+                />
+                Аренда стола
+              </label>
+              <p className="mt-1 text-[0.8125rem] text-text-subtle">
+                Бронь стола любой длины — один визит. Стол с роботом и спарринг оплачиваются деньгами.
+              </p>
+            </fieldset>
+
+            {(locked.size > 0 || rentalLocked) && (
               <p className="mb-4 text-[0.8125rem] text-text-subtle">
                 По тарифу есть действующие абонементы — отмеченные услуги не снимаются, только добавляются.
               </p>

@@ -1,3 +1,4 @@
+import type { WorkingHours } from './working-hours';
 /**
  * Профиль клуба — то, что владелец и администратор настраивают сами, без
  * участия разработчика (ТЗ → «Профиль клуба»).
@@ -202,6 +203,9 @@ export interface Hall {
   robot30MinPrice: number | null;
   robot60MinPrice: number | null;
   robotExtra30MinPrice: number | null;
+
+  /** Часы работы: семь дней с понедельника; пусто — не указаны. */
+  workingHours: WorkingHours | null;
 }
 
 /**
@@ -211,9 +215,11 @@ export interface Hall {
  */
 export type CreateHallRequest = Omit<
   Hall,
-  'id' | 'address' | 'addressFiasId' | 'latitude' | 'longitude' | 'phone' | 'email' | 'managerId'
+  'id' | 'address' | 'addressFiasId' | 'latitude' | 'longitude' | 'phone' | 'email' | 'managerId' | 'workingHours'
 > & {
   addressFiasId: string;
+  /** Не прислано — часы не указаны. */
+  workingHours?: WorkingHours | null;
   /** Не прислано — у зала своих контактов нет, звонят в клуб. */
   phone?: string | null;
   email?: string | null;
@@ -449,8 +455,20 @@ export interface ChangeRolesRequest {
 export interface ClubPeopleQuery {
   /** Пусто — все; иначе — у кого среди ролей есть эта. */
   role?: Role;
-  /** Поиск по ФИО, почте и телефону. */
+  /**
+   * Поиск по ФИО, почте и телефону. Строка вида «17.05.2001» ищет по дате
+   * рождения, «17.05» — по дню рождения в любом году.
+   */
   search?: string;
+  /**
+   * Дни рождения в этом месяце (1–12): клуб поздравляет клиентов. Список тогда
+   * идёт по дню месяца, а не по ФИО.
+   */
+  birthMonth?: number;
+  /** Полных лет не меньше — по сегодняшнему дню. */
+  ageFrom?: number;
+  /** Полных лет не больше. */
+  ageTo?: number;
   /**
    * Точечная выборка по идентификаторам.
    *

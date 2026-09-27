@@ -1,4 +1,4 @@
-import type { ClubSettings, ClubValue, Hall } from '@yenisey/types';
+import { parseWorkingHours, type ClubSettings, type ClubValue, type Hall } from '@yenisey/types';
 
 /**
  * Перекрёстные проверки настроек клуба и зала.
@@ -56,14 +56,20 @@ export function clubSettingsViolations(settings: ClubSettings): string[] {
 /** Поля зала, которые проверяются правилами; адрес проверяет справочник. */
 export type HallRulesInput = Omit<
   Hall,
-  'id' | 'address' | 'addressFiasId' | 'latitude' | 'longitude' | 'phone' | 'email' | 'managerId'
->;
+  'id' | 'address' | 'addressFiasId' | 'latitude' | 'longitude' | 'phone' | 'email' | 'managerId' | 'workingHours'
+> & { workingHours?: unknown };
 
 export function hallViolations(hall: HallRulesInput): string[] {
   const violations: string[] = [];
 
   if (hall.name.trim() === '') {
     violations.push('У зала должно быть название');
+  }
+
+  const hours = parseWorkingHours(hall.workingHours ?? null);
+
+  if (!hours.ok) {
+    violations.push(hours.message);
   }
 
   // Пояс проверяется здесь, а не в настройках клуба: он свойство ЗАЛА. Залы

@@ -552,7 +552,9 @@ export class SettingsChangesService {
         return;
 
       case 'HALL_CREATE': {
-        await tx.hall.create({ data: { ...(data as Omit<Prisma.HallUncheckedCreateInput, 'tenantId'>), id: target, tenantId } });
+        await tx.hall.create({
+          data: { ...(jsonNulls(data) as Omit<Prisma.HallUncheckedCreateInput, 'tenantId'>), id: target, tenantId },
+        });
         const labels = defaultTableLabels(Number(payload.tableCount ?? 0));
 
         if (labels.length > 0) {
@@ -562,7 +564,10 @@ export class SettingsChangesService {
       }
 
       case 'HALL_UPDATE': {
-        const updated = await tx.hall.updateMany({ where: { id: target, tenantId }, data: data as Prisma.HallUpdateManyMutationInput });
+        const updated = await tx.hall.updateMany({
+          where: { id: target, tenantId },
+          data: jsonNulls(data) as Prisma.HallUpdateManyMutationInput,
+        });
 
         if (updated.count === 0) {
           throw new ApplyProblem('Зала уже нет');
@@ -802,3 +807,11 @@ function plural(count: number, one: string, few: string, many: string): string {
   return many;
 }
 
+
+/**
+ * `null` в поле Json Prisma записывать отказывается — пустое значение в базе
+ * называется `Prisma.DbNull`. В правке зала так «часы не указаны».
+ */
+function jsonNulls(data: Record<string, unknown>): Record<string, unknown> {
+  return 'workingHours' in data && data.workingHours === null ? { ...data, workingHours: Prisma.DbNull } : data;
+}

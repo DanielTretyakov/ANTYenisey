@@ -26,16 +26,30 @@ export interface SubscriptionFacts {
   expiresAt: Date | null;
   trainingTypeIds: readonly string[];
   tournamentTypeIds: readonly string[];
+  /** Покрывает ли тариф аренду стола (решение владельца от 26.09.2026). */
+  coversTableRental: boolean;
 }
 
-/** Мероприятие, за которое платят. */
-export interface EventFacts {
-  kind: 'TRAINING' | 'TOURNAMENT';
-  typeId: string;
-  startsAt: Date;
-}
+/**
+ * За что платят: мероприятие своего типа или аренда стола. Аренда — одним
+ * визитом за бронь любой длины (решение владельца от 26.09.2026).
+ */
+export type EventFacts =
+  | { kind: 'TRAINING' | 'TOURNAMENT'; typeId: string; startsAt: Date }
+  | {
+      kind: 'TABLE';
+      startsAt: Date;
+      /** Стол с роботом — отдельная услуга со своей сеткой цен, абонемент её не покрывает. */
+      withRobot: boolean;
+      /** Спарринг ученик оплачивает деньгами — по цене типа (решение владельца). */
+      sparring: boolean;
+    };
 
 export function covers(sub: SubscriptionFacts, event: EventFacts): boolean {
+  if (event.kind === 'TABLE') {
+    return sub.coversTableRental && !event.withRobot && !event.sparring;
+  }
+
   const types = event.kind === 'TRAINING' ? sub.trainingTypeIds : sub.tournamentTypeIds;
 
   return types.includes(event.typeId);
@@ -304,21 +318,30 @@ export function decideClose(
   return { ok: true, expiresAt: now };
 }
 
+/** Что покрывает тариф: виды занятий, виды турниров и аренда стола. */
+export interface PlanCoverage {
+  trainingTypeIds: readonly string[];
+  tournamentTypeIds: readonly string[];
+  coversTableRental: boolean;
+}
+
 /**
  * Правка покрытия тарифа.
  *
  * Добавлять типы можно всегда, убирать — только пока по тарифу нет
  * действующих абонементов: клиент купил «Первую подачу» с турнирами «Клуб 50»,
  * и отнять их у него задним числом нельзя. Нужен другой состав — новый тариф.
+ * Аренда стола — такая же услуга: снять её с тарифа при живых абонементах нельзя.
  */
 export function decidePlanCoverage(
-  current: { trainingTypeIds: readonly string[]; tournamentTypeIds: readonly string[] },
-  next: { trainingTypeIds: readonly string[]; tournamentTypeIds: readonly string[] },
+  current: PlanCoverage,
+  next: PlanCoverage,
   activeSubscriptions: number,
 ): Decision<object> {
   const dropped =
     current.trainingTypeIds.some((id) => !next.trainingTypeIds.includes(id)) ||
-    current.tournamentTypeIds.some((id) => !next.tournamentTypeIds.includes(id));
+    current.tournamentTypeIds.some((id) => !next.tournamentTypeIds.includes(id)) ||
+    (current.coversTableRental && !next.coversTableRental);
 
   if (dropped && activeSubscriptions > 0) {
     return {
@@ -328,7 +351,7 @@ export function decidePlanCoverage(
     };
   }
 
-  if (next.trainingTypeIds.length === 0 && next.tournamentTypeIds.length === 0) {
+  if (next.trainingTypeIds.length === 0 && next.tournamentTypeIds.length === 0 && !next.coversTableRental) {
     return { ok: false, status: 400, message: 'Тариф должен покрывать хотя бы одну услугу' };
   }
 

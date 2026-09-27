@@ -5,9 +5,9 @@
  *
  * Чистый модуль без относительных импортов — его гоняет `node --test`.
  */
-import { formatRubles } from '@yenisey/types';
+import { formatRubles, readWorkingHours, workingHoursLines } from '@yenisey/types';
 
-type Format = 'text' | 'money' | 'percent' | 'minutes' | 'bool' | 'step' | 'city';
+type Format = 'text' | 'money' | 'percent' | 'minutes' | 'bool' | 'step' | 'city' | 'hours';
 
 interface FieldSpec {
   label: string;
@@ -43,6 +43,7 @@ export const HALL_FIELDS: Record<string, FieldSpec> = {
   robot30MinPrice: { label: 'Робот, 30 минут', format: 'money' },
   robot60MinPrice: { label: 'Робот, час', format: 'money' },
   robotExtra30MinPrice: { label: 'Робот, следующие 30 минут', format: 'money' },
+  workingHours: { label: 'Часы работы', format: 'hours' },
 };
 
 /** Поля, которые пишутся вместе с адресом, но сами в сводке не видны. */
@@ -75,12 +76,18 @@ export function formatValue(format: Format, value: unknown, cities: Record<strin
       return STEP_LABELS[String(value)] ?? String(value);
     case 'city':
       return cities[String(value)] ?? String(value);
+    case 'hours':
+      return workingHoursLines(readWorkingHours(value)).join(', ') || 'не заданы';
     default:
       return `«${String(value)}»`;
   }
 }
 
-const same = (a: unknown, b: unknown): boolean => (a ?? null) === (b ?? null);
+/** Равны ли значения; часы работы — массив, их сравниваем содержимым. */
+const same = (a: unknown, b: unknown): boolean =>
+  typeof a === 'object' || typeof b === 'object'
+    ? JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+    : (a ?? null) === (b ?? null);
 
 /**
  * Изменённые поля: только присланные (`undefined` — «не трогать») и

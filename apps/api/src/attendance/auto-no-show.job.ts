@@ -279,12 +279,13 @@ export class AutoNoShowJob implements OnApplicationBootstrap, OnModuleDestroy {
             endsAt: true,
             clientId: true,
             coachId: true,
+            subscriptionId: true,
           },
           orderBy: { endsAt: 'asc' },
           take: BATCH,
         });
 
-        return rows.map((row) => ({ ...row, subscriptionId: null }));
+        return rows;
       }
 
       case 'TRAINING': {

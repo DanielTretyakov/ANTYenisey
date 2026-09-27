@@ -12,6 +12,9 @@ import type {
   PaidBySubscription,
   SubscriptionLedgerRow,
   PublicPlan,
+  SubscriptionHolder,
+  SubscriptionHoldersPage,
+  SubscriptionHoldersQuery,
   SubscriptionOffer,
   SubscriptionPlan,
 } from '@yenisey/types';
@@ -35,7 +38,10 @@ import {
 } from './subscription-rules';
 
 /** К какой записи относится движение по визитам. */
-export type EntryLink = { trainingBookingId: string } | { tournamentRegistrationId: string };
+export type EntryLink =
+  | { trainingBookingId: string }
+  | { tournamentRegistrationId: string }
+  | { tableBookingId: string };
 
 /** Откуда абонемент: продал сотрудник у стойки или оплачен онлайн. */
 export type IssueOrigin = { issuedBy: string } | { paymentId: string };
@@ -64,6 +70,7 @@ const LEDGER_SELECT = {
   tournamentRegistration: {
     select: { tournament: { select: { startsAt: true, tournamentType: { select: { name: true } } } } },
   },
+  tableBooking: { select: { startsAt: true, table: { select: { label: true } } } },
 } satisfies Prisma.SubscriptionLedgerSelect;
 
 type LedgerRowData = Prisma.SubscriptionLedgerGetPayload<{ select: typeof LEDGER_SELECT }>;
@@ -71,6 +78,7 @@ type LedgerRowData = Prisma.SubscriptionLedgerGetPayload<{ select: typeof LEDGER
 function toLedgerRow(row: LedgerRowData): SubscriptionLedgerRow {
   const session = row.trainingBooking?.session;
   const tournament = row.tournamentRegistration?.tournament;
+  const table = row.tableBooking;
 
   return {
     id: row.id,
@@ -84,7 +92,9 @@ function toLedgerRow(row: LedgerRowData): SubscriptionLedgerRow {
       ? { title: session.trainingType.name, startsAt: session.startsAt.toISOString() }
       : tournament
         ? { title: tournament.tournamentType.name, startsAt: tournament.startsAt.toISOString() }
-        : null,
+        : table
+          ? { title: `Аренда, ${table.table.label}`, startsAt: table.startsAt.toISOString() }
+          : null,
   };
 }
 
@@ -98,6 +108,7 @@ const CLIENT_SUBSCRIPTION_SELECT = {
   plan: {
     select: {
       name: true,
+      coversTableRental: true,
       coveredTrainingTypes: { select: { trainingType: { select: { name: true } } } },
       coveredTournamentTypes: { select: { tournamentType: { select: { name: true } } } },
     },
@@ -133,6 +144,7 @@ export class SubscriptionsService {
         durationDays: true,
         price: true,
         isActive: true,
+        coversTableRental: true,
         coveredTrainingTypes: { select: { trainingTypeId: true } },
         coveredTournamentTypes: { select: { tournamentTypeId: true } },
         _count: { select: { subscriptions: { where: activeWhere(now) } } },
@@ -151,6 +163,7 @@ export class SubscriptionsService {
       isActive: plan.isActive,
       trainingTypeIds: plan.coveredTrainingTypes.map((row) => row.trainingTypeId),
       tournamentTypeIds: plan.coveredTournamentTypes.map((row) => row.tournamentTypeId),
+      coversTableRental: plan.coversTableRental,
       activeSubscriptions: plan._count.subscriptions,
     }));
   }
@@ -204,9 +217,9 @@ export class SubscriptionsService {
 
   async createPlan(tenantId: string, dto: SubscriptionPlanDto): Promise<SubscriptionPlan> {
     const terms = planTerms(dto);
-    const empty = { trainingTypeIds: [], tournamentTypeIds: [] };
+    const empty = { trainingTypeIds: [], tournamentTypeIds: [], coversTableRental: false };
 
-    fail(decidePlanCoverage(empty, dto, 0));
+    fail(decidePlanCoverage(empty, coverageOf(dto), 0));
     await this.assertTypes(tenantId, dto);
 
     // Связки — отдельными вставками, а не вложенным create: у них составные
@@ -247,7 +260,7 @@ export class SubscriptionsService {
     const current = await this.findPlan(tenantId, id);
     const terms = planTerms(dto);
 
-    fail(decidePlanCoverage(current, dto, current.activeSubscriptions));
+    fail(decidePlanCoverage(current, coverageOf(dto), current.activeSubscriptions));
     await this.assertTypes(tenantId, dto);
 
     await this.prisma.$transaction(async (tx) => {
@@ -482,14 +495,17 @@ export class SubscriptionsService {
           { OR: [{ remainingVisits: null }, { remainingVisits: { gt: 0 } }] },
         ],
         plan:
-          event.kind === 'TRAINING'
-            ? { coveredTrainingTypes: { some: { trainingTypeId: event.typeId } } }
-            : { coveredTournamentTypes: { some: { tournamentTypeId: event.typeId } } },
+          event.kind === 'TABLE'
+            ? { coversTableRental: true }
+            : event.kind === 'TRAINING'
+              ? { coveredTrainingTypes: { some: { trainingTypeId: event.typeId } } }
+              : { coveredTournamentTypes: { some: { tournamentTypeId: event.typeId } } },
       },
       select: { id: true },
     });
 
-    if (candidates.length === 0) {
+    // Робот и спарринг абонементом не оплачиваются — и блокировать незачем.
+    if (candidates.length === 0 || (event.kind === 'TABLE' && (event.withRobot || event.sparring))) {
       return null;
     }
 
@@ -503,7 +519,8 @@ export class SubscriptionsService {
 
     // Покрытие уже отфильтровано запросом, поэтому правилам его подсказываем
     // как «покрыто»: выбор решают срок и остаток под блокировкой.
-    const typeIds = { trainingTypeIds: [event.typeId], tournamentTypeIds: [event.typeId] };
+    const typeId = event.kind === 'TABLE' ? '' : event.typeId;
+    const typeIds = { trainingTypeIds: [typeId], tournamentTypeIds: [typeId], coversTableRental: true };
 
     return pickSubscription(
       locked.map((sub) => ({ ...sub, ...typeIds })),
@@ -511,7 +528,7 @@ export class SubscriptionsService {
     );
   }
 
-  /** Списать визит за только что созданную запись. Абонемент — из `reserveInTx`. */
+  /** Списать визит за только что созданную запись или бронь. Абонемент — из `reserveInTx`. */
   async chargeInTx(
     tx: Prisma.TransactionClient,
     tenantId: string,
@@ -607,6 +624,7 @@ export class SubscriptionsService {
         plan: {
           select: {
             name: true,
+            coversTableRental: true,
             coveredTrainingTypes: { select: { trainingTypeId: true } },
             coveredTournamentTypes: { select: { tournamentTypeId: true } },
           },
@@ -621,6 +639,7 @@ export class SubscriptionsService {
       planName: sub.plan.name,
       trainingTypeIds: sub.plan.coveredTrainingTypes.map((row) => row.trainingTypeId),
       tournamentTypeIds: sub.plan.coveredTournamentTypes.map((row) => row.tournamentTypeId),
+      coversTableRental: sub.plan.coversTableRental,
     }));
 
     const result = new Map<string, PaidBySubscription>();
@@ -736,6 +755,80 @@ export class SubscriptionsService {
     };
   }
 
+  /**
+   * Вкладки «Действующие» и «Архив» раздела «Абонементы» (решение владельца
+   * от 26.09.2026).
+   *
+   * Действующие — абонементы, по которым сейчас можно ходить, ближайшие к
+   * концу срока сверху: кому пора предложить продление. Архив — люди, у кого
+   * абонемент был, но действующего сейчас нет ни одного: их последний
+   * абонемент, недавно кончившиеся сверху. Человек с новым абонементом из
+   * архива уходит сам — «кончился» в архиве значит «и не продлил».
+   */
+  async holders(tenantId: string, query: SubscriptionHoldersQuery): Promise<SubscriptionHoldersPage> {
+    const now = new Date();
+    const search = query.search?.trim();
+    const limit = Math.min(query.limit ?? 50, 200);
+    const offset = query.offset ?? 0;
+    const person: Prisma.SubscriptionWhereInput = search
+      ? { client: { membership: { user: { fullName: { contains: search, mode: 'insensitive' } } } } }
+      : {};
+
+    if (query.status === 'active') {
+      const where: Prisma.SubscriptionWhereInput = { tenantId, ...activeWhere(now), ...person };
+      const [total, rows] = await Promise.all([
+        this.prisma.subscription.count({ where }),
+        this.prisma.subscription.findMany({
+          where,
+          select: HOLDER_SELECT,
+          orderBy: [{ expiresAt: { sort: 'asc', nulls: 'last' } }, { purchasedAt: 'asc' }, { id: 'asc' }],
+          take: limit,
+          skip: offset,
+        }),
+      ]);
+
+      return { total, items: rows.map((row) => toHolder(row, now)) };
+    }
+
+    // Архив: последний абонемент каждого, у кого действующего нет.
+    const where: Prisma.SubscriptionWhereInput = {
+      tenantId,
+      ...person,
+      client: {
+        ...(person.client as Prisma.ClientProfileWhereInput | undefined),
+        subscriptions: { none: { tenantId, ...activeWhere(now) } },
+      },
+    };
+
+    const groups = await this.prisma.subscription.groupBy({
+      by: ['clientId'],
+      where,
+      _max: { purchasedAt: true },
+      orderBy: { _max: { purchasedAt: 'desc' } },
+    });
+
+    const page = groups.slice(offset, offset + limit);
+    const rows = await this.prisma.subscription.findMany({
+      where: {
+        tenantId,
+        OR: page.map((group) => ({ clientId: group.clientId, purchasedAt: group._max.purchasedAt! })),
+      },
+      select: HOLDER_SELECT,
+    });
+
+    // Порядок — как у групп; два абонемента, купленных одной миллисекундой,
+    // дали бы человеку две строки, поэтому берётся первый.
+    const byClient = new Map(rows.map((row) => [row.client.userId, row]));
+
+    return {
+      total: groups.length,
+      items: page
+        .map((group) => byClient.get(group.clientId))
+        .filter((row): row is HolderRow => row !== undefined)
+        .map((row) => toHolder(row, now)),
+    };
+  }
+
   private async one(tenantId: string, clientId: string, id: string): Promise<ClientSubscription> {
     const row = await this.prisma.subscription.findFirst({
       where: { id, tenantId, clientId },
@@ -793,6 +886,44 @@ export class SubscriptionsService {
   }
 }
 
+const HOLDER_SELECT = {
+  id: true,
+  remainingVisits: true,
+  purchasedAt: true,
+  expiresAt: true,
+  client: { select: { userId: true, membership: { select: { user: { select: { fullName: true, phone: true } } } } } },
+  plan: CLIENT_SUBSCRIPTION_SELECT.plan,
+  // Когда списан последний визит — конец пакета без срока.
+  ledger: { select: { createdAt: true }, orderBy: { createdAt: 'desc' }, take: 1 },
+} satisfies Prisma.SubscriptionSelect;
+
+type HolderRow = Prisma.SubscriptionGetPayload<{ select: typeof HOLDER_SELECT }>;
+
+function toHolder(row: HolderRow, now: Date): SubscriptionHolder {
+  const active = isActive(row, now);
+  // Кончился по сроку — момент срока; по визитам — последнее движение журнала.
+  const endedAt = active
+    ? null
+    : row.expiresAt && row.expiresAt.getTime() <= now.getTime()
+      ? row.expiresAt
+      : (row.ledger[0]?.createdAt ?? null);
+
+  return {
+    subscriptionId: row.id,
+    person: {
+      id: row.client.userId,
+      fullName: row.client.membership.user.fullName,
+      phone: row.client.membership.user.phone,
+    },
+    planName: row.plan.name,
+    remainingVisits: row.remainingVisits,
+    purchasedAt: row.purchasedAt.toISOString(),
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+    endedAt: endedAt?.toISOString() ?? null,
+    covers: coversOf(row.plan),
+  };
+}
+
 /** Условие «абонемент действует сейчас» — то же, что `isActive`, но для базы. */
 function activeWhere(now: Date): Prisma.SubscriptionWhereInput {
   return {
@@ -820,6 +951,15 @@ function planTerms(dto: SubscriptionPlanDto) {
     durationDays: dto.durationDays,
     price: dto.price,
     isActive: dto.isActive ?? true,
+    coversTableRental: dto.coversTableRental ?? false,
+  };
+}
+
+function coverageOf(dto: SubscriptionPlanDto) {
+  return {
+    trainingTypeIds: dto.trainingTypeIds,
+    tournamentTypeIds: dto.tournamentTypeIds,
+    coversTableRental: dto.coversTableRental ?? false,
   };
 }
 
@@ -833,11 +973,24 @@ function toClientSubscription(row: ClientSubscriptionRow, now: Date): ClientSubs
     expiresAt: row.expiresAt?.toISOString() ?? null,
     priceAtPurchase: row.priceAtPurchase,
     active: isActive(row, now),
-    covers: [
-      ...row.plan.coveredTrainingTypes.map((item) => item.trainingType.name),
-      ...row.plan.coveredTournamentTypes.map((item) => item.tournamentType.name),
-    ],
+    covers: coversOf(row.plan),
   };
+}
+
+/** Как аренда стола называется в покрытии тарифа. */
+const TABLE_RENTAL = 'Аренда стола';
+
+/** Что покрывает тариф — названиями, аренда последней. */
+function coversOf(plan: {
+  coversTableRental: boolean;
+  coveredTrainingTypes: { trainingType: { name: string } }[];
+  coveredTournamentTypes: { tournamentType: { name: string } }[];
+}): string[] {
+  return [
+    ...plan.coveredTrainingTypes.map((item) => item.trainingType.name),
+    ...plan.coveredTournamentTypes.map((item) => item.tournamentType.name),
+    ...(plan.coversTableRental ? [TABLE_RENTAL] : []),
+  ];
 }
 
 /** Действующие сверху, внутри — свежие первыми. */
@@ -867,6 +1020,7 @@ const PUBLIC_PLANS = {
     visitsCount: true,
     durationDays: true,
     price: true,
+    coversTableRental: true,
     coveredTrainingTypes: { select: { trainingType: { select: { id: true, name: true } } } },
     coveredTournamentTypes: { select: { tournamentType: { select: { id: true, name: true } } } },
   } as const,
@@ -884,6 +1038,7 @@ function toPublicPlan(plan: {
   visitsCount: number | null;
   durationDays: number | null;
   price: number;
+  coversTableRental: boolean;
   coveredTrainingTypes: { trainingType: { id: string; name: string } }[];
   coveredTournamentTypes: { tournamentType: { id: string; name: string } }[];
 }): PublicPlan {
@@ -893,13 +1048,11 @@ function toPublicPlan(plan: {
     visitsCount: plan.visitsCount,
     durationDays: plan.durationDays,
     price: plan.price,
-    covers: [
-      ...plan.coveredTrainingTypes.map((row) => row.trainingType.name),
-      ...plan.coveredTournamentTypes.map((row) => row.tournamentType.name),
-    ],
+    covers: coversOf(plan),
     typeKeys: [
       ...plan.coveredTrainingTypes.map((row) => `TRAINING:${row.trainingType.id}`),
       ...plan.coveredTournamentTypes.map((row) => `TOURNAMENT:${row.tournamentType.id}`),
+      ...(plan.coversTableRental ? ['TABLE'] : []),
     ],
   };
 }

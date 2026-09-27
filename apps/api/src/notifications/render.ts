@@ -137,6 +137,15 @@ export interface ShiftAssignedPayload {
  * что стало, когда вступит в силу. Сотрудникам — сразу при сохранении, чтобы
  * ошибку успели заметить и отменить до 00:00.
  */
+/** Новая публикация в ленте клуба — клиентам клуба. */
+export interface ClubPostPayload {
+  club: string;
+  slug: string;
+  title: string;
+  /** Начало текста — первый абзац, не длиннее 300 символов. */
+  excerpt: string;
+}
+
 export interface SettingsChangedPayload {
   club: string;
   slug: string;
@@ -381,6 +390,15 @@ export function renderNotification(type: string, payload: unknown, context: Rend
               p.cancelled ? 'Всё остаётся как было.' : `Вступит в силу ${p.effective}.`,
             ),
         link: { label: 'Настройки клуба', url: `${context.webOrigin}/clubs/${p.slug}/settings` },
+      };
+    }
+
+    case 'CLUB_POST': {
+      const p = payload as ClubPostPayload;
+
+      return {
+        text: lines(`${p.club} · ${p.title}`, p.excerpt),
+        link: { label: 'Лента клуба', url: `${context.webOrigin}/clubs/${p.slug}#novosti` },
       };
     }
 

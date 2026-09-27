@@ -6,8 +6,16 @@ import type { BookingEntry, ClubCatalogItem, PublicPlan, PublicTenant } from '@y
 import { RiverBackdrop } from '@/components/brand/RiverBackdrop';
 import { ClubAbout } from '@/components/club/ClubAbout';
 import { ClubMark } from '@/components/club/ClubMark';
+import { ClubNewsColumn, NEWS_ANCHOR } from '@/components/club/ClubNewsColumn';
+import { ClubRatingColumn, RATING_ANCHOR } from '@/components/club/ClubRatingColumn';
 import { ClubTabs } from '@/components/club/ClubTabs';
-import { ALL_HALLS, HallFilter, selectedHallIds, type HallSelection } from '@/components/club/HallFilter';
+import {
+  ALL_HALLS,
+  HallPicker,
+  normalizeSelection,
+  selectedHallIds,
+  type HallSelection,
+} from '@/components/club/HallFilter';
 import { RowSkeleton } from '@/components/club/EventRow';
 import { UPCOMING_ANCHOR, UpcomingEvents, type KindFilter } from '@/components/club/UpcomingEvents';
 import { WhenSpan } from '@/components/club/When';
@@ -30,14 +38,16 @@ import { useSession } from '@/lib/useSession';
 /**
  * Страница клуба.
  *
- * Сверху вниз (решения владельца от 24 и 25.09.2026): баннер с названием и
- * сердечком «мой клуб», «О клубе» — описание, ценности, контакты, — кнопка
- * аренды, вкладки «Залы · Мероприятия клуба · Тренерский состав ·
- * Абонементы», «Мои мероприятия» и «Предстоящие» — неделей или календарём
- * месяца, с фильтром по виду мероприятия.
+ * Сверху вниз (решения владельца от 24, 25 и 27.09.2026): баннер с названием
+ * и сердечком «мой клуб», «О клубе» — описание, ценности, контакты, — кнопка
+ * аренды и «Мои мероприятия». Дальше общее для всех залов — новости и рейтинг
+ * в две колонки. Под ними — выбор зала, крупно: от него зависит всё ниже, —
+ * вкладки зала «Зал · Мероприятия · Тренеры · Абонементы» и «Предстоящие» в
+ * этом зале — неделей или календарём месяца, с фильтром по виду мероприятия.
  *
- * Порядок «Мои» → «Предстоящие» задан ТЗ и не косметический. На страницу клуба заходят чаще всего чтобы посмотреть, куда
- * уже записан и когда идти, а не чтобы выбрать новое.
+ * «Мои мероприятия» — выше «Предстоящих», как требует ТЗ, и выше всего
+ * общего: на страницу клуба заходят чаще всего чтобы посмотреть, куда уже
+ * записан и когда идти, а не чтобы выбрать новое.
  *
  * Оформление берётся у клуба: `clubAccent` подменяет акцентные переменные на
  * обёртке страницы, и все компоненты внутри перекрашиваются сами — они
@@ -90,11 +100,42 @@ export default function ClubPage() {
   );
 
   // Выбранные залы; сохранённый зал, которого у клуба больше нет, — «все».
-  const hallIds = useMemo(() => {
-    if (!tenant) return null;
-    const known = halls.hallId === null || tenant.halls.some((hall) => hall.id === halls.hallId);
-    return selectedHallIds(tenant.halls, known ? halls : ALL_HALLS);
-  }, [tenant, halls]);
+  const effectiveHalls = useMemo(
+    () => (tenant ? normalizeSelection(tenant.halls, halls) : ALL_HALLS),
+    [tenant, halls],
+  );
+  const hallIds = useMemo(
+    () => (tenant ? selectedHallIds(tenant.halls, effectiveHalls) : null),
+    [tenant, effectiveHalls],
+  );
+  // Названия выбранных залов — для строки «Залы: …» над расписанием.
+  const hallNames = useMemo(
+    () => (tenant && hallIds ? tenant.halls.filter((hall) => hallIds.includes(hall.id)).map((hall) => hall.name) : null),
+    [tenant, hallIds],
+  );
+
+  // Новости и рейтинг — блоки, а не вкладки: переход по `#novosti` (из
+  // сообщения клиентам и со стартовой) прокручивает к ним, когда баннер и
+  // описание уже приехали, — иначе они столкнули бы блок вниз.
+  // И по ссылке внутри страницы — тоже: смена якоря без перезагрузки.
+  const loaded = tenant !== null;
+
+  useEffect(() => {
+    if (!loaded) return;
+
+    const scroll = (): void => {
+      const hash = window.location.hash.slice(1);
+
+      if (hash === NEWS_ANCHOR || hash === RATING_ANCHOR) {
+        requestAnimationFrame(() => document.getElementById(hash)?.scrollIntoView({ block: 'start' }));
+      }
+    };
+
+    scroll();
+    window.addEventListener('hashchange', scroll);
+
+    return () => window.removeEventListener('hashchange', scroll);
+  }, [loaded]);
 
   useEffect(() => {
     api
@@ -186,7 +227,21 @@ export default function ClubPage() {
           className="mb-10"
         />
 
-        {tenant && <HallFilter halls={tenant.halls} value={halls} onChange={chooseHalls} />}
+        <MyEvents
+          entries={mine}
+          anonymous={session.status === 'anonymous'}
+          whose={family.selected ? firstName(family.selected.fullName) : null}
+          forPerson={forPerson}
+          readOnly={family.selfIsChild}
+        />
+
+        {/* Общее для всех залов — до выбора зала (решение от 27.09.2026). */}
+        <div className="mb-14 grid gap-10 lg:grid-cols-2 lg:gap-8">
+          <ClubNewsColumn />
+          <ClubRatingColumn />
+        </div>
+
+        {tenant && <HallPicker halls={tenant.halls} value={effectiveHalls} onChange={chooseHalls} />}
 
         <ClubTabs
           slug={slug}
@@ -196,14 +251,6 @@ export default function ClubPage() {
           viewer={viewer}
           hallIds={hallIds}
           onShowSchedule={showSchedule}
-        />
-
-        <MyEvents
-          entries={mine}
-          anonymous={session.status === 'anonymous'}
-          whose={family.selected ? firstName(family.selected.fullName) : null}
-          forPerson={forPerson}
-          readOnly={family.selfIsChild}
         />
 
         <UpcomingEvents
@@ -217,6 +264,7 @@ export default function ClubPage() {
           filter={filter}
           onFilter={setFilter}
           hallIds={hallIds}
+          hallNames={hallNames}
         />
       </main>
     </div>

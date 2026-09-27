@@ -4,6 +4,7 @@ import { BookingService } from './booking.service';
 import { OccupancyService } from './occupancy.service';
 import { ClubModule } from '../club/club.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 /**
  * Движок бронирования. `ClubModule` импортируется ради `ClubService`: список
@@ -15,7 +16,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
  * недели разошёлся бы с этим молча.
  */
 @Module({
-  imports: [ClubModule, NotificationsModule],
+  imports: [ClubModule, NotificationsModule, SubscriptionsModule],
   controllers: [BookingController, SparringController],
   providers: [BookingService, OccupancyService],
   exports: [BookingService, OccupancyService],

@@ -1,7 +1,8 @@
 'use client';
 
 import type { PublicHall } from '@yenisey/types';
-import { Tab } from '@/components/ui/Tab';
+import { cn } from '@/lib/cn';
+import { plural } from '@/lib/plural';
 
 /** Что выбрано: город и, внутри него, зал. Пусто — все. */
 export interface HallSelection {
@@ -15,6 +16,9 @@ export const ALL_HALLS: HallSelection = { city: null, hallId: null };
 const NO_CITY = 'Другие';
 
 const cityOf = (hall: PublicHall): string => hall.city ?? NO_CITY;
+
+/** Якорь выбора зала — к нему прокручивают «сменить зал». */
+export const HALL_PICKER_ANCHOR = 'vybor-zala';
 
 /**
  * Выбранные залы — или `null`, если выбраны все: фильтр тогда не нужен вовсе,
@@ -33,15 +37,38 @@ export function selectedHallIds(halls: readonly PublicHall[], selection: HallSel
 }
 
 /**
- * Фильтр страницы клуба «город, внутри — зал» (решение владельца от
- * 25.09.2026): одна организация, залы в разных городах, и мероприятия,
- * тренеры, залы и абонементы у них свои.
- *
- * Городов несколько — первая строка «Все · Красноярск · Абакан», а у города с
- * несколькими залами — вторая, с залами. Город один — сразу залы. Зал один —
- * фильтра нет.
+ * Выбор, приведённый к залам клуба: зал, которого больше нет, — «все»; у
+ * выбранного зала город — его собственный. Выбор помнит браузер, а залы и
+ * города у клуба меняются: сохранённое «Пироги» без города при втором городе
+ * у клуба показало бы кнопку «Все города», а фильтр стоял бы на Пирогах.
  */
-export function HallFilter({
+export function normalizeSelection(halls: readonly PublicHall[], selection: HallSelection): HallSelection {
+  if (selection.hallId) {
+    const hall = halls.find((item) => item.id === selection.hallId);
+
+    return hall ? { city: cityOf(hall), hallId: hall.id } : ALL_HALLS;
+  }
+
+  return selection.city && halls.some((hall) => cityOf(hall) === selection.city) ? selection : ALL_HALLS;
+}
+
+/** Выбранный зал, если выбран ровно один. */
+export function selectedHall(halls: readonly PublicHall[], selection: HallSelection): PublicHall | null {
+  return selection.hallId ? (halls.find((hall) => hall.id === selection.hallId) ?? null) : null;
+}
+
+/**
+ * Выбор зала — ключевой переключатель страницы клуба (решения владельца от
+ * 25 и 27.09.2026): одна организация, залы в разных городах, и мероприятия,
+ * тренеры, абонементы и расписание у них свои.
+ *
+ * Крупными кнопками, а не пилюлями `Tab`: от выбора зависит всё, что ниже, и
+ * он должен читаться с первого взгляда. Выбранная залита цветом клуба.
+ *
+ * Городов несколько — первая строка «Все · Красноярск · Абакан», вторая — залы
+ * выбранного города. Город один — сразу залы. Зал один — выбора нет.
+ */
+export function HallPicker({
   halls,
   value,
   onChange,
@@ -59,53 +86,127 @@ export function HallFilter({
   const inCity = oneCity ? halls : value.city ? halls.filter((hall) => cityOf(hall) === value.city) : [];
 
   return (
-    <div className="mb-8 grid gap-2.5 rounded-card border border-border bg-surface-raised px-4 py-3.5 sm:px-5">
-      <p className="text-[0.8125rem] text-text-muted">
-        Показать мероприятия, тренеров и абонементы {oneCity ? 'зала' : 'города и зала'}:
+    <section id={HALL_PICKER_ANCHOR} className="mb-8 scroll-mt-24">
+      <h2 className="text-[1.5rem]">Выберите зал</h2>
+      <p className="mt-1 mb-5 text-[0.9375rem] text-text-muted">
+        От зала зависят мероприятия, тренеры, абонементы и расписание ниже.
       </p>
 
       {!oneCity && (
-        <Row label="Город">
-          <Tab active={value.city === null} onClick={() => onChange(ALL_HALLS)}>
+        <Row label="Город" className="mb-3">
+          <Choice active={value.city === null} onClick={() => onChange(ALL_HALLS)} size="md">
             Все города
-          </Tab>
+          </Choice>
           {cities.map((city) => (
-            <Tab key={city} active={value.city === city} onClick={() => onChange({ city, hallId: null })}>
+            <Choice key={city} active={value.city === city} onClick={() => onChange({ city, hallId: null })} size="md">
               {city}
-            </Tab>
+            </Choice>
           ))}
         </Row>
       )}
 
       {inCity.length > 1 && (
         <Row label="Зал">
-          <Tab
+          <Choice
             active={value.hallId === null}
             onClick={() => onChange({ city: oneCity ? null : value.city, hallId: null })}
+            note={`${inCity.length} ${plural(inCity.length, 'зал', 'зала', 'залов')}`}
           >
             {oneCity ? 'Все залы' : 'Все залы города'}
-          </Tab>
+          </Choice>
           {inCity.map((hall) => (
-            <Tab
+            <Choice
               key={hall.id}
               active={value.hallId === hall.id}
               onClick={() => onChange({ city: oneCity ? null : cityOf(hall), hallId: hall.id })}
+              note={streetOf(hall)}
             >
               {hall.name}
-            </Tab>
+            </Choice>
           ))}
         </Row>
       )}
-    </div>
+
+      {/* Город с одним залом: зал выбран городом — показываем, какой это. */}
+      {!oneCity && inCity.length === 1 && (
+        <p className="text-[0.9375rem] text-text-muted">
+          В этом городе один зал — <span className="text-text">{inCity[0]!.name}</span>.
+        </p>
+      )}
+    </section>
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * Кнопка выбора. `aria-pressed` — это переключатель состояния страницы, как
+ * `Tab`, только крупный: ради него на страницу и приходят.
+ */
+function Choice({
+  active,
+  onClick,
+  children,
+  note,
+  size = 'lg',
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  note?: string | null;
+  size?: 'md' | 'lg';
+}) {
   return (
-    <div className="-mx-1 overflow-x-auto px-1 [scrollbar-width:none]">
-      <div className="flex w-max items-center gap-1.5" role="group" aria-label={label}>
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        'flex shrink-0 flex-col items-start rounded-card border-2 text-left transition-colors',
+        size === 'lg' ? 'min-h-14 min-w-36 px-5 py-2.5' : 'px-4 py-2',
+        active
+          ? 'border-accent bg-accent text-accent-text shadow-sm'
+          : 'border-border-strong bg-surface-raised text-text hover:border-accent hover:bg-surface-accent-soft',
+      )}
+    >
+      <span className={cn('font-medium whitespace-nowrap', size === 'lg' ? 'text-[1.0625rem]' : 'text-[0.9375rem]')}>
+        {children}
+      </span>
+      {note && (
+        <span
+          className={cn('mt-0.5 max-w-52 truncate text-[0.8125rem]', active ? 'text-accent-text' : 'text-text-muted')}
+        >
+          {note}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function Row({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+  return (
+    <div className={cn('-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:none]', className)}>
+      <div className="flex w-max gap-2 sm:w-auto sm:flex-wrap" role="group" aria-label={label}>
         {children}
       </div>
     </div>
   );
+}
+
+/**
+ * Где зал — коротко, для второй строки кнопки: улица и дом без города и
+ * индекса. DaData пишет «г Красноярск, ул Ленина, д 1» — город в кнопке
+ * лишний, он уже выбран. Адреса нет (залы, заведённые до 25.09.2026 и с тех
+ * пор не правленные) — так и сказано: раньше на его месте стоял город, и
+ * у соседних кнопок вторая строка значила разное.
+ */
+function streetOf(hall: PublicHall): string {
+  if (!hall.address) {
+    return 'адрес не указан';
+  }
+
+  const parts = hall.address.split(',').map((part) => part.trim());
+  const withoutCity = parts.filter(
+    (part) => !/^\d{6}$/.test(part) && !(hall.city && part.toLowerCase().includes(hall.city.toLowerCase())),
+  );
+
+  return withoutCity.join(', ') || hall.address;
 }

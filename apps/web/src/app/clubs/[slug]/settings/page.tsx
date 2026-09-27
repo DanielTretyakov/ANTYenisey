@@ -199,6 +199,8 @@ export default function ClubPage() {
         robot30MinPrice: null,
         robot60MinPrice: null,
         robotExtra30MinPrice: null,
+        // Часы — как у соседнего зала: обычно у залов клуба они одни.
+        workingHours: source?.workingHours ?? null,
         tableCount,
       });
 

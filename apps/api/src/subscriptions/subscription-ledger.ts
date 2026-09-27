@@ -41,6 +41,8 @@ export interface LedgerMove {
   reason: LedgerReason;
   trainingBookingId?: string;
   tournamentRegistrationId?: string;
+  /** Аренда стола по абонементу (решение владельца от 26.09.2026). */
+  tableBookingId?: string;
   createdByUserId?: string | null;
   note?: string | null;
 }
@@ -66,6 +68,7 @@ export async function writeLedger(tx: Prisma.TransactionClient, move: LedgerMove
       reason: move.reason,
       trainingBookingId: move.trainingBookingId ?? null,
       tournamentRegistrationId: move.tournamentRegistrationId ?? null,
+      tableBookingId: move.tableBookingId ?? null,
       createdByUserId: move.createdByUserId ?? null,
       note: move.note ?? null,
     },

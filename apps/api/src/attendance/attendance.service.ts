@@ -84,11 +84,11 @@ export interface LoadedEntry {
   chargeRatio: number | null;
   startsAt: Date;
   endsAt: Date;
-  /** Пусто у спарринга: за столом тренер, клиента нет. */
+  /** Пусто у спарринга без ученика: за столом только тренер. */
   clientId: string | null;
   /** Тренер занятия или спарринга — ложится в визит клиента. */
   coachId: string | null;
-  /** Абонемент, которым оплачена запись. У записи по цене и у стола — пусто. */
+  /** Абонемент, которым оплачена запись или аренда. У записи по цене — пусто. */
   subscriptionId: string | null;
 }
 
@@ -238,14 +238,18 @@ export class AttendanceService {
     // Визит абонемента — в той же транзакции и после записи: блокировки идут
     // в одном порядке везде. Прощённая неявка вернёт визит, снятое прощение
     // спишет снова; обычная неявка журнал не трогает — визит уже списан.
-    if (entry.subscriptionId && kind !== 'TABLE') {
+    if (entry.subscriptionId) {
       await this.subscriptions.settleInTx(
         tx,
         tenantId,
         entry.subscriptionId,
         consumed(entry),
         consumed({ status: decision.status, chargeRatio: decision.chargeRatio }),
-        kind === 'TRAINING' ? { trainingBookingId: entryId } : { tournamentRegistrationId: entryId },
+        kind === 'TRAINING'
+          ? { trainingBookingId: entryId }
+          : kind === 'TOURNAMENT'
+            ? { tournamentRegistrationId: entryId }
+            : { tableBookingId: entryId },
       );
     }
 
@@ -549,11 +553,11 @@ export class AttendanceService {
             endsAt: true,
             clientId: true,
             coachId: true,
+            subscriptionId: true,
           },
         });
 
-        // Аренда стола абонементом в этой фазе не оплачивается.
-        return { id, ...row, subscriptionId: null };
+        return { id, ...row };
       }
 
       case 'TRAINING': {
@@ -655,7 +659,7 @@ export class AttendanceService {
    * иначе в истории клиента одно занятие легло бы двумя визитами. Последний
    * рубеж — частичный уникальный индекс по ссылке (раздел 17 constraints.sql).
    *
-   * У спарринга клиента нет — там за столом тренер, — и визита тоже нет: это
+   * У спарринга без ученика клиента нет — за столом тренер, — и визита тоже нет: это
    * журнал визитов клиента, а статус, процент и строка аудита у брони есть и так.
    *
    * `recordedBy` пуст только у неявки от джобы — это проверяет база.

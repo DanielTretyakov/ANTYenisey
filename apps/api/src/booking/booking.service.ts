@@ -4,14 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BookingStatus } from '@yenisey/database';
+import { BookingStatus, Prisma } from '@yenisey/database';
 import {
   BOOKING_HORIZON_DAYS,
   type BookingDay,
   type BookingQuote,
   type ClientBooking,
   type ClosureSlot,
-  type CreateBookingRequest,
+  type CreateSparringRequest,
   type PublicDayBoard,
   shortName,
 } from '@yenisey/types';
@@ -19,6 +19,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { instantAt, localParts } from '../club/closures';
 import { MembershipService } from '../club/membership.service';
 import { ClientNotifier } from '../notifications/client-notifier.service';
+import { sparringAgeProblem, sparringPrice } from '../sparring/sparring-rules';
+import { consumed, subscriptionCancelRatio } from '../subscriptions/subscription-rules';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import {
   bookingViolation,
   cancellationOpen,
@@ -67,22 +70,16 @@ const BOOKING_SELECT = {
   cancelledAt: true,
   chargeRatio: true,
   isSparring: true,
+  subscriptionId: true,
+  subscription: { select: { plan: { select: { name: true } } } },
+  sparringType: { select: { name: true } },
+  client: { select: { membership: { select: { user: { select: { fullName: true } } } } } },
+  coach: { select: { membership: { select: { user: { select: { fullName: true } } } } } },
+  tenant: { select: { subscriptionBurnsOnNoShowOnly: true } },
   table: { select: { label: true, hallId: true, hall: { select: { name: true } } } },
 } as const;
 
-interface BookingRow {
-  id: string;
-  tableId: string;
-  startsAt: Date;
-  endsAt: Date;
-  withRobot: boolean;
-  priceAtBooking: number;
-  status: BookingStatus;
-  cancelledAt: Date | null;
-  chargeRatio: number | null;
-  isSparring: boolean;
-  table: { label: string; hallId: string; hall: { name: string } };
-}
+type BookingRow = Prisma.TableBookingGetPayload<{ select: typeof BOOKING_SELECT }>;
 
 type Tier = { minMinutesBeforeStart: number; chargePercent: number };
 
@@ -124,6 +121,7 @@ export class BookingService {
     private readonly occupancy: OccupancyService,
     private readonly membership: MembershipService,
     private readonly notifier: ClientNotifier,
+    private readonly subscriptions: SubscriptionsService,
   ) {}
 
   /**
@@ -285,7 +283,7 @@ export class BookingService {
   async create(
     tenantId: string,
     owner: BookingOwner,
-    dto: CreateBookingRequest,
+    dto: CreateSparringRequest,
   ): Promise<ClientBooking> {
     const table = await this.prisma.table.findFirst({
       where: { id: dto.tableId, tenantId },
@@ -326,7 +324,13 @@ export class BookingService {
     }
 
     const endsAt = new Date(startsAt.getTime() + dto.durationMinutes * 60_000);
-    const price = quote(table.hall, dto.durationMinutes, dto.withRobot).price;
+    // Спарринг с учеником — по цене типа, стол входит в неё (решение
+    // владельца от 26.09.2026); остальное — аренда по прайсу зала.
+    const student =
+      owner.kind === 'coach' ? await this.sparringStudent(tenantId, owner.userId, dto, start.date) : null;
+    const price = student
+      ? sparringPrice(student.type.hourPrice, dto.durationMinutes)
+      : quote(table.hall, dto.durationMinutes, dto.withRobot).price;
 
     if (owner.kind === 'client') {
       // Привязка к клубу заводится здесь, перед первой бронью. По ТЗ
@@ -347,26 +351,50 @@ export class BookingService {
       // Транзакция — ради подтверждения в MAX: бронь и сообщение о ней либо
       // вместе, либо никак. У спарринга клиента нет, и сообщать некому.
       created = await this.prisma.$transaction(async (tx) => {
+        // Аренду клиента оплачивает абонемент, если он её покрывает: бронь
+        // любой длины — один визит (решение владельца от 26.09.2026). Спарринг
+        // ученик оплачивает деньгами, робот — отдельная услуга.
+        const sub =
+          owner.kind === 'client'
+            ? await this.subscriptions.reserveInTx(tx, tenantId, owner.userId, {
+                kind: 'TABLE',
+                startsAt,
+                withRobot: dto.withRobot,
+                sparring: false,
+              })
+            : null;
+
         const row = await tx.tableBooking.create({
           data: {
             tenantId,
             tableId: table.id,
             ...(owner.kind === 'client'
               ? { clientId: owner.userId }
-              : { coachId: owner.userId, isSparring: true }),
+              : {
+                  coachId: owner.userId,
+                  isSparring: true,
+                  ...(student ? { clientId: student.id, sparringTypeId: student.type.id } : {}),
+                }),
             withRobot: dto.withRobot,
             startsAt,
             endsAt,
             // Копия цены на момент брони: поднятый через месяц прайс не должен
             // переписывать то, о чём клуб уже договорился с клиентом.
             priceAtBooking: price,
+            subscriptionId: sub?.id ?? null,
           },
-          select: BOOKING_SELECT,
+          select: { id: true },
         });
 
-        await this.notifier.entryBooked(tx, tenantId, 'TABLE', row.id, 'self');
+        if (sub) {
+          await this.subscriptions.chargeInTx(tx, tenantId, sub, { tableBookingId: row.id });
+        }
 
-        return row;
+        // Ученику о спарринге сообщают как о действии клуба — в тихие часы
+        // оно подождёт утра; у спарринга без ученика сообщать некому.
+        await this.notifier.entryBooked(tx, tenantId, 'TABLE', row.id, owner.kind === 'client' ? 'self' : 'club');
+
+        return tx.tableBooking.findUniqueOrThrow({ where: { id: row.id }, select: BOOKING_SELECT });
       });
     } catch (error) {
       // Пересечение с чужой бронью ловит exclusion-констрейнт. Prisma такую
@@ -379,7 +407,87 @@ export class BookingService {
       throw error;
     }
 
-    return this.present(created, await this.tiers(tenantId));
+    return this.present(created, await this.tiers(tenantId), owner.kind);
+  }
+
+  /**
+   * Сколько стоит спарринг с учеником — до брони, как `quote` у аренды:
+   * цену считает сервер, и только он.
+   */
+  async sparringQuote(tenantId: string, sparringTypeId: string, durationMinutes: number): Promise<BookingQuote> {
+    const type = await this.prisma.sparringType.findFirst({
+      where: { id: sparringTypeId, tenantId, isActive: true },
+      select: { hourPrice: true },
+    });
+
+    if (!type) {
+      throw new NotFoundException('Тип спарринга не найден');
+    }
+
+    return { durationMinutes, billedMinutes: durationMinutes, price: sparringPrice(type.hourPrice, durationMinutes) };
+  }
+
+  /**
+   * Ученик и тип спарринга — оба сразу или ни одного (без них это стол под
+   * спарринг, как прежде). Ученик — человек этого клуба и не сам тренер;
+   * возраст — на день спарринга.
+   */
+  private async sparringStudent(
+    tenantId: string,
+    coachId: string,
+    dto: CreateSparringRequest,
+    date: string,
+  ): Promise<{ id: string; type: { id: string; hourPrice: number } } | null> {
+    if (!dto.studentId && !dto.sparringTypeId) {
+      return null;
+    }
+
+    if (!dto.studentId || !dto.sparringTypeId) {
+      throw new BadRequestException('Ученика и тип спарринга указывают вместе');
+    }
+
+    if (dto.studentId === coachId) {
+      throw new BadRequestException('Сам себе учеником тренер не бывает');
+    }
+
+    if (dto.withRobot) {
+      throw new BadRequestException('Спарринг с учеником — без робота: в цену типа входит только стол');
+    }
+
+    const [type, member] = await Promise.all([
+      this.prisma.sparringType.findFirst({
+        where: { id: dto.sparringTypeId, tenantId, isActive: true },
+        select: { id: true, name: true, hourPrice: true, minAge: true, maxAge: true },
+      }),
+      this.prisma.tenantMembership.findFirst({
+        where: {
+          tenantId,
+          userId: dto.studentId,
+          deactivatedAt: null,
+          user: { deactivatedAt: null, anonymizedAt: null },
+        },
+        select: { user: { select: { birthDate: true } } },
+      }),
+    ]);
+
+    if (!type) {
+      throw new NotFoundException('Тип спарринга не найден или снят');
+    }
+
+    if (!member) {
+      throw new NotFoundException('Ученик не найден в этом клубе');
+    }
+
+    const problem = sparringAgeProblem(type, member.user.birthDate, new Date(`${date}T00:00:00Z`));
+
+    if (problem) {
+      throw new BadRequestException(problem);
+    }
+
+    // Бронь ссылается на анкету клиента — у сотрудника-ученика её может не быть.
+    await this.membership.ensureClient(tenantId, dto.studentId);
+
+    return { id: dto.studentId, type };
   }
 
   /** Свои брони: свежие сверху. У тренера это его спарринги. */
@@ -392,7 +500,7 @@ export class BookingService {
 
     const tiers = await this.tiers(tenantId);
 
-    return bookings.map((booking) => this.present(booking, tiers));
+    return bookings.map((booking) => this.present(booking, tiers, owner.kind));
   }
 
   /**
@@ -429,7 +537,7 @@ export class BookingService {
     }
 
     const tiers = await this.tiers(tenantId);
-    const percent = cancelPercentOf(booking, tiers);
+    const percent = cancelRatioOf(booking, tiers, owner.kind);
 
     // Условие на статус — против гонки: вторая вкладка отменила бронь, пока
     // эта читала её живой, — и процент записался бы дважды, вторым поверх.
@@ -447,7 +555,21 @@ export class BookingService {
         throw new ConflictException('Бронь уже изменилась — обновите страницу');
       }
 
-      await this.notifier.entryCancelled(tx, tenantId, 'TABLE', bookingId, 'self');
+      // Визит абонемента — после записи, в той же транзакции: вернуть или
+      // оставить сгоревшим по правилу клуба.
+      if (booking.subscriptionId) {
+        await this.subscriptions.settleInTx(
+          tx,
+          tenantId,
+          booking.subscriptionId,
+          true,
+          consumed({ status: 'CANCELLED', chargeRatio: percent }),
+          { tableBookingId: bookingId },
+        );
+      }
+
+      // Тренер отменил спарринг — ученик узнаёт, как об отмене клубом.
+      await this.notifier.entryCancelled(tx, tenantId, 'TABLE', bookingId, owner.kind === 'client' ? 'self' : 'club');
     });
 
     const cancelled = await this.prisma.tableBooking.findUniqueOrThrow({
@@ -455,12 +577,18 @@ export class BookingService {
       select: BOOKING_SELECT,
     });
 
-    return this.present(cancelled, tiers);
+    return this.present(cancelled, tiers, owner.kind);
   }
 
   // --- Внутреннее ----------------------------------------------------------
 
-  private present(booking: BookingRow, tiers: readonly Tier[]): ClientBooking {
+  /**
+   * Бронь глазами владельца: у тренера вторая сторона спарринга — ученик
+   * полным именем (ему звонить), у ученика — тренер сокращённо.
+   */
+  private present(booking: BookingRow, tiers: readonly Tier[], viewer: BookingOwner['kind']): ClientBooking {
+    const byVisit = booking.subscriptionId !== null;
+
     return {
       id: booking.id,
       hallId: booking.table.hallId,
@@ -476,8 +604,23 @@ export class BookingService {
       chargePercent: booking.chargeRatio,
       // Сколько спишется при отмене прямо сейчас — вопрос, на который клиент
       // должен получить ответ ДО нажатия кнопки, а не после.
+      // У брони по абонементу отмена стоит визита, а не денег.
       cancelChargePercentNow:
-        booking.status === BookingStatus.BOOKED ? cancelPercentOf(booking, tiers) : null,
+        booking.status === BookingStatus.BOOKED && !byVisit ? cancelRatioOf(booking, tiers, viewer) : null,
+      paidBy: byVisit && booking.subscription
+        ? { subscriptionId: booking.subscriptionId!, planName: booking.subscription.plan.name }
+        : null,
+      sparring: booking.isSparring
+        ? {
+            typeName: booking.sparringType?.name ?? null,
+            partner:
+              viewer === 'coach'
+                ? (booking.client?.membership.user.fullName ?? null)
+                : booking.coach
+                  ? shortName(booking.coach.membership.user.fullName)
+                  : null,
+          }
+        : null,
     };
   }
 
@@ -581,10 +724,23 @@ function parseInstant(value: string): Date {
 /**
  * Сколько списать при отмене этой брони.
  *
- * У спарринга — ничего: заблаговременная отмена тренеру бесплатна (решение
- * владельца от 20.09.2026). Деньги с него клуб берёт только за неявку, и берёт
- * целиком — это делает отметка присутствия, а не отмена.
+ * Отменяет тренер — ничего: заблаговременная отмена спарринга тренеру
+ * бесплатна (решение владельца от 20.09.2026), и ученик за отмену тренером не
+ * платит. Отменяет клиент — по политике клуба, и ученик спарринга тоже: это
+ * его запись (решение от 26.09.2026). По абонементу процент — судьба визита.
  */
-function cancelPercentOf(booking: Pick<BookingRow, 'isSparring' | 'startsAt'>, tiers: readonly Tier[]): number {
-  return booking.isSparring ? 0 : cancellationPercent(tiers, minutesUntil(booking.startsAt));
+function cancelRatioOf(
+  booking: Pick<BookingRow, 'startsAt' | 'subscriptionId' | 'tenant'>,
+  tiers: readonly Tier[],
+  by: BookingOwner['kind'],
+): number {
+  if (by === 'coach') {
+    return 0;
+  }
+
+  const percent = cancellationPercent(tiers, minutesUntil(booking.startsAt));
+
+  return booking.subscriptionId
+    ? subscriptionCancelRatio(booking.tenant.subscriptionBurnsOnNoShowOnly, percent)
+    : percent;
 }

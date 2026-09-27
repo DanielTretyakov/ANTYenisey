@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { hasAnyRole, MANAGING_ROLES, type ClubPeoplePage, type ClubPerson, type Role } from '@yenisey/types';
+import { fullYears, hasAnyRole, MANAGING_ROLES, type ClubPeoplePage, type ClubPerson, type Role } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -30,6 +30,16 @@ const TABS: { value: Role | 'ALL'; label: string }[] = [
 
 const PAGE_SIZE = 50;
 
+const MONTHS = [
+  'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+  'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь',
+];
+
+/** Месяц браузера, 1–12: «в этом месяце» — у того, кто сидит за стойкой. */
+function currentMonth(): number {
+  return new Date().getMonth() + 1;
+}
+
 /** Роли, которые переключаются в строке; клиент — когда не выбрана ни одна. */
 const EDITABLE_ROLES: Role[] = ['OWNER', 'MANAGER', 'ADMIN', 'COACH'];
 
@@ -47,6 +57,10 @@ export default function PeoplePage() {
 
   const [tab, setTab] = useState<Role | 'ALL'>('ALL');
   const [search, setSearch] = useState('');
+  // Фильтры по дате рождения: месяц дня рождения и возраст «от — до».
+  const [birthMonth, setBirthMonth] = useState<number | null>(null);
+  const [ageFrom, setAgeFrom] = useState('');
+  const [ageTo, setAgeTo] = useState('');
   const [page, setPage] = useState<ClubPeoplePage | null>(null);
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +86,7 @@ export default function PeoplePage() {
   // 51–100» на выборке из трёх человек показало бы пустую страницу.
   useEffect(() => {
     setOffset(0);
-  }, [tab, search]);
+  }, [tab, search, birthMonth, ageFrom, ageTo]);
 
   const club = useClubApi();
 
@@ -87,6 +101,9 @@ export default function PeoplePage() {
         await club.people({
           role: tab === 'ALL' ? undefined : tab,
           search: search.trim() || undefined,
+          birthMonth: birthMonth ?? undefined,
+          ageFrom: age(ageFrom),
+          ageTo: age(ageTo),
           limit: PAGE_SIZE,
           offset,
         }),
@@ -96,7 +113,7 @@ export default function PeoplePage() {
     } finally {
       setLoading(false);
     }
-  }, [allowed, tab, search, offset]);
+  }, [allowed, club, tab, search, birthMonth, ageFrom, ageTo, offset]);
 
   useEffect(() => {
     // Пауза перед запросом: без неё каждая буква в поиске — отдельный поход в
@@ -143,16 +160,28 @@ export default function PeoplePage() {
 
               <input
                 aria-label="Поиск по людям"
-                placeholder="Фамилия, почта или телефон"
+                placeholder="Фамилия, почта, телефон или 17.05"
+                title="Дата вида 17.05.2001 ищет по дате рождения, 17.05 — по дню рождения в любом году"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 className={cn(inputClassName, 'ml-auto w-64 py-1.5 text-[0.875rem]')}
               />
             </div>
 
+            <BirthFilters
+              birthMonth={birthMonth}
+              ageFrom={ageFrom}
+              ageTo={ageTo}
+              onBirthMonth={setBirthMonth}
+              onAgeFrom={setAgeFrom}
+              onAgeTo={setAgeTo}
+            />
+
             {items.length === 0 && !loading ? (
               <p className="text-[0.9375rem] text-text-muted">
-                {search.trim() ? 'Никого не нашлось.' : 'В этой роли пока никого нет.'}
+                {search.trim() || birthMonth !== null || ageFrom || ageTo
+                  ? 'Никого не нашлось.'
+                  : 'В этой роли пока никого нет.'}
               </p>
             ) : (
               <div className="overflow-x-auto">
@@ -285,7 +314,9 @@ function PersonRow({
       </td>
       <td className="py-2.5 pr-4 text-text-muted">{person.email}</td>
       <td className="py-2.5 pr-4 text-text-muted">{person.phone}</td>
-      <td className="py-2.5 pr-4 text-text-muted">{formatDate(person.birthDate)}</td>
+      <td className="py-2.5 pr-4 whitespace-nowrap text-text-muted">
+        <BirthDate iso={person.birthDate} />
+      </td>
       <td className="py-2.5">
         {self ? (
           <span className="text-text-muted" title="Свои роли изменить нельзя">
@@ -322,6 +353,119 @@ function PersonRow({
       </td>
     </tr>
   );
+}
+
+/**
+ * Фильтры по дате рождения. «Дни рождения в этом месяце» — отдельной кнопкой
+ * (решение владельца от 26.09.2026: клуб поздравляет клиентов); список тогда
+ * идёт по дню месяца, и чей праздник ближе — видно сразу.
+ */
+function BirthFilters({
+  birthMonth,
+  ageFrom,
+  ageTo,
+  onBirthMonth,
+  onAgeFrom,
+  onAgeTo,
+}: {
+  birthMonth: number | null;
+  ageFrom: string;
+  ageTo: string;
+  onBirthMonth: (month: number | null) => void;
+  onAgeFrom: (value: string) => void;
+  onAgeTo: (value: string) => void;
+}) {
+  const thisMonth = currentMonth();
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2 text-[0.875rem]">
+      <Tab
+        active={birthMonth === thisMonth}
+        onClick={() => onBirthMonth(birthMonth === thisMonth ? null : thisMonth)}
+        title="Кого поздравить в этом месяце"
+      >
+        Дни рождения в этом месяце
+      </Tab>
+
+      <label className="flex items-center gap-1.5 whitespace-nowrap text-text-muted">
+        Месяц рождения
+        <select
+          value={birthMonth ?? ''}
+          onChange={(event) => onBirthMonth(event.target.value ? Number(event.target.value) : null)}
+          className={cn(inputClassName, 'w-auto py-1.5 text-[0.875rem]')}
+        >
+          <option value="">любой</option>
+          {MONTHS.map((name, index) => (
+            <option key={name} value={index + 1}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="flex items-center gap-1.5 whitespace-nowrap text-text-muted">
+        Возраст от
+        <input
+          inputMode="numeric"
+          value={ageFrom}
+          onChange={(event) => onAgeFrom(event.target.value.replace(/\D/g, '').slice(0, 3))}
+          className={cn(inputClassName, '!w-16 py-1.5 text-[0.875rem]')}
+        />
+      </label>
+      <label className="flex items-center gap-1.5 whitespace-nowrap text-text-muted">
+        до
+        <input
+          inputMode="numeric"
+          value={ageTo}
+          onChange={(event) => onAgeTo(event.target.value.replace(/\D/g, '').slice(0, 3))}
+          className={cn(inputClassName, '!w-16 py-1.5 text-[0.875rem]')}
+        />
+      </label>
+
+      {(birthMonth !== null || ageFrom || ageTo) && (
+        <button
+          type="button"
+          onClick={() => {
+            onBirthMonth(null);
+            onAgeFrom('');
+            onAgeTo('');
+          }}
+          className="text-text-subtle underline-offset-2 hover:text-text hover:underline"
+        >
+          Сбросить
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Дата рождения с возрастом; у именинника сегодня — пометка, чтобы у стойки
+ * не пропустить. Заглушку миграции (1900 год) возрастом не подписываем.
+ */
+function BirthDate({ iso }: { iso: string }) {
+  const today = new Date();
+  const born = new Date(`${iso}T00:00:00Z`);
+  const placeholder = iso.startsWith('1900-');
+  const birthdayToday = !placeholder && born.getUTCMonth() === today.getMonth() && born.getUTCDate() === today.getDate();
+  const years = fullYears(born, new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())));
+
+  return (
+    <>
+      {formatDate(iso)}
+      {!placeholder && <span className="ml-1.5 text-text-subtle">· {years}</span>}
+      {birthdayToday && (
+        <span className="ml-2 rounded-full bg-surface-accent-soft px-2 py-0.5 text-[0.75rem] text-text-accent">
+          сегодня
+        </span>
+      )}
+    </>
+  );
+}
+
+/** Возраст из поля ввода: пусто — без ограничения. */
+function age(value: string): number | undefined {
+  return value === '' ? undefined : Number(value);
 }
 
 /** «2001-05-17» → «17.05.2001». Заглушку из миграции показываем как есть. */

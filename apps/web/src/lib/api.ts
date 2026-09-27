@@ -1,4 +1,17 @@
 import type {
+  ClubPost,
+  ClubPostPage,
+  ClubPostRequest,
+  ClubPostWithClub,
+  ClubRating,
+  Gender,
+  CreateSparringRequest,
+  RatingPeriod,
+  SparringStudent,
+  SparringType,
+  SparringTypeRequest,
+  SubscriptionHoldersPage,
+  SubscriptionHoldersQuery,
   NewsDraft,
   NewsFeed,
   NewsItem,
@@ -531,6 +544,13 @@ export const api = {
     authorized(`/platform/news/${id}`, json('PATCH', draft)),
   deleteNews: (id: string): Promise<void> => authorized(`/platform/news/${id}`, { method: 'DELETE' }),
 
+  // --- Лента клубов и рейтинг (решения владельца от 26.09.2026)
+  /** Последние публикации клубов, отмеченных своими и где человек клиент. */
+  myClubPosts: (limit = 3): Promise<ClubPostWithClub[]> => authorized(`/me/club-posts?limit=${limit}`),
+  /** «Не показывать меня в рейтингах» — во всех клубах сразу. */
+  setRatingHidden: (hidden: boolean): Promise<{ hidden: boolean }> =>
+    authorized('/me/rating', json('PUT', { hidden })),
+
   /**
    * Файл — байтами, а не адресом для `<img src>`. Картинка по адресу ушла бы
    * без токена, а аватар ребёнка и скан приказа отдаются только тем, кому
@@ -649,6 +669,9 @@ export function clubApi(slug: string = TENANT_SLUG) {
 
       if (query.role) params.set('role', query.role);
       if (query.search) params.set('search', query.search);
+      if (query.birthMonth !== undefined) params.set('birthMonth', String(query.birthMonth));
+      if (query.ageFrom !== undefined) params.set('ageFrom', String(query.ageFrom));
+      if (query.ageTo !== undefined) params.set('ageTo', String(query.ageTo));
       if (query.ids?.length) params.set('ids', query.ids.join(','));
       if (query.limit !== undefined) params.set('limit', String(query.limit));
       if (query.offset !== undefined) params.set('offset', String(query.offset));
@@ -864,10 +887,56 @@ export function clubApi(slug: string = TENANT_SLUG) {
     cancelBooking: (id: string, forPerson?: string | null): Promise<ClientBooking> =>
       authorized(withFor(`${club}/booking/bookings/${id}`, forPerson), { method: 'DELETE' }),
 
-    // --- Спарринг: тот же стол теми же правилами, но берёт его тренер. Ученик
-    // в такой брони не записан — заполнено либо клиент, либо тренер.
-    createSparring: (payload: CreateBookingRequest): Promise<ClientBooking> =>
+    // --- Спарринг: тот же стол теми же правилами, но берёт его тренер. С
+    // учеником и типом (решение от 26.09.2026) ученик платит цену типа; без
+    // них — стол под спарринг, как прежде.
+    createSparring: (payload: CreateSparringRequest): Promise<ClientBooking> =>
       authorized(`${club}/coach/sparring`, json('POST', payload)),
+
+    /** Цена спарринга с учеником по типу — считает сервер. */
+    sparringQuote: (sparringTypeId: string, durationMinutes: number): Promise<BookingQuote> =>
+      authorized(
+        `${club}/coach/sparring/quote?sparringTypeId=${encodeURIComponent(sparringTypeId)}&durationMinutes=${durationMinutes}`,
+      ),
+
+    /** Поиск ученика по ФИО среди людей клуба — от двух букв. */
+    coachStudents: (search: string): Promise<SparringStudent[]> =>
+      authorized(`${club}/coach/students?search=${encodeURIComponent(search)}`),
+
+    // --- Типы спаррингов: конструктор в каталоге, тренер выбирает при брони
+    sparringTypes: (): Promise<SparringType[]> => authorized(`${club}/sparring-types`),
+
+    createSparringType: (payload: SparringTypeRequest): Promise<SparringType> =>
+      authorized(`${club}/sparring-types`, json('POST', payload)),
+
+    updateSparringType: (id: string, payload: SparringTypeRequest): Promise<SparringType> =>
+      authorized(`${club}/sparring-types/${id}`, json('PATCH', payload)),
+
+    // --- Рейтинг посещений — открыт без входа
+    rating: (period: RatingPeriod, gender: Gender | null = null): Promise<ClubRating> =>
+      optionallyAuthorized(`${club}/rating?period=${period}${gender ? `&gender=${gender}` : ''}`),
+
+    // --- Лента клуба: чтение открыто, правят руководство и администраторы
+    posts: (query: { limit?: number; offset?: number } = {}): Promise<ClubPostPage> => {
+      const params = new URLSearchParams();
+
+      if (query.limit !== undefined) params.set('limit', String(query.limit));
+      if (query.offset !== undefined) params.set('offset', String(query.offset));
+
+      const search = params.toString();
+
+      return optionallyAuthorized(`${club}/posts${search ? `?${search}` : ''}`);
+    },
+
+    managePosts: (): Promise<ClubPost[]> => authorized(`${club}/manage/posts`),
+
+    createPost: (payload: ClubPostRequest): Promise<ClubPost> =>
+      authorized(`${club}/manage/posts`, json('POST', payload)),
+
+    updatePost: (id: string, payload: ClubPostRequest): Promise<ClubPost> =>
+      authorized(`${club}/manage/posts/${id}`, json('PATCH', payload)),
+
+    deletePost: (id: string): Promise<void> => authorized(`${club}/manage/posts/${id}`, { method: 'DELETE' }),
 
     mySparrings: (): Promise<ClientBooking[]> => authorized(`${club}/coach/sparring`),
 
@@ -1006,6 +1075,17 @@ export function clubApi(slug: string = TENANT_SLUG) {
       const search = params.toString();
 
       return authorized(`${club}/subscriptions/ledger${search ? `?${search}` : ''}`);
+    },
+
+    /** Вкладки «Действующие» и «Архив» раздела «Абонементы». */
+    subscriptionHolders: (query: SubscriptionHoldersQuery): Promise<SubscriptionHoldersPage> => {
+      const params = new URLSearchParams({ status: query.status });
+
+      if (query.search) params.set('search', query.search);
+      if (query.limit !== undefined) params.set('limit', String(query.limit));
+      if (query.offset !== undefined) params.set('offset', String(query.offset));
+
+      return authorized(`${club}/subscriptions/holders?${params.toString()}`);
     },
 
     /** Корректировка визитов или досрочное закрытие безлимита — с причиной. */

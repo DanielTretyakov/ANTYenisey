@@ -31,6 +31,27 @@ export class ClubPeopleQueryDto implements ClubPeopleQuery {
   @MaxLength(120)
   search?: string;
 
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  birthMonth?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(120)
+  ageFrom?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(120)
+  ageTo?: number;
+
   /**
    * Точечная выборка: `?ids=a,b,c`.
    *

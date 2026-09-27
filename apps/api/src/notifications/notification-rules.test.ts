@@ -123,10 +123,11 @@ describe('clientRecipients', () => {
 });
 
 describe('availableCategories', () => {
-  it('клиенту — только свои записи и абонемент', () => {
+  it('клиенту — свои записи, абонемент и новости его клубов', () => {
     assert.deepEqual(availableCategories({ clubRoles: ['CLIENT'], platformOwner: false }), [
       'MY_BOOKINGS',
       'MY_SUBSCRIPTION',
+      'CLUB_NEWS',
     ]);
   });
 

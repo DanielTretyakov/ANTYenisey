@@ -20,7 +20,7 @@ export interface EntryFacts {
   kind: EntryKind;
   id: string;
   tenantId: string;
-  /** Пусто у спарринга: бронь тренера, и сообщать о ней клиенту некому. */
+  /** Пусто у спарринга без ученика: бронь тренера, и сообщать о ней клиенту некому. */
   clientId: string | null;
   status: BookingStatus;
   startsAt: Date;
@@ -355,6 +355,8 @@ export async function loadEntry(db: Db, tenantId: string, kind: EntryKind, id: s
           createdAt: true,
           chargeRatio: true,
           priceAtBooking: true,
+          subscriptionId: true,
+          isSparring: true,
           table: { select: { label: true, hall: HALL } },
           ...common,
         },
@@ -371,8 +373,10 @@ export async function loadEntry(db: Db, tenantId: string, kind: EntryKind, id: s
             createdAt: row.createdAt,
             chargeRatio: row.chargeRatio,
             price: row.priceAtBooking,
-            prepaid: false,
-            title: row.table.label,
+            // Аренда по абонементу денег не стоит — визит (решение от 26.09.2026).
+            prepaid: row.subscriptionId !== null,
+            // Ученику спарринга — «спарринг», а не просто номер стола.
+            title: row.isSparring ? `спарринг, ${row.table.label}` : row.table.label,
             place: row.table.hall.name,
             timezone: row.table.hall.timezone,
             club: row.tenant.name,

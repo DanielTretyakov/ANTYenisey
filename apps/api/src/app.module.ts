@@ -8,6 +8,7 @@ import { AttendanceModule } from './attendance/attendance.module';
 import { AuthModule } from './auth/auth.module';
 import { BookingModule } from './booking/booking.module';
 import { ClubModule } from './club/club.module';
+import { ClubPostsModule } from './club-posts/club-posts.module';
 import { CoachesModule } from './coaches/coaches.module';
 import { DeskModule } from './desk/desk.module';
 import { EntriesModule } from './entries/entries.module';
@@ -18,6 +19,8 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { PeopleModule } from './people/people.module';
 import { PlayersModule } from './players/players.module';
 import { NewsModule } from './news/news.module';
+import { RatingModule } from './rating/rating.module';
+import { SparringModule } from './sparring/sparring.module';
 import { StaffModule } from './staff/staff.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { parseDuration } from './auth/tokens';
@@ -73,6 +76,9 @@ import { validateEnv, type Env } from './config/env';
     PeopleModule,
     PlayersModule,
     CoachesModule,
+    SparringModule,
+    RatingModule,
+    ClubPostsModule,
     SubscriptionsModule,
     GuardianshipModule,
     TenantsModule,

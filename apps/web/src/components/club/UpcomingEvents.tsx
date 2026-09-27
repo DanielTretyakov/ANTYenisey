@@ -51,6 +51,7 @@ export function UpcomingEvents({
   filter,
   onFilter,
   hallIds,
+  hallNames = null,
 }: {
   slug: string;
   /** Растёт после записи или отмены — список перечитывается. */
@@ -65,6 +66,11 @@ export function UpcomingEvents({
   onFilter: (filter: KindFilter | null) => void;
   /** Залы фильтра страницы; пусто — все. */
   hallIds: string[] | null;
+  /**
+   * Названия выбранных залов — строкой «Залы: …» под заголовком, чтобы было
+   * видно, чьё это расписание; пусто — все залы клуба.
+   */
+  hallNames?: string[] | null;
 }) {
   const club = useClubApi();
   const [view, setView] = useState<'week' | 'month'>('week');
@@ -185,7 +191,13 @@ export function UpcomingEvents({
   return (
     <section id={UPCOMING_ANCHOR} className="mb-16 scroll-mt-24">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-[1.375rem]">Предстоящие мероприятия</h2>
+        <div>
+          <h2 className="text-[1.375rem]">Предстоящие мероприятия</h2>
+          <p className="mt-1 text-[0.9375rem] text-text-muted">
+            Залы:{' '}
+            <span className="text-text">{hallNames ? hallNames.join(', ') : 'все залы клуба'}</span>
+          </p>
+        </div>
 
         <div className="flex gap-1.5" role="tablist" aria-label="Вид расписания">
           <Tab inTablist active={view === 'week'} onClick={() => setView('week')}>

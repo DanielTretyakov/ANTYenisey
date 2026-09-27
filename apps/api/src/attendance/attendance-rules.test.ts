@@ -279,7 +279,7 @@ describe('attendancePhase', () => {
 });
 
 describe('noShowRatio', () => {
-  const plain = { subscriptionId: null, coachId: null };
+  const plain = { subscriptionId: null, coachId: null, clientId: 'u1' };
 
   it('обычная запись — процент политики клуба', () => {
     assert.equal(noShowRatio('TRAINING', plain, 50), 50);
@@ -288,18 +288,20 @@ describe('noShowRatio', () => {
   });
 
   it('запись по абонементу — всегда 100: визит израсходован', () => {
-    assert.equal(noShowRatio('TRAINING', { subscriptionId: 's1', coachId: null }, 50), 100);
-    assert.equal(noShowRatio('TOURNAMENT', { subscriptionId: 's1', coachId: null }, 0), 100);
+    assert.equal(noShowRatio('TRAINING', { subscriptionId: 's1', coachId: null, clientId: 'u1' }, 50), 100);
+    assert.equal(noShowRatio('TOURNAMENT', { subscriptionId: 's1', coachId: null, clientId: 'u1' }, 0), 100);
   });
 
   it('спарринг — всегда 100: стол простоял по вине тренера', () => {
-    assert.equal(noShowRatio('TABLE', { subscriptionId: null, coachId: 'c1' }, 50), 100);
+    assert.equal(noShowRatio('TABLE', { subscriptionId: null, coachId: 'c1', clientId: null }, 50), 100);
+    // С учеником спарринг — запись клиента, и неявка по клубной политике.
+    assert.equal(noShowRatio('TABLE', { subscriptionId: null, coachId: 'c1', clientId: 'u1' }, 50), 50);
   });
 
   it('занятие с тренером спаррингом не считается', () => {
     // У записи на занятие тренер заполнен всегда — он ведёт группу. Без вида
     // записи в условии клиент платил бы за неявку на занятие все 100.
-    assert.equal(noShowRatio('TRAINING', { subscriptionId: null, coachId: 'c1' }, 50), 50);
+    assert.equal(noShowRatio('TRAINING', { subscriptionId: null, coachId: 'c1', clientId: 'u1' }, 50), 50);
   });
 });
 

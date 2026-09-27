@@ -1,3 +1,5 @@
+import type { PaidBySubscription } from './subscription';
+
 /**
  * Движок бронирования: самостоятельная онлайн-аренда стола клиентом.
  *
@@ -149,6 +151,16 @@ export interface CreateBookingRequest {
 }
 
 /**
+ * Спарринг тренера. С учеником — оба поля сразу (решение владельца от
+ * 26.09.2026): ученик платит цену типа, стол входит в неё. Без них — стол под
+ * спарринг, как прежде: за неявку платит тренер.
+ */
+export interface CreateSparringRequest extends CreateBookingRequest {
+  studentId?: string;
+  sparringTypeId?: string;
+}
+
+/**
  * Бронь в кабинете клиента.
  *
  * Названия зала и стола лежат прямо здесь, а не собираются вторым запросом:
@@ -180,4 +192,14 @@ export interface ClientBooking {
    * активна, отменять нечего.
    */
   cancelChargePercentNow: number | null;
+  /**
+   * Абонемент, которым оплачена аренда (решение владельца от 26.09.2026:
+   * бронь любой длины — один визит). У брони по цене пусто.
+   */
+  paidBy: PaidBySubscription | null;
+  /**
+   * Спарринг: тип и вторая сторона — ученик для тренера (полным именем, ему
+   * звонить), тренер для ученика. У аренды пусто.
+   */
+  sparring: { typeName: string | null; partner: string | null } | null;
 }

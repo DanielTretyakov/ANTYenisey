@@ -7,7 +7,7 @@ import type {
   PublicDayBoard,
 } from '@yenisey/types';
 import { BookingService } from './booking.service';
-import { CreateBookingDto, QuoteQueryDto } from './dto/booking.dto';
+import { CreateBookingDto, CreateSparringDto, QuoteQueryDto, SparringQuoteQueryDto } from './dto/booking.dto';
 import { ClubService } from '../club/club.service';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Acting, ClientAction, type ActingClient } from '../guardianship/acting-client.guard';
@@ -150,8 +150,14 @@ export class SparringController {
   constructor(private readonly booking: BookingService) {}
 
   @Post()
-  create(@CurrentClub() club: ClubContext, @Body() dto: CreateBookingDto): Promise<ClientBooking> {
+  create(@CurrentClub() club: ClubContext, @Body() dto: CreateSparringDto): Promise<ClientBooking> {
     return this.booking.create(club.tenantId, { kind: 'coach', userId: club.userId }, dto);
+  }
+
+  /** Цена спарринга с учеником по типу — её показывает форма до брони. */
+  @Get('quote')
+  quote(@CurrentClub() club: ClubContext, @Query() query: SparringQuoteQueryDto): Promise<BookingQuote> {
+    return this.booking.sparringQuote(club.tenantId, query.sparringTypeId, query.durationMinutes);
   }
 
   @Get()

@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Role } from '@yenisey/database';
 import type { City, ClubCard, ClubSearchQuery, CitySearchQuery, PublicTenant } from '@yenisey/types';
-import { shortName } from '@yenisey/types';
+import { readWorkingHours, shortName } from '@yenisey/types';
 import { readClubValues } from '../club/settings-rules';
 import { cityLimit, cityPatterns } from './city-search';
 import { PrismaService } from '../prisma/prisma.service';
@@ -182,6 +182,7 @@ export class TenantsService {
             tableExtra30MinPrice: true,
             hasRobotOption: true,
             robot60MinPrice: true,
+            workingHours: true,
             city: { select: { name: true } },
             _count: { select: { tables: true } },
           },
@@ -244,6 +245,7 @@ export class TenantsService {
         // услуги читалась бы как «доплатите и получите».
         robotHourPrice: hall.hasRobotOption ? hall.robot60MinPrice : null,
         tables: hall._count.tables,
+        workingHours: readWorkingHours(hall.workingHours),
       })),
     };
   }

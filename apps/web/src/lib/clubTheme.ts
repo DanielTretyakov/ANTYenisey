@@ -39,5 +39,24 @@ export function clubAccent(color: string | null | undefined): CSSProperties {
     // Текст акцентом: подмешан к цвету текста, иначе светло-жёлтый фирменный
     // цвет клуба стал бы нечитаемой надписью на белом.
     '--text-accent': `color-mix(in oklab, ${color} 70%, var(--text))`,
+    // Текст НА акценте (кнопка, выбранный зал) — по контрасту с цветом клуба,
+    // а не по теме: в тёмной теме токен тёмный под яркий изумруд платформы,
+    // и на тёмно-зелёном «Енисее» надпись тонула в заливке.
+    '--accent-text': readableOn(color),
   } as CSSProperties;
+}
+
+/**
+ * Белый или почти чёрный — что контрастнее на этом цвете (по WCAG: светлота
+ * цвета против светлоты белого и чёрного).
+ */
+export function readableOn(color: string): string {
+  const channel = (hex: string): number => {
+    const value = parseInt(hex, 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance =
+    0.2126 * channel(color.slice(1, 3)) + 0.7152 * channel(color.slice(3, 5)) + 0.0722 * channel(color.slice(5, 7));
+
+  return 1.05 / (luminance + 0.05) >= (luminance + 0.05) / 0.05 ? '#ffffff' : 'var(--ink-950)';
 }

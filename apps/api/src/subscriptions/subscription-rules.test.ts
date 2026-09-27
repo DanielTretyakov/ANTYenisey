@@ -24,6 +24,7 @@ const sub = (over: Partial<SubscriptionFacts> = {}): SubscriptionFacts => ({
   expiresAt: at('2026-10-01T00:00:00+07:00'),
   trainingTypeIds: ['group'],
   tournamentTypeIds: ['club50'],
+  coversTableRental: false,
   ...over,
 });
 
@@ -45,6 +46,18 @@ describe('usable', () => {
 
     assert.equal(usable(expiring, training), false);
     assert.equal(usable(expiring, { ...training, startsAt: at('2026-09-19T23:59:00+07:00') }), true);
+  });
+
+  it('аренда стола — если тариф её покрывает, кроме робота и спарринга', () => {
+    const table = { kind: 'TABLE' as const, startsAt: training.startsAt, withRobot: false, sparring: false };
+    const rental = sub({ coversTableRental: true });
+
+    assert.equal(usable(sub(), table), false);
+    assert.equal(usable(rental, table), true);
+    assert.equal(usable(rental, { ...table, withRobot: true }), false);
+    assert.equal(usable(rental, { ...table, sparring: true }), false);
+    // Аренда не открывает занятия: покрытие у каждой услуги своё.
+    assert.equal(usable(sub({ coversTableRental: true, trainingTypeIds: [] }), training), false);
   });
 
   it('пустой абонемент не годится, безлимит — всегда', () => {
@@ -223,23 +236,30 @@ describe('decideClose', () => {
 });
 
 describe('decidePlanCoverage', () => {
-  const current = { trainingTypeIds: ['group'], tournamentTypeIds: ['club50'] };
+  const current = { trainingTypeIds: ['group'], tournamentTypeIds: ['club50'], coversTableRental: false };
+  const none = { trainingTypeIds: [], tournamentTypeIds: [], coversTableRental: false };
 
-  it('добавлять услуги можно всегда', () => {
-    assert.equal(
-      decidePlanCoverage(current, { trainingTypeIds: ['group', 'kids'], tournamentTypeIds: ['club50'] }, 3).ok,
-      true,
-    );
+  it('добавлять услуги можно всегда, аренду тоже', () => {
+    assert.equal(decidePlanCoverage(current, { ...current, trainingTypeIds: ['group', 'kids'] }, 3).ok, true);
+    assert.equal(decidePlanCoverage(current, { ...current, coversTableRental: true }, 3).ok, true);
   });
 
   it('убирать — только пока нет действующих абонементов', () => {
-    const next = { trainingTypeIds: ['group'], tournamentTypeIds: [] };
+    const next = { ...current, tournamentTypeIds: [] };
 
     assert.equal(decidePlanCoverage(current, next, 1).ok, false);
     assert.equal(decidePlanCoverage(current, next, 0).ok, true);
   });
 
-  it('тариф без единой услуги не имеет смысла', () => {
-    assert.equal(decidePlanCoverage(current, { trainingTypeIds: [], tournamentTypeIds: [] }, 0).ok, false);
+  it('аренду снять с тарифа при живых абонементах нельзя', () => {
+    const rental = { ...current, coversTableRental: true };
+
+    assert.equal(decidePlanCoverage(rental, current, 1).ok, false);
+    assert.equal(decidePlanCoverage(rental, current, 0).ok, true);
+  });
+
+  it('тариф без единой услуги не имеет смысла, одна аренда — законна', () => {
+    assert.equal(decidePlanCoverage(current, none, 0).ok, false);
+    assert.equal(decidePlanCoverage(current, { ...none, coversTableRental: true }, 0).ok, true);
   });
 });

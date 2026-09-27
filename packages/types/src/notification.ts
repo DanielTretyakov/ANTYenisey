@@ -11,7 +11,8 @@ export type NotificationCategoryName =
   | 'COACH_GROUPS'
   | 'CLUB_ALERTS'
   | 'CLUB_DIGEST'
-  | 'PLATFORM_DIGEST';
+  | 'PLATFORM_DIGEST'
+  | 'CLUB_NEWS';
 
 export interface NotificationCategorySetting {
   category: NotificationCategoryName;

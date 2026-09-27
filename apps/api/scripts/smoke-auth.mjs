@@ -2324,6 +2324,12 @@ async function main() {
   await digests();
   await webPush();
   await platformNews();
+  await rentalSubscription();
+  await sparringTypes();
+  await visitRating();
+  await clubPosts();
+  await peopleBirthdays();
+  await hallHoursAndRatingGender();
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
@@ -4287,8 +4293,9 @@ async function notifications() {
   check('настройки уведомлений читаются', 200, r.status);
   assert('MAX доступен и ещё не подключён', r.body?.max?.available === true && r.body?.max?.linked === false);
   assert(
-    'клиенту — только свои записи и абонемент',
-    JSON.stringify(r.body?.categories?.map((item) => item.category)) === JSON.stringify(['MY_BOOKINGS', 'MY_SUBSCRIPTION']),
+    'клиенту — свои записи, абонемент и новости клубов',
+    JSON.stringify(r.body?.categories?.map((item) => item.category)) ===
+      JSON.stringify(['MY_BOOKINGS', 'MY_SUBSCRIPTION', 'CLUB_NEWS']),
   );
 
   r = await asA('/me/notifications/test', { method: 'POST' });
@@ -5518,4 +5525,563 @@ async function personalData() {
 
   r = await call('/clubs/net-takogo-kluba/plans');
   check('прайс несуществующего клуба — 404', 404, r.status);
+}
+
+/**
+ * Число буквами — для уникальной фамилии: цифр в имени проверка не пропустит.
+ * Регистр строчный: «Ученичковбвгд» проходит как одно слово.
+ */
+function letters(value) {
+  return String(value % 10_000_000).replace(/\d/g, (digit) => 'абвгдежзик'[Number(digit)]);
+}
+
+/** Вход администратора смоука и фабрика запросов с токеном. */
+async function adminSession() {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    return null;
+  }
+
+  const r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+
+  return withToken(r.body?.accessToken ?? '');
+}
+
+const withToken = (token) => (path, options = {}) =>
+  call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+
+/**
+ * Свободный час на столе зала через `days` дней — по той же сетке, что видит
+ * клиент. Пусто — в тот день свободного часа нет, сценарий не показателен.
+ */
+async function freeHour(asSomeone, days) {
+  let r = await asSomeone('/clubs/yenisey/booking/halls');
+  const hall = (r.body ?? []).find((item) => item.bookingStep);
+
+  if (!hall) return null;
+
+  const date = dateIn(hall.timezone, days);
+  r = await asSomeone(`/clubs/yenisey/booking/halls/${hall.id}/days/${date}`);
+
+  for (const table of r.body?.tables ?? []) {
+    const free = freeMinute(table.busy ?? [], r.body?.earliestMinute ?? 0, r.body?.stepMinutes ?? 30, 60);
+
+    if (free !== null) {
+      return {
+        hall,
+        payload: {
+          tableId: table.tableId,
+          startsAt: instantAt(date, free, hall.timezone),
+          durationMinutes: 60,
+          withRobot: false,
+        },
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Аренда по абонементу и вкладки раздела «Абонементы» (решения владельца от
+ * 26.09.2026): бронь любой длины — один визит, отмена возвращает визит,
+ * «Действующие» и «Архив».
+ *
+ * Под постоянной учёткой абонементов, как раздел 34: строка журнала ссылается
+ * на бронь, и учётку за ней уборка уже не снесёт.
+ */
+async function rentalSubscription() {
+  const asAdmin = await adminSession();
+
+  if (!asAdmin) {
+    console.log('\n=== 43. Аренда по абонементу — ПРОПУЩЕНА (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 43. Аренда по абонементу, действующие и архив');
+
+  let r = await post('/auth/login', { email: 'probe-subscriptions@example.com', password: PASSWORD });
+
+  if (r.status !== 200) {
+    console.log('  ПРОПУЩЕНО: нет постоянной учётки абонементов (раздел 34 не прошёл)');
+    return;
+  }
+
+  const clientId = r.body?.user?.id;
+  const asClient = withToken(r.body?.accessToken ?? '');
+
+  // Остатки прошлых прогонов гасятся: иначе бронь оплатил бы чужой абонемент.
+  for (const stale of (await asClient('/me/subscriptions')).body ?? []) {
+    if (stale.club?.slug === 'yenisey' && stale.remainingVisits > 0) {
+      await asAdmin(`/clubs/yenisey/people/${clientId}/subscriptions/${stale.id}/adjust`, {
+        method: 'POST',
+        json: { delta: -stale.remainingVisits, reason: 'Уборка перед проверкой' },
+      });
+    }
+  }
+
+  const planBody = {
+    name: 'Тариф проверки аренды',
+    visitsCount: 2,
+    durationDays: 30,
+    price: 150000,
+    trainingTypeIds: [],
+    tournamentTypeIds: [],
+    coversTableRental: true,
+  };
+
+  r = await asAdmin('/clubs/yenisey/subscription-plans');
+  let planId = (r.body ?? []).find((plan) => plan.name === planBody.name)?.id;
+
+  r = planId
+    ? await asAdmin(`/clubs/yenisey/subscription-plans/${planId}`, { method: 'PATCH', json: planBody })
+    : await asAdmin('/clubs/yenisey/subscription-plans', { method: 'POST', json: planBody });
+  assert('тариф только на аренду заведён', r.status === 200 || r.status === 201);
+  assert('аренда в покрытии тарифа', r.body?.coversTableRental === true);
+  planId = r.body?.id;
+
+  r = await asAdmin('/clubs/yenisey/subscription-plans', {
+    method: 'POST',
+    json: { ...planBody, name: 'Тариф проверки пустой', coversTableRental: false },
+  });
+  check('тариф без единой услуги отклонён', 400, r.status);
+
+  r = await call('/clubs/yenisey/plans');
+  const shown = (r.body ?? []).find((plan) => plan.id === planId);
+  assert('в открытом прайсе аренда названа', shown?.covers?.includes('Аренда стола') === true);
+  assert('и помечена ключом TABLE', shown?.typeKeys?.includes('TABLE') === true);
+
+  r = await asAdmin('/clubs/yenisey/halls');
+  const hallId = (r.body ?? [])[0]?.id;
+  r = await asAdmin(`/clubs/yenisey/people/${clientId}/subscriptions`, { method: 'POST', json: { planId, hallId } });
+  check('абонемент на аренду продан', 201, r.status);
+  const subscriptionId = r.body?.id;
+
+  const remaining = async () =>
+    ((await asClient('/me/subscriptions')).body ?? []).find((item) => item.id === subscriptionId)?.remainingVisits;
+
+  r = await asAdmin('/clubs/yenisey/subscriptions/holders?status=active&limit=200&search=Абонементов');
+  check('вкладка «Действующие» читается', 200, r.status);
+  assert('проданный абонемент в действующих', (r.body?.items ?? []).some((row) => row.subscriptionId === subscriptionId));
+
+  r = await asClient('/clubs/yenisey/subscriptions/holders?status=active');
+  check('клиенту вкладки закрыты', 403, r.status);
+
+  r = await asAdmin('/clubs/yenisey/subscriptions/holders?status=nothing');
+  check('неизвестная вкладка отклонена', 400, r.status);
+
+  // Далеко вперёд: отмена за неделю ничего не стоит и визит возвращает.
+  const slot = await freeHour(asClient, 7);
+
+  if (!slot) {
+    console.log('  ПРОПУЩЕНО: через неделю нет свободного часа');
+    return;
+  }
+
+  r = await asClient('/clubs/yenisey/booking/bookings', { method: 'POST', json: slot.payload });
+  check('клиент забронировал стол', 201, r.status);
+  const bookingId = r.body?.id;
+  assert('бронь оплачена абонементом', r.body?.paidBy?.subscriptionId === subscriptionId);
+  assert('отмена по абонементу обещает визит, а не деньги', r.body?.cancelChargePercentNow === null);
+  assert('визит списан', (await remaining()) === 1);
+
+  r = await asAdmin(`/clubs/yenisey/people/${clientId}/subscriptions/${subscriptionId}/ledger`);
+  const charged = (r.body ?? []).find((row) => row.reason === 'VISIT_CHARGED');
+  assert('в журнале списание за аренду', charged?.entry?.title?.startsWith('Аренда') === true);
+
+  r = await asClient('/me/bookings');
+  const entry = (r.body ?? []).find((item) => item.entryId === bookingId);
+  assert('в «Моих записях» аренда по абонементу', entry?.paidBy?.subscriptionId === subscriptionId);
+
+  r = await asAdmin(`/clubs/yenisey/desk/bookings?from=${slot.payload.startsAt.slice(0, 10)}`);
+  const seen = (r.body ?? []).find((booking) => booking.id === bookingId);
+  assert('на смене — «по абонементу»', seen?.bySubscription === true);
+
+  r = await asClient(`/clubs/yenisey/booking/bookings/${bookingId}`, { method: 'DELETE' });
+  check('клиент отменил бронь', 200, r.status);
+  assert('визит вернулся', (await remaining()) === 2);
+
+  r = await asAdmin(`/clubs/yenisey/people/${clientId}/subscriptions/${subscriptionId}/ledger`);
+  assert('в журнале возврат за аренду', (r.body ?? []).some((row) => row.reason === 'VISIT_REFUNDED'));
+  assert('журнал сошёлся с остатком', (r.body ?? []).reduce((sum, row) => sum + row.delta, 0) === 2);
+
+  // Со стойки — тот же выбор абонемента: визит списывается и там.
+  r = await asAdmin('/clubs/yenisey/desk/bookings', { method: 'POST', json: { ...slot.payload, clientId } });
+  check('администратор посадил по абонементу', 201, r.status);
+  assert('со стойки тоже по абонементу', r.body?.bySubscription === true);
+  assert('визит списан со стойки', (await remaining()) === 1);
+
+  r = await asAdmin(`/clubs/yenisey/desk/bookings/${r.body?.id}/cancel`, { method: 'POST', json: { waiveCharge: false } });
+  check('администратор отменил', 201, r.status);
+  assert('визит вернулся и со стойки', (await remaining()) === 2);
+
+  // Уборка: остаток до нуля — абонемент уходит в архив, если других нет.
+  r = await asAdmin(`/clubs/yenisey/people/${clientId}/subscriptions/${subscriptionId}/adjust`, {
+    method: 'POST',
+    json: { delta: -2, reason: 'Уборка после проверки' },
+  });
+  check('остаток погашен', 201, r.status);
+
+  r = await asAdmin('/clubs/yenisey/subscriptions/holders?status=active&limit=200&search=Абонементов');
+  assert('погашенный из действующих ушёл', !(r.body?.items ?? []).some((row) => row.subscriptionId === subscriptionId));
+
+  r = await asAdmin('/clubs/yenisey/subscriptions/holders?status=archive&limit=200');
+  check('вкладка «Архив» читается', 200, r.status);
+  assert(
+    'в архиве у каждого одна строка',
+    new Set((r.body?.items ?? []).map((row) => row.person.id)).size === (r.body?.items ?? []).length,
+  );
+  assert('у архивной строки есть дата конца', (r.body?.items ?? []).every((row) => row.endedAt !== null));
+}
+
+/**
+ * Типы спаррингов и спарринг с учеником (решение владельца от 26.09.2026):
+ * ученик платит цену типа, возраст проверяется на день спарринга, отмена
+ * тренером ученику бесплатна.
+ */
+async function sparringTypes() {
+  const asAdmin = await adminSession();
+
+  if (!asAdmin) {
+    console.log('\n=== 44. Типы спаррингов — ПРОПУЩЕНЫ (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 44. Типы спаррингов и спарринг с учеником');
+
+  let r = await post('/auth/register', registration({ lastName: 'Спаррингов', firstName: 'Тренер' }));
+  const coachId = r.body?.user?.id;
+  const asCoach = withToken(r.body?.accessToken ?? '');
+  await asAdmin(`/clubs/yenisey/people/${coachId}/roles`, { method: 'PUT', json: { roles: ['COACH'] } });
+
+  const studentLast = `Ученичков${letters(RUN)}`;
+  r = await post('/auth/register', registration({ lastName: studentLast, firstName: 'Ученик' }));
+  const studentId = r.body?.user?.id;
+  const asStudent = withToken(r.body?.accessToken ?? '');
+
+  // Имена — с префиксом уборки «Тип спарринга проверки ».
+  const adult = { name: `Тип спарринга проверки взрослый ${RUN}`, hourPrice: 150000, minAge: 18 };
+  const kids = { name: `Тип спарринга проверки детский ${RUN}`, hourPrice: 80000, maxAge: 13 };
+
+  r = await asStudent('/clubs/yenisey/sparring-types', { method: 'POST', json: adult });
+  check('клиент типы не заводит', 403, r.status);
+
+  r = await asAdmin('/clubs/yenisey/sparring-types', { method: 'POST', json: { ...adult, minAge: 20, maxAge: 10 } });
+  check('«от» больше «до» отклонено', 400, r.status);
+
+  r = await asAdmin('/clubs/yenisey/sparring-types', { method: 'POST', json: adult });
+  check('взрослый тип заведён', 201, r.status);
+  const adultId = r.body?.id;
+
+  r = await asAdmin('/clubs/yenisey/sparring-types', { method: 'POST', json: adult });
+  check('второй с тем же названием — конфликт', 409, r.status);
+
+  r = await asAdmin('/clubs/yenisey/sparring-types', { method: 'POST', json: kids });
+  const kidsId = r.body?.id;
+
+  r = await asCoach('/clubs/yenisey/sparring-types');
+  check('тренер видит типы', 200, r.status);
+  assert('и заведённые среди них', (r.body ?? []).some((type) => type.id === adultId));
+
+  r = await asStudent(`/clubs/yenisey/coach/students?search=${encodeURIComponent(studentLast)}`);
+  check('клиенту поиск учеников закрыт', 403, r.status);
+
+  r = await asCoach('/clubs/yenisey/coach/students?search=У');
+  check('поиск от одной буквы отклонён', 400, r.status);
+
+  r = await asCoach(`/clubs/yenisey/coach/students?search=${encodeURIComponent(studentLast)}`);
+  const found = (r.body ?? []).find((person) => person.id === studentId);
+  assert('тренер нашёл ученика с возрастом', typeof found?.age === 'number' && found.age >= 18);
+
+  r = await asCoach(`/clubs/yenisey/coach/sparring/quote?sparringTypeId=${adultId}&durationMinutes=90`);
+  assert('цена спарринга — полторы цены часа', r.body?.price === 225000);
+
+  const slot = await freeHour(asCoach, 8);
+
+  if (!slot) {
+    console.log('  ПРОПУЩЕНО: через восемь дней нет свободного часа');
+    return;
+  }
+
+  r = await asCoach('/clubs/yenisey/coach/sparring', { method: 'POST', json: { ...slot.payload, studentId } });
+  check('ученик без типа отклонён', 400, r.status);
+
+  r = await asCoach('/clubs/yenisey/coach/sparring', {
+    method: 'POST',
+    json: { ...slot.payload, studentId, sparringTypeId: kidsId },
+  });
+  check('детский тип взрослому — отказ', 400, r.status);
+
+  r = await asCoach('/clubs/yenisey/coach/sparring', {
+    method: 'POST',
+    json: { ...slot.payload, studentId: coachId, sparringTypeId: adultId },
+  });
+  check('сам себе учеником — отказ', 400, r.status);
+
+  r = await asStudent('/clubs/yenisey/booking/bookings', {
+    method: 'POST',
+    json: { ...slot.payload, studentId: coachId, sparringTypeId: adultId },
+  });
+  check('клиент ученика себе не назначает', 400, r.status);
+
+  r = await asCoach('/clubs/yenisey/coach/sparring', {
+    method: 'POST',
+    json: { ...slot.payload, studentId, sparringTypeId: adultId },
+  });
+  check('спарринг с учеником заведён', 201, r.status);
+  const sparringId = r.body?.id;
+  assert('цена — по типу, а не аренда', r.body?.price === 150000);
+  assert('тренер видит ученика полным именем', r.body?.sparring?.partner?.startsWith(studentLast) === true);
+  assert('и тип', r.body?.sparring?.typeName === adult.name);
+
+  r = await asStudent('/me/bookings');
+  const entry = (r.body ?? []).find((item) => item.entryId === sparringId);
+  assert('ученик видит спарринг в «Моих записях»', entry?.title?.startsWith('Спарринг') === true);
+  assert('с тренером в подписи', entry?.subtitle?.includes('Тренер: Спаррингов') === true);
+
+  r = await asAdmin(`/clubs/yenisey/desk/bookings?from=${slot.payload.startsAt.slice(0, 10)}`);
+  const seen = (r.body ?? []).find((booking) => booking.id === sparringId);
+  assert('на смене за столом ученик', seen?.client?.userId === studentId);
+  assert('и названы тренер и тип', seen?.coachName?.startsWith('Спаррингов') === true && seen?.sparringType === adult.name);
+
+  r = await asCoach(`/clubs/yenisey/coach/sparring/${sparringId}`, { method: 'DELETE' });
+  check('тренер отменил спарринг', 200, r.status);
+  assert('ученику отмена тренером ничего не стоит', r.body?.chargePercent === 0);
+
+  r = await asCoach('/clubs/yenisey/coach/sparring', {
+    method: 'POST',
+    json: { ...slot.payload, studentId, sparringTypeId: adultId },
+  });
+  const again = r.body?.id;
+
+  r = await asStudent(`/clubs/yenisey/booking/bookings/${again}`, { method: 'DELETE' });
+  check('ученик сам отменил свой спарринг', 200, r.status);
+  assert('по политике клуба — за неделю бесплатно', r.body?.chargePercent === 0);
+
+  r = await asAdmin(`/clubs/yenisey/sparring-types/${adultId}`, { method: 'PATCH', json: { ...adult, isActive: false } });
+  check('тип снят', 200, r.status);
+
+  r = await asCoach('/clubs/yenisey/coach/sparring', {
+    method: 'POST',
+    json: { ...slot.payload, studentId, sparringTypeId: adultId },
+  });
+  check('снятым типом спарринг не заводится', 404, r.status);
+
+  r = await asCoach('/clubs/yenisey/coach/sparring', { method: 'POST', json: slot.payload });
+  check('без ученика — стол под спарринг, как прежде', 201, r.status);
+  assert('по цене аренды и без ученика', r.body?.sparring?.partner === null && r.body?.sparring?.typeName === null);
+  await asCoach(`/clubs/yenisey/coach/sparring/${r.body?.id}`, { method: 'DELETE' });
+}
+
+/** Рейтинг посещений (решение владельца от 26.09.2026): открыт, с выключателем. */
+async function visitRating() {
+  console.log('\n=== 45. Рейтинг посещений');
+
+  let r = await call('/clubs/yenisey/rating');
+  check('рейтинг открыт без входа', 200, r.status);
+  assert('по умолчанию — месяц с первого числа', r.body?.period === 'month' && /-01$/.test(r.body?.since ?? ''));
+  assert('анониму ни места, ни выключателя', r.body?.me === null && r.body?.meHidden === null);
+  assert(
+    'места не убывают',
+    (r.body?.rows ?? []).every((row, index, rows) => index === 0 || rows[index - 1].place <= row.place),
+  );
+
+  r = await call('/clubs/yenisey/rating?period=week');
+  check('неизвестный период отклонён', 400, r.status);
+
+  r = await call('/clubs/yenisey/rating?period=all');
+  assert('«всё время» без начала', r.status === 200 && r.body?.since === null);
+
+  // Постоянная учётка абонементов ходила в клуб в разделе 34 — она в рейтинге.
+  r = await post('/auth/login', { email: 'probe-subscriptions@example.com', password: PASSWORD });
+
+  if (r.status !== 200) {
+    console.log('  ПРОПУЩЕНО: нет постоянной учётки абонементов');
+    return;
+  }
+
+  const asClient = withToken(r.body?.accessToken ?? '');
+  const inRating = async () =>
+    ((await asClient('/clubs/yenisey/rating?period=all')).body?.rows ?? []).some((row) => row.name === 'Абонементов Р.');
+
+  r = await asClient('/clubs/yenisey/rating?period=all');
+  assert('вошедшему — выключатель', r.body?.meHidden === false);
+
+  r = await call('/me/rating', { method: 'PUT', json: { hidden: true } });
+  check('без входа скрыться нельзя', 401, r.status);
+
+  r = await asClient('/me/rating', { method: 'PUT', json: { hidden: true } });
+  check('клиент скрылся из рейтингов', 200, r.status);
+  assert('и его в рейтинге нет', !(await inRating()));
+
+  r = await asClient('/me/rating', { method: 'PUT', json: { hidden: false } });
+  check('и вернулся', 200, r.status);
+}
+
+/** Лента клуба (решение владельца от 26.09.2026): пишут руководство и администраторы. */
+async function clubPosts() {
+  const asAdmin = await adminSession();
+
+  if (!asAdmin) {
+    console.log('\n=== 46. Лента клуба — ПРОПУЩЕНА (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 46. Лента клуба');
+
+  let r = await post('/auth/register', registration({ lastName: 'Читателев', firstName: 'Клиент' }));
+  const asClient = withToken(r.body?.accessToken ?? '');
+
+  // Заголовок — с префиксом уборки «Публикация проверки ».
+  const draft = { title: `Публикация проверки ${RUN}`, body: 'Скидка на аренду.\n\nПодробности у стойки.', published: false };
+
+  r = await asClient('/clubs/yenisey/manage/posts', { method: 'POST', json: draft });
+  check('клиент не публикует', 403, r.status);
+
+  r = await asAdmin('/clubs/yenisey/manage/posts', { method: 'POST', json: { ...draft, title: '   ' } });
+  check('пустой заголовок отклонён', 400, r.status);
+
+  r = await asAdmin('/clubs/yenisey/manage/posts', { method: 'POST', json: draft });
+  check('черновик заведён', 201, r.status);
+  const postId = r.body?.id;
+  assert('у черновика нет даты публикации', r.body?.publishedAt === null);
+
+  r = await call(`/clubs/yenisey/posts/${postId}`);
+  check('черновик снаружи не найден', 404, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/manage/posts/${postId}`, { method: 'PATCH', json: { ...draft, published: true } });
+  check('опубликовано', 200, r.status);
+  const publishedAt = r.body?.publishedAt;
+
+  r = await call('/clubs/yenisey/posts');
+  assert('в открытой ленте клуба есть', (r.body?.items ?? []).some((post) => post.id === postId));
+  assert('автор подписан сокращённо', (r.body?.items ?? []).every((post) => /^\S+ [А-ЯЁA-Z]\.( [А-ЯЁA-Z]\.)?$/.test(post.author)));
+
+  r = await asClient('/me/club-posts?limit=5');
+  check('«новости моих клубов» читаются', 200, r.status);
+  assert('и новая публикация в них', (r.body ?? []).some((post) => post.id === postId && post.club?.slug === 'yenisey'));
+
+  r = await asAdmin(`/clubs/yenisey/manage/posts/${postId}`, {
+    method: 'PATCH',
+    json: { ...draft, body: 'Исправленный текст.', published: true },
+  });
+  assert('правка не сдвигает дату публикации', r.body?.publishedAt === publishedAt);
+
+  r = await asAdmin('/clubs/sayany/manage/posts');
+  assert('чужой клуб ленту не отдаёт', r.status === 403 || r.status === 404, `получено ${r.status}`);
+
+  r = await asAdmin(`/clubs/yenisey/manage/posts/${postId}`, { method: 'DELETE' });
+  check('публикация удалена', 204, r.status);
+
+  r = await call(`/clubs/yenisey/posts/${postId}`);
+  check('и больше не находится', 404, r.status);
+}
+
+/** «Состав клуба»: дни рождения месяца, возраст и поиск по дате рождения. */
+async function peopleBirthdays() {
+  const asAdmin = await adminSession();
+
+  if (!asAdmin) {
+    console.log('\n=== 47. Дни рождения в составе клуба — ПРОПУЩЕНЫ (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 47. Дни рождения в составе клуба');
+
+  const lastName = `Именинников${letters(RUN)}`;
+  let r = await post('/auth/register', registration({ lastName, firstName: 'Май', birthDate: '2001-05-17' }));
+  const personId = r.body?.user?.id;
+
+  r = await asAdmin(`/clubs/yenisey/people?birthMonth=5&search=${encodeURIComponent(lastName)}`);
+  assert('май находит родившегося 17 мая', (r.body?.items ?? []).some((person) => person.id === personId));
+
+  r = await asAdmin(`/clubs/yenisey/people?birthMonth=6&search=${encodeURIComponent(lastName)}`);
+  assert('июнь — нет', (r.body?.items ?? []).length === 0);
+
+  r = await asAdmin('/clubs/yenisey/people?birthMonth=5&limit=200');
+  const days = (r.body?.items ?? []).map((person) => person.birthDate.slice(5));
+  assert('месяц идёт по дню рождения', days.every((day, index) => index === 0 || days[index - 1] <= day));
+  assert('заглушка 1 января в май не попала', days.every((day) => day.startsWith('05-')));
+
+  r = await asAdmin('/clubs/yenisey/people?search=17.05.2001&limit=200');
+  assert('поиск по дате рождения', (r.body?.items ?? []).some((person) => person.id === personId));
+
+  r = await asAdmin('/clubs/yenisey/people?search=17.05&limit=200');
+  assert('и по дню рождения без года', (r.body?.items ?? []).every((person) => person.birthDate.slice(5) === '05-17'));
+
+  r = await asAdmin(`/clubs/yenisey/people?ageFrom=90&search=${encodeURIComponent(lastName)}`);
+  assert('возраст «от 90» его не берёт', (r.body?.items ?? []).length === 0);
+
+  r = await asAdmin(`/clubs/yenisey/people?ageFrom=18&ageTo=40&search=${encodeURIComponent(lastName)}`);
+  assert('а «18–40» берёт', (r.body?.items ?? []).some((person) => person.id === personId));
+
+  r = await asAdmin('/clubs/yenisey/people?birthMonth=13');
+  check('тринадцатый месяц отклонён', 400, r.status);
+}
+
+/**
+ * Часы работы зала и фильтр рейтинга по полу (решения владельца от
+ * 27.09.2026). Часы — через ту же очередь настроек, что и всё о зале: смоук
+ * применяет её сразу (`call` → apply-now).
+ */
+async function hallHoursAndRatingGender() {
+  const asAdmin = await adminSession();
+
+  if (!asAdmin) {
+    console.log('\n=== 48. Часы работы зала — ПРОПУЩЕНЫ (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 48. Часы работы зала и рейтинг по полу');
+
+  let r = await asAdmin('/clubs/yenisey/halls');
+  // Правка зала требует адрес: залы, заведённые до 25.09.2026, без него не правятся.
+  const hall = (r.body ?? []).find((item) => item.addressFiasId);
+
+  if (!hall) {
+    console.log('  ПРОПУЩЕНО: у клуба нет зала с адресом');
+  } else {
+    const before = hall.workingHours ?? null;
+    const day = (open, close) => ({ open, close });
+    const week = [...[0, 1, 2, 3, 4].map(() => day('08:00', '23:00')), day('10:00', '24:00'), null];
+
+    r = await asAdmin(`/clubs/yenisey/halls/${hall.id}`, {
+      method: 'PATCH',
+      json: { workingHours: [...week.slice(0, 5), day('22:00', '02:00'), null] },
+    });
+    check('закрытие раньше открытия отклонено', 400, r.status);
+
+    r = await asAdmin(`/clubs/yenisey/halls/${hall.id}`, { method: 'PATCH', json: { workingHours: week.slice(0, 6) } });
+    check('шесть дней вместо семи отклонены', 400, r.status);
+
+    r = await asAdmin(`/clubs/yenisey/halls/${hall.id}`, { method: 'PATCH', json: { workingHours: week } });
+    check('часы работы сохранены', 200, r.status);
+
+    r = await call('/clubs/yenisey');
+    const shown = (r.body?.halls ?? []).find((item) => item.id === hall.id);
+    assert('в открытой карточке зала — часы', JSON.stringify(shown?.workingHours) === JSON.stringify(week));
+
+    r = await asAdmin(`/clubs/yenisey/halls/${hall.id}`, { method: 'PATCH', json: { workingHours: before } });
+    check('часы возвращены как были', 200, r.status);
+
+    r = await call('/clubs/yenisey');
+    assert(
+      'и в карточке — прежние',
+      JSON.stringify((r.body?.halls ?? []).find((item) => item.id === hall.id)?.workingHours ?? null) ===
+        JSON.stringify(before),
+    );
+  }
+
+  r = await call('/clubs/yenisey/rating?period=all&gender=FEMALE');
+  check('рейтинг по полу открыт', 200, r.status);
+  assert('отбор назван в ответе', r.body?.gender === 'FEMALE');
+
+  r = await call('/clubs/yenisey/rating?period=all&gender=OTHER');
+  check('неизвестный пол отклонён', 400, r.status);
+
+  // Постоянная учётка абонементов — мужчина и старше 14: в «Мужчинах» она есть.
+  r = await call('/clubs/yenisey/rating?period=all&gender=MALE');
+  assert('в «Мужчинах» только взрослые с фото или без', (r.body?.rows ?? []).every((row) => row.userId !== null));
 }

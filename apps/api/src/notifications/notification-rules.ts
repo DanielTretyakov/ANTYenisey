@@ -24,7 +24,8 @@ export type NotificationKind =
   | 'PLATFORM_DIGEST'
   | 'SUBSCRIPTION_PAST_DUE'
   | 'STAFF_SHIFT_ASSIGNED'
-  | 'CLUB_SETTINGS_CHANGED';
+  | 'CLUB_SETTINGS_CHANGED'
+  | 'CLUB_POST';
 
 export type Category =
   | 'SERVICE'
@@ -33,7 +34,8 @@ export type Category =
   | 'COACH_GROUPS'
   | 'CLUB_ALERTS'
   | 'CLUB_DIGEST'
-  | 'PLATFORM_DIGEST';
+  | 'PLATFORM_DIGEST'
+  | 'CLUB_NEWS';
 
 /** Настраиваемые категории — всё, кроме служебной. */
 export type ToggleableCategory = Exclude<Category, 'SERVICE'>;
@@ -69,6 +71,9 @@ export const CATEGORY_OF: Record<NotificationKind, Category> = {
   // Правка настроек уходит всем сотрудникам, и тренерам тоже, — у тренера
   // нет категории «дела клуба», а не знать о новых ценах и столах ему нельзя.
   CLUB_SETTINGS_CHANGED: 'SERVICE',
+  // Акции и объявления клуба — выключаемые: это реклама клуба, а не дело
+  // человека (решение владельца от 26.09.2026).
+  CLUB_POST: 'CLUB_NEWS',
 };
 
 /** Кем человек является — ровно то, от чего зависят его категории. */
@@ -89,6 +94,11 @@ export function availableCategories(recipient: Recipient): ToggleableCategory[] 
   const staff = recipient.clubRoles.some((role) => role === 'ADMIN' || role === 'MANAGER' || role === 'OWNER');
   const coach = recipient.clubRoles.includes('COACH');
   const result: ToggleableCategory[] = ['MY_BOOKINGS', 'MY_SUBSCRIPTION'];
+
+  // Публикации клуба приходят его клиентам — у кого есть клуб как у клиента.
+  if (recipient.clubRoles.includes('CLIENT')) {
+    result.push('CLUB_NEWS');
+  }
 
   if (coach) {
     result.push('COACH_GROUPS');
@@ -122,6 +132,7 @@ const TOGGLEABLE: ReadonlySet<string> = new Set<ToggleableCategory>([
   'CLUB_ALERTS',
   'CLUB_DIGEST',
   'PLATFORM_DIGEST',
+  'CLUB_NEWS',
 ]);
 
 export function isToggleableCategory(value: string): value is ToggleableCategory {

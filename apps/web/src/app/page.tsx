@@ -2,13 +2,13 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import type { BookingEntry, City, ClubCard, FavouriteClub, FeedEvent, NewsItem } from '@yenisey/types';
+import type { BookingEntry, City, ClubCard, ClubPostWithClub, FavouriteClub, FeedEvent, NewsItem } from '@yenisey/types';
 import { PlatformMark } from '@/components/brand/PlatformLogo';
 import { RiverBackdrop } from '@/components/brand/RiverBackdrop';
 import { ClubMark } from '@/components/club/ClubMark';
 import { When, WhenSpan } from '@/components/club/When';
 import { EventDialog } from '@/components/events/EventDialog';
-import { NewsRow } from '@/components/news/NewsParts';
+import { excerpt, NewsRow, newsDate } from '@/components/news/NewsParts';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -118,6 +118,7 @@ export default function StartPage() {
             <MyEntries />
             <MyClubs />
             <Nearest />
+            <MyClubPosts />
           </>
         )}
 
@@ -498,6 +499,47 @@ function Nearest() {
           onChanged={load}
         />
       )}
+    </section>
+  );
+}
+
+/**
+ * «Новости моих клубов» (решение владельца от 26.09.2026): последние три
+ * публикации клубов, отмеченных своими и где человек клиент. Нет публикаций —
+ * нет и блока.
+ */
+function MyClubPosts() {
+  const [items, setItems] = useState<ClubPostWithClub[] | null>(null);
+
+  useEffect(() => {
+    api
+      .myClubPosts(3)
+      .then(setItems)
+      .catch(() => setItems([]));
+  }, []);
+
+  if (!items || items.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="mt-16">
+      <SectionTitle>Новости моих клубов</SectionTitle>
+
+      <ul className="border-t border-border">
+        {items.map((item) => (
+          <li key={item.id} className="border-b border-border py-5">
+            <p className="mb-1.5 text-[0.8125rem] text-text-subtle">
+              <span className="font-medium text-text-muted">{item.club.name}</span>
+              {item.publishedAt && ` · ${newsDate(item.publishedAt)}`}
+            </p>
+            <Link href={`/clubs/${item.club.slug}#novosti`} className="group block">
+              <h3 className="text-[1.0625rem] font-semibold text-text group-hover:text-text-accent">{item.title}</h3>
+              <p className="mt-1 text-[0.9375rem] text-text-muted">{excerpt(item.body)}</p>
+            </Link>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

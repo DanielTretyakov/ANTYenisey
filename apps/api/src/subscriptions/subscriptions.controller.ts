@@ -2,6 +2,7 @@ import { Body, Controller, Get, Ip, Param, Patch, Post, Query } from '@nestjs/co
 import type {
   ClientSubscription,
   ClubLedgerPage,
+  SubscriptionHoldersPage,
   SubscriptionLedgerRow,
   PublicPlan,
   SubscriptionOffer,
@@ -16,6 +17,7 @@ import {
   AdjustSubscriptionDto,
   ClubLedgerQueryDto,
   IssueSubscriptionDto,
+  SubscriptionHoldersQueryDto,
   SubscriptionPlanDto,
 } from './dto/subscription.dto';
 import { SubscriptionsService } from './subscriptions.service';
@@ -67,6 +69,15 @@ export class ClubSubscriptionsController {
   @Get('ledger')
   ledger(@CurrentClub() club: ClubContext, @Query() query: ClubLedgerQueryDto): Promise<ClubLedgerPage> {
     return this.subscriptions.clubLedger(club.tenantId, query);
+  }
+
+  /** Действующие абонементы и архив тех, у кого они кончились. */
+  @Get('holders')
+  holders(
+    @CurrentClub() club: ClubContext,
+    @Query() query: SubscriptionHoldersQueryDto,
+  ): Promise<SubscriptionHoldersPage> {
+    return this.subscriptions.holders(club.tenantId, query);
   }
 }
 

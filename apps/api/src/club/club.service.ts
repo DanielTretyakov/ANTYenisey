@@ -19,7 +19,9 @@ import type {
   StaffPreferences,
   UpdateClubSettingsRequest,
   UpdateHallRequest,
+  WorkingHours,
 } from '@yenisey/types';
+import { parseWorkingHours, readWorkingHours } from '@yenisey/types';
 import { FileIntake } from '../files/file-intake.service';
 import { FileStorage } from '../files/file-storage';
 import { PrismaService } from '../prisma/prisma.service';
@@ -34,6 +36,7 @@ import {
   parseSocialUrl,
   readClubValues,
 } from './settings-rules';
+import { BIRTH_PLACEHOLDER, bornRange, byBirthday, parseBirthSearch } from './people-filter';
 
 /**
  * Поля Tenant, составляющие профиль клуба. Выбираются явным списком, а не
@@ -78,6 +81,7 @@ const HALL_SELECT = {
   robot30MinPrice: true,
   robot60MinPrice: true,
   robotExtra30MinPrice: true,
+  workingHours: true,
 } as const;
 
 @Injectable()
@@ -181,12 +185,14 @@ export class ClubService {
 
   // --- Залы ----------------------------------------------------------------
 
-  listHalls(tenantId: string): Promise<Hall[]> {
-    return this.prisma.hall.findMany({
+  async listHalls(tenantId: string): Promise<Hall[]> {
+    const halls = await this.prisma.hall.findMany({
       where: { tenantId },
       select: HALL_SELECT,
       orderBy: { name: 'asc' },
     });
+
+    return halls.map(toHall);
   }
 
   /**
@@ -210,6 +216,7 @@ export class ClubService {
       name: fields.name.trim(),
       phone: fields.phone ?? null,
       email: fields.email ?? null,
+      workingHours: hoursOf(fields.workingHours),
     };
   }
 
@@ -252,6 +259,8 @@ export class ClubService {
         ...defined(rest),
         ...address,
         ...(rest.name === undefined ? {} : { name: rest.name.trim() }),
+        // Присланное — в очищенном виде: лишние поля дней в базу не едут.
+        ...(rest.workingHours === undefined ? {} : { workingHours: hoursOf(rest.workingHours) }),
       },
     };
   }
@@ -487,7 +496,7 @@ export class ClubService {
       throw new NotFoundException('Зал не найден');
     }
 
-    return hall;
+    return toHall(hall);
   }
 
   // --- Столы ---------------------------------------------------------------
@@ -567,46 +576,86 @@ export class ClubService {
    */
   async listPeople(tenantId: string, query: ClubPeopleQuery): Promise<ClubPeoplePage> {
     const search = query.search?.trim();
+    // «17.05.2001» в поиске — дата рождения, «17.05» — день рождения.
+    const birthSearch = search ? parseBirthSearch(search) : null;
+    const born = bornRange(query.ageFrom, query.ageTo, new Date());
+
+    // День и месяц рождения Prisma не выражает (нужен EXTRACT) — эти люди
+    // отбираются отдельным запросом и дальше участвуют в фильтре списком.
+    const birthdayIds =
+      query.birthMonth !== undefined || birthSearch?.kind === 'dayMonth'
+        ? await this.birthdayUserIds(tenantId, {
+            month: birthSearch?.kind === 'dayMonth' ? birthSearch.month : query.birthMonth!,
+            day: birthSearch?.kind === 'dayMonth' ? birthSearch.day : undefined,
+          })
+        : null;
+
+    // Условия на человека — списком: дата из поиска и возраст оба говорят о
+    // birthDate, и объектом одно затёрло бы другое.
+    const conditions: Prisma.UserWhereInput[] = [
+      // Анонимизированные скрыты: у них персональные данные затёрты по 152-ФЗ,
+      // и показывать «Удалённый пользователь» в списке незачем.
+      { anonymizedAt: null },
+    ];
+
+    if (query.ids?.length) {
+      conditions.push({ id: { in: query.ids } });
+    }
+
+    if (birthdayIds) {
+      conditions.push({ id: { in: birthdayIds } });
+    }
+
+    if (birthSearch?.kind === 'date') {
+      conditions.push({ birthDate: day(birthSearch.date) });
+    }
+
+    if (born.from || born.to) {
+      conditions.push({
+        birthDate: {
+          ...(born.from ? { gte: day(born.from) } : {}),
+          ...(born.to ? { lte: day(born.to) } : {}),
+          // Заглушка миграции — не возраст: 126-летних «клиентов» фильтр
+          // возраста не находит.
+          not: day(BIRTH_PLACEHOLDER),
+        },
+      });
+    }
+
+    if (search && !birthSearch) {
+      conditions.push({
+        OR: [
+          { fullName: { contains: search, mode: 'insensitive' as const } },
+          { email: { contains: search, mode: 'insensitive' as const } },
+          { phone: { contains: search } },
+        ],
+      });
+    }
+
     // Список строится по привязкам к клубу, а не по учётным записям: у User
     // клуба больше нет, и «люди клуба» — это ровно те, у кого есть
     // TenantMembership в нём.
     const where: Prisma.TenantMembershipWhereInput = {
       tenantId,
-      // Анонимизированные скрыты: у них персональные данные затёрты по 152-ФЗ,
-      // и показывать «Удалённый пользователь» в списке незачем.
-      user: {
-        anonymizedAt: null,
-        ...(query.ids && query.ids.length > 0 ? { id: { in: query.ids } } : {}),
-        ...(search
-          ? {
-              OR: [
-                { fullName: { contains: search, mode: 'insensitive' as const } },
-                { email: { contains: search, mode: 'insensitive' as const } },
-                { phone: { contains: search } },
-              ],
-            }
-          : {}),
-      },
+      user: { AND: conditions },
       ...(query.role ? { roles: { has: query.role } } : {}),
     };
+
+    // Дни рождения месяца — по дню, а не по ФИО: клуб поздравляет по порядку.
+    // Выборка месяца — двенадцатая часть клуба, её сортируем целиком здесь:
+    // по дню месяца база через Prisma сортировать не умеет.
+    if (query.birthMonth !== undefined) {
+      const all = await this.prisma.tenantMembership.findMany({ where, select: PERSON_SELECT });
+      const people = all.map(toClubPerson).sort(byBirthday);
+      const offset = query.offset ?? 0;
+
+      return { items: people.slice(offset, offset + Math.min(query.limit ?? 50, 200)), total: people.length };
+    }
 
     const [items, total] = await Promise.all([
       this.prisma.tenantMembership.findMany({
         where,
-        select: {
-          userId: true,
-          roles: true,
-          createdAt: true,
-          deactivatedAt: true,
-          user: {
-            select: {
-              fullName: true,
-              email: true,
-              phone: true,
-              birthDate: true,
-            },
-          },
-        },
+        select: PERSON_SELECT,
         // Сотрудники первыми, клиенты последними, внутри — по имени.
         //
         // Порядок ролей в Postgres — это порядок их объявления в enum
@@ -623,19 +672,24 @@ export class ClubService {
       this.prisma.tenantMembership.count({ where }),
     ]);
 
-    return {
-      items: items.map((person) => ({
-        id: person.userId,
-        fullName: person.user.fullName,
-        email: person.user.email,
-        phone: person.user.phone,
-        birthDate: formatBirthDate(person.user.birthDate),
-        roles: person.roles,
-        createdAt: person.createdAt.toISOString(),
-        deactivated: person.deactivatedAt !== null,
-      })),
-      total,
-    };
+    return { items: items.map(toClubPerson), total };
+  }
+
+  /**
+   * Люди клуба с днём рождения в этом месяце (и дне). Заглушка миграции —
+   * 1 января 1900 — не день рождения, её учётки сюда не попадают.
+   */
+  private async birthdayUserIds(tenantId: string, at: { month: number; day?: number }): Promise<string[]> {
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT u."id"
+        FROM "TenantMembership" m
+        JOIN "User" u ON u."id" = m."userId"
+       WHERE m."tenantId" = ${tenantId}
+         AND u."birthDate" <> ${BIRTH_PLACEHOLDER}::date
+         AND EXTRACT(MONTH FROM u."birthDate") = ${at.month}
+         AND (${at.day ?? null}::int IS NULL OR EXTRACT(DAY FROM u."birthDate") = ${at.day ?? null}::int)`;
+
+    return rows.map((row) => row.id);
   }
 
   /**
@@ -757,4 +811,45 @@ function defined<T extends object>(patch: T): Partial<T> {
   return Object.fromEntries(
     Object.entries(patch).filter(([, value]) => value !== undefined),
   ) as Partial<T>;
+}
+
+/** Поля строки «Состава клуба» — одни и для страницы, и для месяца именинников. */
+const PERSON_SELECT = {
+  userId: true,
+  roles: true,
+  createdAt: true,
+  deactivatedAt: true,
+  user: { select: { fullName: true, email: true, phone: true, birthDate: true } },
+} as const satisfies Prisma.TenantMembershipSelect;
+
+function toClubPerson(
+  person: Prisma.TenantMembershipGetPayload<{ select: typeof PERSON_SELECT }>,
+): ClubPerson {
+  return {
+    id: person.userId,
+    fullName: person.user.fullName,
+    email: person.user.email,
+    phone: person.user.phone,
+    birthDate: formatBirthDate(person.user.birthDate),
+    roles: person.roles,
+    createdAt: person.createdAt.toISOString(),
+    deactivated: person.deactivatedAt !== null,
+  };
+}
+
+/** «2001-05-17» → полночь UTC: колонка DATE часов не хранит. */
+function day(date: string): Date {
+  return new Date(`${date}T00:00:00Z`);
+}
+
+/** Часы работы из формы — очищенные; проверку уже прошли в `hallViolations`. */
+function hoursOf(value: WorkingHours | null | undefined): WorkingHours | null {
+  const parsed = parseWorkingHours(value ?? null);
+
+  return parsed.ok ? parsed.value : null;
+}
+
+/** Зал из базы: часы работы — Json, и что в нём лежит, база не знает. */
+function toHall(row: Prisma.HallGetPayload<{ select: typeof HALL_SELECT }>): Hall {
+  return { ...row, workingHours: readWorkingHours(row.workingHours) };
 }

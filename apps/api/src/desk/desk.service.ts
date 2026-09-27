@@ -39,6 +39,9 @@ import {
 import { HALL_PRICING } from '../booking/booking.service';
 import { ACTIVE_BOOKING, assertDateFormat, OccupancyService } from '../booking/occupancy.service';
 import { quote } from '../booking/pricing';
+import { sparringPrice } from '../sparring/sparring-rules';
+import { consumed, subscriptionCancelRatio } from '../subscriptions/subscription-rules';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import type { DeskBookingsQueryDto } from './dto/desk.dto';
 import { busyAt, loadByHour, nextFrom, type BusySpan } from './hall-view';
 import { moneyOf, type ChargeRow } from './revenue';
@@ -99,6 +102,8 @@ const BOOKING_SELECT = {
   chargeRatio: true,
   source: true,
   isSparring: true,
+  subscriptionId: true,
+  sparringType: { select: { name: true } },
   table: { select: { label: true, hallId: true, hall: { select: { name: true } } } },
   client: { select: { membership: PERSON_SELECT } },
   coach: { select: { membership: PERSON_SELECT } },
@@ -177,6 +182,7 @@ export class DeskService {
     private readonly membership: MembershipService,
     private readonly attendance: AttendanceService,
     private readonly notifier: ClientNotifier,
+    private readonly subscriptions: SubscriptionsService,
   ) {}
 
   async findDay(tenantId: string, hallId: string, date: string): Promise<DeskDay> {
@@ -409,11 +415,21 @@ export class DeskService {
 
     const id = await this.write(() =>
       this.prisma.$transaction(async (tx) => {
+        // Абонемент, покрывающий аренду, платит и за бронь со стойки — тем же
+        // выбором, что у самостоятельной брони (решение от 26.09.2026).
+        const sub = await this.subscriptions.reserveInTx(tx, tenantId, dto.clientId, {
+          kind: 'TABLE',
+          startsAt,
+          withRobot: dto.withRobot,
+          sparring: false,
+        });
+
         const created = await tx.tableBooking.create({
           data: {
             tenantId,
             tableId: table.id,
             clientId: dto.clientId,
+            subscriptionId: sub?.id ?? null,
             withRobot: dto.withRobot,
             startsAt,
             endsAt: endOf(startsAt, dto.durationMinutes),
@@ -427,6 +443,11 @@ export class DeskService {
           },
           select: { id: true },
         });
+
+        // Сначала визит, потом отметка: отметка сверяет журнал с записью.
+        if (sub) {
+          await this.subscriptions.chargeInTx(tx, tenantId, sub, { tableBookingId: created.id });
+        }
 
         const now = new Date();
 
@@ -481,6 +502,14 @@ export class DeskService {
 
     await this.assertBookable(tenantId, table, startsAt, dto.durationMinutes, bookingId);
 
+    // Визит абонемента остаётся на брони, но абонемент должен действовать и в
+    // новое время: иначе перенос оплатил бы игру после конца срока.
+    if (booking.subscription?.expiresAt && startsAt.getTime() >= booking.subscription.expiresAt.getTime()) {
+      throw new BadRequestException(
+        'К этому времени абонемент, которым оплачена бронь, уже истечёт — отмените её и заведите новую',
+      );
+    }
+
     await this.write(() =>
       this.prisma.tableBooking.update({
         where: { id: bookingId },
@@ -488,7 +517,10 @@ export class DeskService {
           tableId: table.id,
           startsAt,
           endsAt: endOf(startsAt, dto.durationMinutes),
-          priceAtBooking: quote(table.hall, dto.durationMinutes, booking.withRobot).price,
+          // Спарринг с учеником стоит по типу, аренда — по прайсу зала.
+          priceAtBooking: booking.sparringType
+            ? sparringPrice(booking.sparringType.hourPrice, dto.durationMinutes)
+            : quote(table.hall, dto.durationMinutes, booking.withRobot).price,
         },
         select: { id: true },
       }),
@@ -532,6 +564,14 @@ export class DeskService {
     });
 
     const minutes = Math.floor((booking.startsAt.getTime() - Date.now()) / 60_000);
+    const percent = cancellationPercent(tiers, minutes);
+    // По абонементу процент — судьба визита: вернуть или сжечь по правилу
+    // клуба. Прощение возвращает визит так же, как деньги.
+    const ratio = dto.waiveCharge
+      ? 0
+      : booking.subscriptionId
+        ? subscriptionCancelRatio(booking.tenant.subscriptionBurnsOnNoShowOnly, percent)
+        : percent;
 
     // Условие на статус — против гонки с клиентом, отменившим ту же бронь.
     await this.prisma.$transaction(async (tx) => {
@@ -542,12 +582,23 @@ export class DeskService {
           // Момент отмены обязателен — check-констрейнт: от него считается
           // процент, и запись без него делает спор о деньгах неразрешимым.
           cancelledAt: new Date(),
-          chargeRatio: dto.waiveCharge ? 0 : cancellationPercent(tiers, minutes),
+          chargeRatio: ratio,
         },
       });
 
       if (count === 0) {
         throw new ConflictException('Бронь уже изменилась — обновите страницу');
+      }
+
+      if (booking.subscriptionId) {
+        await this.subscriptions.settleInTx(
+          tx,
+          tenantId,
+          booking.subscriptionId,
+          true,
+          consumed({ status: 'CANCELLED', chargeRatio: ratio }),
+          { tableBookingId: bookingId },
+        );
       }
 
       // Клуб отменил — человек должен узнать об этом не у закрытой двери.
@@ -581,7 +632,16 @@ export class DeskService {
   private async booking(tenantId: string, bookingId: string) {
     const booking = await this.prisma.tableBooking.findFirst({
       where: { id: bookingId, tenantId },
-      select: { id: true, status: true, startsAt: true, withRobot: true },
+      select: {
+        id: true,
+        status: true,
+        startsAt: true,
+        withRobot: true,
+        subscriptionId: true,
+        subscription: { select: { expiresAt: true } },
+        sparringType: { select: { hourPrice: true } },
+        tenant: { select: { subscriptionBurnsOnNoShowOnly: true } },
+      },
     });
 
     if (!booking) {
@@ -906,6 +966,8 @@ interface BookingRow {
   chargeRatio: number | null;
   source: BookingSource;
   isSparring: boolean;
+  subscriptionId: string | null;
+  sparringType: { name: string } | null;
   table: { label: string; hallId: string; hall: { name: string } };
   client: { membership: PersonRow } | null;
   coach: { membership: PersonRow } | null;
@@ -913,17 +975,18 @@ interface BookingRow {
 }
 
 /** Та же строка, но с уже разобранным «кто за столом». */
-type BookingWithPerson = Omit<BookingRow, 'client' | 'coach'> & { client: DeskPerson };
+type BookingWithPerson = Omit<BookingRow, 'client' | 'coach'> & { client: DeskPerson; coachName: string | null };
 
 function bookingRow(row: BookingRow): BookingWithPerson {
   const { coach, ...rest } = row;
 
   return {
     ...rest,
-    // Заполнено ровно одно из двух — это проверяет check-констрейнт
-    // `TableBooking_client_xor_coach`. Спарринг инициирует тренер, и за столом
-    // в этом случае он.
+    // Форму держит CHECK `TableBooking_owner_shape`: у аренды — клиент, у
+    // спарринга — тренер и, если есть, ученик. За столом платит ученик, и
+    // строкой брони он; без ученика — сам тренер.
     client: personOf(row.client ?? coach),
+    coachName: row.client && coach ? coach.membership.user.fullName : null,
   };
 }
 
@@ -942,6 +1005,9 @@ function present(row: BookingWithPerson, view: View): DeskBooking {
     client: row.client,
     manual: row.source === 'MANUAL',
     sparring: row.isSparring,
+    sparringType: row.sparringType?.name ?? null,
+    coachName: row.coachName,
+    bySubscription: row.subscriptionId !== null,
     createdBy: row.createdBy?.user.fullName ?? null,
     cancelledAt: row.cancelledAt?.toISOString() ?? null,
     chargePercent: row.chargeRatio,

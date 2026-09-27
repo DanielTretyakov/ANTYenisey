@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
 import { hasAnyRole, MANAGING_ROLES, type Hall, type Role, type SubscriptionPlan, type Tournament, type TournamentType, type TrainingSession, type TrainingType } from '@yenisey/types';
+import { SparringTypesCard } from './SparringTypesCard';
 import { SubscriptionPlansCard } from './SubscriptionPlansCard';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
@@ -148,6 +149,8 @@ export default function CatalogPage() {
               />
             )}
 
+            {tab === 'sparring' && <SparringTypesCard />}
+
             {tab === 'events' && (
               <>
                 <TrainingSessionsCard sessions={sessions} onChange={setSessions} onError={setError} />
@@ -162,11 +165,12 @@ export default function CatalogPage() {
 }
 
 /** Вкладки раздела: справочники, тарифы и то, что уже поставлено в расписание. */
-type CatalogTab = 'types' | 'plans' | 'events';
+type CatalogTab = 'types' | 'plans' | 'sparring' | 'events';
 
 const TABS: { value: CatalogTab; label: string }[] = [
   { value: 'types', label: 'Типы' },
   { value: 'plans', label: 'Абонементы' },
+  { value: 'sparring', label: 'Спарринги' },
   { value: 'events', label: 'Занятия и турниры' },
 ];
 
@@ -179,6 +183,7 @@ const TABS: { value: CatalogTab; label: string }[] = [
 const TAB_HINTS: Record<CatalogTab, string> = {
   types: 'То, на что клиент будет записываться. Тип занятия несёт цену и название — «просто тренировка» в расписании не говорит клиенту ничего. Новая цена действует на будущие записи: у записанных сумма зафиксирована на момент записи.',
   plans: 'Тарифы абонементов: сколько визитов, на какой срок и что они покрывают. Продаются у стойки, из карточки человека.',
+  sparring: 'Типы спаррингов с ценой: тренер выбирает тип, записывая ученика, и ученик платит его цену. Возраст ученика проверяется на день спарринга.',
   events: 'Занятия и турниры заводятся в расписании зала, из закрашенного времени, и сюда попадают уже готовыми — здесь их видно списком и здесь же правится число мест.',
 };
 

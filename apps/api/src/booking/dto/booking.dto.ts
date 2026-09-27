@@ -1,6 +1,6 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsInt, IsISO8601, IsString, Max, MaxLength, Min } from 'class-validator';
-import type { CreateBookingRequest } from '@yenisey/types';
+import { IsBoolean, IsInt, IsISO8601, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import type { CreateBookingRequest, CreateSparringRequest } from '@yenisey/types';
 import { CLOSE_MINUTE, OPEN_MINUTE } from '../availability';
 
 /**
@@ -54,4 +54,35 @@ export class QuoteQueryDto {
   @asBoolean()
   @IsBoolean()
   withRobot: boolean;
+}
+
+/**
+ * Спарринг тренера. Ученик и тип — вместе или ни одного (решение владельца от
+ * 26.09.2026); проверяет сервис. Отдельным классом, а не полями клиентской
+ * брони: клиент ученика себе не назначает, и `forbidNonWhitelisted` отвечает
+ * ему отказом.
+ */
+export class CreateSparringDto extends CreateBookingDto implements CreateSparringRequest {
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  studentId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  sparringTypeId?: string;
+}
+
+/** Цена спарринга с учеником — до брони. */
+export class SparringQuoteQueryDto {
+  @IsString()
+  @MaxLength(64)
+  sparringTypeId: string;
+
+  @asInt()
+  @IsInt({ message: 'Длительность указывается целым числом минут' })
+  @Min(1, { message: 'Длительность брони должна быть больше нуля' })
+  @Max(MAX_DURATION, { message: 'Забронировать можно с 06:00 до полуночи' })
+  durationMinutes: number;
 }

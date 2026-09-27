@@ -170,6 +170,15 @@ export default function DeskPage() {
           <p className="mt-1.5 text-[0.9375rem] text-text-muted">
             {day ? `${day.hallName} · ${formatDate(day.date)}` : 'Загружаем зал…'}
           </p>
+          {/* Сегодня зала, а не выбранного дня: вопрос «кто рядом за стойкой». */}
+          {access?.allowed && (
+            <p className="mt-1 text-[0.875rem] text-text-muted">
+              Администраторы сегодня:{' '}
+              <span className="text-text">
+                {access.onShift.length > 0 ? access.onShift.join(', ') : 'никто не назначен'}
+              </span>
+            </p>
+          )}
         </div>
 
         {day?.today && day.nowMinute !== null && (
@@ -803,6 +812,11 @@ function bookingRow(booking: DeskBooking): Row {
     subtitle: [
       booking.client.phone,
       duration(booking.startsAt, booking.endsAt),
+      // Спарринг с учеником: тип и тренер — за столом ученик, платит он.
+      booking.sparringType ?? '',
+      booking.coachName ? `тренер ${booking.coachName}` : '',
+      // Денег за такую бронь у стойки не берут: визит списан с абонемента.
+      booking.bySubscription ? 'по абонементу' : '',
       // «Завёл админ» объясняет, почему человек не видел эту бронь в
       // приложении и почему о переносе он позвонит в клуб.
       booking.manual ? 'завёл админ' : '',

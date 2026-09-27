@@ -23,6 +23,8 @@ const PROBE_EMAIL_PREFIX = 'probe-';
 const PROBE_HALL_PREFIX = 'Зал проверки ';
 const PROBE_TABLE_PREFIX = 'Стол проверки ';
 const PROBE_NEWS_PREFIX = 'Новость проверки ';
+const PROBE_POST_PREFIX = 'Публикация проверки ';
+const PROBE_SPARRING_TYPE_PREFIX = 'Тип спарринга проверки ';
 
 async function main(): Promise<void> {
   const users = await prisma.user.findMany({
@@ -122,6 +124,9 @@ async function main(): Promise<void> {
   // Новости, написанные пробной учёткой-владельцем платформы: у автора
   // Restrict, и без этого учётка не удалилась бы.
   await prisma.platformNews.deleteMany({ where: { authorId: { in: ids } } });
+  // Публикации ленты клуба пробного автора — по той же причине: у автора
+  // (членства) Restrict, а членство уходит каскадом вместе с учёткой.
+  await prisma.clubPost.deleteMany({ where: { authorId: { in: ids } } });
 
   const removed = await prisma.user.deleteMany({ where });
 
@@ -290,7 +295,17 @@ async function removeProbeRooms(): Promise<void> {
   // уборки, иначе оставил бы их в ленте платформы навсегда.
   const news = await prisma.platformNews.deleteMany({ where: { title: { startsWith: PROBE_NEWS_PREFIX } } });
 
-  console.log(`Убрано залов смоука: ${halls.count}, столов: ${tables.count}, тарифов: ${plans.count}, новостей: ${news.count}`);
+  // Лента клуба и типы спаррингов смоука — тоже по точным префиксам; тип —
+  // только без броней: на него ссылаются спарринги с Restrict.
+  const posts = await prisma.clubPost.deleteMany({ where: { title: { startsWith: PROBE_POST_PREFIX } } });
+  const sparringTypes = await prisma.sparringType.deleteMany({
+    where: { name: { startsWith: PROBE_SPARRING_TYPE_PREFIX }, bookings: { none: {} } },
+  });
+
+  console.log(
+    `Убрано залов смоука: ${halls.count}, столов: ${tables.count}, тарифов: ${plans.count}, новостей: ${news.count}, ` +
+      `публикаций клуба: ${posts.count}, типов спарринга: ${sparringTypes.count}`,
+  );
 }
 
 main()

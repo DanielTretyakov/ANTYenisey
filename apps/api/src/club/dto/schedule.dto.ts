@@ -27,6 +27,7 @@ import type {
   ReplaceTemplateRequest,
   UpdateHallRequest,
   Weekday,
+  WorkingHours,
 } from '@yenisey/types';
 import { MAX_TABLES_WITH_HALL } from '@yenisey/types';
 import { MINUTES_IN_DAY } from '../closures';
@@ -139,6 +140,12 @@ export class CreateHallDto implements CreateHallRequest {
   @MoneyField()
   robotExtra30MinPrice: number | null;
 
+  /** Часы работы — форму дней проверяет `parseWorkingHours`. */
+  @IsOptional()
+  @ValidateIfNotNull()
+  @IsArray()
+  workingHours?: WorkingHours | null;
+
   /** Столы нового зала — «Стол 1» … «Стол N». */
   @IsOptional()
   @IsInt()
@@ -218,6 +225,11 @@ export class UpdateHallDto implements UpdateHallRequest {
   @ValidateIfNotNull()
   @MoneyField()
   robotExtra30MinPrice?: number | null;
+
+  @IsOptional()
+  @ValidateIfNotNull()
+  @IsArray()
+  workingHours?: WorkingHours | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
-import type { BookingStep, Hall } from '@yenisey/types';
+import { parseWorkingHours, type BookingStep, type Hall } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -16,6 +16,7 @@ import { changedOnly } from '@/lib/changed';
 import { useClubApi } from '@/lib/useClubApi';
 import { inputToKopecks, kopecksToInput } from '@/lib/money';
 import { timezoneOptions } from '@/lib/timezones';
+import { fromHoursDraft, toHoursDraft, WorkingHoursField, type HoursDraft } from './WorkingHoursField';
 
 const BOOKING_STEPS: { value: BookingStep; label: string }[] = [
   { value: 'MIN_10', label: '10 минут' },
@@ -40,6 +41,7 @@ type FormState = {
   robot30MinPrice: string;
   robot60MinPrice: string;
   robotExtra30MinPrice: string;
+  workingHours: HoursDraft;
 };
 
 /** Копейки в строку поля; null — «не задано», а не ноль. */
@@ -64,6 +66,7 @@ function toForm(hall: Hall): FormState {
     robot30MinPrice: priceToInput(hall.robot30MinPrice),
     robot60MinPrice: priceToInput(hall.robot60MinPrice),
     robotExtra30MinPrice: priceToInput(hall.robotExtra30MinPrice),
+    workingHours: toHoursDraft(hall.workingHours),
   };
 }
 
@@ -149,6 +152,13 @@ export function HallForm({
       return;
     }
 
+    const hours = parseWorkingHours(fromHoursDraft(form.workingHours));
+
+    if (!hours.ok) {
+      setErrors([hours.message]);
+      return;
+    }
+
     setErrors([]);
 
     // Только изменённое относительно показанного: зал с запланированной
@@ -170,6 +180,7 @@ export function HallForm({
         tableExtra30MinPrice,
         hasRobotOption: form.hasRobotOption,
         ...robotPrices,
+        workingHours: hours.value,
       },
       hall,
     );
@@ -308,6 +319,8 @@ export function HallForm({
               inputMode="email"
             />
           </div>
+
+          <WorkingHoursField value={form.workingHours} onChange={(value) => set('workingHours', value)} />
 
           <div className="grid gap-x-6 sm:grid-cols-2">
             <MoneyField

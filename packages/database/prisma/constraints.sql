@@ -56,16 +56,21 @@ CREATE UNIQUE INDEX "TournamentRegistration_active_client_uniq"
 -- 3. Инварианты, описанные в комментариях схемы
 -- ---------------------------------------------------------------------------
 
--- Бронь стола принадлежит либо клиенту, либо тренеру (спарринг), но не обоим
--- сразу и не «никому».
+-- Кто за столом. Аренда — клиент, и только он. Спарринг — всегда тренер, и
+-- с 26.09.2026 бывает с учеником (решение владельца): тогда заполнены оба, и
+-- тип спарринга есть ровно тогда, когда есть ученик — цену платит он, по типу.
+-- Сам себе учеником тренер не бывает. Заменило прежние client_xor_coach и
+-- sparring_has_coach (миграция *_sparring_types_club_posts).
 ALTER TABLE "TableBooking"
-  ADD CONSTRAINT "TableBooking_client_xor_coach"
-  CHECK (("clientId" IS NOT NULL)::int + ("coachId" IS NOT NULL)::int = 1);
-
--- Спарринг всегда инициирован тренером.
-ALTER TABLE "TableBooking"
-  ADD CONSTRAINT "TableBooking_sparring_has_coach"
-  CHECK (NOT "isSparring" OR "coachId" IS NOT NULL);
+  ADD CONSTRAINT "TableBooking_owner_shape"
+  CHECK (
+    CASE WHEN "isSparring"
+      THEN "coachId" IS NOT NULL
+       AND ("clientId" IS NULL) = ("sparringTypeId" IS NULL)
+       AND ("clientId" IS NULL OR "clientId" <> "coachId")
+      ELSE "clientId" IS NOT NULL AND "coachId" IS NULL AND "sparringTypeId" IS NULL
+    END
+  );
 
 -- Время идёт вперёд. Без этого exclusion-констрейнт выше принял бы
 -- вывернутый диапазон и молча перестал ловить пересечения.
@@ -936,17 +941,20 @@ ALTER TABLE "SubscriptionLedger"
   ADD CONSTRAINT "SubscriptionLedger_balance_non_negative"
   CHECK ("balanceAfter" IS NULL OR "balanceAfter" >= 0);
 
--- Движение по визиту ссылается ровно на одну запись — занятие или турнир;
--- покупка и корректировка — ни на одну. Аренда стола абонементом в этой фазе
--- не оплачивается, и ссылка на неё запрещена, пока правило не появится.
+-- Движение по визиту ссылается ровно на одну запись — занятие, турнир или,
+-- с 26.09.2026, аренду стола (решение владельца: бронь любой длины — один
+-- визит); покупка и корректировка — ни на одну.
 ALTER TABLE "SubscriptionLedger"
   ADD CONSTRAINT "SubscriptionLedger_link_matches_reason"
   CHECK (
-    "tableBookingId" IS NULL
-    AND CASE
+    CASE
       WHEN "reason" IN ('VISIT_CHARGED', 'VISIT_REFUNDED')
-        THEN ("trainingBookingId" IS NOT NULL) <> ("tournamentRegistrationId" IS NOT NULL)
-      ELSE "trainingBookingId" IS NULL AND "tournamentRegistrationId" IS NULL
+        THEN ("trainingBookingId" IS NOT NULL)::int
+           + ("tournamentRegistrationId" IS NOT NULL)::int
+           + ("tableBookingId" IS NOT NULL)::int = 1
+      ELSE "trainingBookingId" IS NULL
+       AND "tournamentRegistrationId" IS NULL
+       AND "tableBookingId" IS NULL
     END
   );
 
@@ -968,6 +976,22 @@ ALTER TABLE "TrainingBooking"
 ALTER TABLE "TournamentRegistration"
   ADD CONSTRAINT "TournamentRegistration_subscription_ratio"
   CHECK ("subscriptionId" IS NULL OR "chargeRatio" IS NULL OR "chargeRatio" IN (0, 100));
+
+ALTER TABLE "TableBooking"
+  ADD CONSTRAINT "TableBooking_subscription_ratio"
+  CHECK ("subscriptionId" IS NULL OR "chargeRatio" IS NULL OR "chargeRatio" IN (0, 100));
+
+-- Абонементом оплачивается только обычная аренда клиента: спарринг ученик
+-- оплачивает деньгами (решение владельца от 26.09.2026), стол с роботом —
+-- отдельная услуга со своей сеткой цен. И клиент обязателен: составной ключ
+-- (subscriptionId, clientId, tenantId) с пустым clientId база не проверяет
+-- вовсе (MATCH SIMPLE), и абонемент встал бы на бронь тренера.
+ALTER TABLE "TableBooking"
+  ADD CONSTRAINT "TableBooking_subscription_plain_rental"
+  CHECK (
+    "subscriptionId" IS NULL
+    OR ("clientId" IS NOT NULL AND NOT "isSparring" AND NOT "withRobot")
+  );
 
 -- Журнал абонементов — только вставки, как журнал аудита, и без единого
 -- исключения (решение владельца от 20.09.2026).
@@ -1247,3 +1271,54 @@ ALTER TABLE "PlatformNews"
 ALTER TABLE "PlatformNews"
   ADD CONSTRAINT "PlatformNews_body_sane"
   CHECK (btrim("body") <> '' AND char_length("body") <= 20000);
+
+-- ---------------------------------------------------------------------------
+-- 32. Типы спаррингов и лента клуба
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_sparring_types_club_posts (решения владельца от
+-- 26.09.2026). Форма брони-спарринга с учеником и аренда по абонементу — в
+-- разделах 1 и 21 (TableBooking_owner_shape, TableBooking_subscription_*).
+ALTER TABLE "SparringType"
+  ADD CONSTRAINT "SparringType_name_filled"
+  CHECK ("name" = btrim("name") AND char_length("name") BETWEEN 1 AND 100);
+
+ALTER TABLE "SparringType"
+  ADD CONSTRAINT "SparringType_price_sane"
+  CHECK ("hourPrice" BETWEEN 0 AND 100000000);
+
+-- Возраст — полные годы; «от» не больше «до», иначе тип не подходит никому.
+ALTER TABLE "SparringType"
+  ADD CONSTRAINT "SparringType_ages_sane"
+  CHECK (
+    ("minAge" IS NULL OR "minAge" BETWEEN 0 AND 120)
+    AND ("maxAge" IS NULL OR "maxAge" BETWEEN 0 AND 120)
+    AND ("minAge" IS NULL OR "maxAge" IS NULL OR "minAge" <= "maxAge")
+  );
+
+ALTER TABLE "SparringType"
+  ADD CONSTRAINT "SparringType_description_sane"
+  CHECK ("description" IS NULL OR (btrim("description") <> '' AND char_length("description") <= 1000));
+
+ALTER TABLE "ClubPost"
+  ADD CONSTRAINT "ClubPost_title_sane"
+  CHECK (btrim("title") <> '' AND char_length("title") <= 160);
+
+ALTER TABLE "ClubPost"
+  ADD CONSTRAINT "ClubPost_body_sane"
+  CHECK (btrim("body") <> '' AND char_length("body") <= 20000);
+
+-- ---------------------------------------------------------------------------
+-- 33. Часы работы зала
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_hall_working_hours (решение владельца от 27.09.2026).
+-- Неделя — ровно семь дней с понедельника; что внутри дня — «ЧЧ:ММ», открытие
+-- раньше закрытия — держит parseWorkingHours в @yenisey/types: JSON база не
+-- разбирает. Здесь — только чтобы в колонку не легло что-то, кроме недели.
+ALTER TABLE "Hall"
+  ADD CONSTRAINT "Hall_working_hours_shape"
+  CHECK (
+    "workingHours" IS NULL
+    OR (jsonb_typeof("workingHours") = 'array' AND jsonb_array_length("workingHours") = 7)
+  );

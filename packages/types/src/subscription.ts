@@ -19,6 +19,8 @@ export interface SubscriptionPlan {
   isActive: boolean;
   trainingTypeIds: string[];
   tournamentTypeIds: string[];
+  /** Аренда стола: бронь любой длины — один визит (решение от 26.09.2026). */
+  coversTableRental: boolean;
   /**
    * Сколько абонементов этого тарифа сейчас действует. Пока их больше нуля,
    * убрать услугу из покрытия нельзя — только добавить.
@@ -53,7 +55,8 @@ export interface PublicPlan {
   covers: string[];
   /**
    * Те же типы ключами «TRAINING:id» / «TOURNAMENT:id» — страница клуба по
-   * ним понимает, в каких залах тариф пригодится.
+   * ним понимает, в каких залах тариф пригодится. Аренда — ключ «TABLE»:
+   * она есть в любом зале.
    */
   typeKeys: string[];
 }
@@ -66,6 +69,8 @@ export interface SubscriptionPlanRequest {
   isActive?: boolean;
   trainingTypeIds: string[];
   tournamentTypeIds: string[];
+  /** Покрывает ли аренду стола. Не прислано — нет. */
+  coversTableRental?: boolean;
 }
 
 /** Абонемент клиента — в карточке человека и в кабинете самого клиента. */
@@ -100,8 +105,46 @@ export interface SubscriptionLedgerRow {
   note: string | null;
   /** Кто сделал: продавец или администратор. У движений по записи пусто. */
   by: string | null;
-  /** За какое мероприятие — у списаний и возвратов. */
+  /** За какое мероприятие или аренду — у списаний и возвратов. */
   entry: { title: string; startsAt: string } | null;
+}
+
+/**
+ * Владелец абонемента во вкладках «Действующие» и «Архив» раздела
+ * «Абонементы» (решение владельца от 26.09.2026).
+ */
+export interface SubscriptionHolder {
+  subscriptionId: string;
+  person: { id: string; fullName: string; phone: string };
+  planName: string;
+  /** Остаток визитов; null — безлимит. */
+  remainingVisits: number | null;
+  purchasedAt: string;
+  expiresAt: string | null;
+  /**
+   * Когда кончился — в архиве: истёк срок или, у пакета без срока, списан
+   * последний визит. У действующего пусто.
+   */
+  endedAt: string | null;
+  /** Что покрывает — названиями. */
+  covers: string[];
+}
+
+export interface SubscriptionHoldersPage {
+  items: SubscriptionHolder[];
+  total: number;
+}
+
+export interface SubscriptionHoldersQuery {
+  /**
+   * `active` — действующие абонементы; `archive` — люди, у кого абонемент был,
+   * но сейчас ни одного действующего нет: их последний абонемент.
+   */
+  status: 'active' | 'archive';
+  /** Поиск по ФИО владельца. */
+  search?: string;
+  limit?: number;
+  offset?: number;
 }
 
 /**
