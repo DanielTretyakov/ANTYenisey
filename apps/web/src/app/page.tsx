@@ -7,7 +7,7 @@ import { PlatformMark } from '@/components/brand/PlatformLogo';
 import { RiverBackdrop } from '@/components/brand/RiverBackdrop';
 import { ClubMark } from '@/components/club/ClubMark';
 import { KindBadge } from '@/components/club/EventRow';
-import { When, WhenSpan } from '@/components/club/When';
+import { WhenSpan } from '@/components/club/When';
 import { EventDialog } from '@/components/events/EventDialog';
 import { excerpt, NewsRow, newsDate } from '@/components/news/NewsParts';
 import { SiteHeader } from '@/components/layout/SiteHeader';
@@ -172,14 +172,13 @@ export default function StartPage() {
 
         {session.status === 'ready' && (
           <>
-            {/* «Моё» — мозаикой (вариант А от 01.10.2026): ближайшие записи
-                крупной плиткой, рядом мои клубы и их новости. */}
+            {/* «Моё» — мозаикой (вариант А от 01.10.2026): записи и мои клубы
+                рядом, одной высоты, их новости — под ними во всю ширину.
+                Новости рядом с записями растягивали плитку записей в пустоту. */}
             <div className="mt-16 grid gap-4 lg:grid-cols-2">
               <MyEntries />
-              <div className="grid content-start gap-4">
-                <MyClubs />
-                <MyClubPosts />
-              </div>
+              <MyClubs />
+              <MyClubPosts />
             </div>
             <Nearest />
           </>
@@ -475,14 +474,11 @@ function MyEntries() {
     .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
 
   const [first, ...rest] = upcoming;
-  // Пустая плитка не тянется на высоту соседней колонки: крупный пустой
-  // прямоугольник ничего не сообщает.
-  const empty = entries !== null && upcoming.length === 0;
 
   return (
     <section
       id="moi-zapisi"
-      className={`flex scroll-mt-40 flex-col rounded-card border border-border bg-gradient-to-br from-surface-accent-soft to-surface-raised p-6${empty ? ' self-start' : ''}`}
+      className="flex scroll-mt-40 flex-col rounded-card border border-border bg-gradient-to-br from-surface-accent-soft to-surface-raised p-5"
     >
       <div className="flex items-start justify-between gap-3">
         <p className={KICKER}>Мои записи</p>
@@ -501,13 +497,19 @@ function MyEntries() {
         </p>
       )}
 
-      {/* Ближайшая — крупно, шрифтом обложки. */}
+      {/* Ближайшая — крупно, шрифтом обложки: день строкой, время под ним.
+          Не `When`: у строки списка свои мелкие размеры, и крупный шрифт
+          плитки до неё не доходит. */}
       {first && (
         <div className="mt-4">
-          <p className="font-display text-[1.75rem] leading-tight text-text">
-            <When instant={first.startsAt} />
+          <p className="text-[0.875rem] font-medium text-text-muted">{dayLabel(first.startsAt)}</p>
+          <p className="mt-1 font-display text-[2.25rem] leading-none text-text">
+            {timeLabel(first.startsAt)}
+            {first.endsAt && (
+              <span className="text-[1.375rem] text-text-subtle"> – {timeLabel(first.endsAt)}</span>
+            )}
           </p>
-          <p className="mt-2 text-[1.0625rem] text-text">{first.title}</p>
+          <p className="mt-3 text-[1.0625rem] text-text">{first.title}</p>
           <p className="text-[0.875rem] text-text-muted">
             {first.club.name}
             {first.subtitle && ` · ${first.subtitle}`} · {entryPriceLabel(first)}
@@ -690,12 +692,16 @@ function MyClubPosts() {
   }
 
   return (
-    <section id="novosti-klubov" className="scroll-mt-40 rounded-card border border-border bg-surface-raised p-5">
-      <p className={cn(KICKER, 'mb-1')}>Новости моих клубов</p>
+    <section
+      id="novosti-klubov"
+      className="scroll-mt-40 rounded-card border border-border bg-surface-raised p-5 lg:col-span-2"
+    >
+      <p className={cn(KICKER, 'mb-3')}>Новости моих клубов</p>
 
-      <ul className="divide-y divide-border">
+      {/* Во всю ширину — колонками, а не столбцом: три выдержки в строку. */}
+      <ul className="grid gap-x-6 gap-y-4 sm:grid-cols-3">
         {items.map((item) => (
-          <li key={item.id} className="py-3">
+          <li key={item.id} className="min-w-0 border-t border-border pt-3">
             <p className="mb-1.5 flex flex-wrap items-center gap-x-2 text-[0.8125rem] text-text-subtle">
               {item.unread && (
                 <span className="inline-flex items-center gap-1.5 font-medium text-text-accent">
@@ -719,7 +725,7 @@ function MyClubPosts() {
               >
                 {item.title}
               </h3>
-              <p className="mt-1 line-clamp-2 text-[0.9375rem] text-text-muted">{excerpt(item.body)}</p>
+              <p className="mt-1 line-clamp-3 text-[0.9375rem] text-text-muted">{excerpt(item.body)}</p>
             </Link>
           </li>
         ))}
