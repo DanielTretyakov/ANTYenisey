@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BOOKING_HORIZON_DAYS,
   type BookingQuote,
@@ -32,25 +32,30 @@ import { rolesInClub } from '@/lib/membership';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import {
   bookableDates,
+  blockSpans,
   bookableMinutes,
   cellState,
   durationsFrom,
   formatDate,
   formatDuration,
   formatMinute,
+  pickAfterClick,
+  pickPart,
   todayIn,
+  type BlockSpan,
   type CellState,
+  type GridPick,
 } from '@/lib/bookingGrid';
 import { cn } from '@/lib/cn';
 import { formatKopecks } from '@/lib/money';
 import { usePersonSwitch } from '@/lib/usePersonSwitch';
 import { useSession } from '@/lib/useSession';
 
-/** Что клиент выбрал в сетке: стол и начало отрезка. */
-interface Pick {
-  tableId: string;
-  startMinute: number;
-}
+/**
+ * Что клиент выбрал в сетке: стол, начало и длительность (решение владельца
+ * от 30.09.2026 — отрезок выбирается щелчками по сетке и закрашивается).
+ */
+type Pick = GridPick;
 
 /**
  * Бронь стола клиентом — и спарринг тренером.
@@ -98,7 +103,6 @@ export default function BookingPage() {
   const [event, setEvent] = useState<NonNullable<PublicBoardBlock['event']> | null>(null);
 
   const [pick, setPick] = useState<Pick | null>(null);
-  const [duration, setDuration] = useState(0);
   const [withRobot, setWithRobot] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
@@ -163,7 +167,6 @@ export default function BookingPage() {
     // Выбор сбрасывается вместе с сеткой: отрезок, выбранный во вторник, во
     // вторую субботу означал бы совсем другое время.
     setPick(null);
-    setDuration(0);
     loadDay();
   }, [loadDay]);
 
@@ -175,9 +178,11 @@ export default function BookingPage() {
     [day, table, pick],
   );
 
-  // Длительность, выбранная на прежней клетке, на новой может не помещаться —
-  // тогда берётся самая короткая доступная.
-  const chosenDuration = durations.includes(duration) ? duration : (durations[0] ?? 0);
+  // Длительность — часть выбора; если она перестала помещаться (сетку
+  // перечитали, стол заняли), берётся самая короткая доступная.
+  const chosenDuration = pick && durations.includes(pick.durationMinutes) ? pick.durationMinutes : (durations[0] ?? 0);
+  // Сетка закрашивает то, что уйдёт на сервер, а не то, что было выбрано.
+  const shownPick = pick && chosenDuration > 0 ? { ...pick, durationMinutes: chosenDuration } : null;
 
   const [quote, setQuote] = useState<BookingQuote | null>(null);
 
@@ -341,13 +346,18 @@ export default function BookingPage() {
       <Card className="mb-6">
         <CardHeader
           title="Время"
-          description="Свободное — светлым, занятое подписано: аренда, занятие, турнир. На занятие и турнир можно нажать — откроется запись. Прошедшее время не показывается."
+          description="Щёлкните клетку начала, затем клетку конца на том же столе — отрезок закрасится. Занятое подписано: аренда, занятие, турнир; на занятие и турнир можно нажать — откроется запись."
         />
         <CardBody>
           {day && day.tables.length > 0 ? (
             <>
               <Legend />
-              <Grid day={day} pick={pick} onPick={setPick} onEvent={setEvent} />
+              <Grid
+                day={day}
+                pick={shownPick}
+                onCell={(target, minute) => setPick(pickAfterClick(day, target, shownPick, minute))}
+                onEvent={setEvent}
+              />
             </>
           ) : (
             <p className="text-[0.875rem] text-text-muted">
@@ -361,14 +371,15 @@ export default function BookingPage() {
         <Card>
           <CardHeader
             title="Подтверждение"
-            description={`${table.label}, ${formatDate(day.date)}, начало в ${formatMinute(pick.startMinute)}.`}
+            description={`${table.label}, ${formatDate(day.date)}, с ${formatMinute(pick.startMinute)} до ${formatMinute(pick.startMinute + chosenDuration)}.`}
           />
           <CardBody>
             <div className="grid gap-x-6 sm:grid-cols-2">
               <Select
                 label="Длительность"
+                hint="Или щёлкните в сетке клетку ниже на этом же столе — отрезок продлится до неё."
                 value={String(chosenDuration)}
-                onChange={(event) => setDuration(Number(event.target.value))}
+                onChange={(event) => setPick({ ...pick, durationMinutes: Number(event.target.value) })}
                 options={durations.map((value) => ({
                   value: String(value),
                   label: formatDuration(value),
@@ -525,31 +536,33 @@ function Legend() {
   );
 }
 
-/** Блок, который накрывает клетку. */
-function blockAt(table: PublicBoardTable, minute: number): PublicBoardBlock | null {
-  return table.blocks.find((block) => block.startMinute <= minute && minute < block.endMinute) ?? null;
-}
-
 /**
  * Сетка «время × столы».
  *
  * Столбцами идут столы, строками — время: столов в зале единицы, а строк
  * времени десятки, и вертикальная прокрутка привычнее горизонтальной.
+ *
+ * Занятое — цельными прямоугольниками поверх клеток (решение владельца от
+ * 30.09.2026): тренировка на четырёх столах на два часа — один блок в цвете
+ * своего вида, с названием шрифтом платформы, и он открывает окно
+ * мероприятия, где можно записаться. Склейку решает `blockSpans`.
  */
 function Grid({
   day,
   pick,
-  onPick,
+  onCell,
   onEvent,
 }: {
   day: PublicDayBoard;
   pick: Pick | null;
-  onPick: (pick: Pick | null) => void;
+  /** Щелчок по свободной клетке — что станет с выбором, решает `pickAfterClick`. */
+  onCell: (table: PublicBoardTable, startMinute: number) => void;
   onEvent: (event: NonNullable<PublicBoardBlock['event']>) => void;
 }) {
   // Прошедшие клетки не рисуются вовсе: вечером они занимали три четверти
   // сетки, и человек скроллил мимо серого к своему времени.
-  const rows = bookableMinutes(day);
+  const rows = useMemo(() => bookableMinutes(day), [day]);
+  const spans = useMemo(() => blockSpans(day.tables, rows, day.stepMinutes), [day, rows]);
 
   if (rows.length === 0) {
     return (
@@ -559,55 +572,152 @@ function Grid({
     );
   }
 
+  // Клетки под блоками не рисуются: их место занимает сам блок.
+  const covered = new Set<string>();
+  for (const span of spans) {
+    for (let table = span.firstTable; table <= span.lastTable; table += 1) {
+      for (let row = span.rowStart; row < span.rowEnd; row += 1) covered.add(`${table}:${row}`);
+    }
+  }
+
   return (
     // Своя область прокрутки с прилипающей шапкой — как в расписании у
     // администратора: столов бывает дюжина, строк времени четыре десятка, и без
     // шапки столбцы на длинной сетке теряют имена.
     <div className="max-h-[calc(100dvh-16rem)] touch-pan-y overflow-auto">
-      <table className="w-full table-fixed border-separate border-spacing-0 text-[0.8125rem]">
-        <thead>
-          <tr>
-            <th className="sticky top-0 z-20 w-16 bg-surface-raised py-2 text-left font-medium text-text-subtle">
-              Время
-            </th>
-            {day.tables.map((table) => (
-              <th
-                key={table.tableId}
-                className="sticky top-0 z-20 bg-surface-raised px-1 py-2 font-medium text-text-muted"
-              >
-                {table.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((startMinute) => (
-            <tr key={startMinute}>
-              <td className="py-0.5 pr-2 align-middle text-text-subtle tabular-nums">
-                {/* Подписан каждый час, а не каждая клетка: при шаге в десять
-                    минут подписи слились бы в сплошной столбец цифр. */}
-                {startMinute % 60 === 0 ? formatMinute(startMinute) : ''}
-              </td>
+      <div
+        className="grid text-[0.8125rem]"
+        style={{
+          gridTemplateColumns: `4rem repeat(${day.tables.length}, minmax(0, 1fr))`,
+          gridTemplateRows: `auto repeat(${rows.length}, 1.75rem)`,
+        }}
+        role="grid"
+        aria-label="Сетка зала"
+      >
+        <div className="sticky top-0 z-20 bg-surface-raised py-2 text-left font-medium text-text-subtle" style={{ gridRow: 1, gridColumn: 1 }}>
+          Время
+        </div>
+        {day.tables.map((table, index) => (
+          <div
+            key={table.tableId}
+            className="sticky top-0 z-20 bg-surface-raised px-1 py-2 text-center font-medium text-text-muted"
+            style={{ gridRow: 1, gridColumn: index + 2 }}
+          >
+            {table.label}
+          </div>
+        ))}
 
-              {day.tables.map((table) => (
+        {rows.map((startMinute, rowIndex) => (
+          <Fragment key={startMinute}>
+            {/* Подписан каждый час, а не каждая клетка: при шаге в десять
+                минут подписи слились бы в сплошной столбец цифр. */}
+            <div
+              className="self-center pr-2 text-text-subtle tabular-nums"
+              style={{ gridRow: rowIndex + 2, gridColumn: 1 }}
+            >
+              {startMinute % 60 === 0 ? formatMinute(startMinute) : ''}
+            </div>
+
+            {day.tables.map((table, tableIndex) =>
+              covered.has(`${tableIndex}:${rowIndex}`) ? null : (
                 <Cell
                   key={table.tableId}
                   day={day}
                   table={table}
                   startMinute={startMinute}
-                  // Подпись блока — в первой видимой его клетке: блок, начавшийся
-                  // до «сейчас», подписывается на первой непрошедшей строке.
-                  firstRow={rows[0] === startMinute}
-                  picked={pick?.tableId === table.tableId && pick.startMinute === startMinute}
-                  onPick={onPick}
-                  onEvent={onEvent}
+                  row={rowIndex + 2}
+                  column={tableIndex + 2}
+                  part={pickPart(pick, table.tableId, startMinute)}
+                  lastPicked={
+                    pick !== null &&
+                    pick.tableId === table.tableId &&
+                    startMinute + day.stepMinutes === pick.startMinute + pick.durationMinutes
+                  }
+                  onCell={onCell}
                 />
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+              ),
+            )}
+          </Fragment>
+        ))}
+
+        {spans.map((span) => (
+          <BlockTile
+            key={`${span.firstTable}-${span.rowStart}-${span.block.startMinute}-${span.block.title}`}
+            span={span}
+            tables={day.tables}
+            onEvent={onEvent}
+          />
+        ))}
+      </div>
     </div>
+  );
+}
+
+/**
+ * Занятое одним прямоугольником: заливка цвета вида, кромка слева, название
+ * шрифтом платформы, ниже — тренер и время. Занятие и турнир дня открывают
+ * окно мероприятия; аренда и закрытие — просто подписаны.
+ */
+function BlockTile({
+  span,
+  tables,
+  onEvent,
+}: {
+  span: BlockSpan<PublicBoardBlock>;
+  tables: PublicBoardTable[];
+  onEvent: (event: NonNullable<PublicBoardBlock['event']>) => void;
+}) {
+  const { block } = span;
+  const paint = KIND_PAINT[block.kind];
+  const target = block.event;
+  const rowsTall = span.rowEnd - span.rowStart;
+  const tableNames =
+    span.firstTable === span.lastTable
+      ? tables[span.firstTable]!.label
+      : `${tables[span.firstTable]!.label} — ${tables[span.lastTable]!.label}`;
+  const time = `${formatMinute(block.startMinute)}–${formatMinute(block.endMinute)}`;
+  const reason = [block.title, block.subtitle, time, tableNames].filter(Boolean).join(', ');
+
+  const body = (
+    <span className="flex h-full min-w-0 flex-col justify-start overflow-hidden px-2 py-1 text-left">
+      <span className="truncate font-display text-[0.75rem] leading-snug text-text sm:text-[0.8125rem]">
+        {block.title}
+      </span>
+      {rowsTall >= 2 && (
+        <span className="truncate text-[0.6875rem] leading-snug text-text-muted">
+          {[block.subtitle, time].filter(Boolean).join(' · ')}
+        </span>
+      )}
+    </span>
+  );
+
+  const className = 'm-0.5 rounded-[6px] border-l-[3px]';
+  const style = {
+    gridColumn: `${span.firstTable + 2} / ${span.lastTable + 3}`,
+    gridRow: `${span.rowStart + 2} / ${span.rowEnd + 2}`,
+    background: tintFill(paint),
+    borderLeftColor: tintMark(paint),
+  };
+
+  if (target) {
+    return (
+      <button
+        type="button"
+        title={`${reason} — открыть`}
+        aria-label={`${reason}. Открыть мероприятие`}
+        onClick={() => onEvent(target)}
+        className={cn(className, 'transition-[filter] hover:brightness-110 focus-visible:brightness-110')}
+        style={style}
+      >
+        {body}
+      </button>
+    );
+  }
+
+  return (
+    <span role="img" title={reason} aria-label={reason} className={cn(className, 'cursor-not-allowed')} style={style}>
+      {body}
+    </span>
   );
 }
 
@@ -615,63 +725,30 @@ function Cell({
   day,
   table,
   startMinute,
-  firstRow,
-  picked,
-  onPick,
-  onEvent,
+  row,
+  column,
+  part,
+  lastPicked,
+  onCell,
 }: {
   day: PublicDayBoard;
   table: PublicBoardTable;
   startMinute: number;
-  /** Первая показанная строка сетки: блок, начавшийся раньше, подписывается здесь. */
-  firstRow: boolean;
-  picked: boolean;
-  onPick: (pick: Pick | null) => void;
-  onEvent: (event: NonNullable<PublicBoardBlock['event']>) => void;
+  /** Место в CSS-сетке. */
+  row: number;
+  column: number;
+  /** Клетка в выбранном отрезке: его начало или продолжение. */
+  part: 'start' | 'inside' | null;
+  /** Последняя клетка отрезка — скругление снизу. */
+  lastPicked: boolean;
+  onCell: (table: PublicBoardTable, startMinute: number) => void;
 }) {
   const state = cellState(day, table, startMinute);
   const available = state === 'free';
-  const block = state === 'busy' ? blockAt(table, startMinute) : null;
-
-  if (block) {
-    const labelled = firstRow || block.startMinute >= startMinute;
-    const reason = block.subtitle ? `${block.title}, ${block.subtitle}` : block.title;
-    const body = labelled ? (
-      <span className="block truncate px-1 text-left text-[0.6875rem] leading-6 text-text">{block.title}</span>
-    ) : null;
-    const style = { background: tintFill(KIND_PAINT[block.kind]) };
-    const target = block.event;
-
-    return (
-      <td className="px-0.5 py-0.5">
-        {target ? (
-          <button
-            type="button"
-            title={`${reason} — открыть`}
-            aria-label={`${table.label}, ${formatMinute(startMinute)}: ${reason}. Открыть мероприятие`}
-            onClick={() => onEvent(target)}
-            className="h-6 w-full rounded-[3px] hover:brightness-95"
-            style={style}
-          >
-            {body}
-          </button>
-        ) : (
-          <span
-            role="img"
-            title={reason}
-            aria-label={`${table.label}, ${formatMinute(startMinute)}: ${reason}`}
-            className="block h-6 w-full cursor-not-allowed rounded-[3px]"
-            style={style}
-          >
-            {body}
-          </span>
-        )}
-      </td>
-    );
-  }
+  const picked = part !== null;
 
   return (
-    <td className="px-0.5 py-0.5">
+    <div className={cn('px-0.5', picked ? 'py-0' : 'py-0.5')} style={{ gridRow: row, gridColumn: column }}>
       <button
         type="button"
         disabled={!available}
@@ -680,10 +757,14 @@ function Cell({
         // по-разному: утренняя клетка сегодняшнего дня свободна, просто утро
         // кончилось.
         aria-label={`${table.label}, ${formatMinute(startMinute)}${LABELS[state]}`}
-        onClick={() => onPick(picked ? null : { tableId: table.tableId, startMinute })}
+        onClick={() => onCell(table, startMinute)}
         className={cn(
-          'h-6 w-full rounded-[3px] transition-colors',
-          picked && 'bg-accent',
+          'h-full w-full transition-colors',
+          // Выбранный отрезок — сплошной полосой: клетки внутри без зазоров,
+          // скругление только у первой и последней.
+          part === null && 'rounded-[3px]',
+          part === 'start' && cn('bg-accent', lastPicked ? 'rounded-[3px]' : 'rounded-t-[3px]'),
+          part === 'inside' && cn('bg-accent/65', lastPicked && 'rounded-b-[3px]'),
           state === 'free' && !picked && 'bg-surface-sunken hover:bg-surface-accent-soft',
           // Занятое — плотнее прошедшего: за ним стоит чужая бронь, и его
           // стоит замечать, выбирая соседнее время.
@@ -691,7 +772,7 @@ function Cell({
           state === 'past' && 'cursor-not-allowed bg-surface-sunken/40',
         )}
       />
-    </td>
+    </div>
   );
 }
 

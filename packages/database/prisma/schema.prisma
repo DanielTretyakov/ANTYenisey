@@ -691,6 +691,7 @@ model User {
 
   settingsChangesCancelled SettingsChange[] @relation("SettingsChangeCanceller")
   newsWritten              PlatformNews[]
+  clubPostsRead            ClubPostRead[]
 }
 
 // ---------------------------------------------------------------------------
@@ -2610,9 +2611,20 @@ model ClubPost {
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
-  /// Автор — сотрудник ЭТОГО клуба: ключ составной на членство.
-  authorId String
-  author   TenantMembership @relation("ClubPostAuthor", fields: [authorId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+  /// Автор — сотрудник ЭТОГО клуба: ключ составной на членство. Пусто только
+  /// у приветствия: его заводит платформа, подпись — название клуба (CHECK
+  /// `ClubPost_welcome_shape`).
+  authorId String?
+  author   TenantMembership? @relation("ClubPostAuthor", fields: [authorId, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
+  /// Приветствие клуба (решение владельца от 30.09.2026): закреплено первым в
+  /// ленте, у каждого клуба ровно одно (частичный уникальный индекс
+  /// `ClubPost_one_welcome`). Скрыть можно, удалить — нет.
+  welcome  Boolean @default(false)
+  /// Текст приветствия собирается из данных клуба при каждом чтении — залы,
+  /// адреса, часы, контакты — и сам следует за правками настроек. `body` у
+  /// такой строки — лишь снимок. Выключено — клуб написал свой текст.
+  autoBody Boolean @default(false)
 
   title String
   body  String
@@ -2624,5 +2636,25 @@ model ClubPost {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  reads ClubPostRead[]
+
   @@index([tenantId, publishedAt])
+}
+
+/// Кто открыл публикацию ленты клуба (решение владельца от 30.09.2026): по ней
+/// непрочитанное горит в колонке, на стартовой и в шапке.
+///
+/// Каскад с обеих сторон — намеренное отступление от Restrict: публикации
+/// удаляются, а отметка прочтения — производное, не история и не деньги.
+/// Restrict запер бы удаление публикации, которую кто-то успел прочесть.
+model ClubPostRead {
+  userId String
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postId String
+  post   ClubPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  readAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@id([userId, postId])
+  @@index([postId])
 }

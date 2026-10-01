@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import type { ClubRating, ClubRatingRow, Gender, RatingPeriod } from '@yenisey/types';
+import type { ClubRating, ClubRatingRow, ClubVisits, Gender, PlayerVisitTops, RatingPeriod } from '@yenisey/types';
 import { PUBLIC_PROFILE_AGE, shortName } from '@yenisey/types';
 import { bornRange } from '../club/people-filter';
 import { localParts } from '../club/closures';
-import { clubTimezone } from '../notifications/clock';
+import { clubTimezone, FALLBACK_TIMEZONE } from '../notifications/clock';
 import { participantView } from '../players/player-rules';
 import { PrismaService } from '../prisma/prisma.service';
-import { periodStart, ranked, RATING_SIZE } from './rating-rules';
+import { clubTops, periodStart, ranked, RATING_SIZE, type ClubTop } from './rating-rules';
 
 interface VisitCount {
   userId: string;
@@ -115,6 +115,51 @@ export class RatingService {
       me: mine ? withoutOwner(mine) : null,
       meHidden: viewer ? viewer.ratingHidden : null,
     };
+  }
+
+  /**
+   * «Больше всего посещений» в профиле игрока (решение владельца от
+   * 30.09.2026): топ-3 клубов за месяц, год и всё время. Визит — день с
+   * отметкой «пришёл» по поясу клуба (старший зал — как `clubTimezone`),
+   * поэтому день считается в запросе, а «сегодня» — у каждого клуба своё.
+   */
+  async playerTops(userId: string, hiddenFromOthers: boolean): Promise<PlayerVisitTops> {
+    const days = await this.prisma.$queryRaw<{ tenantId: string; date: string; zone: string }[]>`
+      SELECT DISTINCT v."tenantId",
+             to_char(v."visitedAt" AT TIME ZONE tz.zone, 'YYYY-MM-DD') AS "date",
+             tz.zone
+        FROM "VisitLog" v
+        CROSS JOIN LATERAL (
+          SELECT COALESCE(
+            (SELECT h."timezone" FROM "Hall" h WHERE h."tenantId" = v."tenantId" ORDER BY h."createdAt" LIMIT 1),
+            ${FALLBACK_TIMEZONE}
+          ) AS zone
+        ) tz
+       WHERE v."clientId" = ${userId}
+         AND v."attended"`;
+
+    const tenants = await this.prisma.tenant.findMany({
+      where: { id: { in: [...new Set(days.map((day) => day.tenantId))] } },
+      select: { id: true, slug: true, name: true, accentColor: true, logoUrl: true },
+    });
+    const byId = new Map(tenants.map((tenant) => [tenant.id, tenant]));
+    const zones = new Map(days.map((day) => [day.tenantId, day.zone]));
+    const now = new Date();
+
+    const tops = clubTops(
+      days.filter((day) => byId.has(day.tenantId)),
+      (tenantId) => localParts(now, zones.get(tenantId) ?? FALLBACK_TIMEZONE).date,
+      (tenantId) => byId.get(tenantId)!.name,
+    );
+
+    const view = (rows: ClubTop[]): ClubVisits[] =>
+      rows.map((row) => {
+        const { id: _id, ...club } = byId.get(row.tenantId)!;
+
+        return { ...club, place: row.place, visits: row.visits };
+      });
+
+    return { month: view(tops.month), year: view(tops.year), all: view(tops.all), hiddenFromOthers };
   }
 
   /** Выключатель «не показывать меня» — во всех клубах сразу. */

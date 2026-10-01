@@ -109,7 +109,7 @@ export interface ClubValue {
 }
 
 /** Сколько ценностей у клуба может быть. Тот же предел держит CHECK в базе. */
-export const MAX_CLUB_VALUES = 6;
+export const MAX_CLUB_VALUES = 3;
 
 /**
  * Правка настроек. Все поля необязательны: форма шлёт только изменённое, а

@@ -4,33 +4,29 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import {
   availableInAny,
-  workingHoursLines,
   type ClubCatalogItem,
   type PublicPlan,
   type PublicTenant,
 } from '@yenisey/types';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { PlanGroups, PLANS_ANCHOR } from '@/components/subscriptions/PlanList';
-import { Button } from '@/components/ui/Button';
 import { Tab } from '@/components/ui/Tab';
-import type { EventViewer } from '@/lib/eventViewer';
 import { formatKopecks } from '@/lib/money';
-import { plural } from '@/lib/plural';
 import { KindBadge, shortWhen } from './EventRow';
+import { SectionHeading } from './SectionHeading';
 
 /**
- * Вкладки выбранного зала (решения владельца от 25 и 27.09.2026): сам зал,
- * мероприятия, тренеры и абонементы. Всё — в пределах зала, выбранного выше;
- * новости и рейтинг общие для клуба и стоят над выбором зала отдельными
- * блоками.
+ * Вкладки выбранного зала (решения владельца от 25, 27 и 30.09.2026):
+ * мероприятия, тренеры и абонементы. Всё — в пределах зала, выбранного выше.
+ * Сам зал — карточкой прямо под выбором зала (`HallCards`), а не вкладкой:
+ * выбрал зал — сразу видишь, где он и когда открыт.
  *
- * Выбранная вкладка живёт в адресе (`#zaly`…): ссылка «Больше абонементов»
+ * Выбранная вкладка живёт в адресе (`#meropriyatiya`…): ссылка «Больше абонементов»
  * из кабинета ведёт на `#abonementy` и обязана открыть именно её. Адрес
  * меняется через `replaceState` — переключение вкладки не должно ни
  * прокручивать страницу, ни копить историю «назад».
  */
 const TABS = [
-  { id: 'zaly', label: 'Залы' },
   { id: 'meropriyatiya', label: 'Мероприятия' },
   { id: 'trenery', label: 'Тренеры' },
   { id: PLANS_ANCHOR, label: 'Абонементы' },
@@ -38,29 +34,37 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id'];
 
+/**
+ * Что во вкладке и что с ней можно сделать — строкой под лентой вкладок
+ * (решение владельца от 30.09.2026: под каждым заголовком — описание).
+ */
+const TAB_LEADS: Record<TabId, string> = {
+  meropriyatiya:
+    'Чем здесь занимаются: виды тренировок и турниров с ценой и ближайшей датой. «Показать расписание» отберёт вид в «Предстоящих».',
+  trenery: 'Кто ведёт занятия. В карточке тренера — достижения, инвентарь и цены.',
+  [PLANS_ANCHOR]:
+    'Абонемент оплачивает записи сам: визит списывается при записи и возвращается при отмене. Купить — у администратора клуба.',
+};
+
 /** Якорь самих вкладок — к нему прокручивает переход по `#abonementy`. */
-const TABS_ANCHOR = 'o-klube';
+export const TABS_ANCHOR = 'o-klube';
 
 export function ClubTabs({
-  slug,
   tenant,
   catalog,
   plans,
-  viewer,
   hallIds,
   onShowSchedule,
 }: {
-  slug: string;
   tenant: PublicTenant | null;
   catalog: ClubCatalogItem[] | null;
   plans: PublicPlan[] | null;
-  viewer: EventViewer;
   /** Выбранные фильтром залы; пусто — все (решение владельца от 25.09.2026). */
   hallIds: string[] | null;
   /** «Показать расписание» у вида — фильтр в «Предстоящих» и прокрутка к ним. */
   onShowSchedule: (item: ClubCatalogItem) => void;
 }) {
-  const [active, setActive] = useState<TabId>('zaly');
+  const [active, setActive] = useState<TabId>('meropriyatiya');
   const [fromHash, setFromHash] = useState(false);
 
   // Вкладка из адреса. В эффекте, а не в начальном состоянии: на сервере
@@ -103,19 +107,29 @@ export function ClubTabs({
   const scoped = scopeTo(hallIds, tenant, catalog, plans);
 
   const counts: Record<TabId, number | null> = {
-    zaly: scoped.tenant?.halls.length ?? null,
     meropriyatiya: scoped.catalog?.length ?? null,
     trenery: scoped.tenant?.coaches.length ?? null,
     [PLANS_ANCHOR]: scoped.plans?.length ?? null,
   };
 
-  // Выбран один зал — вкладка про него, в единственном числе.
-  const oneHall = hallIds?.length === 1;
-  const labelOf = (tab: (typeof TABS)[number]): string => (tab.id === 'zaly' && oneHall ? 'Зал' : tab.label);
+  const labelOf = (tab: (typeof TABS)[number]): string => tab.label;
+
+  // Заголовок блока — про выбранный зал, если он один (решение от 30.09.2026).
+  const onlyHall = scoped.tenant?.halls.length === 1 ? scoped.tenant.halls[0]! : null;
+  const canPick = (tenant?.halls.length ?? 0) >= 2;
 
   return (
-    <section id={TABS_ANCHOR} className="mb-14 scroll-mt-24">
-      <div className="-mx-1 mb-6 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
+    <section id={TABS_ANCHOR} className="mb-14 scroll-mt-40">
+      <SectionHeading
+        title={onlyHall && canPick ? `В зале «${onlyHall.name}»` : 'Мероприятия, тренеры и абонементы'}
+        description={
+          canPick
+            ? 'Виды занятий и турниров, тренеры и абонементы — в зале, выбранном выше. Сменить зал — там же.'
+            : 'Виды занятий и турниров, тренеры и абонементы клуба — по вкладкам.'
+        }
+      />
+
+      <div className="-mx-1 mb-3 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
         <div className="flex w-max gap-1.5 border-b border-border pb-3" role="tablist" aria-label="О клубе">
           {TABS.map((tab) => (
             <Tab
@@ -123,8 +137,7 @@ export function ClubTabs({
               inTablist
               active={active === tab.id}
               onClick={() => choose(tab.id)}
-              // У одного зала счётчик «1» ничего не сообщает.
-              badge={(tab.id === 'zaly' && oneHall ? null : counts[tab.id]) || undefined}
+              badge={counts[tab.id] || undefined}
             >
               {labelOf(tab)}
             </Tab>
@@ -132,8 +145,9 @@ export function ClubTabs({
         </div>
       </div>
 
+      <p className="mb-5 text-[0.875rem] text-text-muted">{TAB_LEADS[active]}</p>
+
       <div role="tabpanel" aria-label={labelOf(TABS.find((tab) => tab.id === active)!)}>
-        {active === 'zaly' && <HallsTab slug={slug} tenant={scoped.tenant} viewer={viewer} />}
         {active === 'meropriyatiya' && <CatalogTab catalog={scoped.catalog} onShowSchedule={onShowSchedule} />}
         {active === 'trenery' && <CoachesTab tenant={scoped.tenant} />}
         {active === PLANS_ANCHOR && <PlansTab plans={scoped.plans} />}
@@ -178,139 +192,6 @@ function scopeTo(
           plan.typeKeys.some((key) => key === 'TABLE' || usable.has(key)),
       ) ?? null,
   };
-}
-
-/**
- * Залы: куда ехать, почём стол, где на карте. Адрес — крупно: ради него на
- * страницу и приходят (решение владельца от 25.09.2026).
- */
-function HallsTab({ slug, tenant, viewer }: { slug: string; tenant: PublicTenant | null; viewer: EventViewer }) {
-  if (!tenant) {
-    return <CardsSkeleton />;
-  }
-
-  if (tenant.halls.length === 0) {
-    return <Empty>Залы клуб пока не указал.</Empty>;
-  }
-
-  // Бронирует стол клиент; сотруднику и ребёнку до 14 кнопка не нужна.
-  const canBook = viewer === 'client' || viewer === 'anonymous';
-
-  return (
-    <ul className="grid gap-4 md:grid-cols-2">
-      {tenant.halls.map((hall) => (
-        <li key={hall.id} className="flex flex-col rounded-card border border-border bg-surface-raised px-5 py-5">
-          <h3 className="text-[1.125rem]">{hall.name}</h3>
-
-          <div className="mt-3 flex items-start gap-2.5">
-            <PinIcon />
-            <div className="min-w-0">
-              {hall.address ? (
-                <>
-                  <p className="text-[1rem] leading-snug text-text">{placeOf(hall)}</p>
-                  <a
-                    href={mapHref(hall)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-1 inline-block text-[0.875rem] text-text-accent underline-offset-2 hover:underline"
-                  >
-                    На карте
-                  </a>
-                </>
-              ) : (
-                <p className="text-[0.9375rem] text-text-muted">
-                  {hall.city ? `${hall.city} — ` : ''}адрес уточняйте{' '}
-                  {tenant.phone ? (
-                    <a href={`tel:${tenant.phone}`} className="text-text-accent underline-offset-2 hover:underline">
-                      по телефону
-                    </a>
-                  ) : (
-                    'у клуба'
-                  )}
-                </p>
-              )}
-            </div>
-          </div>
-
-          <HallContacts hall={hall} tenant={tenant} />
-
-          {hall.workingHours && (
-            <div className="mt-3 flex items-start gap-2.5 text-[0.875rem]">
-              <ClockIcon />
-              <ul className="text-text" aria-label="Часы работы">
-                {workingHoursLines(hall.workingHours).map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 border-t border-border pt-4 text-[0.875rem]">
-            <div>
-              <dt className="text-text-subtle">Стол, час</dt>
-              <dd className="font-display text-[1.0625rem] text-text">{formatKopecks(hall.tableHourPrice)}</dd>
-            </div>
-            <div>
-              <dt className="text-text-subtle">Дальше, полчаса</dt>
-              <dd className="font-display text-[1.0625rem] text-text">{formatKopecks(hall.tableExtra30MinPrice)}</dd>
-            </div>
-            {hall.robotHourPrice !== null && (
-              <div>
-                <dt className="text-text-subtle">С роботом, час</dt>
-                <dd className="font-display text-[1.0625rem] text-text">{formatKopecks(hall.robotHourPrice)}</dd>
-              </div>
-            )}
-            <div>
-              <dt className="text-text-subtle">Столов</dt>
-              <dd className="font-display text-[1.0625rem] text-text">
-                {hall.tables} {plural(hall.tables, 'стол', 'стола', 'столов')}
-              </dd>
-            </div>
-          </dl>
-
-          {canBook && hall.tables > 0 && (
-            <div className="mt-auto pt-5">
-              <Link href={`/clubs/${slug}/booking?hall=${hall.id}`}>
-                <Button variant="secondary" size="sm">
-                  Забронировать в этом зале
-                </Button>
-              </Link>
-            </div>
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/**
- * Кому звонить про этот зал: свои телефон и почта зала (решение владельца от
- * 25.09.2026), а без них — клуба, с пометкой, что это общий номер.
- */
-function HallContacts({ hall, tenant }: { hall: PublicTenant['halls'][number]; tenant: PublicTenant }) {
-  const own = hall.phone !== null || hall.email !== null;
-  const phone = hall.phone ?? tenant.phone;
-  const email = hall.email ?? tenant.email;
-
-  if (!phone && !email) {
-    return null;
-  }
-
-  return (
-    <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.875rem]">
-      {phone && (
-        <a href={`tel:${phone}`} className="text-text-accent underline-offset-2 hover:underline">
-          {phone}
-        </a>
-      )}
-      {email && (
-        <a href={`mailto:${email}`} className="text-text-accent underline-offset-2 hover:underline">
-          {email}
-        </a>
-      )}
-      {!own && <span className="text-[0.8125rem] text-text-subtle">общий номер клуба</span>}
-    </p>
-  );
 }
 
 /** Фильтр вкладки «Мероприятия» (решение владельца от 27.09.2026). */
@@ -391,7 +272,6 @@ function CatalogTab({
                 <p className="font-display text-[1.125rem] text-text">{formatKopecks(item.price)}</p>
                 <p className="mt-0.5 text-[0.8125rem] text-text-muted">
                   {item.nextStartsAt ? `Ближайшее: ${shortWhen(item.nextStartsAt)}` : 'Сейчас в расписании нет'}
-                  {item.upcomingCount > 1 && ` · всего впереди ${item.upcomingCount}`}
                 </p>
 
                 {item.upcomingCount > 0 && (
@@ -468,13 +348,7 @@ function PlansTab({ plans }: { plans: PublicPlan[] | null }) {
   }
 
   return (
-    <div className="grid gap-4">
-      <p className="text-[0.875rem] text-text-muted">
-        Абонемент оплачивает записи сам: визит списывается при записи и возвращается при отмене. Купить — у
-        администратора клуба.
-      </p>
-      <PlanGroups plans={plans} />
-    </div>
+    <PlanGroups plans={plans} />
   );
 }
 
@@ -494,53 +368,4 @@ function CardsSkeleton() {
       ))}
     </div>
   );
-}
-
-function ClockIcon() {
-  return (
-    <svg viewBox="0 0 16 16" className="mt-0.5 h-4 w-4 shrink-0 text-text-accent" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-      <circle cx="8" cy="8" r="6.2" />
-      <path d="M8 4.8V8l2.2 1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function PinIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      className="mt-0.5 h-4 w-4 shrink-0 text-text-accent"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      aria-hidden="true"
-    >
-      <path d="M8 14.5s4.5-4.2 4.5-7.7a4.5 4.5 0 1 0-9 0c0 3.5 4.5 7.7 4.5 7.7Z" />
-      <circle cx="8" cy="6.8" r="1.6" />
-    </svg>
-  );
-}
-
-/**
- * Где зал: город и адрес одной строкой. Город приписывается, только если его
- * в адресе ещё нет: DaData пишет «г Красноярск, ул …», и «Красноярск, г
- * Красноярск» читалось бы как ошибка вёрстки.
- */
-function placeOf(hall: PublicTenant['halls'][number]): string {
-  if (!hall.address) {
-    return hall.city ?? '';
-  }
-
-  const repeats = hall.city !== null && hall.address.toLowerCase().includes(hall.city.toLowerCase());
-
-  return repeats || !hall.city ? hall.address : `${hall.city}, ${hall.address}`;
-}
-
-/** Яндекс.Карты: по координатам дома, а без них — поиском по адресу. */
-function mapHref(hall: PublicTenant['halls'][number]): string {
-  if (hall.latitude !== null && hall.longitude !== null) {
-    return `https://yandex.ru/maps/?pt=${hall.longitude},${hall.latitude}&z=17&l=map`;
-  }
-
-  return `https://yandex.ru/maps/?text=${encodeURIComponent(placeOf(hall))}`;
 }

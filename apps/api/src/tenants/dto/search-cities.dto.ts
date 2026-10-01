@@ -19,4 +19,9 @@ export class SearchCitiesDto implements CitySearchQuery {
   @Min(1)
   @Max(50)
   limit?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  region?: string;
 }

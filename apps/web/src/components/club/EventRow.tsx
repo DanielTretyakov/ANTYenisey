@@ -4,6 +4,7 @@ import Link from 'next/link';
 import type { ClubEvent, EventKind } from '@yenisey/types';
 import { WhenSpan } from '@/components/club/When';
 import { Button } from '@/components/ui/Button';
+import { cn } from '@/lib/cn';
 import { seatsLabel, useEventAction, type EventViewer } from '@/lib/eventViewer';
 import { formatKopecks } from '@/lib/money';
 import { loginHref } from '@/lib/next';
@@ -85,7 +86,21 @@ export function EventRow({
             )}
           </button>
 
-          {event.subtitle && <span className="mt-0.5 block text-[0.8125rem] text-text-muted">{event.subtitle}</span>}
+          {/* Зал и тренер — одной строкой (решение от 30.09.2026: зал у каждого
+              мероприятия). Зала нет, только если вид идёт в нескольких залах, а
+              проведение в сетку не поставлено. */}
+          <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[0.8125rem] text-text-muted">
+            <span className={cn('inline-flex items-center gap-1', event.hall ? 'text-text' : 'text-text-subtle')}>
+              <HallPin />
+              {event.hall ?? 'зал уточняйте у клуба'}
+            </span>
+            {event.subtitle && (
+              <>
+                <span aria-hidden="true">·</span>
+                {event.subtitle}
+              </>
+            )}
+          </span>
 
           <span className="mt-0.5 block text-[0.8125rem] text-text-muted">
             {/* Подсказка, чем будет оплачена запись: абонементом — вместо цены.
@@ -157,4 +172,13 @@ export function shortWhen(instant: string): string {
   const time = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(value);
 
   return `${day}, ${time}`;
+}
+
+function HallPin() {
+  return (
+    <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 shrink-0 text-text-accent" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <path d="M8 14.5s4.5-4.2 4.5-7.7a4.5 4.5 0 1 0-9 0c0 3.5 4.5 7.7 4.5 7.7Z" />
+      <circle cx="8" cy="6.8" r="1.6" />
+    </svg>
+  );
 }

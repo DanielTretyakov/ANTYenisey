@@ -1454,9 +1454,9 @@ SELECT pg_temp.expect('DU',
   $q$UPDATE "Hall" SET "addressFiasId" = NULL WHERE id = 'h1'$q$,
   '23514', 'Hall_address_verified');
 
--- DV. Седьмая ценность — предел шесть.
+-- DV. Четвёртая ценность — предел три (решение от 01.10.2026).
 SELECT pg_temp.expect('DV',
-  $q$UPDATE "Tenant" SET "values" = (SELECT jsonb_agg(jsonb_build_object('title', 'Пункт ' || n, 'text', '')) FROM generate_series(1, 7) n) WHERE id = 't1'$q$,
+  $q$UPDATE "Tenant" SET "values" = (SELECT jsonb_agg(jsonb_build_object('title', 'Пункт ' || n, 'text', '')) FROM generate_series(1, 4) n) WHERE id = 't1'$q$,
   '23514', 'Tenant_values_sane');
 
 -- DW. Ссылка «ВКонтакте» на чужой домен.
@@ -1701,3 +1701,44 @@ SELECT pg_temp.expect('FF',
 SELECT pg_temp.expect('FG',
   $q$UPDATE "Hall" SET "workingHours" = '"08:00-23:00"' WHERE id = 'h1'$q$,
   '23514', 'Hall_working_hours_shape');
+
+-- ---------------------------------------------------------------------------
+-- 40. Приветствие клуба и прочтение ленты
+-- ---------------------------------------------------------------------------
+
+-- FH. Обычная публикация без автора.
+SELECT pg_temp.expect('FH',
+  $q$INSERT INTO "ClubPost" (id,"tenantId",title,body,"updatedAt") VALUES ('cp_x','t1','Акция','Текст',now())$q$,
+  '23514', 'ClubPost_welcome_shape');
+
+-- FI. «Собирать из данных клуба» у обычной публикации.
+SELECT pg_temp.expect('FI',
+  $q$INSERT INTO "ClubPost" (id,"tenantId","authorId",title,body,"autoBody","updatedAt") VALUES ('cp_x','t1','c1','Акция','Текст',true,now())$q$,
+  '23514', 'ClubPost_welcome_shape');
+
+-- FJ. Приветствие без автора законно; второе в том же клубе — нет.
+DO $$ BEGIN
+  INSERT INTO "ClubPost" (id,"tenantId",title,body,welcome,"autoBody","publishedAt","updatedAt")
+  VALUES ('cp_w1','t1','Добро пожаловать','Текст',true,true,now(),now());
+  RAISE NOTICE 'FJ. Приветствие клуба без автора............... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'FJ. ПРОВАЛ: %', SQLERRM; END $$;
+
+SELECT pg_temp.expect('FK',
+  $q$INSERT INTO "ClubPost" (id,"tenantId",title,body,welcome,"updatedAt") VALUES ('cp_w2','t1','Ещё одно','Текст',true,now())$q$,
+  '23505', 'ClubPost_one_welcome');
+
+-- FL. Отметка прочтения уходит вместе с публикацией: Restrict запер бы удаление.
+DO $$
+DECLARE left_reads int;
+BEGIN
+  INSERT INTO "ClubPost" (id,"tenantId","authorId",title,body,"publishedAt","updatedAt")
+  VALUES ('cp_r','t1','c1','Акция','Текст',now(),now());
+  INSERT INTO "ClubPostRead" ("userId","postId") VALUES ('u1','cp_r');
+  DELETE FROM "ClubPost" WHERE id = 'cp_r';
+  SELECT count(*) INTO left_reads FROM "ClubPostRead" WHERE "postId" = 'cp_r';
+  IF left_reads = 0 THEN
+    RAISE NOTICE 'FL. Прочтение удалено вместе с публикацией...... OK (ожидалось)';
+  ELSE
+    RAISE NOTICE 'FL. ПРОВАЛ: осталось отметок %', left_reads;
+  END IF;
+EXCEPTION WHEN others THEN RAISE NOTICE 'FL. ПРОВАЛ: %', SQLERRM; END $$;

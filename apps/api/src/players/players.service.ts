@@ -13,9 +13,10 @@ import { FileIntake } from '../files/file-intake.service';
 import { FileStorage } from '../files/file-storage';
 import { PrismaService } from '../prisma/prisma.service';
 import { StaffNotifier } from '../notifications/staff-notifier.service';
+import { RatingService } from '../rating/rating.service';
 import type { AchievementDto, SetRankDto, UpdateEquipmentDto } from './dto/player.dto';
 import { PlayerAccess } from './player-access.service';
-import { canSeeProfile, cleanText, decideRankEdit, isProfilePublic, type RankState } from './player-rules';
+import { canSeeProfile, canSeeVisits, cleanText, decideRankEdit, isProfilePublic, type RankState } from './player-rules';
 
 /**
  * Больше достижений человеку не нужно, а список без потолка — место, куда
@@ -58,6 +59,7 @@ const PROFILE_SELECT = {
   fullName: true,
   birthDate: true,
   gender: true,
+  ratingHidden: true,
   playerProfile: { select: { avatarFileId: true, blade: true, forehandRubber: true, backhandRubber: true } },
   achievements: {
     select: ACHIEVEMENT_SELECT,
@@ -87,6 +89,7 @@ export class PlayersService {
     private readonly intake: FileIntake,
     private readonly access: PlayerAccess,
     private readonly staff: StaffNotifier,
+    private readonly rating: RatingService,
   ) {}
 
   /**
@@ -137,6 +140,9 @@ export class PlayersService {
             }
           : null,
       hiddenFromPublic: !isProfilePublic(row.birthDate, today),
+      visits: canSeeVisits(row.ratingHidden, owner, viewer)
+        ? await this.rating.playerTops(row.id, row.ratingHidden)
+        : null,
     };
   }
 

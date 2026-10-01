@@ -224,6 +224,7 @@ async function main(): Promise<void> {
     select: { user: { select: { email: true } } },
   });
 
+  await seedWelcome(tenant.id, tenant.name);
   await seedNeighbour(cities);
 
   console.log(`Клуб «${tenant.name}» (slug: ${tenant.slug}) готов.`);
@@ -321,7 +322,31 @@ async function seedNeighbour(cities: Map<string, string>): Promise<void> {
     });
   }
 
+  await seedWelcome(tenant.id, tenant.name);
+
   console.log(`Клуб «${tenant.name}» (slug: ${tenant.slug}) готов.`);
+}
+
+/**
+ * Приветствие клуба (решение владельца от 30.09.2026): есть у каждого клуба.
+ * Текст собирает API при чтении (`autoBody`), здесь — только снимок под
+ * CHECK непустого текста. Повторный сид ничего не меняет: уникальный индекс
+ * `ClubPost_one_welcome`.
+ */
+async function seedWelcome(tenantId: string, name: string): Promise<void> {
+  await prisma.clubPost.createMany({
+    data: [
+      {
+        tenantId,
+        title: `Добро пожаловать в «${name}»`,
+        body: 'Добро пожаловать!',
+        welcome: true,
+        autoBody: true,
+        publishedAt: new Date(),
+      },
+    ],
+    skipDuplicates: true,
+  });
 }
 
 main()

@@ -408,7 +408,7 @@ function SubscriptionRules({ soft }: { soft: boolean }) {
 }
 
 /**
- * Ценности клуба — до шести карточек «заголовок и пара строк» под описанием
+ * Ценности клуба — до трёх карточек «заголовок и пара строк» под описанием
  * (решение владельца от 25.09.2026). Порядок — как на странице клуба.
  */
 function ValuesEditor({ values, onChange }: { values: ClubValue[]; onChange: (values: ClubValue[]) => void }) {

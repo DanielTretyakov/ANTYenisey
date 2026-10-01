@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { BookingDay, BookingDayTable } from '@yenisey/types';
 import {
+  blockSpans,
   bookableDates,
   bookableMinutes,
   canBook,
@@ -12,6 +13,8 @@ import {
   formatMinute,
   gridMinutes,
   isBusy,
+  pickAfterClick,
+  pickPart,
   slotsOf,
 } from './bookingGrid.ts';
 
@@ -191,5 +194,132 @@ describe('подписи', () => {
     // Дата разбирается в UTC: иначе у клиента восточнее Гринвича «1 сентября»
     // показалось бы тридцать первым августа.
     assert.match(formatDate('2026-09-01'), /1 сентября/);
+  });
+});
+
+describe('pickAfterClick', () => {
+  const free = table();
+  const at = (startMinute: number, durationMinutes = 30) => ({ tableId: 'table', startMinute, durationMinutes });
+
+  it('первый щелчок — начало в один шаг', () => {
+    assert.deepEqual(pickAfterClick(day(), free, null, 1140), at(1140));
+  });
+
+  it('щелчок ниже — отрезок от первой до последней клетки', () => {
+    assert.deepEqual(pickAfterClick(day(), free, at(1140), 1200), at(1140, 90));
+  });
+
+  it('по начальной — выбор снят', () => {
+    assert.equal(pickAfterClick(day(), free, at(1140, 90), 1140), null);
+  });
+
+  it('по последней клетке — короче на неё; внутри — до неё включительно', () => {
+    assert.deepEqual(pickAfterClick(day(), free, at(1140, 90), 1200), at(1140, 60));
+    assert.deepEqual(pickAfterClick(day(), free, at(1140, 120), 1170), at(1140, 60));
+  });
+
+  it('выше начала или другой стол — новое начало', () => {
+    assert.deepEqual(pickAfterClick(day(), free, at(1140, 60), 1080), at(1080));
+    assert.deepEqual(
+      pickAfterClick(day(), { ...free, tableId: 'other' }, at(1140, 60), 1200),
+      { tableId: 'other', startMinute: 1200, durationMinutes: 30 },
+    );
+  });
+
+  it('между щелчками занято — новое начало там, куда щёлкнули', () => {
+    const busy = table([{ startMinute: 1170, endMinute: 1200 }]);
+
+    assert.deepEqual(pickAfterClick(day(), busy, at(1140), 1230), at(1230));
+  });
+});
+
+describe('pickPart', () => {
+  const pick = { tableId: 'table', startMinute: 1140, durationMinutes: 90 };
+
+  it('начало, внутри и вне', () => {
+    assert.equal(pickPart(pick, 'table', 1140), 'start');
+    assert.equal(pickPart(pick, 'table', 1200), 'inside');
+    assert.equal(pickPart(pick, 'table', 1230), null);
+    assert.equal(pickPart(pick, 'other', 1170), null);
+    assert.equal(pickPart(null, 'table', 1140), null);
+  });
+});
+
+describe('blockSpans', () => {
+  const rows = [1080, 1110, 1140, 1170, 1200, 1230]; // 18:00–21:00, шаг 30
+  type Block = {
+    startMinute: number;
+    endMinute: number;
+    kind: string;
+    title: string;
+    subtitle: string | null;
+    event: { kind: string; id: string } | null;
+  };
+  const training: Block = {
+    startMinute: 1080,
+    endMinute: 1200,
+    kind: 'TRAINING',
+    title: 'Детская',
+    subtitle: null,
+    event: { kind: 'TRAINING', id: 't1' },
+  };
+  const at = (blocks: Block[]) => ({ blocks });
+
+  it('тренировка на четырёх столах на два часа — один прямоугольник', () => {
+    const spans = blockSpans([at([training]), at([training]), at([training]), at([training])], rows, 30);
+
+    assert.equal(spans.length, 1);
+    assert.deepEqual(
+      { first: spans[0]!.firstTable, last: spans[0]!.lastTable, start: spans[0]!.rowStart, end: spans[0]!.rowEnd },
+      { first: 0, last: 3, start: 0, end: 4 },
+    );
+  });
+
+  it('стол без мероприятия посередине разрывает блок', () => {
+    const spans = blockSpans([at([training]), at([]), at([training])], rows, 30);
+
+    assert.deepEqual(
+      spans.map((span) => [span.firstTable, span.lastTable]),
+      [
+        [0, 0],
+        [2, 2],
+      ],
+    );
+  });
+
+  it('разное время или другое мероприятие — разные блоки', () => {
+    const later = { ...training, startMinute: 1110 };
+    const other = { ...training, event: { kind: 'TRAINING', id: 't2' } };
+
+    assert.equal(blockSpans([at([training]), at([later])], rows, 30).length, 2);
+    assert.equal(blockSpans([at([training]), at([other])], rows, 30).length, 2);
+  });
+
+  it('аренды рядом не склеиваются', () => {
+    const rent: Block = { startMinute: 1080, endMinute: 1140, kind: 'RENT', title: 'Стол арендован', subtitle: null, event: null };
+
+    assert.equal(blockSpans([at([rent]), at([rent])], rows, 30).length, 2);
+  });
+
+  it('начавшееся до первой строки обрезается, невидимое пропадает', () => {
+    const early = { ...training, startMinute: 1020 };
+    const gone = { ...training, startMinute: 900, endMinute: 960 };
+
+    assert.deepEqual(
+      blockSpans([at([early, gone])], rows, 30).map((span) => [span.rowStart, span.rowEnd]),
+      [[0, 4]],
+    );
+  });
+
+  it('окна шаблона одного занятия встык и на соседних столах — один блок', () => {
+    const window = (start: number, end: number): Block => ({ ...training, startMinute: start, endMinute: end, event: null });
+    const spans = blockSpans(
+      [at([window(1080, 1110), window(1110, 1200)]), at([window(1080, 1200)])],
+      rows,
+      30,
+    );
+
+    assert.equal(spans.length, 1);
+    assert.deepEqual([spans[0]!.lastTable, spans[0]!.block.endMinute, spans[0]!.rowEnd], [1, 1200, 4]);
   });
 });

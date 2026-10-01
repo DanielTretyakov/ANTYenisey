@@ -1,13 +1,23 @@
 import Link from 'next/link';
-import { NEWS_SECTION_LABELS, type NewsItem, type NewsSection } from '@yenisey/types';
+import { Fragment, type ReactNode } from 'react';
+import {
+  NEWS_SECTION_LABELS,
+  parseMarkup,
+  plainText,
+  type MarkupSpan,
+  type NewsItem,
+  type NewsSection,
+} from '@yenisey/types';
 import { cn } from '@/lib/cn';
 
 /**
  * Части новостей платформы, общие для ленты, стартовой страницы и редактора.
  *
- * Текст новости — простой: абзацы через пустую строку, перенос строки внутри
- * абзаца сохраняется. Разметки (Markdown, HTML) нет намеренно — текст
- * выводится как текст, и вставить в страницу скрипт через новость нельзя.
+ * Текст новости — простой текст с пометками (решение владельца от 30.09.2026):
+ * `**жирный**`, `*курсив*`, `__подчёркнутый__`, строки «- » — список, абзацы
+ * через пустую строку. Разбирает их общий `parseMarkup`, а элементы строятся
+ * здесь из дерева — HTML из текста не вставляется никогда, и скрипт через
+ * новость в страницу не попадёт.
  */
 
 /** «26 сентября 2026» — по часам смотрящего: новость про платформу, а не про зал. */
@@ -15,18 +25,40 @@ export function newsDate(iso: string): string {
   return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(iso));
 }
 
-/** Абзацы текста. */
+/** Текст новости: абзацы, списки и строчное оформление. */
 export function NewsBody({ body, className }: { body: string; className?: string }) {
-  const paragraphs = body.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean);
-
   return (
     <div className={cn('space-y-3 text-[0.9375rem] leading-relaxed text-text', className)}>
-      {paragraphs.map((paragraph, index) => (
-        <p key={index} className="whitespace-pre-line">
-          {paragraph}
-        </p>
-      ))}
+      {parseMarkup(body).map((block, index) =>
+        block.kind === 'paragraph' ? (
+          <p key={index} className="whitespace-pre-line">
+            <Spans spans={block.spans} />
+          </p>
+        ) : (
+          <ul key={index} className="list-disc space-y-1 pl-5 marker:text-text-accent">
+            {block.items.map((item, itemIndex) => (
+              <li key={itemIndex}>
+                <Spans spans={item} />
+              </li>
+            ))}
+          </ul>
+        ),
+      )}
     </div>
+  );
+}
+
+function Spans({ spans }: { spans: MarkupSpan[] }) {
+  return (
+    <>
+      {spans.map((span, index) => {
+        let node: ReactNode = span.text;
+        if (span.underline) node = <u className="underline-offset-2">{node}</u>;
+        if (span.italic) node = <em>{node}</em>;
+        if (span.bold) node = <strong className="font-semibold">{node}</strong>;
+        return <Fragment key={index}>{node}</Fragment>;
+      })}
+    </>
   );
 }
 
@@ -51,7 +83,8 @@ export function SectionBadge({ section }: { section: NewsSection }) {
 
 /** Первые строки текста — для ленты. */
 export function excerpt(body: string, limit = 220): string {
-  const flat = body.replace(/\s+/g, ' ').trim();
+  // Выдержка — без пометок: звёздочки в строке ленты выглядели бы мусором.
+  const flat = plainText(body).replace(/\s+/g, ' ').trim();
 
   return flat.length <= limit ? flat : `${flat.slice(0, limit).replace(/\s+\S*$/, '')}…`;
 }

@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
 import { hasAnyRole, MANAGING_ROLES, type ClubPost, type ClubPostRequest } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
+import { MarkupEditor } from '@/components/news/MarkupEditor';
 import { NewsBody, newsDate } from '@/components/news/NewsParts';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
-import { Field, inputClassName } from '@/components/ui/Field';
+import { Field } from '@/components/ui/Field';
 import { Toggle } from '@/components/ui/Toggle';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
@@ -60,9 +61,22 @@ export default function ClubPostsEditorPage() {
 
   const current = items?.find((item) => item.id === editing) ?? null;
 
+  const welcome = current?.welcome ?? false;
+  // У приветствия «собирать из данных клуба» — текст правит не человек.
+  const auto = welcome && (draft.auto ?? false);
+
   function open(item: ClubPost | null): void {
     setEditing(item?.id ?? null);
-    setDraft(item ? { title: item.title, body: item.body, published: item.publishedAt !== null } : EMPTY);
+    setDraft(
+      item
+        ? {
+            title: item.title,
+            body: item.body,
+            published: item.publishedAt !== null,
+            ...(item.welcome ? { auto: item.autoBody } : {}),
+          }
+        : EMPTY,
+    );
     setConfirmDelete(false);
     setError(null);
     setNotice(null);
@@ -74,7 +88,7 @@ export default function ClubPostsEditorPage() {
     setError(null);
     setNotice(null);
 
-    const firstPublish = draft.published && !current?.publishedAt;
+    const firstPublish = draft.published && !current?.publishedAt && !welcome;
 
     try {
       const saved = editing ? await club.updatePost(editing, draft) : await club.createPost(draft);
@@ -91,6 +105,22 @@ export default function ClubPostsEditorPage() {
       setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
     } finally {
       setPending(false);
+    }
+  }
+
+  /**
+   * «Собирать из данных клуба»: выключили — в поле ложится текст по
+   * умолчанию, чтобы править его, а не писать с нуля; включили — вернули
+   * исходный.
+   */
+  async function setAuto(next: boolean): Promise<void> {
+    setError(null);
+
+    try {
+      const text = await club.welcomeDefault();
+      setDraft((value) => ({ ...value, title: text.title, body: text.body, auto: next }));
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
     }
   }
 
@@ -116,7 +146,7 @@ export default function ClubPostsEditorPage() {
     <AdminShell>
       <h1 className="mb-2 text-[1.75rem]">Лента клуба</h1>
       <p className="mb-7 max-w-2xl text-[0.9375rem] text-text-muted">
-        Акции и объявления. Видны всем на странице клуба в блоке{' '}
+        Приветствие клуба, акции и объявления. Видны всем на странице клуба в блоке{' '}
         <Link href={`/clubs/${slug}#novosti`} className="text-text-accent underline-offset-2 hover:underline">
           «Новости клуба»
         </Link>{' '}
@@ -130,7 +160,7 @@ export default function ClubPostsEditorPage() {
       {allowed && (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
           <Card>
-            <CardHeader title="Все публикации" description="Черновики — сверху." />
+            <CardHeader title="Все публикации" description="Приветствие закреплено первым, дальше — черновики." />
             <CardBody>
               <Button type="button" variant="secondary" size="sm" className="mb-4" onClick={() => open(null)}>
                 + Новая публикация
@@ -152,7 +182,9 @@ export default function ClubPostsEditorPage() {
                       )}
                     >
                       <span className="mb-1 block text-[0.75rem] text-text-subtle">
-                        {item.publishedAt ? newsDate(item.publishedAt) : 'черновик'} · {item.author}
+                        {item.welcome
+                          ? `закреплено${item.publishedAt ? '' : ' · скрыто'}${item.autoBody ? ' · из данных клуба' : ''}`
+                          : `${item.publishedAt ? newsDate(item.publishedAt) : 'черновик'} · ${item.author}`}
                       </span>
                       <span className="block text-[0.9375rem] font-medium">{item.title}</span>
                     </button>
@@ -164,38 +196,58 @@ export default function ClubPostsEditorPage() {
 
           <Card>
             <CardHeader
-              title={editing ? 'Правка публикации' : 'Новая публикация'}
-              description="Простой текст: абзацы — через пустую строку. В сообщение клиентам уходят заголовок и первый абзац."
+              title={welcome ? 'Приветствие клуба' : editing ? 'Правка публикации' : 'Новая публикация'}
+              description={
+                welcome
+                  ? 'Закреплено первым в «Новостях клуба» — его первым читает новичок. Сообщением не рассылается, удалить нельзя — только скрыть.'
+                  : 'Жирный, курсив, подчёркивание и списки — кнопками над текстом. В сообщение клиентам уходят заголовок и первый абзац.'
+              }
             />
             <CardBody>
               {error && <Alert>{error}</Alert>}
               {notice && <Alert tone="info">{notice}</Alert>}
 
               <form onSubmit={save}>
-                <Field
-                  label="Заголовок"
-                  value={draft.title}
-                  maxLength={160}
-                  onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-                  required
-                />
-                <label className="mb-4 block">
-                  <span className="mb-1.5 block text-[0.8125rem] font-medium text-text-muted">Текст</span>
-                  <textarea
-                    value={draft.body}
-                    onChange={(event) => setDraft({ ...draft, body: event.target.value })}
-                    rows={10}
-                    maxLength={20000}
-                    required
-                    className={cn(inputClassName, 'resize-y')}
+                {welcome && (
+                  <Toggle
+                    label="Собирать из данных клуба"
+                    hint={
+                      auto
+                        ? 'Залы, адреса, часы работы, цены и контакты берутся из настроек и обновляются сами. Выключите, чтобы написать своё.'
+                        : 'Сейчас — ваш текст. Включите, чтобы вернуть собранный из данных клуба.'
+                    }
+                    checked={auto}
+                    onChange={(event) => void setAuto(event.target.checked)}
                   />
-                </label>
+                )}
+
+                {!auto && (
+                  <>
+                    <Field
+                      label="Заголовок"
+                      value={draft.title}
+                      maxLength={160}
+                      onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+                      required
+                    />
+                    <MarkupEditor
+                      label="Текст"
+                      value={draft.body}
+                      onChange={(body) => setDraft({ ...draft, body })}
+                      rows={welcome ? 16 : 10}
+                      maxLength={20000}
+                      required
+                    />
+                  </>
+                )}
                 <Toggle
                   label="Опубликовать"
                   hint={
-                    current?.publishedAt
-                      ? 'Без галочки — снять со страницы клуба в черновики.'
-                      : 'При первой публикации клиенты клуба получат сообщение. Без галочки — черновик.'
+                    welcome
+                      ? 'Без галочки — приветствие скрыто со страницы клуба.'
+                      : current?.publishedAt
+                        ? 'Без галочки — снять со страницы клуба в черновики.'
+                        : 'При первой публикации клиенты клуба получат сообщение. Без галочки — черновик.'
                   }
                   checked={draft.published}
                   onChange={(event) => setDraft({ ...draft, published: event.target.checked })}
@@ -205,7 +257,12 @@ export default function ClubPostsEditorPage() {
                   <Button type="submit" pending={pending}>
                     Сохранить
                   </Button>
-                  {editing && !confirmDelete && (
+                  {welcome && !auto && (
+                    <Button type="button" variant="ghost" onClick={() => void setAuto(true)}>
+                      Вернуть исходный текст
+                    </Button>
+                  )}
+                  {editing && !welcome && !confirmDelete && (
                     <Button type="button" variant="ghost" onClick={() => setConfirmDelete(true)}>
                       Удалить
                     </Button>

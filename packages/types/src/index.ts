@@ -7,6 +7,7 @@ export * from './coach';
 export * from './desk';
 export * from './family';
 export * from './halls';
+export * from './markup';
 export * from './names';
 export * from './news';
 export * from './numbers';

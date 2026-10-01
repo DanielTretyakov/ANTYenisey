@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   canReadFile,
   canSeeProfile,
+  canSeeVisits,
   cleanText,
   decideRankEdit,
   decideRankReview,
@@ -214,5 +215,22 @@ describe('decideRankReview', () => {
     const result = decideRankReview(rejected, { ...review, decision: 'REJECTED', reason: 'Приказ другого вида спорта' });
 
     assert.equal(result.ok && result.changed, true);
+  });
+});
+
+describe('canSeeVisits', () => {
+  const owner = { ownerId: 'p', birthDate: new Date('2000-01-01') };
+  const stranger = { viewerId: 's', managesOwner: false, guardsOwner: false };
+
+  it('открыт всем, пока игрок не скрылся из рейтингов', () => {
+    assert.equal(canSeeVisits(false, owner, stranger), true);
+    assert.equal(canSeeVisits(false, owner, { ...stranger, viewerId: null }), true);
+  });
+
+  it('скрывшегося видят только он сам и родитель — не администратор клуба', () => {
+    assert.equal(canSeeVisits(true, owner, stranger), false);
+    assert.equal(canSeeVisits(true, owner, { ...stranger, managesOwner: true }), false);
+    assert.equal(canSeeVisits(true, owner, { ...stranger, viewerId: 'p' }), true);
+    assert.equal(canSeeVisits(true, owner, { ...stranger, guardsOwner: true }), true);
   });
 });

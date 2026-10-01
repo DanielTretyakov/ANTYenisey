@@ -1,6 +1,18 @@
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
-import type { ClubPostRequest } from '@yenisey/types';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
+import type { ClubPostRequest, ClubPostsReadRequest } from '@yenisey/types';
 
 const trim = ({ value }: { value: unknown }): unknown => (typeof value === 'string' ? value.trim() : value);
 
@@ -20,6 +32,21 @@ export class ClubPostDto implements ClubPostRequest {
 
   @IsBoolean()
   published: boolean;
+
+  /** Только у приветствия: собирать текст из данных клуба. */
+  @IsOptional()
+  @IsBoolean()
+  auto?: boolean;
+}
+
+/** Прочитанное в окне новостей — пачкой, не больше страницы окна с запасом. */
+export class ClubPostsReadDto implements ClubPostsReadRequest {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  @MaxLength(40, { each: true })
+  ids: string[];
 }
 
 export class ClubPostsQueryDto {

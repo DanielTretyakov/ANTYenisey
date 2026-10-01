@@ -346,9 +346,12 @@ async function main() {
     'цена с роботом показана только там, где робот есть',
     (r.body?.halls ?? []).every((hall) => hall.robotHourPrice === null || hall.robotHourPrice > 0),
   );
+  // Пояс зала с 30.09.2026 в карточке есть: по нему считается «открыто
+  // сейчас» в карточке зала. Секретом он не был — открытая сетка брони
+  // отдаёт его с залом и раньше. Шага брони в карточке по-прежнему нет.
   assert(
-    'ни шага брони, ни часового пояса зала наружу не уходит',
-    (r.body?.halls ?? []).every((hall) => !('bookingStep' in hall) && !('timezone' in hall)),
+    'шаг брони наружу не уходит, пояс зала — ради «открыто сейчас»',
+    (r.body?.halls ?? []).every((hall) => !('bookingStep' in hall) && typeof hall.timezone === 'string'),
   );
   r = await call('/clubs/net-takogo-kluba');
   check('несуществующий клуб', 404, r.status);
@@ -2238,6 +2241,31 @@ async function main() {
     );
   }
 
+  // Регион (решение владельца от 30.09.2026): то же правило, что у города, —
+  // регион города клуба ИЛИ хотя бы одного его зала.
+  r = await call('/cities/regions');
+  check('регионы справочника открыты без входа', 200, r.status);
+  assert('Красноярский край среди регионов', (r.body ?? []).includes('Красноярский край'));
+  assert('регионы по алфавиту и без повторов', (r.body ?? []).every((region, index, all) => index === 0 || all[index - 1] < region));
+
+  const krai = encodeURIComponent('Красноярский край');
+  r = await cityQuery('а', `&region=${krai}`);
+  assert(
+    'подсказки городов сужены регионом',
+    (r.body ?? []).length > 0 && (r.body ?? []).every((city) => city.region === 'Красноярский край'),
+  );
+
+  if (minusinsk) {
+    r = await call(`/clubs?region=${krai}`);
+    assert(
+      'клуб находится по региону ЗАЛА, а не только по региону клуба',
+      (r.body ?? []).some((club) => club.slug === 'sayany' && club.city !== 'Минусинск'),
+    );
+  }
+
+  r = await call(`/clubs?region=${encodeURIComponent('Камчатский край')}`);
+  assert('в чужом регионе «Енисея» нет', !(r.body ?? []).some((club) => club.slug === 'yenisey'));
+
   r = await call('/clubs?query=%D0%B5%D0%BD%D0%B8%D1%81');
   assert(
     'поиск по обрывку названия в нижнем регистре находит «АНТ «Енисей»»',
@@ -2295,6 +2323,12 @@ async function main() {
   assert(
     'анониму не сообщается, записан ли он',
     anonymous.every((event) => event.registered === null),
+  );
+  // Зал у каждой строки (решение владельца от 30.09.2026): из окна сетки,
+  // единственного зала вида или клуба — или честное «неизвестно» (null).
+  assert(
+    'у каждого мероприятия есть поле зала',
+    anonymous.every((event) => 'hall' in event && (event.hall === null || typeof event.hall === 'string')),
   );
 
   r = await asMe('/clubs/yenisey/events');
@@ -4924,9 +4958,9 @@ async function clubPage() {
   check('ссылка ВКонтакте в поле MAX отклонена', 400, r.status);
   r = await asAdmin('/clubs/yenisey/settings', {
     method: 'PATCH',
-    json: { values: Array.from({ length: 7 }, (_, index) => ({ title: `Пункт ${index + 1}`, text: '' })) },
+    json: { values: Array.from({ length: 4 }, (_, index) => ({ title: `Пункт ${index + 1}`, text: '' })) },
   });
-  check('седьмая ценность отклонена', 400, r.status);
+  check('четвёртая ценность отклонена — ключевых не больше трёх', 400, r.status);
   r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: { values: [{ title: '', text: 'без заголовка' }] } });
   check('ценность без заголовка отклонена', 400, r.status);
 
@@ -5912,9 +5946,29 @@ async function visitRating() {
   r = await call('/me/rating', { method: 'PUT', json: { hidden: true } });
   check('без входа скрыться нельзя', 401, r.status);
 
+  // «Больше всего посещений» в профиле (решение владельца от 30.09.2026).
+  const meId = (await asClient('/auth/me')).body?.id;
+
+  r = await call(`/players/${meId}`);
+  assert(
+    'в профиле — клубы по посещениям',
+    Array.isArray(r.body?.visits?.all) && r.body.visits.all.some((club) => club.slug === 'yenisey' && club.visits > 0),
+  );
+  assert('месяц не больше года, год не больше всего времени', (() => {
+    const of = (rows) => rows.find((club) => club.slug === 'yenisey')?.visits ?? 0;
+    const v = r.body?.visits;
+    return v && of(v.month) <= of(v.year) && of(v.year) <= of(v.all);
+  })());
+
   r = await asClient('/me/rating', { method: 'PUT', json: { hidden: true } });
   check('клиент скрылся из рейтингов', 200, r.status);
   assert('и его в рейтинге нет', !(await inRating()));
+
+  r = await call(`/players/${meId}`);
+  assert('посторонний не видит его посещений', r.status === 200 && r.body?.visits === null);
+
+  r = await asClient(`/players/${meId}`);
+  assert('а сам — видит, с пометкой', r.body?.visits?.hiddenFromOthers === true);
 
   r = await asClient('/me/rating', { method: 'PUT', json: { hidden: false } });
   check('и вернулся', 200, r.status);
@@ -5943,6 +5997,86 @@ async function clubPosts() {
   r = await asAdmin('/clubs/yenisey/manage/posts', { method: 'POST', json: { ...draft, title: '   ' } });
   check('пустой заголовок отклонён', 400, r.status);
 
+  // Приветствие клуба (решение владельца от 30.09.2026): есть у каждого клуба.
+  r = await call('/clubs/yenisey/posts');
+  const pinned = r.body?.pinned;
+  assert('закреплено приветствие', pinned?.welcome === true && typeof pinned?.id === 'string');
+  assert('его нет среди обычных публикаций', !(r.body?.items ?? []).some((post) => post.welcome));
+  assert('анониму ничего не горит', r.body?.unreadCount === 0 && pinned?.unread === false);
+
+  r = await call('/clubs/sayany/posts');
+  assert('у соседнего клуба — своё приветствие', r.body?.pinned?.welcome === true && r.body.pinned.id !== pinned?.id);
+
+  r = await asClient('/clubs/yenisey/posts');
+  assert('новичку приветствие горит непрочитанным', r.body?.pinned?.unread === true && r.body?.unreadCount >= 1);
+
+  r = await asClient('/me/clubs/yenisey', { method: 'PUT' });
+  check('клуб стал своим', 200, r.status);
+
+  r = await asClient('/me/club-posts/unread');
+  check('непрочитанное по моим клубам', 200, r.status);
+  const unreadBefore = (r.body?.clubs ?? []).find((club) => club.slug === 'yenisey')?.unread ?? 0;
+  assert('«Енисей» в нём со счётчиком', unreadBefore >= 1);
+
+  r = await asClient('/clubs/yenisey/posts/read', { method: 'POST', json: { ids: [pinned?.id] } });
+  check('приветствие прочитано', 204, r.status);
+
+  r = await asClient('/clubs/yenisey/posts');
+  assert('и больше не горит', r.body?.pinned?.unread === false);
+
+  r = await asClient('/me/club-posts/unread');
+  assert(
+    'счётчик клуба уменьшился',
+    ((r.body?.clubs ?? []).find((club) => club.slug === 'yenisey')?.unread ?? 0) === unreadBefore - 1,
+  );
+
+  r = await call('/clubs/yenisey/posts/read', { method: 'POST', json: { ids: [pinned?.id] } });
+  check('без входа отметить нельзя', 401, r.status);
+
+  r = await asClient('/clubs/yenisey/posts/read', { method: 'POST', json: { ids: [] } });
+  check('пустая пачка отклонена', 400, r.status);
+
+  r = await asAdmin(`/clubs/yenisey/manage/posts/${pinned?.id}`, { method: 'DELETE' });
+  check('приветствие не удаляется', 409, r.status);
+
+  r = await asAdmin('/clubs/yenisey/manage/posts/welcome/default');
+  check('текст приветствия по умолчанию', 200, r.status);
+  assert('собран из данных клуба', /^Добро пожаловать в «/.test(r.body?.title ?? '') && /Где мы играем/.test(r.body?.body ?? ''));
+
+  r = await asAdmin('/clubs/yenisey/manage/posts');
+  const welcomeBefore = (r.body ?? []).find((post) => post.welcome);
+  assert('в редакторе приветствие первым', r.body?.[0]?.welcome === true);
+
+  r = await asAdmin(`/clubs/yenisey/manage/posts/${pinned?.id}`, {
+    method: 'PATCH',
+    json: { title: `Привет от проверки ${RUN}`, body: '**Свой** текст приветствия.', published: true, auto: false },
+  });
+  check('своё приветствие сохранено', 200, r.status);
+  assert('и собирать перестало', r.body?.autoBody === false);
+
+  r = await call('/clubs/yenisey/posts');
+  assert('на странице — свой текст', r.body?.pinned?.body === '**Свой** текст приветствия.');
+
+  r = await asAdmin(`/clubs/yenisey/manage/posts/${pinned?.id}`, {
+    method: 'PATCH',
+    json: { title: 'x', body: 'x', published: true, auto: true },
+  });
+  assert('«вернуть исходный» — снова из данных клуба', r.body?.autoBody === true && /Где мы играем/.test(r.body?.body ?? ''));
+
+  // Приветствие — как было до проверки: клуб мог написать своё.
+  if (welcomeBefore) {
+    r = await asAdmin(`/clubs/yenisey/manage/posts/${pinned?.id}`, {
+      method: 'PATCH',
+      json: {
+        title: welcomeBefore.title,
+        body: welcomeBefore.body,
+        published: welcomeBefore.publishedAt !== null,
+        auto: welcomeBefore.autoBody,
+      },
+    });
+    check('приветствие возвращено как было', 200, r.status);
+  }
+
   r = await asAdmin('/clubs/yenisey/manage/posts', { method: 'POST', json: draft });
   check('черновик заведён', 201, r.status);
   const postId = r.body?.id;
@@ -5962,6 +6096,14 @@ async function clubPosts() {
   r = await asClient('/me/club-posts?limit=5');
   check('«новости моих клубов» читаются', 200, r.status);
   assert('и новая публикация в них', (r.body ?? []).some((post) => post.id === postId && post.club?.slug === 'yenisey'));
+  assert('и горит новой', (r.body ?? []).some((post) => post.id === postId && post.unread === true));
+  assert('приветствий в ленте стартовой нет', (r.body ?? []).every((post) => !post.welcome));
+
+  r = await asClient('/clubs/yenisey/posts/read', { method: 'POST', json: { ids: [postId] } });
+  check('публикация прочитана', 204, r.status);
+
+  r = await asClient('/me/club-posts?limit=5');
+  assert('и больше не горит', (r.body ?? []).some((post) => post.id === postId && post.unread === false));
 
   r = await asAdmin(`/clubs/yenisey/manage/posts/${postId}`, {
     method: 'PATCH',

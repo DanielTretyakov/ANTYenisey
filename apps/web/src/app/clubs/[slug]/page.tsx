@@ -3,40 +3,46 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { BookingEntry, ClubCatalogItem, PublicPlan, PublicTenant } from '@yenisey/types';
-import { RiverBackdrop } from '@/components/brand/RiverBackdrop';
 import { ClubAbout } from '@/components/club/ClubAbout';
-import { ClubMark } from '@/components/club/ClubMark';
+import { ClubGlance } from '@/components/club/ClubGlance';
+import { ClubHero } from '@/components/club/ClubHero';
 import { ClubNewsColumn, NEWS_ANCHOR } from '@/components/club/ClubNewsColumn';
 import { ClubRatingColumn, RATING_ANCHOR } from '@/components/club/ClubRatingColumn';
-import { ClubTabs } from '@/components/club/ClubTabs';
+import { ABOUT_ANCHOR, ClubSectionNav } from '@/components/club/ClubSectionNav';
+import { ClubTabs, TABS_ANCHOR } from '@/components/club/ClubTabs';
+import { HallCards } from '@/components/club/HallCards';
 import {
   ALL_HALLS,
+  HALL_PICKER_ANCHOR,
   HallPicker,
   normalizeSelection,
   selectedHallIds,
   type HallSelection,
 } from '@/components/club/HallFilter';
 import { RowSkeleton } from '@/components/club/EventRow';
+import { SectionHeading } from '@/components/club/SectionHeading';
 import { UPCOMING_ANCHOR, UpcomingEvents, type KindFilter } from '@/components/club/UpcomingEvents';
 import { WhenSpan } from '@/components/club/When';
 import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { ClubNav } from '@/components/layout/ClubNav';
+import { PLANS_ANCHOR } from '@/components/subscriptions/PlanList';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { Alert } from '@/components/ui/Alert';
-import { Button } from '@/components/ui/Button';
 import { api, ApiError } from '@/lib/api';
 import { clubAccent } from '@/lib/clubTheme';
-import { cn } from '@/lib/cn';
-import { eventViewerOf, type EventViewer } from '@/lib/eventViewer';
-import { loginHref } from '@/lib/next';
+import { eventViewerOf } from '@/lib/eventViewer';
 import { entryPriceLabel } from '@/lib/subscriptions';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { usePersonSwitch } from '@/lib/usePersonSwitch';
-import { useFileUrl } from '@/lib/useFileUrl';
 import { useSession } from '@/lib/useSession';
 
 /**
  * Страница клуба.
+ *
+ * Вид — «витрина-журнал» (решение владельца от 30.09.2026, вариант Д):
+ * обложка с фактами и главными действиями (`ClubHero`), липкое меню разделов,
+ * мозаика из новостей, рейтинга и «коротко». Меняется только вид: блоки,
+ * якоря и действия — прежние.
  *
  * Сверху вниз (решения владельца от 24, 25 и 27.09.2026): баннер с названием
  * и сердечком «мой клуб», «О клубе» — описание, ценности, контакты, — кнопка
@@ -54,6 +60,20 @@ import { useSession } from '@/lib/useSession';
  * называют роль («цвет действия»), а не краску. Клуб без своего цвета
  * остаётся в изумруде платформы.
  */
+/** Пункты липкого меню — якоря блоков, порядок — как на странице. */
+const SECTIONS = [
+  { id: ABOUT_ANCHOR, label: 'О клубе' },
+  { id: NEWS_ANCHOR, label: 'Новости' },
+  { id: RATING_ANCHOR, label: 'Рейтинг' },
+  { id: HALL_PICKER_ANCHOR, label: 'Залы' },
+  { id: 'meropriyatiya', label: 'Мероприятия', scrollTo: TABS_ANCHOR },
+  { id: 'trenery', label: 'Тренеры', scrollTo: TABS_ANCHOR },
+  { id: PLANS_ANCHOR, label: 'Абонементы', scrollTo: TABS_ANCHOR },
+  { id: UPCOMING_ANCHOR, label: 'Расписание' },
+];
+
+const TAB_IDS = ['meropriyatiya', 'trenery', PLANS_ANCHOR];
+
 export default function ClubPage() {
   const slug = useClubSlug();
   const club = useClubApi();
@@ -126,8 +146,11 @@ export default function ClubPage() {
     const scroll = (): void => {
       const hash = window.location.hash.slice(1);
 
-      if (hash === NEWS_ANCHOR || hash === RATING_ANCHOR) {
-        requestAnimationFrame(() => document.getElementById(hash)?.scrollIntoView({ block: 'start' }));
+      // `#zaly` — прежняя вкладка залов: зал теперь у выбора зала.
+      const target = hash === 'zaly' ? HALL_PICKER_ANCHOR : hash;
+
+      if (target === NEWS_ANCHOR || target === RATING_ANCHOR || target === HALL_PICKER_ANCHOR) {
+        requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView({ block: 'start' }));
       }
     };
 
@@ -198,6 +221,14 @@ export default function ClubPage() {
       .catch(() => setFavourite(null));
   }, [session.status, club, slug, forPerson]);
 
+  // Переход к блоку по якорю. Вкладка — сменой якоря: её открывает `ClubTabs`.
+  const jump = useCallback((anchor: string) => {
+    const tab = TAB_IDS.includes(anchor);
+
+    if (tab) window.location.hash = anchor;
+    document.getElementById(tab ? TABS_ANCHOR : anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+
   // Кто смотрит — одним правилом с окном мероприятия (`eventViewerOf`).
   const viewer = eventViewerOf(session, slug, forPerson, family.selfIsChild);
 
@@ -209,16 +240,20 @@ export default function ClubPage() {
         <ClubHero
           tenant={tenant}
           slug={slug}
+          viewer={viewer}
           anonymous={session.status === 'anonymous'}
           favourite={favourite}
           onFavourite={setFavourite}
+          onSchedule={() => jump(UPCOMING_ANCHOR)}
         />
+
+        <ClubSectionNav slug={slug} items={SECTIONS} />
 
         {error && <Alert>{error}</Alert>}
 
-        <ClubAbout tenant={tenant} />
-
-        <BookingCta slug={slug} viewer={viewer} />
+        <div id={ABOUT_ANCHOR} className="scroll-mt-40">
+          <ClubAbout tenant={tenant} />
+        </div>
 
         <PersonSwitch
           people={family.children}
@@ -235,20 +270,30 @@ export default function ClubPage() {
           readOnly={family.selfIsChild}
         />
 
-        {/* Общее для всех залов — до выбора зала (решение от 27.09.2026). */}
-        <div className="mb-14 grid gap-10 lg:grid-cols-2 lg:gap-8">
+        {/* Общее для всех залов — до выбора зала (решение от 27.09.2026),
+            мозаикой (решение от 30.09.2026, вариант Д): новости и рейтинг
+            крупно, под ними — «коротко» о залах, записи и тренерах. */}
+        <div className="mb-4 grid gap-10 lg:grid-cols-2 lg:gap-4">
           <ClubNewsColumn />
           <ClubRatingColumn />
         </div>
 
-        {tenant && <HallPicker halls={tenant.halls} value={effectiveHalls} onChange={chooseHalls} />}
+        <ClubGlance tenant={tenant} mine={mine} anonymous={session.status === 'anonymous'} onJump={jump} />
+
+        {tenant && (
+          <HallPicker halls={tenant.halls} value={effectiveHalls} onChange={chooseHalls}>
+            <HallCards
+              slug={slug}
+              tenant={{ ...tenant, halls: hallIds ? tenant.halls.filter((hall) => hallIds.includes(hall.id)) : tenant.halls }}
+              viewer={viewer}
+            />
+          </HallPicker>
+        )}
 
         <ClubTabs
-          slug={slug}
           tenant={tenant}
           catalog={catalog}
           plans={plans}
-          viewer={viewer}
           hallIds={hallIds}
           onShowSchedule={showSchedule}
         />
@@ -267,203 +312,6 @@ export default function ClubPage() {
           hallNames={hallNames}
         />
       </main>
-    </div>
-  );
-}
-
-/**
- * Баннер клуба: снимок, который клуб загрузил сам, или фирменная плоскость с
- * рекой — в цвете клуба. Название, города и сердечко «мой клуб» — на нём.
- *
- * Высота задана до ответа сервера — иначе содержимое страницы подпрыгивало
- * бы, когда приедут название и снимок.
- */
-function ClubHero({
-  tenant,
-  slug,
-  anonymous,
-  favourite,
-  onFavourite,
-}: {
-  tenant: PublicTenant | null;
-  slug: string;
-  anonymous: boolean;
-  favourite: boolean | null;
-  onFavourite: (value: boolean) => void;
-}) {
-  const banner = useFileUrl(tenant?.bannerFileId ?? null);
-  const places = tenant ? [tenant.city, ...tenant.otherCities].filter(Boolean).join(', ') : '';
-
-  return (
-    <header className="relative mt-6 mb-8 overflow-hidden rounded-card text-white sm:mt-8">
-      <div
-        className="relative flex min-h-56 items-end px-6 pt-16 pb-6 sm:min-h-72 sm:px-10 sm:pb-8"
-        // Без баннера — плоскость в цвете клуба, притемнённая: белый текст на
-        // произвольном фирменном цвете иначе читался бы не всегда.
-        style={{ background: 'color-mix(in oklab, var(--accent) 55%, var(--ink-950))' }}
-      >
-        {banner ? (
-          <>
-            <img src={banner} alt="" className="absolute inset-0 h-full w-full object-cover" />
-            {/* Затемнение снизу — под названием: снимок зала бывает светлым. */}
-            <span
-              aria-hidden="true"
-              className="absolute inset-0"
-              style={{
-                background:
-                  'linear-gradient(to top, color-mix(in oklab, var(--ink-950) 80%, transparent), transparent 70%)',
-              }}
-            />
-          </>
-        ) : (
-          <RiverBackdrop orientation="landscape" />
-        )}
-
-        <div className="relative z-10 flex w-full flex-wrap items-end gap-x-5 gap-y-4">
-          {tenant ? (
-            <ClubMark club={tenant} size="lg" />
-          ) : (
-            <span className="h-16 w-16 shrink-0 rounded-control bg-white/20" aria-hidden="true" />
-          )}
-
-          <div className="min-w-0 grow">
-            {tenant ? (
-              <>
-                <h1 className="text-[1.75rem] leading-tight text-white [overflow-wrap:anywhere] sm:text-[2.25rem]">
-                  {tenant.name}
-                </h1>
-                {places && <p className="mt-1.5 text-[0.9375rem] text-white/80">{places}</p>}
-              </>
-            ) : (
-              <>
-                <span className="block h-7 w-64 rounded-full bg-white/20" />
-                <span className="mt-3 block h-3 w-32 rounded-full bg-white/15" />
-              </>
-            )}
-          </div>
-
-          <HeartButton slug={slug} anonymous={anonymous} favourite={favourite} onChange={onFavourite} />
-        </div>
-      </div>
-    </header>
-  );
-}
-
-/**
- * «Забронировать стол» — сразу под баннером и описанием (решение владельца
- * от 24.09.2026), а не под залами: у клуба с десятком залов кнопка уезжала
- * за второй экран.
- *
- * Сотруднику кнопка не показывается — бронь ссылается на карточку клиента,
- * которой у него нет. Ребёнку — тоже: до 14 за него бронирует родитель.
- */
-function BookingCta({ slug, viewer }: { slug: string; viewer: EventViewer }) {
-  if (viewer === 'staff') {
-    return null;
-  }
-
-  if (viewer === 'child') {
-    return (
-      <p className="mb-10 text-[0.875rem] text-text-muted">
-        Пока тебе нет 14, стол бронирует родитель — со своей страницы.
-      </p>
-    );
-  }
-
-  // Анониму — тоже сразу на сетку: она открыта без входа, и вход понадобится
-  // только на последнем шаге, с возвратом туда же.
-  return (
-    <div className="mb-10">
-      <Link href={`/clubs/${slug}/booking`}>
-        <Button size="lg">Забронировать стол</Button>
-      </Link>
-    </div>
-  );
-}
-
-/**
- * Сердечко «мой клуб» (решение владельца от 24.09.2026): контур — не отмечен,
- * красная заливка — отмечен.
- *
- * Избранное и заявленная принадлежность — одна кнопка, а не две: разделять их
- * значило бы объяснять человеку разницу, которой в его голове нет. Анониму
- * сердечко ведёт ко входу и обратно сюда.
- */
-function HeartButton({
-  slug,
-  anonymous,
-  favourite,
-  onChange,
-}: {
-  slug: string;
-  anonymous: boolean;
-  favourite: boolean | null;
-  onChange: (value: boolean) => void;
-}) {
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const active = favourite === true;
-  const label = active ? 'Убрать из моих клубов' : 'Сделать клуб своим';
-
-  async function toggle(): Promise<void> {
-    setPending(true);
-    setError(null);
-
-    try {
-      const clubs = active ? await api.removeClub(slug) : await api.addClub(slug);
-      onChange(clubs.some((item) => item.slug === slug));
-    } catch (cause) {
-      // Отказ «клубов уже три» приходит сюда текстом от сервера: предел живёт
-      // в базе, и повторять его здесь числом значило бы завести второе место,
-      // где он записан.
-      setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
-    } finally {
-      setPending(false);
-    }
-  }
-
-  const heart = (
-    <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
-      <path
-        d="M12 20.5s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.7c0 5.6-7.5 10.2-7.5 10.2z"
-        fill={active ? '#e5484d' : 'none'}
-        stroke={active ? '#e5484d' : 'currentColor'}
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-
-  const className = cn(
-    'grid h-12 w-12 shrink-0 place-items-center rounded-full border border-white/40 bg-black/25 text-white',
-    'backdrop-blur-sm transition-transform hover:scale-105 disabled:opacity-60',
-  );
-
-  return (
-    <div className="flex flex-col items-end gap-2">
-      {anonymous ? (
-        <Link href={loginHref()} aria-label="Войти, чтобы сделать клуб своим" title="Войти, чтобы сделать клуб своим" className={className}>
-          {heart}
-        </Link>
-      ) : (
-        <button
-          type="button"
-          aria-pressed={active}
-          aria-label={label}
-          title={label}
-          disabled={pending || favourite === null}
-          onClick={() => void toggle()}
-          className={className}
-        >
-          {heart}
-        </button>
-      )}
-
-      {error && (
-        <p className="max-w-xs rounded-control bg-black/60 px-3 py-2 text-right text-[0.8125rem] text-white" role="alert">
-          {error}
-        </p>
-      )}
     </div>
   );
 }
@@ -506,8 +354,15 @@ function MyEvents({
   }
 
   return (
-    <section className="mb-16">
-      <SectionTitle>{whose ? `Мероприятия: ${whose}` : 'Мои мероприятия'}</SectionTitle>
+    <section id="moi" className="mb-14 scroll-mt-40">
+      <SectionHeading
+        title={whose ? `Мероприятия: ${whose}` : 'Мои мероприятия'}
+        description={
+          readOnly
+            ? 'Куда ты записан в этом клубе. Записывает и отменяет родитель.'
+            : 'Куда вы записаны в этом клубе — ближайшее сверху. Отменить запись можно в «Моих записях».'
+        }
+      />
 
       {entries === null ? (
         <RowSkeleton />
@@ -547,8 +402,4 @@ function MyEvents({
       </p>
     </section>
   );
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <h2 className="mb-5 text-[1.375rem]">{children}</h2>;
 }

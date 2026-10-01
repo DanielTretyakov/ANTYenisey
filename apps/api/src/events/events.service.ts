@@ -154,6 +154,16 @@ export class EventsService {
       ...sessions.map((row) => trainingEvent(row, userId)),
     ].map((event) => ({ ...event, payWith: payWith.get(event.id) ?? null }));
 
+    // Зал у каждой строки: мероприятие без сетки и без единственного зала вида
+    // в клубе с одним залом — там же, где всё остальное.
+    if (events.some((event) => event.hall === null)) {
+      const clubHalls = await this.prisma.hall.findMany({ where: { tenantId }, select: { name: true }, take: 2 });
+
+      if (clubHalls.length === 1) {
+        for (const event of events) event.hall ??= clubHalls[0]!.name;
+      }
+    }
+
     // Общая сортировка по времени: человек смотрит на неделю клуба целиком, а
     // не отдельно на занятия и отдельно на турниры. Предел — после слияния:
     // каждая таблица отдала до N своих, ближайшие N общих — среди них.

@@ -18,4 +18,10 @@ export class SearchClubsDto implements ClubSearchQuery {
   @IsString()
   @MaxLength(40)
   cityId?: string;
+
+  /** Регион — полным названием из справочника: «Красноярский край». */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  region?: string;
 }

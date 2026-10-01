@@ -176,6 +176,171 @@ export function durationsFrom(
   return durations;
 }
 
+/** Выбранный в сетке отрезок: стол, начало и длительность. */
+export interface GridPick {
+  tableId: string;
+  startMinute: number;
+  durationMinutes: number;
+}
+
+/**
+ * Выбор щелчками по сетке (решение владельца от 30.09.2026): первая клетка —
+ * начало, клетка ниже на том же столе — конец отрезка, и всё между ними
+ * закрашивается. Выпадающий список длительности под сеткой остаётся — он
+ * меняет тот же отрезок.
+ *
+ * - нет выбора, другой стол или клетка выше начала — новое начало в один шаг;
+ * - клетка ниже — отрезок до её конца, если он весь свободен; если посередине
+ *   занято — новое начало там, куда щёлкнули: продлевать через чужую бронь
+ *   нельзя, а молча ничего не сделать — хуже;
+ * - по начальной клетке — выбор снят;
+ * - по последней клетке отрезка — отрезок короче на неё; по клетке внутри —
+ *   отрезок до неё включительно.
+ */
+export function pickAfterClick(
+  day: BookingDay,
+  table: BookingDayTable,
+  current: GridPick | null,
+  minute: number,
+): GridPick | null {
+  const step = day.stepMinutes;
+  const single: GridPick = { tableId: table.tableId, startMinute: minute, durationMinutes: step };
+
+  if (!current || current.tableId !== table.tableId || minute < current.startMinute) {
+    return single;
+  }
+
+  if (minute === current.startMinute) {
+    return null;
+  }
+
+  const end = current.startMinute + current.durationMinutes;
+
+  if (minute + step === end) {
+    return { ...current, durationMinutes: minute - current.startMinute };
+  }
+
+  const duration = minute + step - current.startMinute;
+
+  if (minute < end) {
+    return { ...current, durationMinutes: duration };
+  }
+
+  return canBook(day, table, current.startMinute, duration) ? { ...current, durationMinutes: duration } : single;
+}
+
+/** Где клетка относительно выбранного отрезка: начало, внутри или вне. */
+export function pickPart(pick: GridPick | null, tableId: string, minute: number): 'start' | 'inside' | null {
+  if (!pick || pick.tableId !== tableId) return null;
+  if (minute === pick.startMinute) return 'start';
+
+  return minute > pick.startMinute && minute < pick.startMinute + pick.durationMinutes ? 'inside' : null;
+}
+
+/** Что занимает время в сетке — ровно столько, сколько нужно для сборки блоков. */
+export interface SpanBlock {
+  startMinute: number;
+  endMinute: number;
+  kind: string;
+  title: string;
+  subtitle: string | null;
+  event: { kind: string; id: string } | null;
+}
+
+/** Какие виды занятого складываются в один блок — занятия и турниры. */
+const MERGED_KINDS = new Set(['TRAINING', 'TOURNAMENT']);
+
+/**
+ * Чем блок «один и тот же»: проведением, а у окна шаблона (проведения нет) —
+ * видом, названием и тренером. Аренда, спарринг и закрытие — каждый сам по
+ * себе: две брони рядом — две разные брони.
+ */
+function sameKey(block: SpanBlock): string | null {
+  if (block.event) return `${block.event.kind}:${block.event.id}`;
+
+  return MERGED_KINDS.has(block.kind) ? `${block.kind}|${block.title}|${block.subtitle ?? ''}` : null;
+}
+
+/** Окна одного стола встык и одного занятия — одним блоком. */
+function coalesce<B extends SpanBlock>(blocks: readonly B[]): B[] {
+  const sorted = [...blocks].sort((a, b) => a.startMinute - b.startMinute);
+  const result: B[] = [];
+
+  for (const block of sorted) {
+    const last = result[result.length - 1];
+    const key = sameKey(block);
+
+    if (last && key !== null && key === sameKey(last) && last.endMinute === block.startMinute) {
+      result[result.length - 1] = { ...last, endMinute: block.endMinute };
+    } else {
+      result.push(block);
+    }
+  }
+
+  return result;
+}
+
+/** Прямоугольник занятого в сетке: столы `[firstTable, lastTable]`, строки `[rowStart, rowEnd)`. */
+export interface BlockSpan<B extends SpanBlock> {
+  block: B;
+  firstTable: number;
+  lastTable: number;
+  rowStart: number;
+  rowEnd: number;
+}
+
+/**
+ * Занятое — прямоугольниками (решение владельца от 30.09.2026): тренировка на
+ * четырёх столах на два часа — один цельный блок, а не шестнадцать клеток.
+ *
+ * Строки — показанные клетки (`rows`, шаг `step`); блок занимает те, с
+ * которыми пересекается, — как `cellState`. Начавшееся до первой показанной
+ * строки обрезается по ней. Сливаются окна встык на одном столе и соседние
+ * столы с ОДНИМ И ТЕМ ЖЕ занятием и тем же временем (`sameKey`): две аренды
+ * рядом — две разные брони, и склеивать их значило бы соврать.
+ */
+export function blockSpans<B extends SpanBlock>(
+  tables: readonly { blocks: readonly B[] }[],
+  rows: readonly number[],
+  step: number,
+): BlockSpan<B>[] {
+  const spans: BlockSpan<B>[] = [];
+  // Открытые для продолжения на следующий стол: ключ — мероприятие и строки.
+  let open = new Map<string, BlockSpan<B>>();
+
+  tables.forEach((table, tableIndex) => {
+    const next = new Map<string, BlockSpan<B>>();
+
+    for (const block of coalesce(table.blocks)) {
+      const covered = rows
+        .map((minute, index) => (overlaps(minute, minute + step, block.startMinute, block.endMinute) ? index : -1))
+        .filter((index) => index >= 0);
+
+      if (covered.length === 0) continue;
+
+      const rowStart = covered[0]!;
+      const rowEnd = covered[covered.length - 1]! + 1;
+      const same = sameKey(block);
+      const key = same ? `${same}|${rowStart}|${rowEnd}` : null;
+      const previous = key ? open.get(key) : undefined;
+
+      if (previous && previous.lastTable === tableIndex - 1) {
+        previous.lastTable = tableIndex;
+        next.set(key!, previous);
+        continue;
+      }
+
+      const span: BlockSpan<B> = { block, firstTable: tableIndex, lastTable: tableIndex, rowStart, rowEnd };
+      spans.push(span);
+      if (key) next.set(key, span);
+    }
+
+    open = next;
+  });
+
+  return spans;
+}
+
 /** Минуты от полуночи в «15:00» — для подписей в сетке. */
 export function formatMinute(minute: number): string {
   return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;

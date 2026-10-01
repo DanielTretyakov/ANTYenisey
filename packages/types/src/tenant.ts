@@ -102,4 +102,6 @@ export interface PublicHall {
   tables: number;
   /** Часы работы: семь дней с понедельника; пусто — зал их не указал. */
   workingHours: WorkingHours | null;
+  /** Пояс зала — «открыто сейчас» считается по его часам, а не смотрящего. */
+  timezone: string;
 }

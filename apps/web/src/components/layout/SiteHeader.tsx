@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { PlatformLogo } from '@/components/brand/PlatformLogo';
+import { ClubNewsButton } from '@/components/layout/ClubNewsButton';
 import { HEADER_HEIGHT, HEADER_LOGO_HEIGHT } from '@/components/layout/metrics';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Button } from '@/components/ui/Button';
@@ -80,6 +81,7 @@ export function SiteHeader({
             {clubNav}
             <AccountNav />
           </div>
+          <ClubNewsButton />
           <MobileMenu clubNav={clubNav} />
           <ThemeToggle />
         </div>

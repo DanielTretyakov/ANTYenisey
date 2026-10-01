@@ -1165,7 +1165,7 @@ CREATE UNIQUE INDEX "TenantMembership_coach_list_order_unique"
 -- `parseClubValues`: база Json не разбирает.
 ALTER TABLE "Tenant"
   ADD CONSTRAINT "Tenant_values_sane"
-  CHECK ("values" IS NULL OR (jsonb_typeof("values") = 'array' AND jsonb_array_length("values") BETWEEN 1 AND 6));
+  CHECK ("values" IS NULL OR (jsonb_typeof("values") = 'array' AND jsonb_array_length("values") BETWEEN 1 AND 3));
 
 -- Соцсети — только https и только свой домен: адрес уходит в ссылку на
 -- открытой странице клуба.
@@ -1322,3 +1322,20 @@ ALTER TABLE "Hall"
     "workingHours" IS NULL
     OR (jsonb_typeof("workingHours") = 'array' AND jsonb_array_length("workingHours") = 7)
   );
+
+-- ---------------------------------------------------------------------------
+-- 34. Приветствие клуба и прочтение ленты
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_club_welcome_post_reads (решение владельца от
+-- 30.09.2026). Приветствие — публикация ленты, закреплённая первой: у каждого
+-- клуба ровно одно, автора у него нет (заводит платформа), и только оно
+-- может собирать текст из данных клуба. У обычной публикации автор есть
+-- всегда — ключ на членство держит, что это сотрудник этого клуба.
+ALTER TABLE "ClubPost"
+  ADD CONSTRAINT "ClubPost_welcome_shape"
+  CHECK (("welcome" OR "authorId" IS NOT NULL) AND (NOT "autoBody" OR "welcome"));
+
+CREATE UNIQUE INDEX "ClubPost_one_welcome"
+  ON "ClubPost" ("tenantId")
+  WHERE "welcome";

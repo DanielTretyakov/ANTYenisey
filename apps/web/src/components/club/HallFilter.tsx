@@ -1,8 +1,10 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import type { PublicHall } from '@yenisey/types';
 import { cn } from '@/lib/cn';
 import { plural } from '@/lib/plural';
+import { SectionHeading } from './SectionHeading';
 
 /** Что выбрано: город и, внутри него, зал. Пусто — все. */
 export interface HallSelection {
@@ -66,19 +68,32 @@ export function selectedHall(halls: readonly PublicHall[], selection: HallSelect
  * он должен читаться с первого взгляда. Выбранная залита цветом клуба.
  *
  * Городов несколько — первая строка «Все · Красноярск · Абакан», вторая — залы
- * выбранного города. Город один — сразу залы. Зал один — выбора нет.
+ * выбранного города. Город один — сразу залы. Зал один — выбора нет, но блок
+ * есть: под выбором — карточки выбранных залов (решение владельца от
+ * 30.09.2026: зал — сразу у выбора, а не отдельной вкладкой ниже).
  */
 export function HallPicker({
   halls,
   value,
   onChange,
+  children,
 }: {
   halls: readonly PublicHall[];
   value: HallSelection;
   onChange: (selection: HallSelection) => void;
+  /** Карточки выбранных залов — под кнопками выбора. */
+  children?: ReactNode;
 }) {
   if (halls.length < 2) {
-    return null;
+    return (
+      <section id={HALL_PICKER_ANCHOR} className="mb-12 scroll-mt-40">
+        <SectionHeading
+          title={halls.length === 1 ? 'Зал клуба' : 'Залы'}
+          description="Где играют, когда открыто и почём стол — бронь прямо из карточки."
+        />
+        {children}
+      </section>
+    );
   }
 
   const cities = [...new Set(halls.map(cityOf))];
@@ -86,11 +101,11 @@ export function HallPicker({
   const inCity = oneCity ? halls : value.city ? halls.filter((hall) => cityOf(hall) === value.city) : [];
 
   return (
-    <section id={HALL_PICKER_ANCHOR} className="mb-8 scroll-mt-24">
-      <h2 className="text-[1.5rem]">Выберите зал</h2>
-      <p className="mt-1 mb-5 text-[0.9375rem] text-text-muted">
-        От зала зависят мероприятия, тренеры, абонементы и расписание ниже.
-      </p>
+    <section id={HALL_PICKER_ANCHOR} className="mb-12 scroll-mt-40">
+      <SectionHeading
+        title="Выберите зал"
+        description="Под выбором — карточка зала: где он, когда открыт и почём стол. От зала зависит и всё ниже — мероприятия, тренеры, абонементы и расписание. Выбор запоминается в этом браузере."
+      />
 
       {!oneCity && (
         <Row label="Город" className="mb-3">
@@ -133,6 +148,8 @@ export function HallPicker({
           В этом городе один зал — <span className="text-text">{inCity[0]!.name}</span>.
         </p>
       )}
+
+      {children && <div className="mt-6">{children}</div>}
     </section>
   );
 }

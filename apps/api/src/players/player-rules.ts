@@ -46,6 +46,19 @@ export function canSeeProfile(owner: ProfileOwner, viewer: ProfileViewer, today:
 }
 
 /**
+ * Виден ли блок «Больше всего посещений» (решение владельца от 30.09.2026).
+ *
+ * Игрок, убравший себя из рейтингов (`User.ratingHidden`), не должен находиться
+ * по посещениям и в профиле: иначе профиль рассказал бы то, что он спрятал.
+ * Тогда блок видят только он сам и родитель, который его ведёт. Администратор
+ * клуба — нет: посещения своего клуба он видит в карточке человека, а чужих
+ * клубов ему знать незачем.
+ */
+export function canSeeVisits(ratingHidden: boolean, owner: ProfileOwner, viewer: ProfileViewer): boolean {
+  return !ratingHidden || viewer.viewerId === owner.ownerId || viewer.guardsOwner;
+}
+
+/**
  * Можно ли отдать файл.
  *
  * Аватар — тем же, кому виден профиль. Скан приказа — только самому человеку,

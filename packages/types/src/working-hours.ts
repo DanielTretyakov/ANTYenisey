@@ -118,3 +118,78 @@ function sameDay(a: WorkingDay | null, b: WorkingDay | null): boolean {
 function minutesToTime(minutes: number): string {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
+
+/**
+ * Открыт ли зал сейчас (решение владельца от 30.09.2026: часы работы в
+ * карточке зала — на виду). Время — местное время зала, а не смотрящего:
+ * человек из Москвы смотрит на зал в Красноярске.
+ *
+ * `null` — часы не указаны; `opensAt: null` — на всей неделе ни дня работы.
+ */
+export type OpenState =
+  | { open: true; closesAt: string }
+  | { open: false; opensAt: { weekday: number; time: string; inDays: number } | null };
+
+const WEEKDAY_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/** День недели (понедельник — 0) и минута суток по поясу. */
+export function localWeekMinute(now: Date, timezone: string): { weekday: number; minute: number } {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const part = (type: string): string => parts.find((item) => item.type === type)?.value ?? '';
+
+  return {
+    weekday: WEEKDAY_EN.indexOf(part('weekday')),
+    minute: Number(part('hour')) * 60 + Number(part('minute')),
+  };
+}
+
+export function openState(hours: WorkingHours | null, now: Date, timezone: string): OpenState | null {
+  if (!hours) return null;
+
+  const { weekday, minute } = localWeekMinute(now, timezone);
+  const today = hours[weekday] ?? null;
+
+  if (today) {
+    const open = timeToMinutes(today.open)!;
+    const close = timeToMinutes(today.close)!;
+
+    if (minute >= open && minute < close) {
+      return { open: true, closesAt: today.close };
+    }
+
+    if (minute < open) {
+      return { open: false, opensAt: { weekday, time: today.open, inDays: 0 } };
+    }
+  }
+
+  for (let inDays = 1; inDays <= 7; inDays += 1) {
+    const day = (weekday + inDays) % 7;
+    const next = hours[day] ?? null;
+
+    if (next) {
+      return { open: false, opensAt: { weekday: day, time: next.open, inDays } };
+    }
+  }
+
+  return { open: false, opensAt: null };
+}
+
+/** «Открыто · до 23:00», «Закрыто · откроется завтра в 08:00». */
+export function openStateLabel(state: OpenState): string {
+  if (state.open) {
+    return state.closesAt === '24:00' ? 'Открыто до полуночи' : `Открыто до ${state.closesAt}`;
+  }
+
+  if (!state.opensAt) return 'Закрыто';
+
+  const { inDays, weekday, time } = state.opensAt;
+  const when = inDays === 0 ? '' : inDays === 1 ? 'завтра ' : `в ${WEEKDAY_SHORT[weekday]!.toLowerCase()} `;
+
+  return `Закрыто · откроется ${when}в ${time}`;
+}

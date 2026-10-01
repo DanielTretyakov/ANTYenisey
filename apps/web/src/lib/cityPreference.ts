@@ -28,3 +28,29 @@ export function saveCityPreference(value: string): void {
     /* не страшно: выбор проживёт до перезагрузки */
   }
 }
+
+/**
+ * Регион поиска (решение владельца от 30.09.2026) — рядом с городом, своим
+ * ключом. Выбранный город регион ставит сам, поэтому по умолчанию — регион
+ * домашнего города.
+ */
+const REGION_KEY = 'yenisey.region';
+
+/** «Любой регион». */
+export const ANY_REGION = 'any';
+
+export function readRegionPreference(): string | null {
+  try {
+    return localStorage.getItem(REGION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveRegionPreference(value: string): void {
+  try {
+    localStorage.setItem(REGION_KEY, value);
+  } catch {
+    /* не страшно: выбор проживёт до перезагрузки */
+  }
+}

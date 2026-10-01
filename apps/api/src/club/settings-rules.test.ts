@@ -185,9 +185,10 @@ describe('parseClubValues', () => {
     assert.equal(parseClubValues([{ title: '', text: 'Без заголовка' }]).ok, false);
   });
 
-  it('седьмая ценность — ошибка', () => {
-    const seven = Array.from({ length: 7 }, (_, index) => ({ title: `Пункт ${index}`, text: '' }));
-    assert.equal(parseClubValues(seven).ok, false);
+  it('ключевых ценностей — не больше трёх', () => {
+    const items = (count: number) => Array.from({ length: count }, (_, index) => ({ title: `Пункт ${index}`, text: '' }));
+    assert.equal(parseClubValues(items(3)).ok, true);
+    assert.equal(parseClubValues(items(4)).ok, false);
   });
 
   it('слишком длинный заголовок', () => {

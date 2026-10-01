@@ -1,10 +1,11 @@
-'use client';
+"use client";
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
-import type { City } from '@yenisey/types';
-import { api } from '@/lib/api';
-import { cn } from '@/lib/cn';
-import { inputClassName } from './Field';
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import type { City } from "@yenisey/types";
+import { api } from "@/lib/api";
+import { cn } from "@/lib/cn";
+import { inputClassName } from "./Field";
+import { SearchIcon } from "./SearchIcon";
 
 /**
  * Выбор города из справочника с поиском.
@@ -27,9 +28,11 @@ export function CityCombobox({
   value,
   onChange,
   emptyLabel,
-  placeholder = 'Начните вводить город',
+  placeholder = "Начните вводить город",
   className,
   inputClassName: inputClass,
+  region = null,
+  searchIcon = false,
 }: {
   label: string;
   /** Подпись только для экранного диктора — когда поле стоит в строке поиска. */
@@ -42,13 +45,17 @@ export function CityCombobox({
   placeholder?: string;
   className?: string;
   inputClassName?: string;
+  /** Подсказывать только города этого региона — когда регион уже выбран. */
+  region?: string | null;
+  /** Лупа слева в поле — в строке поиска на стартовой. */
+  searchIcon?: boolean;
 }) {
   const id = useId();
   const listId = `${id}-list`;
   const hintId = hint ? `${id}-hint` : undefined;
 
   const [selected, setSelected] = useState<City | null>(null);
-  const [text, setText] = useState('');
+  const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<City[]>([]);
   const [active, setActive] = useState(0);
@@ -59,7 +66,7 @@ export function CityCombobox({
   useEffect(() => {
     if (!value) {
       setSelected(null);
-      setText('');
+      setText("");
       return;
     }
 
@@ -86,11 +93,11 @@ export function CityCombobox({
   useEffect(() => {
     if (!open) return;
 
-    const query = typed.current ? text : '';
+    const query = typed.current ? text : "";
     let cancelled = false;
     const timer = window.setTimeout(() => {
       api
-        .cities(query, 8)
+        .cities(query, 8, region)
         .then((found) => {
           if (cancelled) return;
           setOptions(found);
@@ -105,36 +112,36 @@ export function CityCombobox({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [open, text]);
+  }, [open, text, region]);
 
   const items: (City | null)[] = emptyLabel ? [null, ...options] : options;
 
   function choose(city: City | null): void {
     setSelected(city);
-    setText(city?.name ?? '');
+    setText(city?.name ?? "");
     setOpen(false);
     typed.current = false;
     onChange(city);
   }
 
   function restore(): void {
-    setText(selected?.name ?? '');
+    setText(selected?.name ?? "");
     setOpen(false);
     typed.current = false;
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
-    if (event.key === 'ArrowDown') {
+    if (event.key === "ArrowDown") {
       event.preventDefault();
       if (!open) setOpen(true);
       setActive((index) => Math.min(index + 1, items.length - 1));
-    } else if (event.key === 'ArrowUp') {
+    } else if (event.key === "ArrowUp") {
       event.preventDefault();
       setActive((index) => Math.max(index - 1, 0));
-    } else if (event.key === 'Enter' && open) {
+    } else if (event.key === "Enter" && open) {
       event.preventDefault();
       if (items.length > 0) choose(items[active] ?? null);
-    } else if (event.key === 'Escape' && open) {
+    } else if (event.key === "Escape" && open) {
       // Своё закрытие не должно закрывать и окно, в котором стоит поле.
       event.stopPropagation();
       restore();
@@ -142,42 +149,47 @@ export function CityCombobox({
   }
 
   return (
-    <div className={cn('relative', className)}>
+    <div className={cn("relative", className)}>
       <label
         htmlFor={id}
         className={cn(
-          'mb-1.5 block text-[0.8125rem] font-medium text-text-muted',
-          hideLabel && 'sr-only',
+          "mb-1.5 block text-[0.8125rem] font-medium text-text-muted",
+          hideLabel && "sr-only",
         )}
       >
         {label}
       </label>
 
-      <input
-        id={id}
-        role="combobox"
-        aria-expanded={open}
-        aria-controls={listId}
-        aria-autocomplete="list"
-        aria-activedescendant={open && items.length > 0 ? `${id}-option-${active}` : undefined}
-        aria-describedby={hintId}
-        autoComplete="off"
-        spellCheck={false}
-        placeholder={emptyLabel && !selected ? emptyLabel : placeholder}
-        value={text}
-        onChange={(event) => {
-          typed.current = true;
-          setText(event.target.value);
-          setOpen(true);
-        }}
-        onFocus={(event) => {
-          event.target.select();
-          setOpen(true);
-        }}
-        onBlur={restore}
-        onKeyDown={onKeyDown}
-        className={cn(inputClassName, inputClass)}
-      />
+      <div className="relative">
+        {searchIcon && <SearchIcon />}
+        <input
+          id={id}
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={
+            open && items.length > 0 ? `${id}-option-${active}` : undefined
+          }
+          aria-describedby={hintId}
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={emptyLabel && !selected ? emptyLabel : placeholder}
+          value={text}
+          onChange={(event) => {
+            typed.current = true;
+            setText(event.target.value);
+            setOpen(true);
+          }}
+          onFocus={(event) => {
+            event.target.select();
+            setOpen(true);
+          }}
+          onBlur={restore}
+          onKeyDown={onKeyDown}
+          className={cn(inputClassName, searchIcon && "pl-12", inputClass)}
+        />
+      </div>
 
       {open && items.length > 0 && (
         <ul
@@ -185,13 +197,13 @@ export function CityCombobox({
           role="listbox"
           aria-label={label}
           className={cn(
-            'absolute top-full right-0 left-0 z-30 mt-1 max-h-72 overflow-y-auto',
-            'rounded-control border border-border bg-surface-raised py-1 shadow-lg',
+            "absolute top-full right-0 left-0 z-30 mt-1 max-h-72 overflow-y-auto",
+            "rounded-control border border-border bg-surface-raised py-1 shadow-lg",
           )}
         >
           {items.map((city, index) => (
             <li
-              key={city?.id ?? 'empty'}
+              key={city?.id ?? "empty"}
               id={`${id}-option-${index}`}
               role="option"
               aria-selected={index === active}
@@ -203,15 +215,17 @@ export function CityCombobox({
               }}
               onMouseEnter={() => setActive(index)}
               className={cn(
-                'cursor-pointer px-3.5 py-2 text-[0.9375rem]',
-                index === active ? 'bg-surface-sunken text-text' : 'text-text',
+                "cursor-pointer px-3.5 py-2 text-[0.9375rem]",
+                index === active ? "bg-surface-sunken text-text" : "text-text",
               )}
             >
               {city ? (
                 <>
                   <span className="block">{city.name}</span>
                   {city.region && (
-                    <span className="block text-[0.8125rem] text-text-subtle">{city.region}</span>
+                    <span className="block text-[0.8125rem] text-text-subtle">
+                      {city.region}
+                    </span>
                   )}
                 </>
               ) : (

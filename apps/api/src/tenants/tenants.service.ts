@@ -44,11 +44,13 @@ export class TenantsService {
   async searchCities(query: CitySearchQuery): Promise<City[]> {
     const limit = cityLimit(query.limit);
     const patterns = cityPatterns(query.query);
+    const region = query.region?.trim() || null;
 
     // Без запроса — самые крупные: у пустого поля подсказка должна что-то
     // предлагать. Население пусто у городов вне справочника — они в конце.
     if (!patterns) {
       return this.prisma.city.findMany({
+        where: region ? { region } : {},
         select: CITY_SELECT,
         orderBy: [{ population: { sort: 'desc', nulls: 'last' } }, { name: 'asc' }],
         take: limit,
@@ -61,12 +63,25 @@ export class TenantsService {
     return this.prisma.$queryRaw<City[]>`
       SELECT id, name, region
       FROM "City"
-      WHERE lower(name) LIKE ${patterns.prefix}
+      WHERE (lower(name) LIKE ${patterns.prefix}
          OR lower(name) LIKE ${patterns.word}
-         OR lower(name) LIKE ${patterns.hyphen}
+         OR lower(name) LIKE ${patterns.hyphen})
+        AND (${region}::text IS NULL OR region = ${region})
       ORDER BY (lower(name) LIKE ${patterns.prefix}) DESC, population DESC NULLS LAST, name
       LIMIT ${limit}
     `;
+  }
+
+  /** Регионы справочника по алфавиту. Город без региона — вне списка. */
+  async regions(): Promise<string[]> {
+    const rows = await this.prisma.city.findMany({
+      where: { region: { not: null } },
+      select: { region: true },
+      distinct: ['region'],
+      orderBy: { region: 'asc' },
+    });
+
+    return rows.map((row) => row.region!);
   }
 
   async findCity(id: string): Promise<City> {
@@ -92,6 +107,7 @@ export class TenantsService {
    */
   async search(query: ClubSearchQuery): Promise<ClubCard[]> {
     const name = query.query?.trim();
+    const region = query.region?.trim();
 
     const tenants = await this.prisma.tenant.findMany({
       where: {
@@ -102,7 +118,10 @@ export class TenantsService {
           : {}),
         ...(query.cityId
           ? { OR: [{ cityId: query.cityId }, { halls: { some: { cityId: query.cityId } } }] }
-          : {}),
+          : // Регион — по тому же правилу, что город: регион клуба ИЛИ зала.
+            region
+            ? { OR: [{ city: { region } }, { halls: { some: { city: { region } } } }] }
+            : {}),
       },
       select: CARD_SELECT,
       orderBy: { name: 'asc' },
@@ -183,6 +202,7 @@ export class TenantsService {
             hasRobotOption: true,
             robot60MinPrice: true,
             workingHours: true,
+            timezone: true,
             city: { select: { name: true } },
             _count: { select: { tables: true } },
           },
@@ -246,6 +266,7 @@ export class TenantsService {
         robotHourPrice: hall.hasRobotOption ? hall.robot60MinPrice : null,
         tables: hall._count.tables,
         workingHours: readWorkingHours(hall.workingHours),
+        timezone: hall.timezone,
       })),
     };
   }

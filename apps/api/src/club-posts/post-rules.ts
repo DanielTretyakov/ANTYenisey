@@ -3,6 +3,8 @@
  * Без относительных импортов: модуль гоняет `node --test`.
  */
 
+import { plainText } from '@yenisey/types';
+
 /** Сколько символов текста уходит в сообщение клиенту. */
 export const EXCERPT_MAX = 300;
 
@@ -10,9 +12,11 @@ export const EXCERPT_MAX = 300;
  * Начало публикации для сообщения в MAX и браузер: первый абзац, не длиннее
  * `EXCERPT_MAX`, обрезанный по слову. Весь текст в сообщение не кладётся —
  * это приглашение открыть ленту, а не её копия.
+ *
+ * Пометки разметки снимаются: в MAX звёздочки дошли бы звёздочками.
  */
 export function excerptOf(body: string): string {
-  const first = body.trim().split(/\n\s*\n/)[0]!.replace(/\s+/g, ' ').trim();
+  const first = plainText(body).trim().split(/\n\s*\n/)[0]!.replace(/\s+/g, ' ').trim();
 
   if (first.length <= EXCERPT_MAX) {
     return first;
@@ -32,4 +36,25 @@ export function excerptOf(body: string): string {
  */
 export function announceOnSave(before: Date | null, after: Date | null): boolean {
   return before === null && after !== null;
+}
+
+/**
+ * Сколько дней публикация может гореть непрочитанной (решение владельца от
+ * 30.09.2026). Без окна после выкладки загорелось бы разом всё, что клуб
+ * успел опубликовать, а новичок в клубе с годовой лентой увидел бы «48
+ * новых». Приветствие горит без срока, пока его не откроют: оно и есть то,
+ * что новичку стоит прочесть первым.
+ */
+export const UNREAD_WINDOW_DAYS = 30;
+
+/** С какого момента опубликованное ещё может быть «новым». */
+export function unreadSince(now: Date): Date {
+  return new Date(now.getTime() - UNREAD_WINDOW_DAYS * 86_400_000);
+}
+
+/** Непрочитана ли публикация для вошедшего. */
+export function isUnread(post: { publishedAt: Date | null; welcome: boolean }, read: boolean, now: Date): boolean {
+  if (read || post.publishedAt === null) return false;
+
+  return post.welcome || post.publishedAt >= unreadSince(now);
 }

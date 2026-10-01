@@ -29,13 +29,26 @@ const PARTICIPANT_SELECT = {
   select: { membership: { select: { user: { select: { fullName: true } } } } },
 } as const;
 
+/**
+ * Зал строки мероприятия: по первому окну расписания (связь идёт через стол), а
+ * без окна — залы вида: единственный из них и есть зал.
+ */
+const HALL_NAME_SELECT = {
+  select: { table: { select: { hall: { select: { name: true } } } } },
+  orderBy: { startMinute: 'asc' },
+  take: 1,
+} as const;
+
+const TYPE_HALLS_SELECT = { select: { hall: { select: { name: true } } } } as const;
+
 /** Что нужно от турнира, чтобы показать его строкой. */
 export const TOURNAMENT_EVENT_SELECT = {
   id: true,
   startsAt: true,
   endsAt: true,
   tournamentTypeId: true,
-  tournamentType: { select: { name: true, ratingLabel: true, price: true } },
+  tournamentType: { select: { name: true, ratingLabel: true, price: true, halls: TYPE_HALLS_SELECT } },
+  dayClosures: HALL_NAME_SELECT,
   registrations: {
     where: { status: BookingStatus.BOOKED },
     select: { clientId: true, client: PARTICIPANT_SELECT },
@@ -49,7 +62,8 @@ export const TRAINING_EVENT_SELECT = {
   endsAt: true,
   capacity: true,
   trainingTypeId: true,
-  trainingType: { select: { name: true, price: true } },
+  trainingType: { select: { name: true, price: true, halls: TYPE_HALLS_SELECT } },
+  dayClosures: HALL_NAME_SELECT,
   coach: { select: { membership: { select: { user: { select: { fullName: true } } } } } },
   bookings: {
     where: { status: BookingStatus.BOOKED },
@@ -59,22 +73,40 @@ export const TRAINING_EVENT_SELECT = {
 
 type Participant = { clientId: string; client: { membership: { user: { fullName: string } } } };
 
-type TournamentRow = {
+/** Окно расписания и залы вида — ради зала строки. */
+type HallSource = {
+  dayClosures: { table: { hall: { name: string } } }[];
+};
+type TypeHalls = { halls?: { hall: { name: string } }[] };
+
+/**
+ * Зал мероприятия: окно в сетке, иначе единственный зал вида. Единственный
+ * зал клуба подставляет список клуба (`EventsService`) — здесь о клубе не знают.
+ */
+function hallOf(row: HallSource, type: TypeHalls): string | null {
+  const placed = row.dayClosures[0]?.table.hall.name;
+
+  if (placed) return placed;
+
+  return type.halls?.length === 1 ? type.halls[0]!.hall.name : null;
+}
+
+type TournamentRow = HallSource & {
   id: string;
   tournamentTypeId: string;
   startsAt: Date;
   endsAt: Date;
-  tournamentType: { name: string; ratingLabel: string | null; price: number };
+  tournamentType: { name: string; ratingLabel: string | null; price: number } & TypeHalls;
   registrations: Participant[];
 };
 
-type TrainingRow = {
+type TrainingRow = HallSource & {
   id: string;
   trainingTypeId: string;
   startsAt: Date;
   endsAt: Date;
   capacity: number;
-  trainingType: { name: string; price: number };
+  trainingType: { name: string; price: number } & TypeHalls;
   coach: { membership: { user: { fullName: string } } };
   bookings: Participant[];
 };
@@ -89,6 +121,7 @@ export function tournamentEvent(row: TournamentRow, userId: string | null): Club
     startsAt: row.startsAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
     subtitle: null,
+    hall: hallOf(row, row.tournamentType),
     price: row.tournamentType.price,
     // Чем оплатит смотрящий, решает страница клуба — ей известен человек, за
     // которого действуют. Лента и прочие списки абонементов не касаются.
@@ -114,6 +147,7 @@ export function trainingEvent(row: TrainingRow, userId: string | null): ClubEven
     startsAt: row.startsAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
     subtitle: `Тренер: ${shortName(row.coach.membership.user.fullName)}`,
+    hall: hallOf(row, row.trainingType),
     price: row.trainingType.price,
     payWith: null,
     registeredCount: row.bookings.length,
@@ -221,7 +255,9 @@ const CLUB_REF_SELECT = { select: { slug: true, name: true, accentColor: true } 
 
 export const TOURNAMENT_DETAIL_SELECT = {
   ...TOURNAMENT_EVENT_SELECT,
-  tournamentType: { select: { name: true, ratingLabel: true, price: true, description: true } },
+  tournamentType: {
+    select: { name: true, ratingLabel: true, price: true, description: true, halls: TYPE_HALLS_SELECT },
+  },
   registrations: {
     where: { status: BookingStatus.BOOKED },
     select: { clientId: true, client: DETAIL_PARTICIPANT_SELECT },
@@ -232,7 +268,7 @@ export const TOURNAMENT_DETAIL_SELECT = {
 
 export const TRAINING_DETAIL_SELECT = {
   ...TRAINING_EVENT_SELECT,
-  trainingType: { select: { name: true, price: true, description: true } },
+  trainingType: { select: { name: true, price: true, description: true, halls: TYPE_HALLS_SELECT } },
   coach: { select: { userId: true, membership: { select: { user: { select: { fullName: true } } } } } },
   bookings: {
     where: { status: BookingStatus.BOOKED },

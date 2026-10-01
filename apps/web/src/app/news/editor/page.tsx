@@ -12,11 +12,12 @@ import {
   type NewsItem,
 } from '@yenisey/types';
 import { AppShell } from '@/components/layout/AppShell';
+import { MarkupEditor } from '@/components/news/MarkupEditor';
 import { NewsBody, newsDate, SectionBadge } from '@/components/news/NewsParts';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
-import { Field, inputClassName } from '@/components/ui/Field';
+import { Field } from '@/components/ui/Field';
 import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
 import { api, ApiError } from '@/lib/api';
@@ -159,7 +160,7 @@ export default function NewsEditorPage() {
           <Card>
             <CardHeader
               title={editing ? 'Правка новости' : 'Новая новость'}
-              description="Простой текст: абзацы — через пустую строку. «Для клубов» видят только сотрудники клубов. В MAX новости не рассылаются."
+              description="Жирный, курсив, подчёркивание и списки — кнопками над текстом. «Для клубов» видят только сотрудники клубов. В MAX новости не рассылаются."
             />
             <CardBody>
               {error && <Alert>{error}</Alert>}
@@ -179,17 +180,14 @@ export default function NewsEditorPage() {
                   onChange={(event) => setDraft({ ...draft, title: event.target.value })}
                   required
                 />
-                <label className="mb-4 block">
-                  <span className="mb-1.5 block text-[0.8125rem] font-medium text-text-muted">Текст</span>
-                  <textarea
-                    value={draft.body}
-                    onChange={(event) => setDraft({ ...draft, body: event.target.value })}
-                    rows={12}
-                    maxLength={NEWS_BODY_MAX}
-                    required
-                    className={cn(inputClassName, 'resize-y')}
-                  />
-                </label>
+                <MarkupEditor
+                  label="Текст"
+                  value={draft.body}
+                  onChange={(body) => setDraft({ ...draft, body })}
+                  rows={12}
+                  maxLength={NEWS_BODY_MAX}
+                  required
+                />
                 <Toggle
                   label="Опубликовать"
                   hint="Без галочки — черновик: его видите только вы."

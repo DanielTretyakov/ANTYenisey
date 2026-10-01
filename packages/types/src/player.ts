@@ -197,4 +197,29 @@ export interface PublicPlayer {
    * кому можно, — сам игрок или администратор его клуба.
    */
   hiddenFromPublic: boolean;
+  /**
+   * «Больше всего посещений» (решение владельца от 30.09.2026): три клуба,
+   * где игрок бывал чаще всего, за месяц, год и всё время. `null` — скрыто
+   * от смотрящего: игрок убрал себя из рейтингов, а смотрит не он и не его
+   * родитель.
+   */
+  visits: PlayerVisitTops | null;
+}
+
+/** Клуб в «Больше всего посещений». */
+export interface ClubVisits {
+  slug: string;
+  name: string;
+  accentColor: string | null;
+  logoUrl: string | null;
+  place: number;
+  visits: number;
+}
+
+export interface PlayerVisitTops {
+  month: ClubVisits[];
+  year: ClubVisits[];
+  all: ClubVisits[];
+  /** Игрок скрыл себя из рейтингов: блок видят только он и его родитель. */
+  hiddenFromOthers: boolean;
 }

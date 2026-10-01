@@ -5,6 +5,7 @@ import type { PublicPlayer } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { AchievementList, EquipmentList, PlayerAvatar, RankLine } from './PlayerView';
+import { PlayerVisitsCard } from './PlayerVisitsCard';
 
 /**
  * Страница игрока так, как её видят другие.
@@ -70,6 +71,9 @@ export function PlayerPublicView({
           </CardBody>
         </Card>
       </div>
+
+      {/* Под инвентарём и достижениями, шириной обоих (решение от 30.09.2026). */}
+      {player.visits && <PlayerVisitsCard visits={player.visits} />}
     </div>
   );
 }

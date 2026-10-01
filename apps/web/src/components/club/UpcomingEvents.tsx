@@ -14,6 +14,7 @@ import { useClubApi } from '@/lib/useClubApi';
 import { sameDay, weekDays, weekEnd, weekLabel, weekStart } from '@/lib/week';
 import { EventRow, KIND_PAINT, RowSkeleton, shortWhen } from './EventRow';
 import { MonthCalendar } from './MonthCalendar';
+import { SectionHeading } from './SectionHeading';
 
 /** Выбранный вид мероприятия — «только детские тренировки». */
 export interface KindFilter {
@@ -189,15 +190,19 @@ export function UpcomingEvents({
   );
 
   return (
-    <section id={UPCOMING_ANCHOR} className="mb-16 scroll-mt-24">
+    <section id={UPCOMING_ANCHOR} className="mb-16 scroll-mt-40">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-[1.375rem]">Предстоящие мероприятия</h2>
-          <p className="mt-1 text-[0.9375rem] text-text-muted">
-            Залы:{' '}
-            <span className="text-text">{hallNames ? hallNames.join(', ') : 'все залы клуба'}</span>
-          </p>
-        </div>
+        <SectionHeading
+          className="mb-0"
+          title="Предстоящие мероприятия"
+          description={
+            <>
+              Тренировки и турниры по дням — неделей или календарём месяца; запись — прямо в строке. Отобрать по
+              виду можно чипами ниже. Залы:{' '}
+              <span className="text-text">{hallNames ? hallNames.join(', ') : 'все залы клуба'}</span>
+            </>
+          }
+        />
 
         <div className="flex gap-1.5" role="tablist" aria-label="Вид расписания">
           <Tab inTablist active={view === 'week'} onClick={() => setView('week')}>

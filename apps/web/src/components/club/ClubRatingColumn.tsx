@@ -5,12 +5,12 @@ import { useEffect, useState } from 'react';
 import type { ClubRating, ClubRatingRow, Gender, RatingPeriod } from '@yenisey/types';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { Button } from '@/components/ui/Button';
-import { Dialog } from '@/components/ui/Dialog';
 import { Tab } from '@/components/ui/Tab';
 import { api, ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { plural } from '@/lib/plural';
-import { useClubApi } from '@/lib/useClubApi';
+import { useClubApi, useClubSlug } from '@/lib/useClubApi';
+import { SectionHeading } from './SectionHeading';
 
 const PERIODS: { value: RatingPeriod; label: string }[] = [
   { value: 'month', label: 'Этот месяц' },
@@ -25,11 +25,11 @@ const GENDERS: { value: Gender | null; label: string }[] = [
 ];
 
 /**
- * Сколько строк в колонке (решение владельца от 27.09.2026): высота блока —
- * десять человек, остальные — в окне «Подробнее». По этой высоте равняется
- * и соседняя колонка новостей.
+ * Сколько мест в колонке (решение владельца от 01.10.2026): пьедестал первых
+ * трёх и строками 4-е и 5-е, всё остальное — на странице «Подробнее».
+ * Прежние десять строк делали колонку башней.
  */
-export const RATING_SHOWN = 10;
+export const RATING_SHOWN = 5;
 
 /** Якорь колонки. */
 export const RATING_ANCHOR = 'reiting';
@@ -43,9 +43,9 @@ export const RATING_ANCHOR = 'reiting';
  * в окне «Подробнее».
  */
 export function ClubRatingColumn() {
+  const slug = useClubSlug();
   const [period, setPeriod] = useState<RatingPeriod>('month');
   const { rating, error } = useRating(period, null);
-  const [open, setOpen] = useState(false);
 
   const rows = rating?.rows.slice(0, RATING_SHOWN) ?? [];
   const mineShown = rating?.me && rows.some((row) => sameRow(row, rating.me!));
@@ -53,40 +53,55 @@ export function ClubRatingColumn() {
   return (
     <section
       id={RATING_ANCHOR}
-      className="flex min-w-0 scroll-mt-24 flex-col rounded-card border border-border bg-surface-raised"
+      className="flex min-w-0 scroll-mt-40 flex-col rounded-card border border-border bg-surface-raised"
     >
-      <header className="border-b border-border px-5 pt-4 pb-3">
-        <h2 className="mb-3 text-[1.375rem]">Рейтинг посещений</h2>
+      <header className="px-5 pt-4 pb-3">
+        <SectionHeading
+          className="mb-3"
+          title="Рейтинг посещений"
+          description="Кто чаще всех приходит в клуб. Весь рейтинг — в «Подробнее»."
+        />
         <PeriodTabs value={period} onChange={setPeriod} />
       </header>
 
-      {/* Высота — ровно десять строк, сколько бы их ни было. */}
-      <div className="h-[calc(35rem+9px)] overflow-hidden">
+      {/* Пьедестал всегда на виду (решение от 01.10.2026): свободное место —
+          заглушкой, а не пустотой, — пьедестал и есть то, ради чего блок. */}
+      <div className="flex-1">
         {error ? (
           <p className="px-5 py-4 text-[0.9375rem] text-danger">{error}</p>
-        ) : rating === null ? (
-          <p className="px-5 py-4 text-[0.9375rem] text-text-muted" aria-busy="true">
-            Загружаю…
-          </p>
-        ) : rows.length === 0 ? (
-          <p className="px-5 py-4 text-[0.9375rem] text-text-muted">За этот период отмеченных визитов пока нет.</p>
         ) : (
-          <ol className="divide-y divide-border">
-            {rows.map((row, index) => (
-              <RatingRow
-                key={`${row.place}-${row.name}-${index}`}
-                row={row}
-                mine={rating.me !== null && sameRow(row, rating.me)}
-              />
-            ))}
-          </ol>
+          <>
+            <Podium rows={rows.slice(0, 3)} me={rating?.me ?? null} loading={rating === null} />
+            <ol className="divide-y divide-border" start={4}>
+              {[3, 4].map((index) => {
+                const row = rows[index];
+
+                return row ? (
+                  <RatingRow
+                    key={`${row.place}-${row.name}-${index}`}
+                    row={row}
+                    mine={rating?.me != null && sameRow(row, rating.me)}
+                  />
+                ) : (
+                  // Пустое место — строкой-заглушкой той же высоты: плитка не
+                  // прыгает от того, сколько людей набралось за период.
+                  <li key={index} className="flex h-14 items-center gap-4 px-5 text-text-subtle">
+                    <span className="w-8 shrink-0 text-right font-display text-[1.125rem] tabular-nums">{index + 1}</span>
+                    <span className="text-[0.875rem]">{rating === null ? '…' : 'место свободно'}</span>
+                  </li>
+                );
+              })}
+            </ol>
+          </>
         )}
       </div>
 
       <footer className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border px-5 py-3">
-        <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
-          Подробнее
-        </Button>
+        <Link href={`/clubs/${slug}/rating?period=${period}`}>
+          <Button variant="secondary" size="sm">
+            Подробнее
+          </Button>
+        </Link>
         {rating?.me && !mineShown && (
           <span className="text-[0.875rem] text-text-muted">
             Ваше место — <span className="text-text">{rating.me.place}</span>, {rating.me.visits}{' '}
@@ -94,17 +109,16 @@ export function ClubRatingColumn() {
           </span>
         )}
       </footer>
-
-      {open && <RatingDialog initialPeriod={period} onClose={() => setOpen(false)} />}
     </section>
   );
 }
 
 /**
  * Весь рейтинг — до полусотни строк — с фильтром по полу и выключателем «не
- * показывать меня».
+ * показывать меня». Страницей `/clubs/:slug/rating` (решение владельца от
+ * 30.09.2026), а не окном; период — тот, что был выбран в колонке.
  */
-function RatingDialog({ initialPeriod, onClose }: { initialPeriod: RatingPeriod; onClose: () => void }) {
+export function RatingFull({ initialPeriod }: { initialPeriod: RatingPeriod }) {
   const [period, setPeriod] = useState(initialPeriod);
   const [gender, setGender] = useState<Gender | null>(null);
   const [version, setVersion] = useState(0);
@@ -129,13 +143,8 @@ function RatingDialog({ initialPeriod, onClose }: { initialPeriod: RatingPeriod;
   const mineShown = rating?.me && rating.rows.some((row) => sameRow(row, rating.me!));
 
   return (
-    <Dialog
-      title="Рейтинг посещений"
-      description="Дни в клубе: отмеченные визиты — занятия, турниры, аренда, спарринги, не больше одного в день."
-      onClose={onClose}
-      size="lg"
-    >
-      <div className="px-6 py-5">
+    <div className="max-w-3xl">
+      <div>
         <div className="mb-2">
           <PeriodTabs value={period} onChange={setPeriod} />
         </div>
@@ -161,7 +170,7 @@ function RatingDialog({ initialPeriod, onClose }: { initialPeriod: RatingPeriod;
         ) : rating.rows.length === 0 ? (
           <p className="text-[0.9375rem] text-text-muted">Отмеченных визитов за этот период нет.</p>
         ) : (
-          <ol className="divide-y divide-border rounded-card border border-border">
+          <ol className="divide-y divide-border rounded-card border border-border bg-surface-raised">
             {rating.rows.map((row, index) => (
               <RatingRow
                 key={`${row.place}-${row.name}-${index}`}
@@ -192,7 +201,7 @@ function RatingDialog({ initialPeriod, onClose }: { initialPeriod: RatingPeriod;
           </label>
         )}
       </div>
-    </Dialog>
+    </div>
   );
 }
 
@@ -232,6 +241,84 @@ function PeriodTabs({ value, onChange }: { value: RatingPeriod; onChange: (perio
         </Tab>
       ))}
     </div>
+  );
+}
+
+/**
+ * Пьедестал первых трёх: второй — слева, первый — в центре и выше, третий —
+ * справа. Те же люди и те же правила, что в строках: у младше 14 нет ни
+ * ссылки, ни фото. Своё место подсвечено.
+ */
+function Podium({ rows, me, loading }: { rows: ClubRatingRow[]; me: ClubRatingRow | null; loading: boolean }) {
+  // Второй — слева, первый — в центре, третий — справа; пустое место — null.
+  const order = [rows[1] ?? null, rows[0] ?? null, rows[2] ?? null];
+  const places = [2, 1, 3];
+  const height = ['h-14', 'h-20', 'h-10'];
+
+  return (
+    <ol
+      className="flex h-[14rem] items-end justify-center gap-3 border-b border-border px-5"
+      aria-label="Первые три места"
+      aria-busy={loading}
+    >
+      {order.map((row, index) => {
+        const mine = row !== null && me !== null && sameRow(row, me);
+        const person = row ? (
+          <span className="flex flex-col items-center gap-0.5">
+            <span className={cn('rounded-full', mine && 'ring-2 ring-accent')}>
+              <PlayerAvatar fileId={row.avatarFileId} name={row.name} gender={row.gender} size={index === 1 ? 'sm' : 'xs'} />
+            </span>
+            <span className="max-w-full truncate text-[0.8125rem] leading-tight text-text">{row.name}</span>
+            <span className="text-[0.75rem] leading-tight text-text-muted tabular-nums">
+              {row.visits} {plural(row.visits, 'визит', 'визита', 'визитов')}
+            </span>
+          </span>
+        ) : (
+          <span className="flex flex-col items-center gap-0.5">
+            <span
+              aria-hidden="true"
+              className={cn(
+                'grid place-items-center rounded-full border border-dashed border-border-strong text-text-subtle',
+                index === 1 ? 'h-12 w-12' : 'h-10 w-10',
+              )}
+            >
+              ?
+            </span>
+            <span className="text-[0.8125rem] leading-tight text-text-subtle">{loading ? '…' : 'место свободно'}</span>
+            <span className="text-[0.75rem] leading-tight text-transparent" aria-hidden="true">
+              —
+            </span>
+          </span>
+        );
+
+        return (
+          <li
+            key={places[index]}
+            className="flex max-w-[7.5rem] min-w-0 flex-1 flex-col items-center gap-1.5"
+          >
+            {row?.userId ? (
+              <Link href={`/players/${row.userId}`} className="max-w-full hover:underline">
+                {person}
+              </Link>
+            ) : (
+              person
+            )}
+            <span
+              className={cn(
+                'grid w-full place-items-center rounded-t-[0.625rem] font-display',
+                height[index],
+                index === 1
+                  ? 'bg-accent text-[1.5rem] text-accent-text'
+                  : 'bg-surface-accent-soft text-[1.125rem] text-text-accent',
+                !row && 'opacity-50',
+              )}
+            >
+              {row?.place ?? places[index]}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 

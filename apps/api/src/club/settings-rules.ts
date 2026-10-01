@@ -105,8 +105,12 @@ export function hallViolations(hall: HallRulesInput): string[] {
 
 // --- Страница клуба: ценности и соцсети (решения владельца от 25.09.2026) ---
 
-/** Тот же предел, что `MAX_CLUB_VALUES` в @yenisey/types и CHECK в базе. */
-export const CLUB_VALUES_LIMIT = 6;
+/**
+ * Тот же предел, что `MAX_CLUB_VALUES` в @yenisey/types и CHECK в базе.
+ * Три, а не шесть (решение владельца от 01.10.2026): ценностей на странице —
+ * ключевые, а не список.
+ */
+export const CLUB_VALUES_LIMIT = 3;
 export const CLUB_VALUE_TITLE_MAX = 60;
 export const CLUB_VALUE_TEXT_MAX = 300;
 
@@ -152,7 +156,7 @@ export function parseClubValues(input: { title?: unknown; text?: unknown }[]): R
 
 /**
  * Ценности из базы. Поле — Json, и что там лежит, база знает лишь до «массив
- * не длиннее шести»; негодное молча отбрасывается, как `readSocialLinks` у
+ * не длиннее трёх»; негодное молча отбрасывается, как `readSocialLinks` у
  * тренера.
  */
 export function readClubValues(raw: unknown): ClubValue[] {

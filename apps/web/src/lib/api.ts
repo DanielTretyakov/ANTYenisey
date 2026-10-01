@@ -2,6 +2,7 @@ import type {
   ClubPost,
   ClubPostPage,
   ClubPostRequest,
+  ClubPostsUnread,
   ClubPostWithClub,
   ClubRating,
   Gender,
@@ -349,8 +350,13 @@ export const api = {
    * Подсказки города: начало названия или слова, крупные первыми. Пустой
    * запрос — самые крупные города.
    */
-  cities: (query = '', limit = 8): Promise<City[]> =>
-    request(`/cities?${new URLSearchParams({ query: query.trim(), limit: String(limit) })}`),
+  cities: (query = '', limit = 8, region: string | null = null): Promise<City[]> =>
+    request(
+      `/cities?${new URLSearchParams({ query: query.trim(), limit: String(limit), ...(region ? { region } : {}) })}`,
+    ),
+
+  /** Регионы справочника — целиком: их восемь десятков. */
+  regions: (): Promise<string[]> => request('/cities/regions'),
 
   /** Один город — показать уже выбранный в форме. */
   city: (id: string): Promise<City> => request(`/cities/${encodeURIComponent(id)}`),
@@ -366,6 +372,7 @@ export const api = {
 
     if (query.query) params.set('query', query.query);
     if (query.cityId) params.set('cityId', query.cityId);
+    if (query.region) params.set('region', query.region);
 
     const search = params.toString();
 
@@ -547,6 +554,9 @@ export const api = {
   // --- Лента клубов и рейтинг (решения владельца от 26.09.2026)
   /** Последние публикации клубов, отмеченных своими и где человек клиент. */
   myClubPosts: (limit = 3): Promise<ClubPostWithClub[]> => authorized(`/me/club-posts?limit=${limit}`),
+
+  /** Непрочитанное в лентах моих клубов — шапка и карточки на стартовой. */
+  clubPostsUnread: (): Promise<ClubPostsUnread> => authorized('/me/club-posts/unread'),
   /** «Не показывать меня в рейтингах» — во всех клубах сразу. */
   setRatingHidden: (hidden: boolean): Promise<{ hidden: boolean }> =>
     authorized('/me/rating', json('PUT', { hidden })),
@@ -928,7 +938,15 @@ export function clubApi(slug: string = TENANT_SLUG) {
       return optionallyAuthorized(`${club}/posts${search ? `?${search}` : ''}`);
     },
 
+    /** Одна публикация ленты — страница публикации. */
+    post: (id: string): Promise<ClubPost> => optionallyAuthorized(`${club}/posts/${encodeURIComponent(id)}`),
+
+    /** Открытое на странице публикации — прочитано. */
+    markPostsRead: (ids: string[]): Promise<void> => authorized(`${club}/posts/read`, json('POST', { ids })),
+
     managePosts: (): Promise<ClubPost[]> => authorized(`${club}/manage/posts`),
+
+    welcomeDefault: (): Promise<{ title: string; body: string }> => authorized(`${club}/manage/posts/welcome/default`),
 
     createPost: (payload: ClubPostRequest): Promise<ClubPost> =>
       authorized(`${club}/manage/posts`, json('POST', payload)),
