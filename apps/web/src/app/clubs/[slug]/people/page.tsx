@@ -8,6 +8,7 @@ import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
+import { CompactSelect } from '@/components/ui/CompactSelect';
 import { Tab } from '@/components/ui/Tab';
 import { inputClassName } from '@/components/ui/Field';
 import { rolesInClub } from '@/lib/membership';
@@ -152,11 +153,25 @@ export default function PeoplePage() {
           />
           <CardBody>
             <div className="mb-4 flex flex-wrap items-center gap-1.5">
-              {TABS.map((item) => (
-                <Tab key={item.value} active={tab === item.value} onClick={() => setTab(item.value)}>
-                  {item.label}
-                </Tab>
-              ))}
+              {/* На телефоне — список ролей (решение от 03.10.2026). */}
+              <CompactSelect
+                label="Кто"
+                value={tab}
+                options={TABS.map((item) => ({ value: item.value, label: item.label }))}
+                onChange={(value) => {
+                  const item = TABS.find((candidate) => candidate.value === value);
+                  if (item) setTab(item.value);
+                }}
+                className="w-full sm:hidden"
+              />
+
+              <div className="hidden flex-wrap gap-1.5 sm:flex">
+                {TABS.map((item) => (
+                  <Tab key={item.value} active={tab === item.value} onClick={() => setTab(item.value)}>
+                    {item.label}
+                  </Tab>
+                ))}
+              </div>
 
               <input
                 aria-label="Поиск по людям"
@@ -164,7 +179,7 @@ export default function PeoplePage() {
                 title="Дата вида 17.05.2001 ищет по дате рождения, 17.05 — по дню рождения в любом году"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                className={cn(inputClassName, 'ml-auto w-64 py-1.5 text-[0.875rem]')}
+                className={cn(inputClassName, 'w-full py-1.5 text-[0.875rem] sm:ml-auto sm:w-64')}
               />
             </div>
 

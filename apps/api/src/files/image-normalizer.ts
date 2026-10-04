@@ -53,20 +53,65 @@ export async function normalizeAvatar(input: Uint8Array): Promise<Uint8Array> {
     .toBuffer();
 }
 
-/** Баннер клуба: полоса 1600×500 для шапки страницы клуба. */
-export const BANNER_WIDTH = 1600;
-export const BANNER_HEIGHT = 500;
+/** Сторона логотипа клуба: тот же квадрат, что аватар. */
+export const LOGO_SIZE = 512;
+
+/** Меньше этого знак расплывётся даже на самом крупном показе (64 точки ×2). */
+export const LOGO_MIN_SIDE = 128;
 
 /**
- * Баннер клуба: полоса 1600×500 в WebP, кадрирование — по самому заметному.
- * Метаданные выбрасываются, как у аватара: снимок зала с телефона несёт
- * координаты, а баннер видит вся платформа.
+ * Допуск «квадратности»: 2158×2100 — тоже квадрат. Обрезка при приведении к
+ * 512×512 срежет не больше пары процентов с краёв, и знак не пострадает.
  */
-export async function normalizeBanner(input: Uint8Array): Promise<Uint8Array> {
-  return open(input)
-    .resize(BANNER_WIDTH, BANNER_HEIGHT, { fit: 'cover', position: sharp.strategy.attention })
-    .webp({ quality: 80 })
-    .toBuffer();
+const LOGO_MAX_RATIO = 1.05;
+
+/**
+ * Годится ли картинка в логотип клуба (решение владельца от 02.10.2026:
+ * логотип только квадратный). null — годится, иначе — отказ словами того,
+ * кто загружает.
+ *
+ * Неквадратную картинку сервер не обрезает и не вписывает с полями, а
+ * отклоняет: у горизонтального локапа обрезка срежет название, а поля
+ * превратят знак в узкую полоску посередине. Квадрат клуб готовит сам.
+ */
+export function logoShapeProblem(width: number, height: number): string | null {
+  const ratio = Math.max(width, height) / Math.min(width, height);
+
+  if (!(ratio <= LOGO_MAX_RATIO)) {
+    return `Логотип должен быть квадратным: сейчас ${width}×${height}`;
+  }
+
+  if (Math.min(width, height) < LOGO_MIN_SIDE) {
+    return `Логотип слишком маленький: сейчас ${width}×${height}, нужно от ${LOGO_MIN_SIDE}×${LOGO_MIN_SIDE}`;
+  }
+
+  return null;
+}
+
+/** Отказ по форме логотипа — для человека, в отличие от сбоя чтения. */
+export class LogoShapeError extends Error {}
+
+/**
+ * Логотип клуба: квадрат 512×512 в WebP, прозрачность сохраняется — знак
+ * клуба часто нарисован по прозрачному фону. Метаданные выбрасываются, как у
+ * аватара. Неквадратный — `LogoShapeError` с текстом отказа.
+ */
+export async function normalizeLogo(input: Uint8Array): Promise<Uint8Array> {
+  // Размер — по заголовку, до распаковки. Поворот по EXIF на квадратность не
+  // влияет: стороны просто меняются местами.
+  const { width, height } = await sharp(input, { limitInputPixels: MAX_INPUT_PIXELS, failOn: 'error' }).metadata();
+
+  if (!width || !height) {
+    throw new Error('Размер картинки не прочитан');
+  }
+
+  const problem = logoShapeProblem(width, height);
+
+  if (problem) {
+    throw new LogoShapeError(problem);
+  }
+
+  return open(input).resize(LOGO_SIZE, LOGO_SIZE, { fit: 'cover' }).webp({ quality: 90 }).toBuffer();
 }
 
 /**

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { availableInAny, type ClubCatalogItem, type ClubEvent, type EventKind } from '@yenisey/types';
 import { EventDialog } from '@/components/events/EventDialog';
+import { CompactSelect } from '@/components/ui/CompactSelect';
 import { inputClassName } from '@/components/ui/Field';
 import { Tab } from '@/components/ui/Tab';
 import type { EventsFilter } from '@/lib/api';
@@ -190,7 +191,7 @@ export function UpcomingEvents({
   );
 
   return (
-    <section id={UPCOMING_ANCHOR} className="mb-16 scroll-mt-40">
+    <section id={UPCOMING_ANCHOR} className="mb-16 scroll-mt-48">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <SectionHeading
           className="mb-0"
@@ -222,8 +223,26 @@ export function UpcomingEvents({
       </div>
 
       {/* Фильтр по виду: «Детская тренировка» — и остальное не мешает. */}
+      {/* На телефоне — списком: видов бывает десяток, лента уходила за край
+          (решение владельца от 03.10.2026). */}
       {chips.length > 1 && (
-        <div className="-mx-1 mb-5 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
+        <CompactSelect
+          label="Вид"
+          value={filter ? `${filter.kind}:${filter.typeId}` : ''}
+          options={[
+            { value: '', label: 'Все виды' },
+            ...chips.map((item) => ({ value: `${item.kind}:${item.typeId}`, label: item.name })),
+          ]}
+          onChange={(value) => {
+            const item = chips.find((chip) => `${chip.kind}:${chip.typeId}` === value);
+            onFilter(item ? { kind: item.kind, typeId: item.typeId } : null);
+          }}
+          className="mb-5 sm:hidden"
+        />
+      )}
+
+      {chips.length > 1 && (
+        <div className="-mx-1 mb-5 hidden overflow-x-auto px-1 pb-1 [scrollbar-width:none] sm:block">
           <div className="flex w-max gap-1.5" role="group" aria-label="Вид мероприятия">
             <Tab active={filter === null} onClick={() => onFilter(null)}>
               Все
@@ -291,7 +310,23 @@ export function UpcomingEvents({
           </div>
 
           {!searching && (
-            <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="День недели">
+            <CompactSelect
+              label="День"
+              value={day === null ? '' : String(day)}
+              options={[
+                { value: '', label: 'Вся неделя' },
+                ...days.map((date, index) => ({
+                  value: String(index),
+                  label: `${DAY_NAMES[index]}, ${date.getDate()}${date < new Date(today.getFullYear(), today.getMonth(), today.getDate()) ? ' — прошёл' : ''}`,
+                })),
+              ]}
+              onChange={(value) => setDay(value === '' ? null : Number(value))}
+              className="sm:hidden"
+            />
+          )}
+
+          {!searching && (
+            <div className="hidden flex-wrap gap-1.5 sm:flex" role="tablist" aria-label="День недели">
               <Tab inTablist active={day === null} onClick={() => setDay(null)}>
                 Вся неделя
               </Tab>

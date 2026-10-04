@@ -6,6 +6,7 @@ import type { FamilyChild, GuardianshipRequestView, MyGuardian, PublicUser } fro
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
+import { ConsentCheckbox } from '@/components/ui/ConsentCheckbox';
 import { Field } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
 import { guardianshipLeft } from '@/lib/family';
@@ -44,7 +45,7 @@ export function ParentFamilyCard({
         title="Мои дети"
         description="Пока ребёнку нет 14, записывает и отменяет за него родитель, он же ведёт профиль игрока. Ребёнок входит своей учёткой и видит, куда записан."
       />
-      <CardBody className="grid gap-6">
+      <CardBody className="grid grid-cols-[minmax(0,1fr)] gap-6">
         {kids.length === 0 && mode === null && (
           <p className="text-[0.875rem] text-text-muted">Детей пока нет.</p>
         )}
@@ -233,6 +234,7 @@ export function CreateChildForm({
   onCancel,
   submit = (payload) => api.createChild(payload),
   title = 'Новая учётка ребёнка',
+  atDesk = false,
 }: {
   parentPhone: string;
   onDone: (child: FamilyChild) => void;
@@ -240,9 +242,12 @@ export function CreateChildForm({
   /** У стойки форму отправляет администратор — своим маршрутом. */
   submit?: (payload: Parameters<typeof api.createChild>[0]) => Promise<FamilyChild>;
   title?: string;
+  /** У стойки: форму заполняет администратор, согласие даёт родитель рядом. */
+  atDesk?: boolean;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [consent, setConsent] = useState(false);
 
   async function send(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -268,6 +273,7 @@ export function CreateChildForm({
           email: String(form.get('email')),
           password: String(form.get('password')),
           phone: String(form.get('phone')),
+          consent: true,
         }),
       );
     } catch (cause) {
@@ -323,8 +329,10 @@ export function CreateChildForm({
         hint="Не короче 8 символов. Сменить его можно будет здесь же."
       />
 
+      <ConsentCheckbox checked={consent} onChange={setConsent} by={atDesk ? 'desk' : 'parent'} />
+
       <div className="flex gap-2">
-        <Button type="submit" size="sm" pending={pending}>
+        <Button type="submit" size="sm" pending={pending} disabled={!consent}>
           Завести учётку
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
@@ -438,7 +446,7 @@ export function ChildFamilyCard() {
         title="Семья"
         description="До 14 лет на занятия и турниры записывает родитель — или администратор клуба у стойки."
       />
-      <CardBody className="grid gap-4">
+      <CardBody className="grid grid-cols-[minmax(0,1fr)] gap-4">
         {error && <Alert>{error}</Alert>}
 
         {guardian === undefined && <p className="text-[0.875rem] text-text-muted">Загружаю…</p>}

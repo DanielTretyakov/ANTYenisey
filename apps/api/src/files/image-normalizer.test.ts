@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import sharp from 'sharp';
-import { AVATAR_SIZE, normalizeAvatar, normalizeDocumentImage } from './image-normalizer.ts';
+import {
+  AVATAR_SIZE,
+  LOGO_SIZE,
+  LogoShapeError,
+  logoShapeProblem,
+  normalizeAvatar,
+  normalizeDocumentImage,
+  normalizeLogo,
+} from './image-normalizer.ts';
 
 /** Снимок «с телефона»: JPEG с EXIF, где лежат модель камеры и координаты. */
 async function photoWithExif(width: number, height: number): Promise<Buffer> {
@@ -70,5 +78,44 @@ describe('normalizeDocumentImage', () => {
 
     assert.equal(kept.width, 600);
     assert.equal(kept.format, 'webp');
+  });
+});
+
+describe('logoShapeProblem', () => {
+  it('квадрат и почти квадрат — годятся', () => {
+    assert.equal(logoShapeProblem(512, 512), null);
+    assert.equal(logoShapeProblem(2158, 2100), null);
+    assert.equal(logoShapeProblem(128, 128), null);
+  });
+
+  it('горизонтальный и вертикальный локап — нет, с размерами в тексте', () => {
+    assert.equal(logoShapeProblem(2158, 399), 'Логотип должен быть квадратным: сейчас 2158×399');
+    assert.match(logoShapeProblem(1537, 2092) ?? '', /квадратным: сейчас 1537×2092/);
+  });
+
+  it('меньше 128 точек — слишком маленький', () => {
+    assert.match(logoShapeProblem(64, 64) ?? '', /слишком маленький: сейчас 64×64/);
+  });
+});
+
+describe('normalizeLogo', () => {
+  it('квадрат 512×512 в WebP с прозрачностью', async () => {
+    const input = await sharp({ create: { width: 900, height: 880, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .png()
+      .toBuffer();
+    const meta = await sharp(await normalizeLogo(input)).metadata();
+
+    assert.equal(meta.format, 'webp');
+    assert.equal(meta.width, LOGO_SIZE);
+    assert.equal(meta.height, LOGO_SIZE);
+    assert.equal(meta.hasAlpha, true);
+  });
+
+  it('неквадратный — отказ по форме, а не сбой чтения', async () => {
+    const wide = await sharp({ create: { width: 2000, height: 400, channels: 3, background: '#fff' } })
+      .png()
+      .toBuffer();
+
+    await assert.rejects(normalizeLogo(wide), (error: unknown) => error instanceof LogoShapeError);
   });
 });

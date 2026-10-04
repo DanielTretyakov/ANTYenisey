@@ -51,7 +51,7 @@ export function PlayerReview({
         title="Профиль игрока"
         description="Заполняет сам человек. Клуб проверяет разряд — решение видно во всех клубах игрока."
       />
-      <CardBody className="grid gap-7">
+      <CardBody className="grid grid-cols-[minmax(0,1fr)] gap-7">
         <div className="flex flex-wrap items-center gap-4">
           <PlayerAvatar fileId={player.avatarFileId} name={personName} gender={player.gender} size="md" />
           <div className="text-[0.875rem]">

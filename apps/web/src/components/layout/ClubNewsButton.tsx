@@ -1,11 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { useEffect, useId, useRef, useState } from 'react';
 import { useClubPostsUnread } from '@/lib/clubPostsUnread';
 import { cn } from '@/lib/cn';
 import { plural } from '@/lib/plural';
+import { useDisclosure } from '@/lib/useDisclosure';
 import { useSession } from '@/lib/useSession';
 
 /**
@@ -20,32 +19,8 @@ import { useSession } from '@/lib/useSession';
 export function ClubNewsButton() {
   const session = useSession();
   const unread = useClubPostsUnread();
-  const pathname = usePathname();
-  const [open, setOpen] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
-  const panelId = useId();
-
-  useEffect(() => {
-    setOpen(false);
-  }, [pathname]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    function onPointerDown(event: PointerEvent): void {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    }
-    function onKeyDown(event: KeyboardEvent): void {
-      if (event.key === 'Escape') setOpen(false);
-    }
-
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
+  const menu = useDisclosure();
+  const { open, setOpen, root, panelId } = menu;
 
   if (session.status === 'loading') {
     return <span className="h-11 w-11 shrink-0" aria-hidden="true" />;

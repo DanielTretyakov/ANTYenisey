@@ -25,6 +25,7 @@ const PROBE_TABLE_PREFIX = 'Стол проверки ';
 const PROBE_NEWS_PREFIX = 'Новость проверки ';
 const PROBE_POST_PREFIX = 'Публикация проверки ';
 const PROBE_SPARRING_TYPE_PREFIX = 'Тип спарринга проверки ';
+const PROBE_APPLICATION_PREFIX = 'Клуб проверки заявки ';
 
 async function main(): Promise<void> {
   const users = await prisma.user.findMany({
@@ -302,9 +303,15 @@ async function removeProbeRooms(): Promise<void> {
     where: { name: { startsWith: PROBE_SPARRING_TYPE_PREFIX }, bookings: { none: {} } },
   });
 
+  // Заявки клубов смоука — по точному префиксу названия клуба: иначе список
+  // заявок владельца платформы рос бы с каждым прогоном.
+  const applications = await prisma.clubApplication.deleteMany({
+    where: { clubName: { startsWith: PROBE_APPLICATION_PREFIX } },
+  });
+
   console.log(
     `Убрано залов смоука: ${halls.count}, столов: ${tables.count}, тарифов: ${plans.count}, новостей: ${news.count}, ` +
-      `публикаций клуба: ${posts.count}, типов спарринга: ${sparringTypes.count}`,
+      `публикаций клуба: ${posts.count}, типов спарринга: ${sparringTypes.count}, заявок клубов: ${applications.count}`,
   );
 }
 

@@ -1,4 +1,13 @@
 import type {
+  BillingView,
+  CardPaymentStart,
+  ClubApplicationRequest,
+  ClubApplicationUpdate,
+  ClubApplicationView,
+  ClubRequisitesView,
+  PlatformClubRow,
+  PlatformDocument,
+  PlatformPlanView,
   ClubPost,
   ClubPostPage,
   ClubPostRequest,
@@ -51,6 +60,7 @@ import type {
   SubscriptionPlanRequest,
   PublicCoach,
   FavouriteClub,
+  FavouriteCoach,
   EventDetail,
   EventKind,
   FeedEvent,
@@ -117,7 +127,7 @@ import type {
   UpdateClubSettingsRequest,
   UpdateHallRequest,
 } from '@yenisey/types';
-import { clearSession, readAccessToken, saveSession } from './session';
+import { clearSession, forgetToken, knownSignedOut, readAccessToken, saveSession } from './session';
 import { TENANT_SLUG } from './config';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
@@ -256,13 +266,21 @@ async function optionallyAuthorizedResponse(path: string, init: RequestInit = {}
 let refreshing: Promise<AuthResponse> | null = null;
 
 function refreshOnce(): Promise<AuthResponse> {
+  // Гость: браузер помнит, что здесь не вошли, — запроса, обречённого на 401, нет.
+  if (!refreshing && knownSignedOut()) {
+    return Promise.reject(new ApiError('Нужно войти', 401));
+  }
+
   refreshing ??= request<AuthResponse>('/auth/refresh', { method: 'POST' })
     .then((refreshed) => {
       saveSession(refreshed);
       return refreshed;
     })
     .catch((cause: unknown) => {
-      clearSession();
+      // «Не вошли» браузер запоминает только по настоящему отказу: сбой сети
+      // не значит, что сессии нет, и выкидывать за него из аккаунта нельзя.
+      if (cause instanceof ApiError && cause.status === 401) clearSession();
+      else forgetToken();
       throw cause;
     })
     .finally(() => {
@@ -389,6 +407,14 @@ export const api = {
   removeClub: (slug: string): Promise<FavouriteClub[]> =>
     authorized(`/me/clubs/${slug}`, { method: 'DELETE' }),
 
+  // --- Мои тренеры (решение от 02.10.2026): закладка, предела нет.
+  myCoaches: (): Promise<FavouriteCoach[]> => authorized('/me/coaches'),
+
+  /** Отметить тренера. Идемпотентно, как у клуба. */
+  addCoach: (id: string): Promise<FavouriteCoach[]> => authorized(`/me/coaches/${id}`, { method: 'PUT' }),
+
+  removeCoach: (id: string): Promise<FavouriteCoach[]> => authorized(`/me/coaches/${id}`, { method: 'DELETE' }),
+
   /** Лента ближайших мероприятий моих клубов — одним списком по времени. */
   feed: (): Promise<FeedEvent[]> => authorized('/me/feed'),
 
@@ -505,6 +531,9 @@ export const api = {
   /** Публичная карточка тренера. Возраста у неё нет — открыта всем. */
   coach: (id: string): Promise<PublicCoach> => optionallyAuthorized(`/coaches/${id}`),
 
+  /** Ближайшие занятия тренера по всем его клубам; вошедшему — с «я записан». */
+  coachUpcoming: (id: string): Promise<FeedEvent[]> => optionallyAuthorized(`/coaches/${id}/upcoming`),
+
   // --- Уведомления в MAX. Свойство человека, а не клуба: клуба в адресе нет.
   notificationSettings: (): Promise<NotificationSettingsView> => authorized('/me/notifications'),
 
@@ -546,6 +575,27 @@ export const api = {
 
   /** Редактор — только владелец платформы; черновики тоже. */
   platformNews: (): Promise<NewsItem[]> => authorized('/platform/news'),
+
+  // --- «Подключить свой клуб»: тарифы и заявка — без входа.
+  platformPlans: (): Promise<PlatformPlanView[]> => request('/platform/plans'),
+  submitClubApplication: (payload: ClubApplicationRequest): Promise<{ ok: true }> =>
+    request('/club-applications', json('POST', payload)),
+
+  // --- Клубы и подписки — владельцу платформы.
+  platformClubs: (): Promise<PlatformClubRow[]> => authorized('/platform/clubs'),
+  clubApplications: (): Promise<ClubApplicationView[]> => authorized('/platform/club-applications'),
+  updateClubApplication: (id: string, payload: ClubApplicationUpdate): Promise<ClubApplicationView> =>
+    authorized(`/platform/club-applications/${encodeURIComponent(id)}`, json('PATCH', payload)),
+  markInvoicePaid: (paymentId: string): Promise<PlatformClubRow[]> =>
+    authorized(`/platform/clubs/invoices/${paymentId}/paid`, { method: 'POST' }),
+  setClubExempt: (slug: string, exempt: boolean): Promise<PlatformClubRow[]> =>
+    authorized(`/platform/clubs/${slug}/exempt`, json('PUT', { exempt })),
+  extendClub: (slug: string, days: number): Promise<PlatformClubRow[]> =>
+    authorized(`/platform/clubs/${slug}/extend`, json('POST', { days })),
+
+  /** Поддельная «страница оплаты» — только вне production без ключей ЮKassa. */
+  devDecidePayment: (providerPaymentId: string, succeed: boolean): Promise<{ ok: true }> =>
+    request(`/dev/payments/${providerPaymentId}/${succeed ? 'succeed' : 'fail'}`, { method: 'POST' }),
   createNews: (draft: NewsDraft): Promise<NewsItem> => authorized('/platform/news', json('POST', draft)),
   updateNews: (id: string, draft: NewsDraft): Promise<NewsItem> =>
     authorized(`/platform/news/${id}`, json('PATCH', draft)),
@@ -618,10 +668,23 @@ export function clubApi(slug: string = TENANT_SLUG) {
     cancelSettingsChange: (id: string): Promise<SettingsChange[]> =>
       authorized(`${club}/settings/changes/${id}/cancel`, { method: 'POST' }),
 
-    /** Баннер страницы клуба: файл в поле `file`, новый заменяет старый. */
-    setClubBanner: (file: File): Promise<ClubSettings> => authorized(`${club}/settings/banner`, form('PUT', {}, file)),
+    // --- Подписка клуба на КНТ — руководителю.
+    billing: (): Promise<BillingView> => authorized(`${club}/billing`),
+    setRequisites: (requisites: ClubRequisitesView): Promise<BillingView> =>
+      authorized(`${club}/billing/requisites`, json('PUT', requisites)),
+    setAutoRenew: (autoRenew: boolean): Promise<BillingView> =>
+      authorized(`${club}/billing/auto-renew`, json('PUT', { autoRenew })),
+    payByCard: (planId: string): Promise<CardPaymentStart> => authorized(`${club}/billing/card`, json('POST', { planId })),
+    syncCardPayment: (paymentId: string): Promise<BillingView> =>
+      authorized(`${club}/billing/card/${paymentId}/sync`, { method: 'POST' }),
+    issueInvoice: (planId: string): Promise<BillingView> => authorized(`${club}/billing/invoice`, json('POST', { planId })),
+    billingDocument: (kind: 'INVOICE' | 'ACT', id: string): Promise<PlatformDocument> =>
+      authorized(`${club}/billing/documents/${kind}/${id}`),
 
-    removeClubBanner: (): Promise<ClubSettings> => authorized(`${club}/settings/banner`, { method: 'DELETE' }),
+    /** Логотип клуба: квадрат файлом в поле `file`, новый заменяет старый. */
+    setClubLogo: (file: File): Promise<ClubSettings> => authorized(`${club}/settings/logo`, form('PUT', {}, file)),
+
+    removeClubLogo: (): Promise<ClubSettings> => authorized(`${club}/settings/logo`, { method: 'DELETE' }),
 
     /** Все тренеры клуба; показанные на странице клуба — с местом. */
     coachList: (): Promise<ClubCoachListItem[]> => authorized(`${club}/settings/coaches`),

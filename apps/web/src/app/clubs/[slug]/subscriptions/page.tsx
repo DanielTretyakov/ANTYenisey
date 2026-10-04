@@ -16,6 +16,7 @@ import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { inputClassName } from '@/components/ui/Field';
+import { CompactSelect } from '@/components/ui/CompactSelect';
 import { Tab } from '@/components/ui/Tab';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
@@ -90,19 +91,33 @@ export default function ClubSubscriptionsPage() {
 
       {allowed && (
         <>
-          <div className="mb-4 flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Абонементы">
-            {VIEWS.map((item) => (
-              <Tab key={item.value} inTablist active={view === item.value} onClick={() => choose(item.value)}>
-                {item.label}
-              </Tab>
-            ))}
+          <div className="mb-4 flex flex-wrap items-center gap-1.5">
+            {/* На телефоне — список (решение от 03.10.2026). */}
+            <CompactSelect
+              label="Показать"
+              value={view}
+              options={VIEWS.map((item) => ({ value: item.value, label: item.label }))}
+              onChange={(value) => {
+                const item = VIEWS.find((candidate) => candidate.value === value);
+                if (item) choose(item.value);
+              }}
+              className="w-full sm:hidden"
+            />
+
+            <div className="hidden flex-wrap items-center gap-1.5 sm:flex" role="tablist" aria-label="Абонементы">
+              {VIEWS.map((item) => (
+                <Tab key={item.value} inTablist active={view === item.value} onClick={() => choose(item.value)}>
+                  {item.label}
+                </Tab>
+              ))}
+            </div>
 
             <input
               aria-label="Поиск по владельцу абонемента"
               placeholder="Фамилия владельца"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className={cn(inputClassName, 'ml-auto w-64 py-1.5 text-[0.875rem]')}
+              className={cn(inputClassName, 'w-full py-1.5 text-[0.875rem] sm:ml-auto sm:w-64')}
             />
           </div>
 

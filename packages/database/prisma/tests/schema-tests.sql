@@ -1403,13 +1403,13 @@ SELECT pg_temp.expect('DN',
   '23503', 'TenantMembership_preferredHallId_tenantId_fkey');
 
 -- ---------------------------------------------------------------------------
--- 30. Страница клуба: баннер, описание, тренерский состав
+-- 30. Страница клуба: логотип, описание, тренерский состав
 -- ---------------------------------------------------------------------------
 
--- Баннер клуба t2 — для сценариев ниже.
+-- Логотип клуба t2 — для сценариев ниже.
 DO $$ BEGIN
   INSERT INTO "StoredFile" (id,"ownerTenantId",kind,"contentType",size,sha256,data)
-  VALUES ('fb2','t2','CLUB_BANNER','image/webp',4,repeat('d',64),'\x52494646'::bytea);
+  VALUES ('fb2','t2','CLUB_LOGO','image/webp',4,repeat('d',64),'\x52494646'::bytea);
 EXCEPTION WHEN others THEN RAISE NOTICE 'DO. ПРОВАЛ подготовки: %', SQLERRM; END $$;
 
 -- DO. Файл без владельца — ничей мусор, который никто не удалит.
@@ -1418,16 +1418,22 @@ SELECT pg_temp.expect('DO',
      VALUES ('fnone','AVATAR','image/webp',4,repeat('a',64),'\x52494646'::bytea)$q$,
   '23514', 'StoredFile_one_owner');
 
--- DP. Аватар, записанный на клуб, — не баннер: у клуба только баннеры.
+-- DP. Аватар, записанный на клуб, — не логотип: у клуба только логотип.
 SELECT pg_temp.expect('DP',
   $q$INSERT INTO "StoredFile" (id,"ownerTenantId",kind,"contentType",size,sha256,data)
      VALUES ('ftav','t1','AVATAR','image/webp',4,repeat('a',64),'\x52494646'::bytea)$q$,
   '23514', 'StoredFile_one_owner');
 
--- DQ. Баннер чужого клуба не ставится: ключ составной (файл, клуб-владелец).
+-- DQ. Логотип чужого клуба не ставится: ключ составной (файл, клуб-владелец).
 SELECT pg_temp.expect('DQ',
-  $q$UPDATE "Tenant" SET "bannerFileId" = 'fb2' WHERE id = 't1'$q$,
-  '23503', 'Tenant_bannerFileId_id_fkey');
+  $q$UPDATE "Tenant" SET "logoFileId" = 'fb2' WHERE id = 't1'$q$,
+  '23503', 'Tenant_logoFileId_id_fkey');
+
+-- FM. Логотип на человеке — не логотип клуба: файл клуба принадлежит клубу.
+SELECT pg_temp.expect('FM',
+  $q$INSERT INTO "StoredFile" (id,"ownerUserId",kind,"contentType",size,sha256,data)
+     VALUES ('fulogo','u1','CLUB_LOGO','image/webp',4,repeat('a',64),'\x52494646'::bytea)$q$,
+  '23514', 'StoredFile_one_owner');
 
 -- DR. Клиент в тренерском составе — список только для тренеров.
 SELECT pg_temp.expect('DR',
@@ -1742,3 +1748,94 @@ BEGIN
     RAISE NOTICE 'FL. ПРОВАЛ: осталось отметок %', left_reads;
   END IF;
 EXCEPTION WHEN others THEN RAISE NOTICE 'FL. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- ---------------------------------------------------------------------------
+-- 41. Мои тренеры
+-- ---------------------------------------------------------------------------
+
+-- FN. Клиент отмечает тренера — законно.
+DO $$ BEGIN
+  INSERT INTO "UserCoach" ("userId","coachId") VALUES ('u1','c1');
+  RAISE NOTICE 'FN. Тренер в избранном у клиента................. OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'FN. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- FO. Себя в избранные тренеры не отмечают.
+SELECT pg_temp.expect('FO',
+  $q$INSERT INTO "UserCoach" ("userId","coachId") VALUES ('c1','c1')$q$,
+  '23514', 'UserCoach_not_self');
+
+-- FP. Дважды одного и того же — нет: ключ (человек, тренер).
+SELECT pg_temp.expect('FP',
+  $q$INSERT INTO "UserCoach" ("userId","coachId") VALUES ('u1','c1')$q$,
+  '23505', 'UserCoach_pkey');
+
+-- ---------------------------------------------------------------------------
+-- 42. Подписка клуба на КНТ
+-- ---------------------------------------------------------------------------
+
+-- FQ. Пробный период без конца — джоба не узнала бы, когда его закрыть.
+SELECT pg_temp.expect('FQ',
+  $q$UPDATE "TenantSubscription" SET status = 'TRIAL', "planId" = NULL, "priceAtPurchase" = NULL WHERE id = 'ts_ok'$q$,
+  '23514', 'TenantSubscription_trial_has_end');
+
+-- FR. Пробный период без тарифа — законно: клуб ещё ничего не купил.
+DO $$ BEGIN
+  UPDATE "TenantSubscription" SET status = 'TRIAL', "trialEndsAt" = now() + interval '7 days' WHERE id = 'ts_ex';
+  RAISE NOTICE 'FR. Пробный период без тарифа.................. OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'FR. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- FS. Просрочка без момента начала — льготные дни не от чего считать.
+SELECT pg_temp.expect('FS',
+  $q$UPDATE "TenantSubscription" SET status = 'PAST_DUE' WHERE id = 'ts_ok'$q$,
+  '23514', 'TenantSubscription_past_due_has_start');
+
+-- FT. Счёт без номера — нечего напечатать в счёте и акте.
+SELECT pg_temp.expect('FT',
+  $q$INSERT INTO "PlatformPayment" (id,"tenantId","planId",amount,method,"updatedAt") VALUES ('pp_inv0','t2','pp_year2',6000000,'INVOICE',now())$q$,
+  '23514', 'PlatformPayment_method_shape');
+
+-- FU. Оплаченный платёж без срока доступа — неизвестно, что продлили.
+SELECT pg_temp.expect('FU',
+  $q$INSERT INTO "PlatformPayment" (id,"tenantId","planId",amount,method,status,"paidAt","updatedAt") VALUES ('pp_card0','t2','pp_year2',6000000,'CARD','SUCCEEDED',now(),now())$q$,
+  '23514', 'PlatformPayment_paid_shape');
+
+-- FV. Оплаченный счёт с периодом и актом за месяц — законно.
+DO $$ BEGIN
+  INSERT INTO "PlatformPayment" (id,"tenantId","planId",amount,method,status,"invoiceNumber","paidAt","periodFrom","periodTo","updatedAt")
+  VALUES ('pp_inv1','t2','pp_year2',6000000,'INVOICE','SUCCEEDED',1,now(),now(),now() + interval '1 year',now());
+  INSERT INTO "PlatformAct" (id,"tenantId","paymentId",number,"periodFrom","periodTo",amount)
+  VALUES ('pa1','t2','pp_inv1',1,now(),now() + interval '1 month',500000);
+  RAISE NOTICE 'FV. Оплаченный счёт и акт за месяц............ OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'FV. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- FW. ИНН из девяти цифр — не ИНН ни организации, ни ИП.
+SELECT pg_temp.expect('FW',
+  $q$INSERT INTO "ClubRequisites" ("tenantId","legalName",inn,address,email,"updatedAt") VALUES ('t2','ООО «Столбы»','123456789','г. Красноярск, ул. Мира, 1','buh@example.ru',now())$q$,
+  '23514', 'ClubRequisites_sane');
+
+-- ---------------------------------------------------------------------------
+-- 43. Заявки клубов на подключение
+-- ---------------------------------------------------------------------------
+
+-- FX. Заявка без телефона и почты — заявителю не ответить.
+SELECT pg_temp.expect('FX',
+  $q$INSERT INTO "ClubApplication" (id,"contactName","clubName","updatedAt") VALUES ('ca0','Иван Петров','Клуб «Столбы»',now())$q$,
+  '23514', 'ClubApplication_contact_present');
+
+-- FY. Телефон не в E.164 — по нему не позвонить из карточки.
+SELECT pg_temp.expect('FY',
+  $q$INSERT INTO "ClubApplication" (id,"contactName","clubName",phone,"updatedAt") VALUES ('ca1','Иван Петров','Клуб «Столбы»','8 (391) 200-00-00',now())$q$,
+  '23514', 'ClubApplication_sane');
+
+-- FZ. Заявка с почтой, городом и размером клуба — законно.
+DO $$ BEGIN
+  INSERT INTO "ClubApplication" (id,"contactName","clubName",email,halls,tables,"updatedAt")
+  VALUES ('ca2','Иван Петров','Клуб «Столбы»','ivan@example.ru',2,12,now());
+  RAISE NOTICE 'FZ. Заявка клуба с почтой........................ OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'FZ. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- GA. Ноль столов — опечатка, а не клуб.
+SELECT pg_temp.expect('GA',
+  $q$INSERT INTO "ClubApplication" (id,"contactName","clubName",email,tables,"updatedAt") VALUES ('ca3','Иван Петров','Клуб «Столбы»','ivan@example.ru',0,now())$q$,
+  '23514', 'ClubApplication_sane');
+

@@ -5,8 +5,10 @@ import { rolesInClub } from '@/lib/membership';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
+import { SiteFooter } from '@/components/layout/SiteFooter';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { clubPath } from '@/components/layout/ClubNav';
+import { NavSelect } from '@/components/ui/CompactSelect';
 import { cn } from '@/lib/cn';
 import { useClubSlug } from '@/lib/useClubApi';
 import { useSession } from '@/lib/useSession';
@@ -63,6 +65,8 @@ const SETUP: Section[] = [
   { path: '/people', label: 'Состав клуба' },
   { path: '/catalog', label: 'Занятия и турниры' },
   { path: '/settings', label: 'Настройки' },
+  // Подписка клуба на КНТ — только руководителю (решение от 02.10.2026).
+  { path: '/billing', label: 'Подписка на КНТ', roles: ['OWNER'] },
 ];
 
 export function AdminShell({
@@ -107,6 +111,9 @@ export function AdminShell({
 
         <main className="min-w-0 flex-1 py-8 sm:py-10">{children}</main>
       </div>
+
+      {/* Рабочему месту — подвал строкой: место нужнее (вариант Б, 03.10.2026). */}
+      <SiteFooter variant="line" wide={wide} />
     </div>
   );
 }
@@ -114,13 +121,20 @@ export function AdminShell({
 /**
  * Разделы рабочего места.
  *
- * На узком экране колонка превращается в горизонтальную полосу с прокруткой, а
- * не в бургер: администратор стоит за стойкой с телефоном в руке, и лишнее
- * нажатие на каждый переход — это то, чего рабочее место должно избегать.
- * Заголовки групп там же скрываются: подписи над однострочной лентой заняли бы
- * больше места, чем сама лента.
+ * Уже колонки (меньше `lg`) — выпадающий список «Раздел: Смена ▾» с группами
+ * (решение владельца от 03.10.2026). Прежде здесь была лента с прокруткой
+ * вбок: девять разделов в неё не влезали даже на планшете, и половина их
+ * пряталась за краем экрана — администратор их просто не находил. Список
+ * показывает все разделы сразу и текущий — словом.
  */
 function AdminNav({ slug, clubName, roles }: { slug: string; clubName: string | null; roles: Role[] }) {
+  const pathname = usePathname();
+  const shift = SHIFT.filter(visibleTo(roles));
+  const setup = SETUP.filter(visibleTo(roles));
+  const current = [...shift, ...setup]
+    .map((section) => clubPath(slug, section.path))
+    .find((href) => pathname === href || pathname.startsWith(`${href}/`));
+
   return (
     <nav
       aria-label="Рабочее место"
@@ -137,17 +151,71 @@ function AdminNav({ slug, clubName, roles }: { slug: string; clubName: string | 
         </p>
       )}
 
-      <div
-        className={cn(
-          '-mx-5 flex gap-1 overflow-x-auto px-5 py-3 sm:-mx-8 sm:px-8',
-          'border-b border-border',
-          'lg:mx-0 lg:flex-col lg:overflow-visible lg:border-0 lg:px-0 lg:py-0',
-        )}
-      >
-        <Group title="Операционка" sections={SHIFT.filter(visibleTo(roles))} slug={slug} />
-        <Group title="Устройство клуба" sections={SETUP.filter(visibleTo(roles))} slug={slug} />
+      {/* Клуб — и на телефоне: у руководителя двух клубов разделы одинаковые. */}
+      {clubName && <p className="truncate pt-3 text-[0.8125rem] font-semibold text-text lg:hidden">{clubName}</p>}
+
+      <div className="flex items-center gap-3 border-b border-border py-3 lg:hidden">
+        <NavSelect
+          label="Раздел"
+          current={current ?? ''}
+          options={[
+            ...shift.map((section) => ({ href: clubPath(slug, section.path), label: section.label, group: 'Операционка' })),
+            ...setup.map((section) => ({ href: clubPath(slug, section.path), label: section.label, group: 'Устройство клуба' })),
+          ]}
+          className="grow"
+        />
+        <SectionHelp slug={slug} short />
+      </div>
+
+      <div className="hidden lg:flex lg:flex-col">
+        <Group title="Операционка" sections={shift} slug={slug} />
+        <Group title="Устройство клуба" sections={setup} slug={slug} />
+        <SectionHelp slug={slug} />
       </div>
     </nav>
+  );
+}
+
+/** Статья справки о разделе рабочего места — по последнему участку пути. */
+const SECTION_HELP: Record<string, string> = {
+  '/desk': 'smena',
+  '/schedule': 'raspisanie-zala',
+  '/staff': 'raspisanie-personala',
+  '/subscriptions': 'abonementy-u-stojki',
+  '/posts': 'lenta-kluba',
+  '/people': 'lyudi-kluba',
+  '/settings': 'nastrojki-v-polnoch',
+  '/billing': 'podpiska-knt',
+};
+
+/**
+ * «Как это работает?» — статья справки о текущем разделе (решение от
+ * 02.10.2026). Внизу колонки разделов, а не над страницей: у каждой страницы
+ * свой заголовок и свои действия, и ссылка над ними спорила бы с ними.
+ */
+function SectionHelp({ slug, short = false }: { slug: string; short?: boolean }) {
+  const pathname = usePathname();
+  const section = Object.keys(SECTION_HELP).find((path) => {
+    const href = clubPath(slug, path);
+    return pathname === href || pathname.startsWith(`${href}/`);
+  });
+
+  if (!section) {
+    return null;
+  }
+
+  return (
+    <Link
+      href={`/help/${SECTION_HELP[section]}`}
+      aria-label={short ? 'Как это работает? Справка о разделе' : undefined}
+      className={cn(
+        'rounded-control py-2 text-[0.8125rem] whitespace-nowrap text-text-accent underline-offset-2 hover:underline',
+        short ? 'shrink-0' : 'mt-4 px-3',
+      )}
+    >
+      {/* Рядом со списком места мало — короче, смысл тот же. */}
+      {short ? 'Справка' : 'Как это работает?'}
+    </Link>
   );
 }
 
@@ -169,12 +237,7 @@ function Group({
 
   return (
     <>
-      <p
-        className={cn(
-          'hidden text-[0.6875rem] tracking-[0.09em] text-text-subtle uppercase',
-          'lg:block lg:px-3 lg:pt-4 lg:pb-1.5',
-        )}
-      >
+      <p className="px-3 pt-4 pb-1.5 text-[0.6875rem] tracking-[0.09em] text-text-subtle uppercase">
         {title}
       </p>
 
@@ -192,9 +255,7 @@ function Group({
             aria-current={active ? 'page' : undefined}
             className={cn(
               'rounded-control px-3 py-2 text-[0.875rem] whitespace-nowrap transition-colors',
-              active
-                ? 'bg-surface-accent-soft font-medium text-text-accent'
-                : 'text-text-muted hover:bg-surface-sunken hover:text-text lg:hover:bg-surface',
+              active ? 'bg-surface-accent-soft font-medium text-text-accent' : 'text-text-muted hover:bg-surface hover:text-text',
             )}
           >
             {section.label}

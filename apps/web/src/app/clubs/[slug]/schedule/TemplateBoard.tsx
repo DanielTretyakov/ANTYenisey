@@ -13,6 +13,7 @@ import type {
 } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
+import { CompactSelect } from '@/components/ui/CompactSelect';
 import { Tab } from '@/components/ui/Tab';
 import { ApiError } from '@/lib/api';
 import {
@@ -137,7 +138,23 @@ export function TemplateBoard({
 
       {grid.error && <Alert>{grid.error}</Alert>}
 
-      <div className="mb-4 flex flex-wrap gap-1.5" role="tablist" aria-label="День недели">
+      {/* На телефоне — список дней (решение от 03.10.2026); число закрашенных
+          клеток — в подписи пункта, как счётчик на вкладке. */}
+      <CompactSelect
+        label="День"
+        value={String(weekday)}
+        options={WEEKDAYS.map((day) => {
+          const count = countOnLane(grid.cells, String(day.value));
+          return { value: String(day.value), label: count > 0 ? `${day.full} · ${count}` : day.full };
+        })}
+        onChange={(value) => {
+          const day = WEEKDAYS.find((item) => String(item.value) === value);
+          if (day) setWeekday(day.value);
+        }}
+        className="mb-4 sm:hidden"
+      />
+
+      <div className="mb-4 hidden flex-wrap gap-1.5 sm:flex" role="tablist" aria-label="День недели">
         {WEEKDAYS.map((day) => {
           const count = countOnLane(grid.cells, String(day.value));
 

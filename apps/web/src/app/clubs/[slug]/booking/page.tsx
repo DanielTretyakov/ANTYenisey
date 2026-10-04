@@ -19,6 +19,7 @@ import { SparringStudentPicker } from './SparringStudent';
 import { EventDialog } from '@/components/events/EventDialog';
 import { WhenSpan } from '@/components/club/When';
 import { PersonSwitch } from '@/components/family/PersonSwitch';
+import { HelpHint } from '@/components/help/HelpHint';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -299,10 +300,9 @@ export default function BookingPage() {
   }
 
   return (
-    <AppShell>
-      <h1 className="mb-7 text-[1.75rem]">
-        {sparring ? 'Стол под спарринг' : 'Забронировать стол'}
-      </h1>
+    <AppShell footer="line" clubSlug={slug}>
+      <h1 className="text-[1.75rem]">{sparring ? 'Стол под спарринг' : 'Забронировать стол'}</h1>
+      <HelpHint slug={sparring ? 'sparring' : 'bron-stola'} className="mt-1 mb-7" />
 
       {!sparring && (
         <PersonSwitch

@@ -19,6 +19,8 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { PeopleModule } from './people/people.module';
 import { PlayersModule } from './players/players.module';
 import { NewsModule } from './news/news.module';
+import { BillingModule } from './billing/billing.module';
+import { ClubApplicationsModule } from './club-applications/club-applications.module';
 import { RatingModule } from './rating/rating.module';
 import { SparringModule } from './sparring/sparring.module';
 import { StaffModule } from './staff/staff.module';
@@ -83,6 +85,8 @@ import { validateEnv, type Env } from './config/env';
     GuardianshipModule,
     TenantsModule,
     NewsModule,
+    BillingModule,
+    ClubApplicationsModule,
     EntriesModule,
     EventsModule,
     MeModule,

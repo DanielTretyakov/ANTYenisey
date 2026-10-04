@@ -7,6 +7,7 @@ import type { BookingEntry, BookingStatus } from '@yenisey/types';
 import { ClubMark } from '@/components/club/ClubMark';
 import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { WhenSpan } from '@/components/club/When';
+import { HelpHint } from '@/components/help/HelpHint';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -70,10 +71,11 @@ export default function MyBookingsPage() {
   }
 
   return (
-    <AppShell>
-      <h1 className="mb-8 text-[1.75rem]">
+    <AppShell footer="line">
+      <h1 className="text-[1.75rem]">
         {family.selected ? `Записи: ${family.selected.fullName}` : 'Мои записи'}
       </h1>
+      <HelpHint slug="otmena-zapisi" className="mt-1 mb-8" />
 
       <PersonSwitch
         people={family.children}

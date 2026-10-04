@@ -7,7 +7,7 @@ import type { StoredContentType } from './file-signature';
 /** Что известно о файле без его байтов. */
 /**
  * Чей файл: человека или клуба — ровно одно (CHECK StoredFile_one_owner).
- * Клубу принадлежит только баннер.
+ * Клубу принадлежит только логотип.
  */
 export type FileOwner = { ownerUserId: string } | { ownerTenantId: string };
 

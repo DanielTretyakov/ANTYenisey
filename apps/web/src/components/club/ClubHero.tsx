@@ -10,7 +10,6 @@ import type { EventViewer } from '@/lib/eventViewer';
 import { formatKopecks } from '@/lib/money';
 import { loginHref } from '@/lib/next';
 import { plural } from '@/lib/plural';
-import { useFileUrl } from '@/lib/useFileUrl';
 import { ClubContacts } from './ClubAbout';
 import { ClubMark } from './ClubMark';
 
@@ -22,13 +21,14 @@ import { ClubMark } from './ClubMark';
  * Действия те же, что были под баннером: «Забронировать стол» (сотруднику не
  * показывается — бронь ссылается на карточку клиента; ребёнку до 14 — пояснение
  * вместо кнопки), запись на тренировку ведёт к расписанию, сердечко «мой
- * клуб». Снимок, который клуб загрузил сам, — фоном, притемнённым под текст.
+ * клуб». Фон — плоскость в цвете клуба с рекой: снимков у клуба нет (решение
+ * от 02.10.2026), оформление — фирменный цвет и квадратный логотип.
  *
  * Внизу, под кнопками, — контакты клуба одной строкой (`ClubContacts`), в
  * правом верхнем углу — сердечко «мой клуб» иконкой (решение от 01.10.2026).
  *
  * Высота задана до ответа сервера — иначе содержимое страницы подпрыгивало
- * бы, когда приедут название и снимок.
+ * бы, когда приедут название и факты.
  */
 export function ClubHero({
   tenant,
@@ -48,7 +48,6 @@ export function ClubHero({
   /** «Записаться на тренировку» — к расписанию. */
   onSchedule: () => void;
 }) {
-  const banner = useFileUrl(tenant?.bannerFileId ?? null);
   const places = tenant ? [tenant.city, ...tenant.otherCities].filter(Boolean).join(', ') : '';
   const manifesto = tenant?.values.map((value) => value.title.replace(/[.!]+$/, '')).join('. ');
 
@@ -56,35 +55,19 @@ export function ClubHero({
     <header className="relative mt-6 mb-4 overflow-hidden rounded-[1.375rem] text-white sm:mt-8">
       <div
         className="relative flex min-h-[23rem] flex-col justify-end px-6 pt-16 pb-7 sm:px-11 sm:pb-9"
-        // Без баннера — плоскость в цвете клуба, притемнённая: белый текст на
-        // произвольном фирменном цвете иначе читался бы не всегда.
+        // Плоскость в цвете клуба, притемнённая: белый текст на произвольном
+        // фирменном цвете иначе читался бы не всегда.
         style={{ background: 'color-mix(in oklab, var(--accent) 50%, var(--ink-950))' }}
       >
-        {banner ? (
-          <>
-            <img src={banner} alt="" className="absolute inset-0 h-full w-full object-cover" />
-            <span
-              aria-hidden="true"
-              className="absolute inset-0"
-              style={{
-                background:
-                  'linear-gradient(to top, color-mix(in oklab, var(--ink-950) 88%, transparent), color-mix(in oklab, var(--ink-950) 35%, transparent) 75%)',
-              }}
-            />
-          </>
-        ) : (
-          <>
-            <RiverBackdrop orientation="landscape" />
-            <span
-              aria-hidden="true"
-              className="absolute inset-0"
-              style={{
-                background:
-                  'radial-gradient(900px 320px at 85% -10%, color-mix(in oklab, var(--accent) 45%, transparent), transparent 65%)',
-              }}
-            />
-          </>
-        )}
+        <RiverBackdrop orientation="landscape" />
+        <span
+          aria-hidden="true"
+          className="absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(900px 320px at 85% -10%, color-mix(in oklab, var(--accent) 45%, transparent), transparent 65%)',
+          }}
+        />
 
         {/* Сердечко «мой клуб» — иконкой в правом верхнем углу обложки
             (решение от 01.10.2026). */}

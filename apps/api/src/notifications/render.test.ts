@@ -369,3 +369,24 @@ describe('смены и настройки клуба', () => {
     assert.match(text, /Причина: У стола появились брони/);
   });
 });
+
+describe('заявка клуба на подключение', () => {
+  it('о клубе — название, город и размер; ссылка на заявки', () => {
+    const { text, link } = renderNotification(
+      'CLUB_APPLICATION',
+      { clubName: 'Столбы', city: 'Красноярск', halls: 1, tables: 5 },
+      context,
+    );
+
+    assert.match(text, /Заявка на подключение клуба · «Столбы»/);
+    assert.match(text, /Красноярск · 1 зал, 5 столов/);
+    assert.equal(link?.url, 'https://ant-yenisey.ru/platform/clubs#zayavki');
+  });
+
+  it('без контактов заявителя: они — на странице, не в мессенджере', () => {
+    const { text } = renderNotification('CLUB_APPLICATION', { clubName: 'Столбы', city: null, halls: null, tables: null }, context);
+
+    assert.doesNotMatch(text, /\+7|@/);
+    assert.doesNotMatch(text, /null/);
+  });
+});

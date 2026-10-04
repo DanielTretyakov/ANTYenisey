@@ -152,13 +152,24 @@ function ReadOnlyData({ user }: { user: PublicUser }) {
   );
 }
 
-/** Почта и дата рождения — видны, но меняются только через клуб. */
+/**
+ * Почта и дата рождения — видны, но меняются только через клуб. Рядом — когда
+ * дано согласие на обработку данных: человек вправе знать, на что согласился.
+ */
 function FixedFacts({ user }: { user: PublicUser }) {
   return (
     <div className="mt-2 mb-4 rounded-control border border-border bg-surface-sunken px-4 py-3.5">
       <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
         <Fact label="Электронная почта" value={user.email} />
         <Fact label="Дата рождения" value={formatBirthDate(user.birthDate)} />
+        <Fact
+          label="Согласие на обработку данных"
+          value={
+            user.consentAt
+              ? `дано ${new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(user.consentAt))}`
+              : 'не запрашивалось — учётка заведена до 3 октября 2026 г.'
+          }
+        />
       </dl>
       <p className="mt-3 text-[0.8125rem] text-text-subtle">
         Почта — ваш логин, дата рождения решает правила до 14 лет. Их меняет администратор клуба.

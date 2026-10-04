@@ -65,11 +65,9 @@ async function main(): Promise<void> {
       slug: 'yenisey',
       // Часового пояса у клуба больше нет: он у каждого зала свой.
       cityId: cities.get('Красноярск')!,
+      // Логотипа сид не заводит: с 02.10.2026 это загруженный в настройках
+      // квадрат, а не ссылка. До загрузки клуб показывается монограммой.
       accentColor: '#126b54',
-      // Знак академии больше не логотип продукта: у платформы свой,
-      // векторный. Здесь он ровно то же, что логотип любого другого клуба, —
-      // ссылка на картинку, которую клуб про себя заявил.
-      logoUrl: '/brand/clubs/yenisey.png',
       // Контакты из ТЗ: по ним посетитель страницы клуба звонит и пишет.
       phone: '+73912000000',
       email: 'info@ant-yenisey.ru',
@@ -94,11 +92,6 @@ async function main(): Promise<void> {
   await prisma.tenant.updateMany({
     where: { slug: 'yenisey', accentColor: null },
     data: { accentColor: '#126b54' },
-  });
-
-  await prisma.tenant.updateMany({
-    where: { slug: 'yenisey', logoUrl: null },
-    data: { logoUrl: '/brand/clubs/yenisey.png' },
   });
 
   await prisma.tenant.updateMany({
@@ -225,6 +218,9 @@ async function main(): Promise<void> {
   });
 
   await seedWelcome(tenant.id, tenant.name);
+  await seedPlatformPlans();
+  // «Енисей» — пилотный клуб, подписку не оплачивает (ТЗ).
+  await seedSubscription(tenant.id, true);
   await seedNeighbour(cities);
 
   console.log(`Клуб «${tenant.name}» (slug: ${tenant.slug}) готов.`);
@@ -323,8 +319,36 @@ async function seedNeighbour(cities: Map<string, string>): Promise<void> {
   }
 
   await seedWelcome(tenant.id, tenant.name);
+  await seedSubscription(tenant.id, false);
 
   console.log(`Клуб «${tenant.name}» (slug: ${tenant.slug}) готов.`);
+}
+
+/** Тарифы платформы из ТЗ: месяц, год, три года. Повторный сид ничего не меняет. */
+async function seedPlatformPlans(): Promise<void> {
+  await prisma.platformPlan.createMany({
+    data: [
+      { id: 'platform-plan-month', name: 'Месяц', periodMonths: 1, price: 5_000 * RUB },
+      { id: 'platform-plan-year', name: 'Год', periodMonths: 12, price: 50_000 * RUB },
+      { id: 'platform-plan-3years', name: '3 года', periodMonths: 36, price: 130_000 * RUB },
+    ],
+    skipDuplicates: true,
+  });
+}
+
+/**
+ * Подписка клуба на КНТ (решения владельца от 02.10.2026): пилотный — без
+ * оплаты, остальные — пробные 7 дней. Уже заведённую сид не трогает.
+ */
+async function seedSubscription(tenantId: string, exempt: boolean): Promise<void> {
+  await prisma.tenantSubscription.createMany({
+    data: [
+      exempt
+        ? { tenantId, status: 'EXEMPT' }
+        : { tenantId, status: 'TRIAL', trialEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
+    ],
+    skipDuplicates: true,
+  });
 }
 
 /**

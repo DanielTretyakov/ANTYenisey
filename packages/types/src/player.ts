@@ -211,7 +211,7 @@ export interface ClubVisits {
   slug: string;
   name: string;
   accentColor: string | null;
-  logoUrl: string | null;
+  logoFileId: string | null;
   place: number;
   visits: number;
 }

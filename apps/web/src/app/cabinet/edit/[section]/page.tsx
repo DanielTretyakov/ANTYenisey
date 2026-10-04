@@ -4,6 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { useCabinet } from '@/components/cabinet/CabinetEdit';
 import { MyClubsCard } from '@/components/cabinet/MyClubsCard';
+import { MyCoachesCard } from '@/components/cabinet/MyCoachesCard';
 import { PersonalDataCard } from '@/components/cabinet/PersonalDataCard';
 import { FIRST_SECTION, isSection } from '@/components/cabinet/sections';
 import { ChildFamilyCard, ParentFamilyCard } from '@/components/family/FamilyCards';
@@ -41,7 +42,7 @@ export default function CabinetSectionPage() {
   const section = params.section;
 
   return (
-    <div className="grid gap-6 [&>*]:mt-0">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6 [&>*]:mt-0">
       {section === 'profile' && <PersonalDataCard user={user} />}
 
       {section === 'player' && (
@@ -60,6 +61,8 @@ export default function CabinetSectionPage() {
       {section === 'clubs' && (
         <>
           <MyClubsCard user={user} />
+
+          <MyCoachesCard />
 
           {canBeGuardianBirthDate(user.birthDate) && (
             <ParentFamilyCard

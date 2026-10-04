@@ -38,7 +38,6 @@ type FormState = {
   values: ClubValue[];
   vkUrl: string;
   maxUrl: string;
-  logoUrl: string;
   accentColor: string;
   noShowChargePercent: string;
   attendanceReminderAfterMinutes: string;
@@ -56,7 +55,6 @@ function toForm(settings: ClubSettings): FormState {
     values: settings.values,
     vkUrl: settings.vkUrl ?? '',
     maxUrl: settings.maxUrl ?? '',
-    logoUrl: settings.logoUrl ?? '',
     accentColor: settings.accentColor ?? '',
     noShowChargePercent: String(settings.noShowChargePercent),
     attendanceReminderAfterMinutes: String(settings.attendanceReminderAfterMinutes),
@@ -128,7 +126,6 @@ export function SettingsForm({
         values: form.values,
         vkUrl: form.vkUrl.trim() || null,
         maxUrl: form.maxUrl.trim() || null,
-        logoUrl: form.logoUrl.trim() || null,
         accentColor: form.accentColor.trim() || null,
         noShowChargePercent,
         attendanceReminderAfterMinutes,
@@ -164,7 +161,7 @@ export function SettingsForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="grid gap-6">
+    <form onSubmit={handleSubmit} className="grid grid-cols-[minmax(0,1fr)] gap-6">
       {errors.length > 0 && (
         <Alert>
           {errors.length === 1 ? (
@@ -247,7 +244,7 @@ export function SettingsForm({
       <Card>
         <CardHeader
           title="Оформление"
-          description="Как выглядит страница клуба. Пустые поля оставляют её в цветах платформы."
+          description="Как выглядит страница клуба: описание, ценности и фирменный цвет — фотографий у клуба нет. Пустой цвет оставляет её в цветах платформы, квадратный логотип загружается в карточке «Страница клуба»."
         />
         <CardBody>
           <label className="mb-4 block">
@@ -261,17 +258,10 @@ export function SettingsForm({
               className={cn(inputClassName, 'resize-y')}
             />
             <span className="mt-1.5 block text-[0.8125rem] text-text-subtle">
-              Показывается под баннером на странице клуба. До 2000 символов.
+              Показывается в блоке «О клубе» на странице клуба. До 2000 символов.
             </span>
           </label>
           <ValuesEditor values={form.values} onChange={(values) => set('values', values)} />
-          <Field
-            label="Ссылка на логотип"
-            hint="Показывается рядом с названием на странице клуба."
-            value={form.logoUrl}
-            onChange={(event) => set('logoUrl', event.target.value)}
-            placeholder="https://..."
-          />
           <div className="grid items-end gap-x-6 sm:grid-cols-[1fr_auto]">
             <Field
               label="Фирменный цвет"

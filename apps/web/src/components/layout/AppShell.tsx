@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { ClubNav } from '@/components/layout/ClubNav';
+import { SiteFooter } from '@/components/layout/SiteFooter';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 
 /**
@@ -15,16 +15,24 @@ export function AppShell({
   actions,
   /** Клуб, чьи разделы показать в шапке. Не передан — страница платформенная. */
   clubSlug,
+  /**
+   * Подвал (вариант Б, решение от 03.10.2026): полный на открытых страницах,
+   * строкой — на рабочих (кабинет, «Мои записи», бронь, редакторы).
+   */
+  footer = 'full',
 }: {
   children: ReactNode;
   actions?: ReactNode;
   clubSlug?: string;
+  footer?: 'full' | 'line';
 }) {
   return (
     <div className="flex min-h-dvh flex-col bg-surface-sunken">
-      <SiteHeader actions={actions} clubNav={clubSlug ? <ClubNav slug={clubSlug} /> : undefined} />
+      <SiteHeader actions={actions} clubSlug={clubSlug} />
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-10 sm:px-8 sm:py-14">{children}</main>
+
+      <SiteFooter variant={footer} />
     </div>
   );
 }

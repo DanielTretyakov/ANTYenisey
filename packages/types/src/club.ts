@@ -75,13 +75,11 @@ export interface ClubSettings {
   maxUrl: string | null;
 
   /**
-   * Баннер страницы клуба — загруженный файл (`GET /files/:id`). Правкой
-   * настроек не меняется: ставится загрузкой `PUT settings/banner`.
+   * Логотип клуба — загруженный квадрат 512×512 (`GET /files/:id`). Правкой
+   * настроек не меняется: ставится загрузкой `PUT settings/logo`. Других
+   * снимков у клуба нет (решение от 02.10.2026): оформление — цвет.
    */
-  bannerFileId: string | null;
-
-  /** Логотип организации. Показывается на странице клуба рядом с названием. */
-  logoUrl: string | null;
+  logoFileId: string | null;
   /** Фирменный цвет, «#126b54». Им перекрашивается акцент на странице клуба. */
   accentColor: string | null;
 
@@ -115,7 +113,7 @@ export const MAX_CLUB_VALUES = 3;
  * Правка настроек. Все поля необязательны: форма шлёт только изменённое, а
  * перекрёстные проверки сервер делает уже на слитом состоянии.
  */
-export type UpdateClubSettingsRequest = Partial<Omit<ClubSettings, 'bannerFileId'>>;
+export type UpdateClubSettingsRequest = Partial<Omit<ClubSettings, 'logoFileId'>>;
 
 /**
  * Тренер в «Тренерском составе» настроек. С 25.09.2026 (решение владельца)

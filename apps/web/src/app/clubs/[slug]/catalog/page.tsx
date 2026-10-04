@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { inputClassName } from '@/components/ui/Field';
 import { MoneyField } from '@/components/ui/MoneyField';
+import { CompactSelect } from '@/components/ui/CompactSelect';
 import { Tab } from '@/components/ui/Tab';
 import { rolesInClub } from '@/lib/membership';
 import { ApiError } from '@/lib/api';
@@ -114,7 +115,19 @@ export default function CatalogPage() {
               справочники, которые правят раз в сезон, и списки проведений на
               десятки строк, которые растут каждую неделю. Прокрутить её до
               турниров было отдельным упражнением. */}
-          <div className="mb-6 flex flex-wrap items-center gap-1.5">
+          {/* На телефоне — список (решение от 03.10.2026). */}
+          <CompactSelect
+            label="Раздел"
+            value={tab}
+            options={TABS.map((item) => ({ value: item.value, label: item.label }))}
+            onChange={(value) => {
+              const item = TABS.find((candidate) => candidate.value === value);
+              if (item) setTab(item.value);
+            }}
+            className="mb-6 sm:hidden"
+          />
+
+          <div className="mb-6 hidden flex-wrap items-center gap-1.5 sm:flex">
             {TABS.map((item) => (
               <Tab key={item.value} active={tab === item.value} onClick={() => setTab(item.value)}>
                 {item.label}
@@ -122,7 +135,7 @@ export default function CatalogPage() {
             ))}
           </div>
 
-          <div className="grid gap-6">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
             {tab === 'types' && (
               <>
                 <TrainingTypesCard

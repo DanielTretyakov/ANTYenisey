@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { SECTION_ACTIVE_OFFSET_CLUB, STICKY_BELOW_CLUB_HEADER } from '@/components/layout/metrics';
+import { CompactSelect } from '@/components/ui/CompactSelect';
 import { useClubPostsUnread } from '@/lib/clubPostsUnread';
 import { cn } from '@/lib/cn';
 
@@ -46,7 +48,7 @@ export function ClubSectionNav({
       for (const id of ids) {
         const top = document.getElementById(id)?.getBoundingClientRect().top;
 
-        if (top !== undefined && top < 180 && top > currentTop + 1) {
+        if (top !== undefined && top < SECTION_ACTIVE_OFFSET_CLUB && top > currentTop + 1) {
           current = id;
           currentTop = top;
         }
@@ -74,12 +76,33 @@ export function ClubSectionNav({
     document.getElementById(item.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  const currentItem = items.find((item) => active !== null && active === (item.scrollTo ?? item.id) && (!item.scrollTo || isTab(item.id)));
+
   return (
     <nav
       aria-label="Разделы страницы клуба"
-      className="sticky top-20 z-10 mb-10 -mx-1 overflow-x-auto rounded-card border border-border bg-surface-raised/90 p-1.5 backdrop-blur [scrollbar-width:none]"
+      className={cn(
+        // Под шапкой со строкой клуба (шапка, вариант А, 03.10.2026).
+        'sticky z-10 mb-10 -mx-1 rounded-card border border-border bg-surface-raised/90 p-1.5 backdrop-blur',
+        STICKY_BELOW_CLUB_HEADER,
+      )}
     >
-      <ul className="flex w-max gap-1">
+      {/* На телефоне — список, а не лента вбок (решение владельца от 03.10.2026). */}
+      <CompactSelect
+        label="Раздел"
+        value={currentItem?.id ?? items[0]?.id ?? ''}
+        options={items.map((item) => ({
+          value: item.id,
+          label: item.id === 'novosti' && news > 0 ? `${item.label} · ${news} новых` : item.label,
+        }))}
+        onChange={(id) => {
+          const item = items.find((candidate) => candidate.id === id);
+          if (item) go(item);
+        }}
+        className="px-1.5 sm:hidden"
+      />
+
+      <ul className="hidden max-w-full gap-1 overflow-x-auto [scrollbar-width:none] sm:flex">
         {items.map((item) => {
           const current = active !== null && active === (item.scrollTo ?? item.id) && (!item.scrollTo || isTab(item.id));
 

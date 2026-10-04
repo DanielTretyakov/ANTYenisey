@@ -23,6 +23,32 @@
  */
 const API = process.env.SMOKE_API_URL ?? 'http://127.0.0.1:3001/api';
 const RUN = Date.now();
+
+/**
+ * Дата сценария — через `days` дней от сегодняшнего (UTC), «ГГГГ-ММ-ДД»; с
+ * `weekday` — ближайший такой день недели не раньше (0 — воскресенье).
+ *
+ * Не зашитая строкой: зашитая дата однажды становится «завтра», а потом
+ * прошлым, и сценарии ломаются сами по себе. Так 02.10.2026 сломался турнир,
+ * поставленный на 03.10: он стал ближайшим турниром клуба, на него записались
+ * сценарии ниже, и уборка дня уже не могла его снять.
+ */
+function dayAhead(days, weekday = null) {
+  const date = new Date();
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCDate(date.getUTCDate() + days);
+
+  while (weekday !== null && date.getUTCDay() !== weekday) {
+    date.setUTCDate(date.getUTCDate() + 1);
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
+/** День турнира проверки — далеко впереди, чтобы не стать «ближайшим». */
+const CUP_DAY = dayAhead(45);
+/** Вторник для отвязки дня от шаблона (окна `window()` — вторничные). */
+const DETACH_DAY = dayAhead(52, 2);
 const PASSWORD = 'ochen-dlinnyi-parol-123';
 
 let passed = 0;
@@ -193,6 +219,7 @@ const registration = (overrides = {}) => ({
   phone: '+79991234567',
   birthDate: '2001-05-17',
   gender: 'MALE',
+  consent: true,
   ...overrides,
 });
 
@@ -213,6 +240,17 @@ async function main() {
     !('role' in (r.body?.user ?? {})) && !('tenantId' in (r.body?.user ?? {})));
   assert('регистрация со страницы клуба сразу дала роль CLIENT в нём',
     r.body?.user?.memberships?.some((m) => m.slug === 'yenisey' && m.roles?.includes('CLIENT')) === true);
+  assert('момент согласия на обработку данных записан при регистрации',
+    typeof r.body?.user?.consentAt === 'string' && Date.now() - Date.parse(r.body.user.consentAt) < 60_000);
+
+  console.log('=== 1а. Без согласия на обработку персональных данных учётки нет');
+  // Галочку формы можно обойти запросом напрямую — держит сервер (152-ФЗ).
+  r = await post('/auth/register', registration({ consent: undefined }));
+  check('регистрация без согласия отклонена', 400, r.status);
+  r = await post('/auth/register', registration({ consent: false }));
+  check('регистрация с «не согласен» отклонена', 400, r.status);
+  r = await post('/auth/register', registration({ consent: 'да' }));
+  check('согласие — только true, не строка', 400, r.status);
 
   console.log('=== 2. Повторная регистрация того же адреса');
   r = await post('/auth/register', registration({ email: first.email }));
@@ -320,9 +358,9 @@ async function main() {
     typeof r.body?.name === 'string' && r.body.name.length > 0,
   );
   assert(
-    'наружу отдана карточка клуба: код, название, города, оформление, контакты и соцсети, залы, описание, ценности, баннер и тренеры',
+    'наружу отдана карточка клуба: код, название, города, оформление, контакты и соцсети, залы, описание, ценности и тренеры',
     Object.keys(r.body ?? {}).sort().join(',') ===
-      'accentColor,bannerFileId,city,coaches,description,email,halls,logoUrl,maxUrl,name,otherCities,phone,slug,values,vkUrl',
+      'accentColor,city,coaches,description,email,halls,logoFileId,maxUrl,name,otherCities,phone,slug,suspended,values,vkUrl',
   );
   assert(
     'часового пояса в карточке клуба больше НЕТ — он свойство зала',
@@ -461,9 +499,9 @@ async function main() {
     const adminAuth = { Authorization: `Bearer ${r.body?.accessToken ?? ''}` };
     const asAdmin = (path, options = {}) =>
       call(path, { ...options, headers: { ...adminAuth, ...options.headers } });
-    // Баннер правкой настроек не ставится — он загружается файлом. Прочитанные
-    // настройки несут bannerFileId, и вернуть их как есть значило бы получить 400.
-    const patchSettings = ({ bannerFileId: _banner, ...json }) =>
+    // Логотип правкой настроек не ставится — он загружается файлом. Прочитанные
+    // настройки несут logoFileId, и вернуть их как есть значило бы получить 400.
+    const patchSettings = ({ logoFileId: _logo, ...json }) =>
       asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json });
 
     r = await asAdmin('/clubs/yenisey/settings');
@@ -862,12 +900,12 @@ async function main() {
       method: 'POST',
       json: {
         tournamentTypeId,
-        startsAt: '2026-10-03T04:00:00.000Z',
-        endsAt: '2026-10-03T08:00:00.000Z',
+        startsAt: `${CUP_DAY}T04:00:00.000Z`,
+        endsAt: `${CUP_DAY}T08:00:00.000Z`,
       },
     });
     check('турнир заведён', 201, r.status);
-    assert('окончание турнира сохранено', r.body?.endsAt === '2026-10-03T08:00:00.000Z');
+    assert('окончание турнира сохранено', r.body?.endsAt === `${CUP_DAY}T08:00:00.000Z`);
     const tournamentId = r.body?.id;
     assert('название типа приехало вместе с турниром', r.body?.typeName === tournamentTypeName);
 
@@ -875,15 +913,15 @@ async function main() {
       method: 'POST',
       json: {
         tournamentTypeId,
-        startsAt: '2026-10-03T04:00:00.000Z',
-        endsAt: '2026-10-03T04:00:00.000Z',
+        startsAt: `${CUP_DAY}T04:00:00.000Z`,
+        endsAt: `${CUP_DAY}T04:00:00.000Z`,
       },
     });
     check('турнир, кончающийся в момент начала, отклонён', 400, r.status);
 
     r = await asAdmin('/clubs/yenisey/tournaments', {
       method: 'POST',
-      json: { tournamentTypeId, startsAt: '2026-10-03T04:00:00.000Z' },
+      json: { tournamentTypeId, startsAt: `${CUP_DAY}T04:00:00.000Z` },
     });
     check('турнир без окончания отклонён', 400, r.status);
 
@@ -891,8 +929,8 @@ async function main() {
       method: 'POST',
       json: {
         tournamentTypeId: 'chuzhoy-tip',
-        startsAt: '2026-10-03T04:00:00.000Z',
-        endsAt: '2026-10-03T08:00:00.000Z',
+        startsAt: `${CUP_DAY}T04:00:00.000Z`,
+        endsAt: `${CUP_DAY}T08:00:00.000Z`,
       },
     });
     check('турнир по несуществующему типу отклонён', 404, r.status);
@@ -954,7 +992,7 @@ async function main() {
     }
 
     console.log('=== 21д. Турнир в расписании дня');
-    const cupDate = '2026-10-03';
+    const cupDate = CUP_DAY;
     r = await asAdmin(`/clubs/yenisey/halls/${hallId}/days/${cupDate}`, {
       method: 'PUT',
       json: {
@@ -1268,7 +1306,7 @@ async function main() {
     const templateBefore = (r.body ?? []).map(({ id: _id, ...rule }) => rule);
 
     // Вторник — как weekday: 2 у окон window().
-    const detachDate = '2026-10-06';
+    const detachDate = DETACH_DAY;
     assert('дата отвязки — вторник', new Date(`${detachDate}T00:00:00Z`).getUTCDay() === 2);
 
     r = await asAdmin(`/clubs/yenisey/halls/${hallId}/template`, {
@@ -2364,6 +2402,9 @@ async function main() {
   await clubPosts();
   await peopleBirthdays();
   await hallHoursAndRatingGender();
+  await favouriteCoaches();
+  await platformBilling();
+  await clubApplications();
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
@@ -3900,6 +3941,7 @@ async function family() {
     phone: '+79991234567',
     birthDate: bornYearsAgo(10),
     gender: 'MALE',
+    consent: true,
     ...over,
   });
 
@@ -3917,6 +3959,9 @@ async function family() {
 
   r = await asParent('/me/children', { method: 'POST', json: childForm({ tenantSlug: 'yenisey' }) });
   check('клуб в форме ребёнка — лишнее поле', 400, r.status);
+
+  r = await asParent('/me/children', { method: 'POST', json: childForm({ consent: undefined }) });
+  check('учётка ребёнка без согласия родителя не заводится', 400, r.status);
 
   r = await asParent('/me/children', { method: 'POST', json: childForm() });
   check('ребёнок заведён и закреплён сразу', 201, r.status);
@@ -4783,7 +4828,9 @@ async function digests() {
   await run();
   await call('/dev/max/dispatch', { method: 'POST' });
 
-  const club = (await sentTo()).filter((message) => message.text.startsWith('Сводка клуба'));
+  // Учётка смоука — руководитель ещё и пробного клуба подписки (раздел 50):
+  // сводок у неё две, проверяется сводка «Енисея».
+  const club = (await sentTo()).filter((message) => message.text.startsWith('Сводка клуба') && message.text.includes('Енисей'));
   assert('администратору пришла сводка клуба', club.length === 1);
   assert('в ней «свои» клуба, план на сегодня и итог дня', /всего \d+/.test(club[0]?.text ?? '') && /Сегодня: занятий/.test(club[0]?.text ?? '') && /Итог дня:/.test(club[0]?.text ?? ''));
 
@@ -4876,12 +4923,13 @@ main().catch((error) => {
 });
 
 /**
- * Страница клуба: описание, баннер, тренерский состав, неделя мероприятий
- * (решения владельца от 24.09.2026).
+ * Страница клуба: описание, логотип, тренерский состав, неделя мероприятий
+ * (решения владельца от 24.09.2026; логотип вместо баннера — от 02.10.2026).
  *
- * Настоящий баннер клуба прогон не трогает: если он уже есть, сценарии баннера
- * пропускаются — заменить и удалить его значило бы стереть снимок клуба.
- * Описание и состав возвращаются к исходным.
+ * Настоящий логотип клуба прогон не трогает: если он уже есть, сценарии
+ * загрузки пропускаются — заменить и удалить его значило бы стереть знак
+ * клуба. Отказы (неквадратный, мелкий, чужой) проверяются всегда: до записи
+ * они не доходят. Описание и состав возвращаются к исходным.
  */
 async function clubPage() {
   const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
@@ -4892,19 +4940,19 @@ async function clubPage() {
     return;
   }
 
-  console.log('\n=== 40. Страница клуба: описание, баннер, тренеры, неделя');
+  console.log('\n=== 40. Страница клуба: описание, логотип, тренеры, неделя');
 
   const { default: sharp } = await import('sharp');
   const as = (token) => (path, options = {}) =>
     call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
 
-  const uploadBanner = async (token, color) => {
+  const uploadLogo = async (token, color, width = 600, height = 600) => {
     const bytes = await sharp({
-      create: { width: 2000, height: 800, channels: 3, background: color },
+      create: { width, height, channels: 4, background: { ...color, alpha: 1 } },
     }).png().toBuffer();
     const form = new FormData();
-    form.set('file', new Blob([bytes], { type: 'image/png' }), 'banner.png');
-    const response = await fetch(`${API}/clubs/yenisey/settings/banner`, {
+    form.set('file', new Blob([bytes], { type: 'image/png' }), 'logo.png');
+    const response = await fetch(`${API}/clubs/yenisey/settings/logo`, {
       method: 'PUT',
       body: form,
       headers: { Authorization: `Bearer ${token}` },
@@ -4921,7 +4969,7 @@ async function clubPage() {
 
   r = await asAdmin('/clubs/yenisey/settings');
   const originalDescription = r.body?.description ?? null;
-  const originalBanner = r.body?.bannerFileId ?? null;
+  const originalLogo = r.body?.logoFileId ?? null;
   const originalValues = r.body?.values ?? [];
   const originalVk = r.body?.vkUrl ?? null;
   const originalMax = r.body?.maxUrl ?? null;
@@ -4979,45 +5027,67 @@ async function clubPage() {
   r = await call('/clubs/yenisey');
   assert('описание видно на открытой странице', r.body?.description === 'Клуб проверки: играем каждый день');
 
-  r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: { bannerFileId: 'чужой' } });
-  check('баннер правкой настроек не ставится', 400, r.status);
+  r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: { logoFileId: 'чужой' } });
+  check('логотип правкой настроек не ставится', 400, r.status);
+
+  r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: { logoUrl: 'https://example.com/logo.png' } });
+  check('логотипа ссылкой больше нет', 400, r.status);
 
   r = await asAdmin('/clubs/yenisey/settings', { method: 'PATCH', json: { description: originalDescription ?? '' } });
   check('описание возвращено', 200, r.status);
   assert('пустое описание — это «нет описания»', r.body?.description === originalDescription);
 
-  // --- Баннер.
-  if (originalBanner) {
-    console.log('  ПРОПУЩЕНО: у клуба уже есть баннер — прогон его не заменяет');
+  // --- Логотип: только квадрат (решение от 02.10.2026).
+  r = await post('/auth/register', registration({ lastName: 'Клиентов', firstName: 'Логотип' }));
+  const clientToken = r.body?.accessToken ?? '';
+
+  r = await uploadLogo(clientToken, { r: 200, g: 40, b: 40 });
+  check('клиент логотип клуба не ставит', 403, r.status);
+
+  r = await uploadLogo(adminToken, { r: 20, g: 110, b: 90 }, 2000, 400);
+  check('горизонтальный логотип отклонён', 400, r.status);
+  assert(
+    `отказ называет размеры: «${r.body?.message}»`,
+    String(r.body?.message ?? '').includes('квадратным: сейчас 2000×400'),
+  );
+
+  r = await uploadLogo(adminToken, { r: 20, g: 110, b: 90 }, 64, 64);
+  check('логотип меньше 128 точек отклонён', 400, r.status);
+
+  r = await asAdmin('/clubs/yenisey/settings');
+  assert('отказы логотип не тронули', (r.body?.logoFileId ?? null) === originalLogo);
+
+  if (originalLogo) {
+    console.log('  ПРОПУЩЕНО: у клуба уже есть логотип — прогон его не заменяет');
   } else {
-    r = await post('/auth/register', registration({ lastName: 'Клиентов', firstName: 'Баннер' }));
-    const clientToken = r.body?.accessToken ?? '';
+    r = await uploadLogo(adminToken, { r: 20, g: 110, b: 90 }, 600, 590);
+    check('почти квадратный логотип загружен', 200, r.status);
+    const firstLogo = r.body?.logoFileId;
+    assert('у клуба появился логотип', typeof firstLogo === 'string');
 
-    r = await uploadBanner(clientToken, { r: 200, g: 40, b: 40 });
-    check('клиент баннер клуба не ставит', 403, r.status);
-
-    r = await uploadBanner(adminToken, { r: 20, g: 110, b: 90 });
-    check('баннер загружен', 200, r.status);
-    const firstBanner = r.body?.bannerFileId;
-    assert('у клуба появился баннер', typeof firstBanner === 'string');
-
-    let response = await fetch(`${API}/files/${firstBanner}`);
-    check('баннер отдаётся без входа', 200, response.status);
-    assert('баннер пережат в WebP', response.headers.get('content-type') === 'image/webp');
+    let response = await fetch(`${API}/files/${firstLogo}`);
+    check('логотип отдаётся без входа', 200, response.status);
+    assert('логотип пережат в WebP', response.headers.get('content-type') === 'image/webp');
     const meta = await sharp(Buffer.from(await response.arrayBuffer())).metadata();
-    assert('баннер обрезан до 1600×500', meta.width === 1600 && meta.height === 500);
+    assert('логотип приведён к 512×512', meta.width === 512 && meta.height === 512);
 
     r = await call('/clubs/yenisey');
-    assert('баннер виден на открытой странице', r.body?.bannerFileId === firstBanner);
+    assert('логотип виден на открытой странице', r.body?.logoFileId === firstLogo);
 
-    r = await uploadBanner(adminToken, { r: 30, g: 60, b: 160 });
-    check('баннер заменён', 200, r.status);
-    response = await fetch(`${API}/files/${firstBanner}`);
-    check('старый баннер удалён вместе с заменой', 404, response.status);
+    r = await call('/clubs?query=%D0%B5%D0%BD%D0%B8%D1%81');
+    assert(
+      'логотип и в карточке поиска',
+      (r.body ?? []).some((club) => club.slug === 'yenisey' && club.logoFileId === firstLogo),
+    );
 
-    r = await asAdmin('/clubs/yenisey/settings/banner', { method: 'DELETE' });
-    check('баннер снят', 200, r.status);
-    assert('у клуба баннера больше нет', r.body?.bannerFileId === null);
+    r = await uploadLogo(adminToken, { r: 30, g: 60, b: 160 });
+    check('логотип заменён', 200, r.status);
+    response = await fetch(`${API}/files/${firstLogo}`);
+    check('старый логотип удалён вместе с заменой', 404, response.status);
+
+    r = await asAdmin('/clubs/yenisey/settings/logo', { method: 'DELETE' });
+    check('логотип снят', 200, r.status);
+    assert('у клуба логотипа больше нет', r.body?.logoFileId === null);
   }
 
   // --- Тренерский состав: все тренеры, кроме скрытых (решение от 25.09.2026).
@@ -6226,4 +6296,346 @@ async function hallHoursAndRatingGender() {
   // Постоянная учётка абонементов — мужчина и старше 14: в «Мужчинах» она есть.
   r = await call('/clubs/yenisey/rating?period=all&gender=MALE');
   assert('в «Мужчинах» только взрослые с фото или без', (r.body?.rows ?? []).every((row) => row.userId !== null));
+}
+
+/**
+ * Мои тренеры (решение владельца от 02.10.2026): сердечко на странице
+ * тренера, плитка на стартовой, ближайшие занятия по всем его клубам.
+ * Отметить можно только действующего тренера и не себя; повтор — не ошибка.
+ */
+async function favouriteCoaches() {
+  console.log('\n=== 49. Мои тренеры');
+
+  let r = await call('/clubs/yenisey');
+  const coach = (r.body?.coaches ?? [])[0];
+
+  if (!coach) {
+    console.log('  ПРОПУЩЕНО: у клуба нет тренеров на странице');
+    return;
+  }
+
+  r = await call(`/me/coaches/${coach.id}`, { method: 'PUT' });
+  check('гость тренера не отмечает', 401, r.status);
+
+  r = await post('/auth/register', registration({ lastName: 'Болельщиков', firstName: 'Тренер' }));
+  const fanId = r.body?.user?.id ?? '';
+  const fanToken = r.body?.accessToken ?? '';
+  const fan = (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${fanToken}`, ...(options.headers ?? {}) } });
+
+  r = await fan('/me/coaches');
+  check('список моих тренеров читается', 200, r.status);
+  assert('у нового человека избранных тренеров нет', Array.isArray(r.body) && r.body.length === 0);
+
+  r = await fan(`/me/coaches/${coach.id}`, { method: 'PUT' });
+  check('тренер отмечен', 200, r.status);
+  const mine = (r.body ?? []).find((item) => item.id === coach.id);
+  assert('тренер в списке', Boolean(mine));
+  assert(`имя сокращено: «${mine?.name}»`, /^\S+ [А-ЯЁA-Z]\.$/.test(mine?.name ?? ''));
+  assert('у тренера названы клубы', (mine?.clubs ?? []).some((club) => club.slug === 'yenisey'));
+  assert(
+    'ближайшее занятие — его, или его нет',
+    mine?.next === null || (mine?.next?.kind === 'TRAINING' && typeof mine?.next?.club?.slug === 'string'),
+  );
+
+  r = await fan(`/me/coaches/${coach.id}`, { method: 'PUT' });
+  check('повторная отметка — не ошибка', 200, r.status);
+  assert('тренер не задвоился', (r.body ?? []).filter((item) => item.id === coach.id).length === 1);
+
+  r = await fan(`/me/coaches/${fanId}`, { method: 'PUT' });
+  check('себя в избранные тренеры не отмечают', 400, r.status);
+
+  r = await post('/auth/register', registration({ lastName: 'Нетренеров', firstName: 'Клиент' }));
+  const notCoachId = r.body?.user?.id ?? '';
+
+  r = await fan(`/me/coaches/${notCoachId}`, { method: 'PUT' });
+  check('не тренера отметить нельзя — его как тренера нет', 404, r.status);
+
+  r = await call(`/coaches/${coach.id}/upcoming`);
+  check('ближайшие занятия тренера открыты без входа', 200, r.status);
+  assert(
+    'это занятия с клубом, не больше пяти, по времени',
+    Array.isArray(r.body) &&
+      r.body.length <= 5 &&
+      r.body.every((event) => event.kind === 'TRAINING' && typeof event.club?.slug === 'string') &&
+      r.body.every((event, index, list) => index === 0 || list[index - 1].startsAt <= event.startsAt),
+  );
+
+  r = await call(`/coaches/${notCoachId}/upcoming`);
+  check('у не тренера ближайших занятий нет — как и страницы', 404, r.status);
+
+  r = await fan(`/me/coaches/${coach.id}`, { method: 'DELETE' });
+  check('отметка снята', 200, r.status);
+  assert('список снова пуст', Array.isArray(r.body) && r.body.length === 0);
+}
+
+/**
+ * Подписка клуба на КНТ (ТЗ → «Монетизация платформы», решения владельца от
+ * 02.10.2026): пробные 7 дней, оплата картой и по счёту, акты раз в месяц,
+ * просрочка — 3 дня, потом приостановка с отменой будущих записей.
+ *
+ * Приостановка отменяет записи клуба, поэтому переходы проверяются на
+ * постоянном пробном клубе `probe-billing` (его заводит и сбрасывает
+ * `/dev/billing/probe-club`), а не на «Енисее». Нужны поддельный шлюз (вне
+ * production без ключей ЮKassa) и учётка смоука — владелец платформы.
+ */
+async function platformBilling() {
+  const asAdmin = await adminSession();
+
+  if (!asAdmin) {
+    console.log('\n=== 50. Подписка на КНТ — ПРОПУЩЕНА (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 50. Подписка клуба на КНТ');
+  const DAY = 24 * 60 * 60 * 1000;
+
+  let r = await asAdmin('/clubs/yenisey/billing');
+  check('руководитель видит подписку', 200, r.status);
+  assert('«Енисей» — пилотный, без оплаты', r.body?.status === 'EXEMPT');
+  const plans = r.body?.plans ?? [];
+  const month = plans.find((plan) => plan.periodMonths === 1);
+  const year = plans.find((plan) => plan.periodMonths === 12);
+  assert(
+    'тарифы из ТЗ: 5 000, 50 000 и 130 000 ₽',
+    plans.map((plan) => plan.price).join(',') === '500000,5000000,13000000',
+  );
+  assert('год — 4 167 ₽ в месяц, выгода 17 %', year?.perMonth === 416700 && year?.savingPercent === 17);
+
+  r = await asAdmin('/clubs/yenisey/billing/card', { method: 'POST', json: { planId: month?.id } });
+  check('пилотному клубу платить не нужно', 409, r.status);
+
+  r = await post('/auth/register', registration({ lastName: 'Подписочный', firstName: 'Клиент' }));
+  const clientId = r.body?.user?.id ?? '';
+  const clientToken = r.body?.accessToken ?? '';
+  const asClient = (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${clientToken}`, ...(options.headers ?? {}) } });
+
+  r = await asClient('/clubs/yenisey/billing');
+  check('клиенту подписка клуба закрыта', 403, r.status);
+  r = await asClient('/platform/clubs');
+  check('клубы и подписки — только владельцу платформы', 403, r.status);
+
+  r = await asAdmin('/auth/me');
+  const adminId = r.body?.id ?? '';
+
+  r = await call('/dev/billing/probe-club', { method: 'POST', json: { ownerId: adminId, clientId } });
+  if (r.status === 404) {
+    console.log('  ПРОПУЩЕНО: поддельного шлюза нет (заданы ключи ЮKassa или production)');
+    return;
+  }
+  check('пробный клуб заведён', 200, r.status);
+  const slug = r.body?.slug;
+  const bookingId = r.body?.bookingId;
+
+  r = await asAdmin(`/clubs/${slug}/billing`);
+  check('подписка пробного клуба читается', 200, r.status);
+  assert('новый клуб — на пробном периоде', r.body?.status === 'TRIAL');
+  const trialEnds = new Date(r.body?.trialEndsAt ?? 0).getTime();
+  assert('пробный период — 7 дней', Math.abs(trialEnds - Date.now() - 7 * DAY) < 60 * 60 * 1000);
+
+  r = await asAdmin('/platform/clubs');
+  check('владелец платформы видит клубы', 200, r.status);
+  assert('и пробный клуб среди них', (r.body ?? []).some((row) => row.slug === slug && row.status === 'TRIAL'));
+
+  // --- Счёт для юрлица.
+  r = await asAdmin(`/clubs/${slug}/billing/invoice`, { method: 'POST', json: { planId: year?.id } });
+  check('счёт без реквизитов не выставляется', 400, r.status);
+
+  r = await asAdmin(`/clubs/${slug}/billing/requisites`, {
+    method: 'PUT',
+    json: { legalName: 'ООО «Проверка»', inn: '123456789', address: 'г. Красноярск, ул. Мира, 1', email: 'buh@example.com' },
+  });
+  check('ИНН из девяти цифр отклонён', 400, r.status);
+
+  r = await asAdmin(`/clubs/${slug}/billing/requisites`, {
+    method: 'PUT',
+    json: { legalName: 'ООО «Проверка»', inn: '2465000000', kpp: '246501001', address: 'г. Красноярск, ул. Мира, 1', email: 'buh@example.com' },
+  });
+  check('реквизиты сохранены', 200, r.status);
+
+  r = await asAdmin(`/clubs/${slug}/billing/invoice`, { method: 'POST', json: { planId: year?.id } });
+  check('счёт выставлен', 201, r.status);
+  const invoice = (r.body?.payments ?? []).find((payment) => payment.method === 'INVOICE' && payment.status === 'PENDING');
+  assert('счёт с номером и суммой года', typeof invoice?.invoiceNumber === 'number' && invoice?.amount === 5000000);
+
+  r = await asAdmin(`/clubs/${slug}/billing/documents/INVOICE/${invoice?.id}`);
+  check('счёт открывается для печати', 200, r.status);
+  assert('в счёте покупатель — клуб', r.body?.buyer?.inn === '2465000000' && r.body?.number === invoice?.invoiceNumber);
+
+  // --- Конец пробного периода: напоминание, просрочка, приостановка.
+  const run = (offset) =>
+    call('/dev/billing/run', { method: 'POST', json: { slug, now: new Date(trialEnds + offset).toISOString() } });
+
+  r = await run(-12 * 60 * 60 * 1000);
+  check('проход за полдня до конца пробного', 200, r.status);
+  assert('руководителю — напоминание', r.body?.steps?.remind === 1);
+
+  r = await run(60 * 60 * 1000);
+  assert('пробный кончился — просрочка', r.body?.steps?.past_due === 1);
+  r = await asAdmin(`/clubs/${slug}/billing`);
+  assert('статус — не оплачена', r.body?.status === 'PAST_DUE');
+  assert(
+    'клуб работает ещё три дня',
+    new Date(r.body?.graceUntil ?? 0).getTime() === trialEnds + 3 * DAY,
+  );
+
+  r = await run(2 * DAY);
+  assert('на льготных днях клуб не закрывается', r.body?.steps?.none === 1);
+
+  r = await run(3 * DAY + 60 * 60 * 1000);
+  assert('через три дня — приостановка', r.body?.steps?.suspend === 1);
+
+  r = await call(`/clubs/${slug}`);
+  assert('открытая карточка знает о приостановке', r.body?.suspended === true);
+
+  r = await asClient('/me/bookings');
+  const cancelled = (r.body ?? []).find((entry) => entry.id === bookingId);
+  assert(
+    `будущая бронь отменена без оплаты (${cancelled?.status}, ${cancelled?.chargePercent})`,
+    cancelled?.status === 'CANCELLED' && (cancelled?.chargePercent ?? 0) === 0,
+  );
+
+  r = await asClient(`/clubs/${slug}/booking/bookings`, { method: 'POST', json: {} });
+  check('приостановленный клуб записей не принимает', 403, r.status);
+
+  r = await asAdmin(`/clubs/${slug}/billing`);
+  check('страница подписки открыта и при приостановке', 200, r.status);
+  assert('статус — приостановлена', r.body?.status === 'SUSPENDED');
+
+  // --- Счёт оплачен — доступ вернулся, акты по месяцам.
+  r = await asClient(`/platform/clubs/invoices/${invoice?.id}/paid`, { method: 'POST' });
+  check('отметить оплату может только владелец платформы', 403, r.status);
+
+  r = await asAdmin(`/platform/clubs/invoices/${invoice?.id}/paid`, { method: 'POST' });
+  check('владелец платформы отметил счёт оплаченным', 200, r.status);
+
+  r = await asAdmin(`/clubs/${slug}/billing`);
+  assert('подписка снова активна', r.body?.status === 'ACTIVE');
+  const paid = (r.body?.payments ?? []).find((payment) => payment.id === invoice?.id);
+  assert('счёт оплачен', paid?.status === 'SUCCEEDED');
+  assert('за год — двенадцать актов', paid?.acts?.length === 12);
+  assert(
+    'сумма актов равна сумме счёта',
+    (paid?.acts ?? []).reduce((sum, act) => sum + act.amount, 0) === 5000000,
+  );
+  const paidUntil = new Date(r.body?.paidUntil ?? 0).getTime();
+
+  r = await asAdmin(`/clubs/${slug}/billing/documents/ACT/${paid?.acts?.[0]?.id}`);
+  check('акт открывается для печати', 200, r.status);
+
+  r = await asAdmin(`/platform/clubs/invoices/${invoice?.id}/paid`, { method: 'POST' });
+  check('второй раз тот же счёт не проводится', 409, r.status);
+
+  r = await call(`/clubs/${slug}`);
+  assert('карточка клуба снова открыта для записи', r.body?.suspended === false);
+
+  // --- Карта: первая оплата сохраняет карту, продление — с конца срока.
+  r = await asAdmin(`/clubs/${slug}/billing/card`, { method: 'POST', json: { planId: month?.id } });
+  check('оплата картой начата', 201, r.status);
+  const confirmation = new URL(r.body?.confirmationUrl ?? 'http://x/');
+  const providerId = confirmation.searchParams.get('testPayment');
+  assert('страница оплаты ведёт обратно на подписку', confirmation.pathname === `/clubs/${slug}/billing` && Boolean(providerId));
+
+  r = await call(`/dev/payments/${providerId}/succeed`, { method: 'POST' });
+  check('тестовая оплата прошла', 200, r.status);
+
+  r = await asAdmin(`/clubs/${slug}/billing`);
+  assert('карта сохранена', typeof r.body?.paymentMethodTitle === 'string' && r.body.paymentMethodTitle.includes('4242'));
+  const extended = new Date(r.body?.paidUntil ?? 0).getTime();
+  assert('месяц добавлен к концу оплаченного года', extended - paidUntil >= 28 * DAY && extended - paidUntil <= 31 * DAY);
+  assert('следующее списание — в конце срока', r.body?.nextCharge?.amount === 500000);
+
+  // --- Автосписание не прошло — просрочка; повтор через сутки прошёл.
+  r = await call('/dev/payments/next-charge', { method: 'POST', json: { result: 'canceled' } });
+  check('следующее автосписание откажет', 200, r.status);
+  r = await call('/dev/billing/run', { method: 'POST', json: { slug, now: new Date(extended + 60 * 1000).toISOString() } });
+  assert('в конце срока — автосписание', r.body?.steps?.charge === 1);
+  r = await asAdmin(`/clubs/${slug}/billing`);
+  assert('отказ банка — просрочка', r.body?.status === 'PAST_DUE');
+  assert(
+    'причина отказа видна руководителю',
+    (r.body?.payments ?? []).some((payment) => payment.autoCharge && payment.status === 'FAILED' && payment.failureReason),
+  );
+
+  r = await call('/dev/billing/run', { method: 'POST', json: { slug, now: new Date(extended + DAY + 2 * 60 * 1000).toISOString() } });
+  assert('через сутки — повтор списания', r.body?.steps?.charge === 1);
+  r = await asAdmin(`/clubs/${slug}/billing`);
+  assert('повтор прошёл — подписка активна', r.body?.status === 'ACTIVE');
+
+  // --- Ручные действия владельца платформы.
+  r = await asAdmin(`/platform/clubs/${slug}/extend`, { method: 'POST', json: { days: 7 } });
+  check('продление вручную', 200, r.status);
+  r = await asAdmin(`/platform/clubs/${slug}/exempt`, { method: 'PUT', json: { exempt: true } });
+  check('клуб переведён «без оплаты»', 200, r.status);
+  assert('и он без оплаты', (r.body ?? []).some((row) => row.slug === slug && row.status === 'EXEMPT'));
+  r = await asAdmin(`/platform/clubs/${slug}/exempt`, { method: 'PUT', json: { exempt: false } });
+  assert('снятие «без оплаты» возвращает оплаченный срок', (r.body ?? []).some((row) => row.slug === slug && row.status === 'ACTIVE'));
+}
+
+/**
+ * Заявки клубов на подключение и открытые тарифы (решение владельца от
+ * 03.10.2026): форма без входа, ловушка для ботов, список и статусы у
+ * владельца платформы. Имена — с префиксом уборки «Клуб проверки заявки ».
+ */
+async function clubApplications() {
+  console.log('\n=== 51. «Подключить свой клуб»: тарифы и заявки');
+  const clubName = `Клуб проверки заявки ${RUN}`;
+  const form = (over = {}) => ({ contactName: 'Заявкин Пётр', clubName, consent: true, ...over });
+
+  let r = await call('/platform/plans');
+  check('тарифы КНТ открыты без входа', 200, r.status);
+  assert(
+    'тарифы — те же, что у подписки клуба, с выгодой за год',
+    Array.isArray(r.body) && r.body.some((plan) => plan.periodMonths === 12 && plan.savingPercent > 0),
+  );
+
+  r = await post('/club-applications', form());
+  check('заявка без телефона и почты отклонена', 400, r.status);
+
+  r = await post('/club-applications', form({ phone: '8 391 200' }));
+  check('телефон не по формату отклонён', 400, r.status);
+
+  r = await post('/club-applications', form({ email: 'zayavka@example.com', consent: undefined }));
+  check('заявка без согласия на обработку данных отклонена', 400, r.status);
+
+  r = await post('/club-applications', form({ phone: '+7 (999) 123-45-67', email: 'Zayavka@Example.com', halls: 2, tables: 12, comment: 'Хотим попробовать' }));
+  check('заявка принята', 201, r.status);
+
+  r = await post('/club-applications', form({ clubName: `${clubName} бот`, email: 'bot@example.com', website: 'https://spam.example' }));
+  check('боту — тот же ответ, что человеку', 201, r.status);
+
+  r = await call('/platform/club-applications');
+  check('список заявок без входа закрыт', 401, r.status);
+
+  r = await post('/auth/register', registration({ lastName: 'Заявкин', firstName: 'Клиент' }));
+  r = await withToken(r.body?.accessToken ?? '')('/platform/club-applications');
+  check('список заявок — не клиенту', 403, r.status);
+
+  const asAdmin = await adminSession();
+  r = asAdmin ? await asAdmin('/auth/me') : null;
+
+  if (!asAdmin || r?.body?.platformOwner !== true) {
+    console.log('     Заявки у владельца — ПРОПУЩЕНЫ (SMOKE_ADMIN не владелец платформы: pnpm db:grant-platform)');
+    return;
+  }
+
+  r = await asAdmin('/platform/club-applications');
+  check('владелец платформы видит заявки', 200, r.status);
+  const mine = (r.body ?? []).filter((item) => item.clubName === clubName);
+  assert(
+    'заявка — с контактами в общем виде и размером клуба',
+    mine.length === 1 && mine[0].phone === '+79991234567' && mine[0].email === 'zayavka@example.com' && mine[0].tables === 12 && mine[0].status === 'NEW',
+  );
+  assert('заявка бота не сохранилась', !(r.body ?? []).some((item) => item.clubName === `${clubName} бот`));
+
+  r = await asAdmin(`/platform/club-applications/${mine[0]?.id}`, { method: 'PATCH', json: { status: 'IN_PROGRESS', note: 'Созвонились, ждут договор' } });
+  check('статус заявки сменён', 200, r.status);
+  assert('статус и заметка сохранены', r.body?.status === 'IN_PROGRESS' && r.body?.note === 'Созвонились, ждут договор');
+
+  r = await asAdmin(`/platform/club-applications/${mine[0]?.id}`, { method: 'PATCH', json: { status: 'ARCHIVED', note: null } });
+  check('неизвестный статус отклонён', 400, r.status);
+
+  r = await asAdmin('/platform/club-applications/net-takoy-zayavki', { method: 'PATCH', json: { status: 'DECLINED', note: null } });
+  check('несуществующая заявка', 404, r.status);
 }

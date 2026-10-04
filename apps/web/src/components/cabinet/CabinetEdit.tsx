@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, type ReactNode } from 'react';
 import type { PublicUser } from '@yenisey/types';
 import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { AppShell } from '@/components/layout/AppShell';
 import { cn } from '@/lib/cn';
 import { usePersonSwitch } from '@/lib/usePersonSwitch';
+import { useDisclosure } from '@/lib/useDisclosure';
 import { useSession } from '@/lib/useSession';
 import { CABINET_SECTIONS, sectionHref, sectionsFor, type CabinetSection } from './sections';
 
@@ -52,7 +53,7 @@ export function CabinetEditShell({ children }: { children: ReactNode }) {
   const viewHref = forPerson ? `/cabinet?for=${forPerson}` : '/cabinet';
 
   return (
-    <AppShell>
+    <AppShell footer="line">
       <div className="mb-7">
         <p className="text-[0.75rem] tracking-[0.1em] text-text-subtle uppercase">Кабинет</p>
         <h1 className="mt-1 text-[1.75rem]">Редактор профиля</h1>
@@ -105,30 +106,8 @@ function SectionNav({
 }) {
   const sections = sectionsFor();
   const currentLabel = sections.find((section) => section.id === current)?.label ?? 'Разделы';
-  const [open, setOpen] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
-  const listId = useId();
-
-  // Переход закрывает меню: каркас не перемонтируется.
-  useEffect(() => setOpen(false), [current]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    function onPointerDown(event: PointerEvent): void {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    }
-    function onKeyDown(event: KeyboardEvent): void {
-      if (event.key === 'Escape') setOpen(false);
-    }
-
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
+  // Закрытие по щелчку снаружи, Escape и переходу — общий useDisclosure.
+  const { open, setOpen, root, panelId: listId } = useDisclosure();
 
   const links = (
     <ul className="grid gap-0.5">

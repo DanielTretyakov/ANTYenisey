@@ -42,7 +42,7 @@ export function CoachCard({
         title="Карточка тренера"
         description="Публичная страница: её видят все, не входя. Заполняет её сам тренер — она одна на все его клубы."
       />
-      <CardBody className="grid gap-7">
+      <CardBody className="grid grid-cols-[minmax(0,1fr)] gap-7">
         <div className="flex flex-wrap items-start gap-5">
           <PlayerAvatar fileId={coach.card.photoFileId} name={personName} gender={gender} size="lg" />
           <div className="min-w-[12rem] flex-1">

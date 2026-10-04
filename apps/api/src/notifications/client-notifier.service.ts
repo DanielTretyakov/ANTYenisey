@@ -62,7 +62,14 @@ export class ClientNotifier {
   }
 
   /** Запись отменена — клиентом или клубом. Процент уже записан в строку. */
-  async entryCancelled(db: Db, tenantId: string, kind: EntryKind, entryId: string, origin: Origin): Promise<void> {
+  async entryCancelled(
+    db: Db,
+    tenantId: string,
+    kind: EntryKind,
+    entryId: string,
+    origin: Origin,
+    reason: 'CLUB_SUSPENDED' | null = null,
+  ): Promise<void> {
     const facts = await loadEntry(db, tenantId, kind, entryId);
 
     if (!facts || facts.status !== BookingStatus.CANCELLED) {
@@ -73,6 +80,7 @@ export class ClientNotifier {
       byClub: origin === 'club',
       charge: chargeOf({ status: 'CANCELLED', price: facts.price, chargeRatio: facts.chargeRatio, prepaid: facts.prepaid }),
       chargePercent: facts.chargeRatio,
+      ...(reason === 'CLUB_SUSPENDED' ? { clubSuspended: true } : {}),
     });
   }
 

@@ -109,7 +109,7 @@ export default function NewsEditorPage() {
   }
 
   return (
-    <AppShell>
+    <AppShell footer="line">
       <Link href="/news" className="mb-5 inline-block text-[0.875rem] text-text-accent underline underline-offset-2">
         ← Лента новостей
       </Link>

@@ -7,6 +7,7 @@ import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { inputClassName } from '@/components/ui/Field';
+import { CompactSelect } from '@/components/ui/CompactSelect';
 import { Tab } from '@/components/ui/Tab';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
@@ -133,7 +134,21 @@ export default function StaffSchedulePage() {
 
       {allowed && halls && (
         <>
-          <div className="mb-5 flex flex-wrap items-center gap-1.5">
+          {/* На телефоне — список залов (решение от 03.10.2026). */}
+          {halls.length > 1 && (
+            <CompactSelect
+              label="Зал"
+              value={hallId ?? ''}
+              options={halls.map((item) => ({
+                value: item.id,
+                label: item.canPlan ? item.name : `${item.name} — только просмотр`,
+              }))}
+              onChange={setHallId}
+              className="mb-5 sm:hidden"
+            />
+          )}
+
+          <div className={cn('mb-5 flex-wrap items-center gap-1.5', halls.length > 1 ? 'hidden sm:flex' : 'flex')}>
             <span className="mr-1 text-[0.8125rem] tracking-[0.06em] text-text-subtle uppercase">Залы</span>
             {halls.map((item) => (
               <Tab

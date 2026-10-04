@@ -17,6 +17,7 @@ import { clubPath } from '@/components/layout/ClubNav';
 import { Alert } from '@/components/ui/Alert';
 import { AddressCombobox, type ChosenAddress } from '@/components/ui/AddressCombobox';
 import { CityCombobox } from '@/components/ui/CityCombobox';
+import { CompactSelect } from '@/components/ui/CompactSelect';
 import { Dialog } from '@/components/ui/Dialog';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
@@ -234,7 +235,7 @@ export default function ClubPage() {
       {allowed && !error && !data && <SettingsSkeleton />}
 
       {data && (
-        <div className="grid gap-6">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
           {notice && <Alert tone="info">{notice}</Alert>}
 
           <PendingChanges changes={data.changes} onChange={reloadAfterCancel} />
@@ -255,7 +256,30 @@ export default function ClubPage() {
           />
 
           <div>
-            <div className="mb-4 flex flex-wrap items-center gap-1.5">
+            {/* На телефоне — список залов (решение от 03.10.2026); «+ Зал» — кнопкой рядом. */}
+            <div className="mb-4 grid gap-2 sm:hidden">
+              <div className="flex items-center gap-2">
+                <CompactSelect
+                  label="Зал"
+                  value={hallId ?? ''}
+                  options={data.halls.map((item) => ({ value: item.id, label: item.name }))}
+                  onChange={setHallId}
+                  className="grow"
+                />
+                <Button type="button" variant="ghost" size="sm" onClick={startHall}>
+                  + Зал
+                </Button>
+              </div>
+              {data.changes
+                .filter((change) => change.status === 'PENDING' && change.kind === 'HALL_CREATE')
+                .map((change) => (
+                  <p key={change.id} className="text-[0.8125rem] text-text-muted">
+                    Новый зал «{change.newName}» — {change.effectiveLabel}
+                  </p>
+                ))}
+            </div>
+
+            <div className="mb-4 hidden flex-wrap items-center gap-1.5 sm:flex">
               <span className="mr-1 text-[0.8125rem] tracking-[0.06em] text-text-subtle uppercase">
                 Залы
               </span>
@@ -340,7 +364,7 @@ export default function ClubPage() {
             )}
 
             {hall && (
-              <div className="grid gap-6">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
                 <HallForm
                   key={`${hall.id}:${formVersion}`}
                   hall={hall}

@@ -43,7 +43,8 @@ export interface ClubRef {
 
 /** Карточка клуба в результатах поиска и в списке «моих клубов». */
 export interface ClubCard extends ClubRef {
-  logoUrl: string | null;
+  /** Квадратный логотип (`GET /files/:id`). Пусто — монограмма в цвете клуба. */
+  logoFileId: string | null;
   /** Основной город клуба — тот, что показывается в карточке. */
   city: string | null;
   /**
@@ -88,6 +89,28 @@ export interface FavouriteClub extends ClubCard {
 
 /** Сколько клубов человек может отметить своими. */
 export const MAX_FAVOURITE_CLUBS = 3;
+
+/**
+ * Тренер в «Моих тренерах» (решение владельца от 02.10.2026). Отдельно от
+ * «Моих клубов»: это закладка, а не принадлежность, и предела у неё нет.
+ *
+ * Имя — «Фамилия И.», как на публичной странице тренера: полные имена в
+ * браузер не уходят.
+ */
+export interface FavouriteCoach {
+  /** Учётка тренера — адрес его страницы `/coaches/:id`. */
+  id: string;
+  name: string;
+  photoFileId: string | null;
+  gender: Gender | null;
+  /** Клубы, где тренирует сейчас. Пусто — ушёл отовсюду, но из избранного не пропал. */
+  clubs: ClubRef[];
+  /** Ближайшее его занятие в любом клубе; null — впереди ничего нет. */
+  next: FeedEvent | null;
+}
+
+/** Сколько избранных тренеров показывает стартовая; остальные — в кабинете. */
+export const START_PAGE_COACHES = 6;
 
 /** Чем человек занят: аренда стола, занятие или участие в турнире. */
 export type BookingKind = 'TABLE' | 'TRAINING' | 'TOURNAMENT';

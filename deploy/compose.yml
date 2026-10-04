@@ -84,6 +84,22 @@ services:
       # Подсказки и проверка адреса зала. Пусто — в production справочник
       # выключен: новый зал не завести, старый без адреса не поправить.
       DADATA_API_KEY: ${DADATA_API_KEY:-}
+      # Подписка клуба на КНТ. Джоба при приостановке ОТМЕНЯЕТ все будущие
+      # записи клуба, поэтому и здесь выключена, пока её не включат явно.
+      BILLING_JOB: ${BILLING_JOB:-off}
+      BILLING_JOB_INTERVAL: ${BILLING_JOB_INTERVAL:-10m}
+      # Магазин ЮKassa. Пусто — оплата картой выключена, по счёту работает.
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
+      # Реквизиты платформы для счетов и актов. Пусто — документ предупреждает.
+      BILLING_SELLER_NAME: ${BILLING_SELLER_NAME:-}
+      BILLING_SELLER_INN: ${BILLING_SELLER_INN:-}
+      BILLING_SELLER_KPP: ${BILLING_SELLER_KPP:-}
+      BILLING_SELLER_ADDRESS: ${BILLING_SELLER_ADDRESS:-}
+      BILLING_SELLER_BANK: ${BILLING_SELLER_BANK:-}
+      BILLING_SELLER_BIK: ${BILLING_SELLER_BIK:-}
+      BILLING_SELLER_ACCOUNT: ${BILLING_SELLER_ACCOUNT:-}
+      BILLING_SELLER_CORR_ACCOUNT: ${BILLING_SELLER_CORR_ACCOUNT:-}
     expose:
       - '3001'
     healthcheck:

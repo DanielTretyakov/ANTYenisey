@@ -90,6 +90,30 @@ const envSchema = z
     // Пояс утренней сводки платформы: у платформы нет зала, а сводка «за
     // вчера» должна знать, где кончились сутки.
     PLATFORM_TIMEZONE: z.string().default('Asia/Krasnoyarsk').refine(isTimeZone, 'Ожидается пояс IANA, например Asia/Krasnoyarsk'),
+
+    // Подписка клуба на КНТ (решения владельца от 02.10.2026). Джоба переводит
+    // клубы между пробным, оплаченным, просроченным и приостановленным — и
+    // при приостановке ОТМЕНЯЕТ ВСЕ будущие записи клуба. Поэтому выключена
+    // по умолчанию везде, и в production тоже: включают её осознанно.
+    BILLING_JOB: optional(z.enum(['on', 'off'])),
+    BILLING_JOB_INTERVAL: z
+      .string()
+      .default('10m')
+      .refine(isDuration, 'Ожидается длительность вида 30s, 5m, 1h'),
+    // Магазин ЮKassa. Без ключей вне production — поддельный шлюз, в
+    // production — оплата картой выключена (по счёту работает).
+    YOOKASSA_SHOP_ID: optional(z.string().regex(/^[0-9]+$/, 'shopId ЮKassa — число')),
+    YOOKASSA_SECRET_KEY: optional(z.string().min(10)),
+    // Реквизиты платформы для счетов и актов. Не заданы — документ так и
+    // пишет: «реквизиты продавца не заданы».
+    BILLING_SELLER_NAME: optional(z.string().min(2)),
+    BILLING_SELLER_INN: optional(z.string().regex(/^([0-9]{10}|[0-9]{12})$/, 'ИНН — 10 или 12 цифр')),
+    BILLING_SELLER_KPP: optional(z.string().regex(/^[0-9]{9}$/, 'КПП — 9 цифр')),
+    BILLING_SELLER_ADDRESS: optional(z.string().min(5)),
+    BILLING_SELLER_BANK: optional(z.string().min(2)),
+    BILLING_SELLER_BIK: optional(z.string().regex(/^[0-9]{9}$/, 'БИК — 9 цифр')),
+    BILLING_SELLER_ACCOUNT: optional(z.string().regex(/^[0-9]{20}$/, 'Расчётный счёт — 20 цифр')),
+    BILLING_SELLER_CORR_ACCOUNT: optional(z.string().regex(/^[0-9]{20}$/, 'Корреспондентский счёт — 20 цифр')),
   })
   .refine((env) => env.JWT_ACCESS_SECRET !== env.JWT_REFRESH_SECRET, {
     // Совпадение секретов означает, что refresh-токен примут как access:
@@ -101,6 +125,10 @@ const envSchema = z
     // Без адреса бота не собрать ссылку привязки, и токен лежал бы без дела.
     message: 'Задан MAX_BOT_TOKEN, но не задан MAX_BOT_LINK',
     path: ['MAX_BOT_LINK'],
+  })
+  .refine((env) => (env.YOOKASSA_SHOP_ID === undefined) === (env.YOOKASSA_SECRET_KEY === undefined), {
+    message: 'YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY задаются вместе',
+    path: ['YOOKASSA_SHOP_ID'],
   })
   .refine(
     (env) => [env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY, env.VAPID_SUBJECT].every((value) => value === undefined) ||
@@ -168,4 +196,12 @@ export function parseCorsOrigins(value: string): string[] {
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
+}
+
+/**
+ * Работает ли джоба подписки клуба на КНТ. Только по явному BILLING_JOB=on —
+ * даже в production: приостановка отменяет все будущие записи клуба.
+ */
+export function billingJobEnabled(env: Pick<Env, 'BILLING_JOB'>): boolean {
+  return env.BILLING_JOB === 'on';
 }

@@ -23,9 +23,13 @@ export type NotificationKind =
   | 'CLUB_DIGEST'
   | 'PLATFORM_DIGEST'
   | 'SUBSCRIPTION_PAST_DUE'
+  | 'SUBSCRIPTION_REMINDER'
+  | 'SUBSCRIPTION_SUSPENDED'
+  | 'SUBSCRIPTION_PAID'
   | 'STAFF_SHIFT_ASSIGNED'
   | 'CLUB_SETTINGS_CHANGED'
-  | 'CLUB_POST';
+  | 'CLUB_POST'
+  | 'CLUB_APPLICATION';
 
 export type Category =
   | 'SERVICE'
@@ -64,7 +68,12 @@ export const CATEGORY_OF: Record<NotificationKind, Category> = {
   RANK_PENDING: 'CLUB_ALERTS',
   CLUB_DIGEST: 'CLUB_DIGEST',
   PLATFORM_DIGEST: 'PLATFORM_DIGEST',
-  SUBSCRIPTION_PAST_DUE: 'CLUB_ALERTS',
+  // Подписка клуба на КНТ — руководителю, служебное: выключив категорию,
+  // клуб узнал бы о закрытом доступе от клиентов (решение от 02.10.2026).
+  SUBSCRIPTION_PAST_DUE: 'SERVICE',
+  SUBSCRIPTION_REMINDER: 'SERVICE',
+  SUBSCRIPTION_SUSPENDED: 'SERVICE',
+  SUBSCRIPTION_PAID: 'SERVICE',
   // Назначение на смену — служебное: пропустить его, выключив категорию,
   // значит не выйти на работу (решение владельца от 26.09.2026).
   STAFF_SHIFT_ASSIGNED: 'SERVICE',
@@ -74,6 +83,9 @@ export const CATEGORY_OF: Record<NotificationKind, Category> = {
   // Акции и объявления клуба — выключаемые: это реклама клуба, а не дело
   // человека (решение владельца от 26.09.2026).
   CLUB_POST: 'CLUB_NEWS',
+  // Заявка клуба на подключение — владельцу платформы, служебное: клуб,
+  // который ждёт ответа неделю, уходит к другим (решение от 03.10.2026).
+  CLUB_APPLICATION: 'SERVICE',
 };
 
 /** Кем человек является — ровно то, от чего зависят его категории. */

@@ -2,14 +2,29 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import type { BookingEntry, City, ClubCard, ClubPostWithClub, FavouriteClub, FeedEvent, NewsItem } from '@yenisey/types';
-import { PlatformMark } from '@/components/brand/PlatformLogo';
+import {
+  START_PAGE_COACHES,
+  type BookingEntry,
+  type City,
+  type ClubCard,
+  type ClubPostWithClub,
+  type FavouriteClub,
+  type FavouriteCoach,
+  type FeedEvent,
+  type NewsItem,
+} from '@yenisey/types';
 import { RiverBackdrop } from '@/components/brand/RiverBackdrop';
 import { ClubMark } from '@/components/club/ClubMark';
-import { KindBadge } from '@/components/club/EventRow';
 import { WhenSpan } from '@/components/club/When';
 import { EventDialog } from '@/components/events/EventDialog';
+import { dayLabel, FeedEventCard, timeLabel } from '@/components/events/FeedEventCard';
+import { PlayerAvatar } from '@/components/player/PlayerView';
 import { excerpt, NewsRow, newsDate } from '@/components/news/NewsParts';
+import { DevNotice } from '@/components/layout/DevNotice';
+import { SECTION_ACTIVE_OFFSET_START } from '@/components/layout/metrics';
+import { CompactSelect } from '@/components/ui/CompactSelect';
+import { FirstSteps } from '@/components/start/FirstSteps';
+import { SiteFooter } from '@/components/layout/SiteFooter';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -29,7 +44,6 @@ import {
 import { useClubPostsUnread } from '@/lib/clubPostsUnread';
 import { readableOn } from '@/lib/clubTheme';
 import { cn } from '@/lib/cn';
-import { formatKopecks } from '@/lib/money';
 import { plural } from '@/lib/plural';
 import { entryPriceLabel } from '@/lib/subscriptions';
 import { useSession } from '@/lib/useSession';
@@ -151,6 +165,7 @@ export default function StartPage() {
 
   return (
     <div className="flex min-h-dvh flex-col bg-surface">
+      <DevNotice />
       <SiteHeader sticky={false} />
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-5 sm:px-8">
@@ -170,14 +185,20 @@ export default function StartPage() {
 
         <Results clubs={clubs} city={city ?? null} region={city ? null : (region ?? null)} query={query.trim()} />
 
+        {/* «С чего начать» — новичку и гостю, пока шаги не сделаны (решение от 02.10.2026). */}
+        <FirstSteps />
+
         {session.status === 'ready' && (
           <>
             {/* «Моё» — мозаикой (вариант А от 01.10.2026): записи и мои клубы
                 рядом, одной высоты, их новости — под ними во всю ширину.
-                Новости рядом с записями растягивали плитку записей в пустоту. */}
+                Новости рядом с записями растягивали плитку записей в пустоту.
+                «Мои тренеры» — полосой во всю ширину между ними (вариант А от
+                02.10.2026): у тренера длинная строка занятия. */}
             <div className="mt-16 grid gap-4 lg:grid-cols-2">
               <MyEntries />
               <MyClubs />
+              <MyCoaches />
               <MyClubPosts />
             </div>
             <Nearest />
@@ -187,15 +208,7 @@ export default function StartPage() {
         {session.status !== 'loading' && <LatestNews />}
       </main>
 
-      <footer className="mt-20 border-t border-border">
-        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-2.5 px-5 py-9 text-[0.8125rem] text-text-subtle sm:px-8">
-          <PlatformMark className="text-[1.25rem]" />
-          КНТ — платформа клубов настольного тенниса
-          <Link href="/news" className="ml-auto text-text-muted underline-offset-2 hover:underline">
-            Новости платформы
-          </Link>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }
@@ -282,8 +295,10 @@ function Hero({
           </div>
         )}
 
-        {/* Поиск — половина ширины, город и регион — по четверти (решение
-            владельца от 30.09.2026); уже — поиск строкой, под ним пара. */}
+        {/* Поиск — половина ширины, регион и город — по четверти (решение
+            владельца от 30.09.2026); уже — поиск строкой, под ним пара.
+            Регион перед городом — от общего к частному (решение от
+            02.10.2026): выбранный регион сужает подсказки города. */}
         <div className="mt-8 grid max-w-5xl gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <label className="relative block sm:col-span-2">
             <span className="sr-only">Название клуба</span>
@@ -300,6 +315,17 @@ function Hero({
             />
           </label>
 
+          <RegionCombobox
+            label="Регион"
+            hideLabel
+            emptyLabel="Любой регион"
+            value={region}
+            onChange={onRegion}
+            searchIcon
+            placeholder="Регион"
+            inputClassName="h-14 border-transparent text-[1.0625rem]"
+          />
+
           <CityCombobox
             label="Город"
             hideLabel
@@ -309,17 +335,6 @@ function Hero({
             region={region}
             searchIcon
             placeholder="Город"
-            inputClassName="h-14 border-transparent text-[1.0625rem]"
-          />
-
-          <RegionCombobox
-            label="Регион"
-            hideLabel
-            emptyLabel="Любой регион"
-            value={region}
-            onChange={onRegion}
-            searchIcon
-            placeholder="Регион"
             inputClassName="h-14 border-transparent text-[1.0625rem]"
           />
         </div>
@@ -603,6 +618,99 @@ function MyClubs() {
 }
 
 /**
+ * Мои тренеры (решение владельца от 02.10.2026, вариант А): полоса во всю
+ * ширину, у каждого — ближайшее занятие, щелчок открывает окно записи. На
+ * стартовой — первые шесть, весь список и снятие отметки — в кабинете.
+ * Своих тренеров нет — одна строка-подсказка, а не пустая плитка.
+ */
+function MyCoaches() {
+  const [coaches, setCoaches] = useState<FavouriteCoach[] | null>(null);
+  const [open, setOpen] = useState<FeedEvent | null>(null);
+
+  const load = (): void => {
+    api
+      .myCoaches()
+      .then(setCoaches)
+      .catch(() => setCoaches([]));
+  };
+
+  useEffect(load, []);
+
+  if (coaches === null) {
+    return null;
+  }
+
+  const shown = coaches.slice(0, START_PAGE_COACHES);
+
+  return (
+    <section id="moi-trenery" className="scroll-mt-40 rounded-card border border-border bg-surface-raised p-5 lg:col-span-2">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <p className={KICKER}>Мои тренеры</p>
+        {coaches.length > 0 && (
+          <Link href="/cabinet/edit/clubs" className="text-[0.8125rem] text-text-muted underline-offset-2 hover:underline">
+            {coaches.length > shown.length ? `Все ${coaches.length}` : 'Изменить'}
+          </Link>
+        )}
+      </div>
+
+      {coaches.length === 0 && (
+        <p className="text-[0.9375rem] text-text-muted">
+          Избранных тренеров пока нет. Отметьте тренера сердечком на его странице — здесь появятся его ближайшие
+          занятия.
+        </p>
+      )}
+
+      {shown.length > 0 && (
+        <ul className="grid gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
+          {shown.map((coach) => (
+            <li key={coach.id} className="grid min-w-0 content-start gap-2.5">
+              <Link href={`/coaches/${coach.id}`} className="group flex min-w-0 items-center gap-3">
+                <PlayerAvatar fileId={coach.photoFileId} name={coach.name} gender={coach.gender} size="xs" />
+                <span className="min-w-0">
+                  <span className="block truncate text-[1rem] text-text group-hover:underline">{coach.name}</span>
+                  <span className="block truncate text-[0.8125rem] text-text-muted">
+                    {coach.clubs.length > 0 ? coach.clubs.map((club) => club.name).join(', ') : 'Сейчас не тренирует'}
+                  </span>
+                </span>
+              </Link>
+
+              {coach.next ? (
+                <button
+                  type="button"
+                  onClick={() => setOpen(coach.next)}
+                  className="grid gap-0.5 border-l-[3px] border-accent pl-2.5 text-left text-[0.875rem] hover:underline"
+                >
+                  <span className="font-medium tabular-nums text-text">
+                    {dayLabel(coach.next.startsAt)}, {timeLabel(coach.next.startsAt)}
+                  </span>
+                  <span className="text-text-muted">
+                    {coach.next.title} · {coach.next.club.name}
+                    {coach.next.capacity !== null && ` · ${seatsLabel(coach.next.freeSeats ?? 0)}`}
+                  </span>
+                </button>
+              ) : (
+                <p className="border-l-[3px] border-border pl-2.5 text-[0.875rem] text-text-subtle">
+                  Ближайших занятий нет
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {open && (
+        <EventDialog slug={open.club.slug} kind={open.kind} id={open.id} onClose={() => setOpen(null)} onChanged={load} />
+      )}
+    </section>
+  );
+}
+
+/** «3 места», «нет мест». */
+function seatsLabel(free: number): string {
+  return free === 0 ? 'мест нет' : `${free} ${plural(free, 'место', 'места', 'мест')}`;
+}
+
+/**
  * Ближайшее в моих клубах: пять ближайших неповторяющихся мероприятий.
  *
  * Отбор «неповторяющихся» — на сервере (`distinctNearest`): иначе пять строк
@@ -638,22 +746,7 @@ function Nearest() {
         <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {events.map((event) => (
             <li key={`${event.club.slug}-${event.kind}-${event.id}`}>
-              <button
-                type="button"
-                onClick={() => setOpen(event)}
-                className="group flex h-full w-full flex-col rounded-card border border-border bg-surface-raised px-5 py-4 text-left transition-colors hover:border-border-strong"
-              >
-                <span className={KICKER}>{dayLabel(event.startsAt)}</span>
-                <span className="mt-1.5 font-display text-[1.375rem] text-text">{timeLabel(event.startsAt)}</span>
-                <span className="mt-1 flex flex-wrap items-center gap-2">
-                  <KindBadge kind={event.kind} />
-                  <span className="text-[0.9375rem] text-text group-hover:underline">{event.title}</span>
-                </span>
-                <span className="mt-1 text-[0.8125rem] text-text-muted">
-                  {event.club.name}
-                  {event.subtitle && ` · ${event.subtitle}`} · {formatKopecks(event.price)}
-                </span>
-              </button>
+              <FeedEventCard event={event} onOpen={setOpen} />
             </li>
           ))}
         </ul>
@@ -833,6 +926,7 @@ function StartNav({ signedIn }: { signedIn: boolean }) {
       ? [
           { id: 'moi-zapisi', label: 'Мои записи' },
           { id: 'moi-kluby', label: 'Мои клубы' },
+          { id: 'moi-trenery', label: 'Мои тренеры' },
           { id: 'novosti-klubov', label: 'Новости клубов' },
           { id: 'blizhaishee', label: 'Ближайшее' },
         ]
@@ -852,7 +946,7 @@ function StartNav({ signedIn }: { signedIn: boolean }) {
 
       for (const id of list) {
         const top = document.getElementById(id)?.getBoundingClientRect().top;
-        if (top !== undefined && top < 180 && top > currentTop + 1) {
+        if (top !== undefined && top < SECTION_ACTIVE_OFFSET_START && top > currentTop + 1) {
           current = id;
           currentTop = top;
         }
@@ -880,9 +974,21 @@ function StartNav({ signedIn }: { signedIn: boolean }) {
   return (
     <nav
       aria-label="Разделы стартовой"
-      className="sticky top-0 z-10 -mx-1 mb-2 overflow-x-auto rounded-card border border-border bg-surface-raised/90 p-1.5 backdrop-blur [scrollbar-width:none]"
+      className="sticky top-0 z-10 -mx-1 mb-2 rounded-card border border-border bg-surface-raised/90 p-1.5 backdrop-blur"
     >
-      <ul className="flex w-max gap-1">
+      {/* На телефоне — список, а не лента вбок (решение владельца от 03.10.2026). */}
+      <CompactSelect
+        label="Раздел"
+        value={active && shown.some((item) => item.id === active) ? active : shown[0]!.id}
+        options={shown.map((item) => ({
+          value: item.id,
+          label: item.id === 'moi-kluby' && (unread?.total ?? 0) > 0 ? `${item.label} · ${unread!.total} новых` : item.label,
+        }))}
+        onChange={(id) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        className="px-1.5 sm:hidden"
+      />
+
+      <ul className="hidden max-w-full gap-1 overflow-x-auto [scrollbar-width:none] sm:flex">
         {shown.map((item) => (
           <li key={item.id}>
             <button
@@ -911,19 +1017,6 @@ function StartNav({ signedIn }: { signedIn: boolean }) {
       </ul>
     </nav>
   );
-}
-
-/** «Пятница, 2 октября» — подпись карточки ближайшего, по часам смотрящего, как `When`. */
-function dayLabel(instant: string): string {
-  const label = new Intl.DateTimeFormat('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }).format(
-    new Date(instant),
-  );
-
-  return label.charAt(0).toUpperCase() + label.slice(1);
-}
-
-function timeLabel(instant: string): string {
-  return new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(new Date(instant));
 }
 
 /** Заглушка карточек — той же сетки, что выдача: список не подпрыгивает. */

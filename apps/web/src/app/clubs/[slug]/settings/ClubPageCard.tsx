@@ -18,10 +18,10 @@ function messageOf(cause: unknown): string {
 }
 
 /**
- * Страница клуба глазами посетителя: баннер и тренерский состав (решение
- * владельца от 24.09.2026). Отдельной карточкой, а не полями общей формы:
- * баннер — файл, а состав — список со своим порядком, и сохраняются они сами
- * по себе, не дожидаясь кнопки «Сохранить» у настроек.
+ * Страница клуба глазами посетителя: логотип и тренерский состав (решения
+ * владельца от 24.09 и 02.10.2026). Отдельной карточкой, а не полями общей
+ * формы: логотип — файл, а состав — список со своим порядком, и сохраняются
+ * они сами по себе, не дожидаясь кнопки «Сохранить» у настроек.
  */
 export function ClubPageCard({
   settings,
@@ -36,17 +36,17 @@ export function ClubPageCard({
     <Card>
       <CardHeader
         title="Страница клуба"
-        description="Баннер над названием и тренеры, которых видит посетитель. Карточку тренер ведёт сам — здесь только порядок и кого скрыть."
+        description="Квадратный логотип рядом с названием и тренеры, которых видит посетитель. Карточку тренер ведёт сам — здесь только порядок и кого скрыть."
       />
-      <CardBody className="grid gap-8">
-        <BannerBlock settings={settings} onSettings={onSettings} />
+      <CardBody className="grid grid-cols-[minmax(0,1fr)] gap-8">
+        <LogoBlock settings={settings} onSettings={onSettings} />
         <CoachListBlock halls={halls} />
       </CardBody>
     </Card>
   );
 }
 
-function BannerBlock({
+function LogoBlock({
   settings,
   onSettings,
 }: {
@@ -55,7 +55,7 @@ function BannerBlock({
 }) {
   const club = useClubApi();
   const input = useRef<HTMLInputElement>(null);
-  const url = useFileUrl(settings.bannerFileId);
+  const url = useFileUrl(settings.logoFileId);
   const [pending, setPending] = useState<'upload' | 'remove' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -77,32 +77,36 @@ function BannerBlock({
     if (input.current) input.current.value = '';
     if (!file) return;
 
-    // Проверка до отправки — только ради быстрого ответа; решает сервер.
-    if (file.size > 8 * MB) {
-      setError('Файл больше 8 МБ');
+    // Проверка до отправки — только ради быстрого ответа; решает сервер, и
+    // квадратность тоже проверяет он: второе правило здесь разошлось бы с ним.
+    if (file.size > 5 * MB) {
+      setError('Файл больше 5 МБ');
       return;
     }
 
-    void run('upload', () => club.setClubBanner(file));
+    void run('upload', () => club.setClubLogo(file));
   }
 
   return (
     <section>
-      <h3 className="text-[0.9375rem] font-medium">Баннер</h3>
+      <h3 className="text-[0.9375rem] font-medium">Логотип</h3>
       <p className="mt-0.5 text-[0.8125rem] text-text-muted">
-        Широкий снимок зала — сервер обрежет его до полосы 1600×500 и уберёт место съёмки. Без
-        баннера страница клуба рисует плоскость в фирменном цвете.
+        Только квадратный знак от 128×128 точек — JPEG, PNG или WebP, лучше с прозрачным фоном.
+        Неквадратную картинку сервер не примет. Фотографий у клуба нет: страницу оформляет
+        фирменный цвет, а без логотипа рядом с названием стоит монограмма.
       </p>
 
-      <div
-        className="mt-3.5 aspect-[16/5] w-full max-w-2xl overflow-hidden rounded-control border border-border bg-surface-sunken"
-        aria-hidden={!url}
-      >
-        {url ? (
-          <img src={url} alt="Баннер клуба" className="h-full w-full object-cover" />
-        ) : (
-          <span className="grid h-full place-items-center text-[0.8125rem] text-text-subtle">Баннера нет</span>
-        )}
+      <div className="mt-3.5 flex items-center gap-4">
+        <div
+          className="grid h-32 w-32 shrink-0 place-items-center overflow-hidden rounded-control border border-border bg-ink-0"
+          aria-hidden={!url}
+        >
+          {url ? (
+            <img src={url} alt="Логотип клуба" className="h-full w-full object-contain p-1.5" />
+          ) : (
+            <span className="text-[0.8125rem] text-ink-500">Логотипа нет</span>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -119,15 +123,15 @@ function BannerBlock({
           disabled={pending !== null}
           onClick={() => input.current?.click()}
         >
-          {settings.bannerFileId ? 'Заменить баннер' : 'Загрузить баннер'}
+          {settings.logoFileId ? 'Заменить логотип' : 'Загрузить логотип'}
         </Button>
-        {settings.bannerFileId && (
+        {settings.logoFileId && (
           <Button
             size="sm"
             variant="ghost"
             pending={pending === 'remove'}
             disabled={pending !== null}
-            onClick={() => void run('remove', () => club.removeClubBanner())}
+            onClick={() => void run('remove', () => club.removeClubLogo())}
           >
             Убрать
           </Button>
@@ -262,7 +266,7 @@ function CoachListBlock({ halls }: { halls: Hall[] }) {
 
       {coaches && coaches.length > 0 && (
         <>
-          <ol className="mt-3.5 grid max-w-xl gap-1.5">
+          <ol className="mt-3.5 grid max-w-xl grid-cols-[minmax(0,1fr)] gap-1.5">
             {order.map((id, index) => {
               const isHidden = hidden.has(id);
 

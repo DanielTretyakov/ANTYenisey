@@ -8,6 +8,7 @@ import { PhoneField } from '@/components/PhoneField';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
+import { ConsentCheckbox } from '@/components/ui/ConsentCheckbox';
 import { Field } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
 import { isChildBirthDate } from '@/lib/family';
@@ -54,6 +55,7 @@ function RegisterForm({ clubSlug, next }: { clubSlug: string | null; next: strin
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [birthDate, setBirthDate] = useState('');
+  const [consent, setConsent] = useState(false);
 
   // Младше 16 регистрироваться можно — учётка ребёнку нужна, чтобы видеть свои
   // записи, — но записывать его будет родитель. Сказать это надо до отправки,
@@ -82,6 +84,11 @@ function RegisterForm({ clubSlug, next }: { clubSlug: string | null; next: strin
       return;
     }
 
+    if (!consent) {
+      setError('Без согласия на обработку персональных данных учётку не завести');
+      return;
+    }
+
     setPending(true);
 
     try {
@@ -95,6 +102,7 @@ function RegisterForm({ clubSlug, next }: { clubSlug: string | null; next: strin
         phone,
         birthDate: String(form.get('birthDate')),
         gender,
+        consent: true,
       });
 
       saveSession(auth);
@@ -161,7 +169,9 @@ function RegisterForm({ clubSlug, next }: { clubSlug: string | null; next: strin
           required
         />
 
-        <Button type="submit" pending={pending} fullWidth size="lg" className="mt-2">
+        <ConsentCheckbox checked={consent} onChange={setConsent} />
+
+        <Button type="submit" pending={pending} disabled={!consent} fullWidth size="lg" className="mt-2">
           {pending ? 'Отправляю…' : 'Зарегистрироваться'}
         </Button>
       </form>

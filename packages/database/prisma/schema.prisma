@@ -160,10 +160,26 @@ enum PaymentPurpose {
 
 /// Статус подписки клуба на платформу.
 enum PlatformSubscriptionStatus {
+  TRIAL // пробный период нового клуба — 7 дней (решение владельца от 02.10.2026)
   ACTIVE
-  PAST_DUE // просрочен платёж, доступ ещё не заблокирован (грейс-период джобы)
+  PAST_DUE // просрочен платёж, доступ ещё не заблокирован (льготные 3 дня)
   SUSPENDED // доступ клуба заблокирован из-за неоплаты
   EXEMPT // клуб не платит подписку (статус «Енисея» как пилотного клиента)
+}
+
+/// Чем клуб платит платформе: картой с автопродлением или по счёту для юрлица
+/// (решение владельца от 02.10.2026).
+enum PlatformPaymentMethod {
+  CARD
+  INVOICE
+}
+
+/// Судьба платежа клуба платформе.
+enum PlatformPaymentStatus {
+  PENDING // ждёт оплаты: карта — подтверждения ЮKassa, счёт — поступления
+  SUCCEEDED
+  FAILED // банк отказал или срок счёта вышел
+  CANCELLED // заменён новым или отменён владельцем платформы
 }
 
 /// Причина движения визитов по балансу абонемента (см. SubscriptionLedger).
@@ -208,10 +224,14 @@ enum NotificationType {
   RANK_PENDING // администраторам: игрок клуба заявил или поправил разряд
   CLUB_DIGEST // руководству клуба: утренняя сводка за вчера и план на сегодня
   PLATFORM_DIGEST // владельцу платформы: утренняя сводка по всей платформе
-  SUBSCRIPTION_PAST_DUE // клубу — про просрочку подписки на платформу
+  SUBSCRIPTION_PAST_DUE // руководителю: оплата подписки на КНТ не прошла, доступ закроется через 3 дня
+  SUBSCRIPTION_REMINDER // руководителю: за 7 и за 1 день до конца оплаченного срока или пробного периода
+  SUBSCRIPTION_SUSPENDED // руководителю: доступ клуба приостановлен, записи отменены с возвратом
+  SUBSCRIPTION_PAID // руководителю: подписка оплачена, до какого числа
   STAFF_SHIFT_ASSIGNED // администратору: его назначили на смену в зале
   CLUB_SETTINGS_CHANGED // сотрудникам: кто и что поменял в настройках клуба, когда вступит в силу
   CLUB_POST // клиентам клуба: новая публикация в ленте клуба — акция, объявление
+  CLUB_APPLICATION // владельцу платформы: заявка на подключение клуба со страницы «Подключить свой клуб»
 }
 
 /// Судьба строки очереди уведомлений.
@@ -285,7 +305,7 @@ enum StoredFileKind {
   AVATAR // аватар игрока: приведён к 512×512 WebP, метаданные выброшены
   RANK_DOCUMENT // скан приказа о присвоении разряда: картинка или PDF
   COACH_PHOTO // фотография в карточке тренера: обработана как аватар
-  CLUB_BANNER // баннер страницы клуба: 1600×500 WebP, принадлежит клубу, а не человеку
+  CLUB_LOGO // логотип клуба: квадрат 512×512 WebP, принадлежит клубу, а не человеку
 }
 
 /// Уровень соревнования в достижении игрока.
@@ -372,20 +392,22 @@ model Tenant {
   vkUrl  String?
   maxUrl String?
 
-  /// Баннер страницы клуба. Составной ключ на (файл, клуб-владелец): файл
-  /// чужого клуба или человека сюда не встанет. NoAction, как у аватара:
-  /// замена удаляет старый файл после того, как ссылка уже переставлена.
-  bannerFileId String?
-  banner       StoredFile?  @relation("ClubBanner", fields: [bannerFileId, id], references: [id, ownerTenantId], onDelete: NoAction)
-  files        StoredFile[] @relation("TenantFiles")
-
   // --- Оформление страницы клуба.
   //
   // ВНИМАНИЕ: в ТЗ брендинга клуба нет вовсе — это расширение, добавленное по
-  // прямой просьбе владельца продукта. Логотип хранится ссылкой, а не файлом:
-  // загрузка файлов тянет за собой валидацию, лимиты размера и раздачу
-  // статики, а страница клуба работает и без них.
-  logoUrl     String?
+  // прямой просьбе владельца продукта. С 02.10.2026 (решение владельца) у
+  // клуба ровно два знака отличия: квадратный логотип и фирменный цвет.
+  // Снимков — баннера, фото зала — у клуба нет: страницу клуба оформляет
+  // цвет, а не фотография.
+
+  /// Логотип клуба — загруженный квадрат 512×512 (до 02.10.2026 — ссылка
+  /// `logoUrl` на произвольную картинку, квадрат которой сервер проверить не
+  /// мог). Составной ключ на (файл, клуб-владелец): файл чужого клуба или
+  /// человека сюда не встанет. NoAction, как у аватара: замена удаляет старый
+  /// файл после того, как ссылка уже переставлена.
+  logoFileId  String?
+  logo        StoredFile?  @relation("ClubLogo", fields: [logoFileId, id], references: [id, ownerTenantId], onDelete: NoAction)
+  files       StoredFile[] @relation("TenantFiles")
   /// Фирменный цвет в виде «#126b54». Формат проверяется CHECK'ом в
   /// constraints.sql: значение уезжает прямо в CSS-переменную, и мусор в нём
   /// означал бы сломанную вёрстку страницы клуба, а не пустое поле.
@@ -475,6 +497,9 @@ model Tenant {
   legalDocuments          LegalDocument[]
   legalAcceptances        LegalAcceptance[]
   platformSubscription    TenantSubscription?
+  platformPayments        PlatformPayment[]
+  platformActs            PlatformAct[]
+  requisites              ClubRequisites?
   favouritedBy            UserClub[]
 
   // Поиск клубов на стартовой странице фильтрует по городу — и клуба, и его
@@ -535,6 +560,7 @@ model PlatformPlan {
   updatedAt DateTime @updatedAt
 
   subscriptions TenantSubscription[]
+  payments      PlatformPayment[]
 
   @@index([isActive])
 }
@@ -542,15 +568,20 @@ model PlatformPlan {
 /// Подписка клуба на саму платформу (деньги «клуб → платформа»). Это не то
 /// же самое, что клиентский абонемент (Subscription/SubscriptionPlan ниже) —
 /// там деньги идут от клиента клубу за тренировки/турниры/аренду.
+///
+/// Правила (решения владельца от 02.10.2026, ТЗ → «Монетизация платформы»):
+/// новый клуб получает 7 дней пробного периода; оплаченный срок кончается в
+/// `paidUntil`; не оплатили — PAST_DUE, клуб работает ещё 3 дня; дальше
+/// SUSPENDED, и все будущие записи клуба отменяются с полным возвратом.
+/// Переходы делает `BillingJob`, правила — чистые функции `billing-rules.ts`.
 model TenantSubscription {
   id       String @id @default(cuid())
   tenantId String @unique
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  // Тариф и зафиксированная цена покупки. Оба пусты только у клубов со
-  // статусом EXEMPT — «Енисей» как пилотный клиент подписку не оплачивает,
-  // и тарифа у него нет вовсе. Для всех остальных обязательны: это
-  // проверяет check-констрейнт, см. schema-constraints.sql.
+  // Тариф и зафиксированная цена покупки. Пусты у EXEMPT («Енисей» как
+  // пилотный клиент подписку не оплачивает) и у TRIAL, пока клуб ничего не
+  // купил. Для остальных обязательны — CHECK в constraints.sql.
   //
   // priceAtPurchase — та же логика, что и priceAtBooking у броней: клуб
   // купил трёхлетний доступ за 130 000 ₽, и последующее изменение прайса
@@ -560,12 +591,131 @@ model TenantSubscription {
   priceAtPurchase Int?
 
   status               PlatformSubscriptionStatus @default(ACTIVE)
+  /// Конец пробного периода (TRIAL).
+  trialEndsAt          DateTime?
+  /// До какого момента оплачен доступ. Пусто — ещё ничего не оплачено.
+  paidUntil            DateTime?
+  /// Продлевать картой автоматически. Выключенное — клуб платит сам, когда захочет.
+  autoRenew            Boolean                    @default(true)
   nextChargeDate       DateTime? // дата следующего автосписания ЮKassa — читает джоба биллинга
   savedPaymentMethodId String? // сохранённый способ оплаты клуба в ЮKassa
+  /// Подпись сохранённой карты для страницы: «Visa •• 4242».
+  paymentMethodTitle   String?
+  /// С какого момента не оплачено: от него считаются льготные 3 дня.
+  pastDueSince         DateTime?
+  /// Неудачных автосписаний подряд — повтор раз в сутки, пока идут льготные дни.
+  chargeAttempts       Int                        @default(0)
+  lastChargeAttemptAt  DateTime?
+  suspendedAt          DateTime?
   createdAt            DateTime                   @default(now())
   updatedAt            DateTime                   @updatedAt
 
   @@index([status, nextChargeDate])
+}
+
+/// Платёж клуба платформе — картой через ЮKassa или по счёту. Клиентский
+/// `Payment` (клиент → клуб) здесь не годится: он привязан к анкете клиента.
+///
+/// Строка не удаляется: это деньги. Период доступа (`periodFrom`..`periodTo`)
+/// проставляется при успехе — до него неизвестно, с какого дня продлевать.
+model PlatformPayment {
+  id       String       @id @default(cuid())
+  tenantId String
+  tenant   Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  planId   String
+  plan     PlatformPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  /// Сумма в копейках — цена тарифа на момент выставления.
+  amount     Int
+  method     PlatformPaymentMethod
+  status     PlatformPaymentStatus @default(PENDING)
+  /// Автосписание по сохранённой карте, а не оплата руководителем.
+  autoCharge Boolean               @default(false)
+
+  /// Платёж ЮKassa — у карты. Уникален: повторный вебхук не проведёт его дважды.
+  providerPaymentId String? @unique
+  /// Номер счёта — у счёта. Сквозной по платформе.
+  invoiceNumber     Int?    @unique
+  failureReason     String?
+
+  periodFrom DateTime?
+  periodTo   DateTime?
+  paidAt     DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  acts PlatformAct[]
+
+  @@index([tenantId, createdAt])
+}
+
+/// Акт оказанных услуг — раз в месяц (решение владельца от 02.10.2026): за
+/// годовую оплату — двенадцать актов, по одному на месяц срока. Заводятся
+/// все сразу при оплате, номер сквозной.
+model PlatformAct {
+  id        String          @id @default(cuid())
+  tenantId  String
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  paymentId String
+  payment   PlatformPayment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  number     Int      @unique
+  periodFrom DateTime
+  periodTo   DateTime
+  /// Копейки. Сумма актов платежа равна сумме платежа — остаток деления в последнем.
+  amount     Int
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, periodFrom])
+}
+
+/// Реквизиты клуба для счетов и актов (оплата по счёту для юрлица).
+model ClubRequisites {
+  tenantId  String   @id
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalName String
+  inn       String
+  kpp       String?
+  address   String
+  email     String
+  updatedAt DateTime @updatedAt
+}
+
+/// Заявка на подключение клуба к КНТ — форма страницы «Подключить свой клуб»
+/// (решение владельца от 03.10.2026). Оставить её может кто угодно без входа,
+/// поэтому на учётку строка не ссылается: заявитель — имя и контакт.
+/// Владелец платформы ведёт заявки по статусам на «Клубах и подписках».
+///
+/// Связаться — по телефону или по почте, хотя бы одно обязательно (CHECK
+/// `ClubApplication_contact_present`). Строка не удаляется: это история
+/// подключений, и отказ — статус, а не удаление.
+model ClubApplication {
+  id          String                @id @default(cuid())
+  contactName String
+  clubName    String
+  cityId      String?
+  city        City?                 @relation(fields: [cityId], references: [id], onDelete: Restrict)
+  phone       String?
+  email       String?
+  /// Сколько залов и столов — для разговора о тарифе; необязательны.
+  halls       Int?
+  tables      Int?
+  comment     String?
+  status      ClubApplicationStatus @default(NEW)
+  /// Заметка владельца платформы: «созвонились, ждут договор».
+  note        String?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  @@index([status, createdAt])
+}
+
+/// Где заявка клуба: новая → в работе → подключён или отказ.
+enum ClubApplicationStatus {
+  NEW
+  IN_PROGRESS
+  CONNECTED
+  DECLINED
 }
 
 // ---------------------------------------------------------------------------
@@ -635,6 +785,13 @@ model User {
   /// человека, и прятаться поштучно в каждом клубе никто не станет.
   ratingHidden Boolean @default(false)
 
+  /// Когда дано согласие на обработку персональных данных (152-ФЗ, решение
+  /// владельца от 03.10.2026): галочка при регистрации, а у учётки ребёнка —
+  /// галочка родителя, который её заводит. Это доказательство согласия, поэтому
+  /// пишет его только сервер в момент создания учётки. У учёток, заведённых до
+  /// 03.10.2026, пусто — их согласие не собиралось.
+  personalDataConsentAt DateTime?
+
   // --- Мягкое удаление и анонимизация (152-ФЗ).
   //
   // Физически удалять клиента нельзя: за ним висят платежи и визиты, которые
@@ -658,12 +815,15 @@ model User {
   deactivatedAt DateTime?
   anonymizedAt  DateTime?
 
-  memberships    TenantMembership[]
+  memberships       TenantMembership[]
   // Сессии входа висят на аккаунте, а не на клубе: человек входит на
   // платформу один раз и дальше сам выбирает, в какой клуб идёт.
-  refreshTokens  RefreshToken[]
+  refreshTokens     RefreshToken[]
   // «Мои клубы» — отметка человека, а не клуба, поэтому висит на аккаунте.
-  favouriteClubs UserClub[]
+  favouriteClubs    UserClub[]
+  // «Мои тренеры»: кого человек отметил (owner) и кто отметил его (target).
+  favouriteCoaches  UserCoach[]        @relation("FavouriteCoachOwner")
+  favouritedAsCoach UserCoach[]        @relation("FavouriteCoachTarget")
 
   // Профиль игрока — тоже свойство человека, а не клуба: разряд не меняется
   // от того, в каком зале человек сегодня играет.
@@ -781,7 +941,7 @@ model Guardianship {
 model StoredFile {
   id            String         @id @default(cuid())
   /// Владелец — ровно один: человек (аватар, приказ, фото тренера) или клуб
-  /// (баннер). CHECK StoredFile_one_owner в constraints.sql, раздел 26.
+  /// (логотип). CHECK StoredFile_one_owner в constraints.sql, раздел 26.
   ownerUserId   String?
   owner         User?          @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
   /// Клуб-владелец. Restrict: клубы не удаляются, а файл клуба не должен
@@ -804,7 +964,7 @@ model StoredFile {
   avatarOf       PlayerProfile[] @relation("ProfileAvatar")
   rankDocumentOf SportRank[]     @relation("RankDocument")
   coachPhotoOf   CoachCard[]     @relation("CoachPhoto")
-  clubBannerOf   Tenant[]        @relation("ClubBanner")
+  clubLogoOf     Tenant[]        @relation("ClubLogo")
 
   // Мишень составных ключей: аватар и приказ ссылаются на пару (файл,
   // владелец), и база не примет чужой файл в своём профиле.
@@ -937,6 +1097,27 @@ model UserClub {
   @@index([tenantId])
 }
 
+/// «Мои тренеры» — избранные тренеры человека (решение владельца от
+/// 02.10.2026). Отдельно от «Моих клубов»: клуб своим — это ещё и
+/// принадлежность («я играю здесь»), и потому их не больше трёх; тренер в
+/// избранном — только закладка, предела нет.
+///
+/// Тренер — учётка, а не членство: карточка тренера платформенная, и один
+/// человек тренирует в нескольких клубах. Тренирует ли он сейчас, решает
+/// сервис при отметке; ушедший из всех клубов остаётся в избранном с
+/// пометкой «сейчас не тренирует». Тренер не видит, кто его отметил.
+model UserCoach {
+  userId  String
+  user    User   @relation("FavouriteCoachOwner", fields: [userId], references: [id], onDelete: Cascade)
+  coachId String
+  coach   User   @relation("FavouriteCoachTarget", fields: [coachId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([userId, coachId])
+  @@index([coachId])
+}
+
 /// Город из справочника платформы.
 ///
 /// Справочник, а не строка в карточке клуба: свободный ввод даёт «Красноярск»,
@@ -960,8 +1141,9 @@ model City {
 
   createdAt DateTime @default(now())
 
-  tenants Tenant[]
-  halls   Hall[]
+  tenants      Tenant[]
+  halls        Hall[]
+  applications ClubApplication[]
 
   /// Уникальна пара, а не одно название: одноимённые города в разных регионах
   /// законны, а два «Красноярска» в одном — нет.

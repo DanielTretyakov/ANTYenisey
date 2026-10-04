@@ -24,8 +24,8 @@ import { SectionHeading } from '@/components/club/SectionHeading';
 import { UPCOMING_ANCHOR, UpcomingEvents, type KindFilter } from '@/components/club/UpcomingEvents';
 import { WhenSpan } from '@/components/club/When';
 import { PersonSwitch } from '@/components/family/PersonSwitch';
-import { ClubNav } from '@/components/layout/ClubNav';
 import { PLANS_ANCHOR } from '@/components/subscriptions/PlanList';
+import { SiteFooter } from '@/components/layout/SiteFooter';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { Alert } from '@/components/ui/Alert';
 import { api, ApiError } from '@/lib/api';
@@ -44,7 +44,7 @@ import { useSession } from '@/lib/useSession';
  * мозаика из новостей, рейтинга и «коротко». Меняется только вид: блоки,
  * якоря и действия — прежние.
  *
- * Сверху вниз (решения владельца от 24, 25 и 27.09.2026): баннер с названием
+ * Сверху вниз (решения владельца от 24, 25 и 27.09.2026): обложка с названием
  * и сердечком «мой клуб», «О клубе» — описание, ценности, контакты, — кнопка
  * аренды и «Мои мероприятия». Дальше общее для всех залов — новости и рейтинг
  * в две колонки. Под ними — выбор зала, крупно: от него зависит всё ниже, —
@@ -135,7 +135,7 @@ export default function ClubPage() {
   );
 
   // Новости и рейтинг — блоки, а не вкладки: переход по `#novosti` (из
-  // сообщения клиентам и со стартовой) прокручивает к ним, когда баннер и
+  // сообщения клиентам и со стартовой) прокручивает к ним, когда обложка и
   // описание уже приехали, — иначе они столкнули бы блок вниз.
   // И по ссылке внутри страницы — тоже: смена якоря без перезагрузки.
   const loaded = tenant !== null;
@@ -234,9 +234,18 @@ export default function ClubPage() {
 
   return (
     <div className="flex min-h-dvh flex-col bg-surface" style={clubAccent(tenant?.accentColor)}>
-      <SiteHeader clubNav={<ClubNav slug={slug} />} />
+      <SiteHeader clubSlug={slug} />
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-5 pb-20 sm:px-8">
+        {/* Подписка клуба на КНТ приостановлена за неоплату (решение от
+            02.10.2026): страница открыта, но записаться и забронировать нельзя. */}
+        {tenant?.suspended && (
+          <div className="mt-6">
+            <Alert tone="warning">
+              Клуб временно не принимает записи и брони. Записи, сделанные раньше, отменены без оплаты.
+            </Alert>
+          </div>
+        )}
         <ClubHero
           tenant={tenant}
           slug={slug}
@@ -251,7 +260,7 @@ export default function ClubPage() {
 
         {error && <Alert>{error}</Alert>}
 
-        <div id={ABOUT_ANCHOR} className="scroll-mt-40">
+        <div id={ABOUT_ANCHOR} className="scroll-mt-48">
           <ClubAbout tenant={tenant} />
         </div>
 
@@ -312,6 +321,8 @@ export default function ClubPage() {
           hallNames={hallNames}
         />
       </main>
+
+      <SiteFooter />
     </div>
   );
 }
@@ -354,7 +365,7 @@ function MyEvents({
   }
 
   return (
-    <section id="moi" className="mb-14 scroll-mt-40">
+    <section id="moi" className="mb-14 scroll-mt-48">
       <SectionHeading
         title={whose ? `Мероприятия: ${whose}` : 'Мои мероприятия'}
         description={

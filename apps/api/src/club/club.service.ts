@@ -52,8 +52,7 @@ const SETTINGS_SELECT = {
   values: true,
   vkUrl: true,
   maxUrl: true,
-  bannerFileId: true,
-  logoUrl: true,
+  logoFileId: true,
   accentColor: true,
   // Часового пояса здесь нет: он переехал на зал (см. HALL_SELECT).
   noShowChargePercent: true,
@@ -265,36 +264,36 @@ export class ClubService {
     };
   }
 
-  // --- Баннер клуба ---------------------------------------------------------
+  // --- Логотип клуба --------------------------------------------------------
 
   /**
-   * Новый баннер. Старый удаляется в той же транзакции — у клуба он один.
+   * Новый логотип. Старый удаляется в той же транзакции — у клуба он один.
    * Файл принадлежит клубу, а не загрузившему администратору: того могут
-   * уволить, а баннер останется.
+   * уволить, а логотип останется. Меняется сразу, как всё оформление.
    */
-  async setBanner(tenantId: string, upload: Uint8Array | undefined): Promise<ClubSettings> {
+  async setLogo(tenantId: string, upload: Uint8Array | undefined): Promise<ClubSettings> {
     // Перекодирование — до транзакции: sharp думает сотни миллисекунд.
-    const prepared = await this.intake.prepare('CLUB_BANNER', upload);
+    const prepared = await this.intake.prepare('CLUB_LOGO', upload);
 
     await this.prisma.$transaction(async (tx) => {
       const file = await this.storage.save(tx, {
         ownerTenantId: tenantId,
-        kind: StoredFileKind.CLUB_BANNER,
+        kind: StoredFileKind.CLUB_LOGO,
         contentType: prepared.contentType,
         data: prepared.data,
       });
 
-      await tx.tenant.update({ where: { id: tenantId }, data: { bannerFileId: file.id } });
-      await this.storage.prune(tx, { ownerTenantId: tenantId, kind: StoredFileKind.CLUB_BANNER, keepId: file.id });
+      await tx.tenant.update({ where: { id: tenantId }, data: { logoFileId: file.id } });
+      await this.storage.prune(tx, { ownerTenantId: tenantId, kind: StoredFileKind.CLUB_LOGO, keepId: file.id });
     });
 
     return this.findSettings(tenantId);
   }
 
-  async removeBanner(tenantId: string): Promise<ClubSettings> {
+  async removeLogo(tenantId: string): Promise<ClubSettings> {
     await this.prisma.$transaction(async (tx) => {
-      await tx.tenant.update({ where: { id: tenantId }, data: { bannerFileId: null } });
-      await this.storage.prune(tx, { ownerTenantId: tenantId, kind: StoredFileKind.CLUB_BANNER, keepId: null });
+      await tx.tenant.update({ where: { id: tenantId }, data: { logoFileId: null } });
+      await this.storage.prune(tx, { ownerTenantId: tenantId, kind: StoredFileKind.CLUB_LOGO, keepId: null });
     });
 
     return this.findSettings(tenantId);

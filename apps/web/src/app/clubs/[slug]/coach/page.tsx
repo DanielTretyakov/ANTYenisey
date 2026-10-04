@@ -58,19 +58,19 @@ export default function MyCoachCardPage() {
   const name = session.status === 'ready' ? (session.user?.fullName ?? 'Тренер') : 'Тренер';
 
   return (
-    <AppShell clubSlug={slug}>
+    <AppShell footer="line" clubSlug={slug}>
       <h1 className="mb-6 text-[2rem] leading-tight">Моя карточка</h1>
 
       {error && <Alert tone="warning">{error}</Alert>}
 
       {profile && (
-        <div className="grid gap-6">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
           <Card>
             <CardHeader
               title="Карточка тренера"
               description="Её видят все, не входя: по ней выбирают, к кому идти заниматься. Карточка одна на все клубы, где вы тренируете."
             />
-            <CardBody className="grid gap-7">
+            <CardBody className="grid grid-cols-[minmax(0,1fr)] gap-7">
               <CoachEditor
                 profile={profile}
                 name={name}

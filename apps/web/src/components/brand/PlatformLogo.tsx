@@ -12,6 +12,10 @@ import { cn } from '@/lib/cn';
  *
  * Пропорции квадратные и линии толстые намеренно: этот же знак идёт в favicon,
  * а там он живёт на 16 пикселях.
+ *
+ * Рисунок — концепция 1 «Стол» из макетов логотипа (выбор владельца от
+ * 04.10.2026): прежний знак, доведённый — стол шире и толще, сетка выше, мяч
+ * крупнее, чтобы на 16 точках три фигуры не рассыпались.
  */
 export function PlatformMark({ className }: { className?: string }) {
   return (
@@ -22,11 +26,11 @@ export function PlatformMark({ className }: { className?: string }) {
       className={cn('h-[1em] w-[1em] shrink-0', className)}
     >
       {/* Стол — линия, из которой вырастает подчёркивание словесной части. */}
-      <rect x="3" y="22" width="26" height="3.5" rx="1.75" fill="currentColor" />
+      <rect x="2.5" y="21" width="27" height="4" rx="2" fill="currentColor" />
       {/* Сетка. Приглушена, чтобы на мелком кегле не слипалась со столом. */}
-      <rect x="15" y="16.5" width="2" height="5.5" rx="1" fill="currentColor" opacity="0.45" />
+      <rect x="14.6" y="13.5" width="2.8" height="7.5" rx="1.2" fill="currentColor" opacity="0.55" />
       {/* Мяч — над столом и правее: подача, а не натюрморт. */}
-      <circle cx="23" cy="10" r="4.5" fill="var(--ball)" />
+      <circle cx="23.5" cy="8.5" r="4.6" fill="var(--ball)" />
     </svg>
   );
 }

@@ -67,13 +67,13 @@ export function canSeeVisits(ratingHidden: boolean, owner: ProfileOwner, viewer:
  * неё нет, тренером человек становится взрослым.
  */
 export function canReadFile(
-  kind: 'AVATAR' | 'RANK_DOCUMENT' | 'COACH_PHOTO' | 'CLUB_BANNER',
+  kind: 'AVATAR' | 'RANK_DOCUMENT' | 'COACH_PHOTO' | 'CLUB_LOGO',
   owner: ProfileOwner,
   viewer: ProfileViewer,
   today: Date,
 ): boolean {
-  // Фото тренера и баннер клуба — часть открытых страниц, возраста у них нет.
-  if (kind === 'COACH_PHOTO' || kind === 'CLUB_BANNER') {
+  // Фото тренера и логотип клуба — часть открытых страниц, возраста у них нет.
+  if (kind === 'COACH_PHOTO' || kind === 'CLUB_LOGO') {
     return true;
   }
 

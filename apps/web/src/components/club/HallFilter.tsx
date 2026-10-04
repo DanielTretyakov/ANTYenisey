@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import type { PublicHall } from '@yenisey/types';
+import { CompactSelect } from '@/components/ui/CompactSelect';
 import { cn } from '@/lib/cn';
 import { plural } from '@/lib/plural';
 import { SectionHeading } from './SectionHeading';
@@ -71,6 +72,10 @@ export function selectedHall(halls: readonly PublicHall[], selection: HallSelect
  * выбранного города. Город один — сразу залы. Зал один — выбора нет, но блок
  * есть: под выбором — карточки выбранных залов (решение владельца от
  * 30.09.2026: зал — сразу у выбора, а не отдельной вкладкой ниже).
+ *
+ * На телефоне — двумя списками «Город» и «Зал» (решение от 03.10.2026):
+ * крупные кнопки там уходили лентой за край, и залов за ним не было видно.
+ * Адрес выбранного зала — в карточке сразу под списком.
  */
 export function HallPicker({
   halls,
@@ -86,7 +91,7 @@ export function HallPicker({
 }) {
   if (halls.length < 2) {
     return (
-      <section id={HALL_PICKER_ANCHOR} className="mb-12 scroll-mt-40">
+      <section id={HALL_PICKER_ANCHOR} className="mb-12 scroll-mt-48">
         <SectionHeading
           title={halls.length === 1 ? 'Зал клуба' : 'Залы'}
           description="Где играют, когда открыто и почём стол — бронь прямо из карточки."
@@ -101,11 +106,42 @@ export function HallPicker({
   const inCity = oneCity ? halls : value.city ? halls.filter((hall) => cityOf(hall) === value.city) : [];
 
   return (
-    <section id={HALL_PICKER_ANCHOR} className="mb-12 scroll-mt-40">
+    <section id={HALL_PICKER_ANCHOR} className="mb-12 scroll-mt-48">
       <SectionHeading
         title="Выберите зал"
         description="Под выбором — карточка зала: где он, когда открыт и почём стол. От зала зависит и всё ниже — мероприятия, тренеры, абонементы и расписание. Выбор запоминается в этом браузере."
       />
+
+      <div className="grid gap-2 sm:hidden">
+        {!oneCity && (
+          <CompactSelect
+            label="Город"
+            value={value.city ?? ''}
+            options={[{ value: '', label: 'Все города' }, ...cities.map((city) => ({ value: city, label: city }))]}
+            onChange={(city) => onChange(city ? { city, hallId: null } : ALL_HALLS)}
+            className="[&_label]:w-10"
+          />
+        )}
+        {inCity.length > 1 && (
+          <CompactSelect
+            label="Зал"
+            value={value.hallId ?? ''}
+            options={[
+              { value: '', label: `${oneCity ? 'Все залы' : 'Все залы города'} · ${inCity.length}` },
+              ...inCity.map((hall) => ({ value: hall.id, label: hall.name })),
+            ]}
+            onChange={(hallId) => {
+              const hall = inCity.find((item) => item.id === hallId);
+              onChange(
+                hall
+                  ? { city: oneCity ? null : cityOf(hall), hallId: hall.id }
+                  : { city: oneCity ? null : value.city, hallId: null },
+              );
+            }}
+            className="[&_label]:w-10"
+          />
+        )}
+      </div>
 
       {!oneCity && (
         <Row label="Город" className="mb-3">
@@ -144,7 +180,7 @@ export function HallPicker({
 
       {/* Город с одним залом: зал выбран городом — показываем, какой это. */}
       {!oneCity && inCity.length === 1 && (
-        <p className="text-[0.9375rem] text-text-muted">
+        <p className="mt-2 text-[0.9375rem] text-text-muted sm:mt-0">
           В этом городе один зал — <span className="text-text">{inCity[0]!.name}</span>.
         </p>
       )}
@@ -200,7 +236,7 @@ function Choice({
 
 function Row({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn('-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:none]', className)}>
+    <div className={cn('-mx-1 hidden overflow-x-auto px-1 pb-1 [scrollbar-width:none] sm:block', className)}>
       <div className="flex w-max gap-2 sm:w-auto sm:flex-wrap" role="group" aria-label={label}>
         {children}
       </div>

@@ -8,10 +8,14 @@ import {
   type PublicPlan,
   type PublicTenant,
 } from '@yenisey/types';
+import { CoachHeart } from '@/components/coach/CoachHeart';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { PlanGroups, PLANS_ANCHOR } from '@/components/subscriptions/PlanList';
+import { CompactSelect } from '@/components/ui/CompactSelect';
 import { Tab } from '@/components/ui/Tab';
+import { api } from '@/lib/api';
 import { formatKopecks } from '@/lib/money';
+import { useSession } from '@/lib/useSession';
 import { KindBadge, shortWhen } from './EventRow';
 import { SectionHeading } from './SectionHeading';
 
@@ -87,7 +91,7 @@ export function ClubTabs({
   }, []);
 
   // Пришли по якорю — прокручиваем к вкладкам, когда выше всё загрузилось:
-  // иначе баннер и описание, приехав позже, столкнули бы их вниз.
+  // иначе обложка и описание, приехав позже, столкнули бы их вниз.
   const ready = tenant !== null && catalog !== null && plans !== null;
 
   useEffect(() => {
@@ -119,7 +123,7 @@ export function ClubTabs({
   const canPick = (tenant?.halls.length ?? 0) >= 2;
 
   return (
-    <section id={TABS_ANCHOR} className="mb-14 scroll-mt-40">
+    <section id={TABS_ANCHOR} className="mb-14 scroll-mt-48">
       <SectionHeading
         title={onlyHall && canPick ? `В зале «${onlyHall.name}»` : 'Мероприятия, тренеры и абонементы'}
         description={
@@ -129,7 +133,20 @@ export function ClubTabs({
         }
       />
 
-      <div className="-mx-1 mb-3 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
+      {/* На телефоне — список: три вкладки со счётчиками в ширину не влезают
+          (решение владельца от 03.10.2026). */}
+      <CompactSelect
+        label="Показать"
+        value={active}
+        options={TABS.map((tab) => ({ value: tab.id, label: counts[tab.id] ? `${tab.label} · ${counts[tab.id]}` : tab.label }))}
+        onChange={(id) => {
+          const tab = TABS.find((candidate) => candidate.id === id);
+          if (tab) choose(tab.id);
+        }}
+        className="mb-3 sm:hidden"
+      />
+
+      <div className="-mx-1 mb-3 hidden overflow-x-auto px-1 pb-1 [scrollbar-width:none] sm:block">
         <div className="flex w-max gap-1.5 border-b border-border pb-3" role="tablist" aria-label="О клубе">
           {TABS.map((tab) => (
             <Tab
@@ -292,8 +309,24 @@ function CatalogTab({
   );
 }
 
-/** Тренерский состав — карточки-ссылки на страницы тренеров. */
+/**
+ * Тренерский состав — карточки-ссылки на страницы тренеров. Сердечко «в мои
+ * тренеры» — в углу карточки, вне ссылки (решение от 02.10.2026): щелчок по
+ * нему не уводит на страницу тренера.
+ */
 function CoachesTab({ tenant }: { tenant: PublicTenant | null }) {
+  const session = useSession();
+  const [favourites, setFavourites] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    if (session.status !== 'ready') return;
+
+    api
+      .myCoaches()
+      .then((list) => setFavourites(new Set(list.map((item) => item.id))))
+      .catch(() => setFavourites(new Set()));
+  }, [session.status]);
+
   if (!tenant) {
     return <CardsSkeleton />;
   }
@@ -305,7 +338,17 @@ function CoachesTab({ tenant }: { tenant: PublicTenant | null }) {
   return (
     <ul className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
       {tenant.coaches.map((coach) => (
-        <li key={coach.id}>
+        <li key={coach.id} className="relative">
+          {!(session.status === 'ready' && session.user.id === coach.id) && session.status !== 'loading' && (
+            <CoachHeart
+              coachId={coach.id}
+              size="sm"
+              anonymous={session.status === 'anonymous'}
+              favourite={session.status === 'anonymous' ? false : favourites ? favourites.has(coach.id) : null}
+              onChange={(list) => setFavourites(new Set(list.map((item) => item.id)))}
+              className="absolute top-2.5 right-2.5 z-10"
+            />
+          )}
           <Link
             href={`/coaches/${coach.id}`}
             className="group flex h-full flex-col items-center rounded-card border border-border bg-surface-raised px-3 py-5 text-center transition-colors hover:border-border-strong sm:px-5 sm:py-6"

@@ -53,6 +53,26 @@ export interface EntryPayload {
   byClub?: boolean;
   /** До какого момента отмена бесплатна — для напоминания. */
   freeCancelUntil?: string | null;
+  /** Отменено, потому что подписка клуба на КНТ приостановлена: денег нет, визит вернулся. */
+  clubSuspended?: boolean;
+}
+
+/** Подписка клуба на КНТ — руководителю (решения владельца от 02.10.2026). */
+export interface PlatformBillingPayload {
+  club: string;
+  slug: string;
+  timezone: string;
+  /** Напоминание: пробный срок или оплаченный. */
+  trial?: boolean;
+  /** Конец срока, конец льготных дней или «оплачено до». */
+  until: string;
+  /** Тариф и сумма — у оплаты и автосписания. */
+  plan?: string | null;
+  amount?: number | null;
+  /** Сколько будущих записей отменено при приостановке. */
+  cancelled?: number;
+  /** Автосписание включено — напоминание говорит «спишем», а не «оплатите». */
+  autoCharge?: boolean;
 }
 
 export interface SubscriptionPayload {
@@ -137,6 +157,18 @@ export interface ShiftAssignedPayload {
  * что стало, когда вступит в силу. Сотрудникам — сразу при сохранении, чтобы
  * ошибку успели заметить и отменить до 00:00.
  */
+/**
+ * Заявка на подключение клуба — владельцу платформы. Без имени, телефона и
+ * почты заявителя: в мессенджер — только о клубе, контакты — на странице
+ * заявок (как и о клиентах персоналу — не больше нужного).
+ */
+export interface ClubApplicationPayload {
+  clubName: string;
+  city: string | null;
+  halls: number | null;
+  tables: number | null;
+}
+
 /** Новая публикация в ленте клуба — клиентам клуба. */
 export interface ClubPostPayload {
   club: string;
@@ -238,7 +270,9 @@ export function renderNotification(type: string, payload: unknown, context: Rend
 
     case 'BOOKING_CANCELLED': {
       const p = payload as EntryPayload;
-      const head = `${p.byClub ? 'Клуб отменил запись' : 'Запись отменена'}${p.person ? ` · ${p.person}` : ''}`;
+      const head = p.clubSuspended
+        ? `Клуб временно не принимает записи — запись отменена${p.person ? ` · ${p.person}` : ''}`
+        : `${p.byClub ? 'Клуб отменил запись' : 'Запись отменена'}${p.person ? ` · ${p.person}` : ''}`;
 
       return { text: lines(head, ...entryLines(p), cancelMoney(p)), link: myBookings };
     }
@@ -370,6 +404,61 @@ export function renderNotification(type: string, payload: unknown, context: Rend
       };
     }
 
+    case 'SUBSCRIPTION_REMINDER': {
+      const p = payload as PlatformBillingPayload;
+      const end = when(p.until, p.timezone);
+
+      return {
+        text: p.trial
+          ? lines(`Пробный период КНТ кончается ${end} · ${p.club}`, 'Выберите тариф и способ оплаты, чтобы клуб работал дальше.')
+          : p.autoCharge
+            ? lines(
+                `Подписка на КНТ продлится ${end} · ${p.club}`,
+                p.amount ? `Спишем ${rubles(p.amount)} с сохранённой карты${p.plan ? `, тариф ${quoted(p.plan)}` : ''}.` : null,
+              )
+            : lines(`Подписка на КНТ кончается ${end} · ${p.club}`, 'Оплатите картой или выставьте счёт, чтобы клуб работал дальше.'),
+        link: { label: 'Подписка на КНТ', url: `${context.webOrigin}/clubs/${p.slug}/billing` },
+      };
+    }
+
+    case 'SUBSCRIPTION_PAST_DUE': {
+      const p = payload as PlatformBillingPayload;
+
+      return {
+        text: lines(
+          `Подписка на КНТ не оплачена · ${p.club}`,
+          `Клуб работает до ${when(p.until, p.timezone)}. Потом доступ закроется, а все будущие записи клуба отменятся с полным возвратом.`,
+        ),
+        link: { label: 'Оплатить подписку', url: `${context.webOrigin}/clubs/${p.slug}/billing` },
+      };
+    }
+
+    case 'SUBSCRIPTION_SUSPENDED': {
+      const p = payload as PlatformBillingPayload;
+
+      return {
+        text: lines(
+          `Доступ клуба к КНТ приостановлен · ${p.club}`,
+          p.cancelled ? `Будущие записи отменены с полным возвратом: ${p.cancelled}.` : null,
+          'Оплата подписки вернёт доступ сразу.',
+        ),
+        link: { label: 'Оплатить подписку', url: `${context.webOrigin}/clubs/${p.slug}/billing` },
+      };
+    }
+
+    case 'SUBSCRIPTION_PAID': {
+      const p = payload as PlatformBillingPayload;
+
+      return {
+        text: lines(
+          `Подписка на КНТ оплачена · ${p.club}`,
+          `${p.plan ? `Тариф ${quoted(p.plan)}, ` : ''}доступ до ${when(p.until, p.timezone)}.`,
+          p.amount ? `Сумма — ${rubles(p.amount)}.` : null,
+        ),
+        link: { label: 'Подписка на КНТ', url: `${context.webOrigin}/clubs/${p.slug}/billing` },
+      };
+    }
+
     case 'CLUB_SETTINGS_CHANGED': {
       const p = payload as SettingsChangedPayload;
 
@@ -399,6 +488,23 @@ export function renderNotification(type: string, payload: unknown, context: Rend
       return {
         text: lines(`${p.club} · ${p.title}`, p.excerpt),
         link: { label: 'Лента клуба', url: `${context.webOrigin}/clubs/${p.slug}#novosti` },
+      };
+    }
+
+    case 'CLUB_APPLICATION': {
+      const p = payload as ClubApplicationPayload;
+      const size = [
+        p.halls ? `${p.halls} ${plural(p.halls, 'зал', 'зала', 'залов')}` : null,
+        p.tables ? `${p.tables} ${plural(p.tables, 'стол', 'стола', 'столов')}` : null,
+      ].filter((part): part is string => part !== null);
+
+      return {
+        text: lines(
+          `Заявка на подключение клуба · ${quoted(p.clubName)}`,
+          [p.city, size.join(', ') || null].filter((part) => part).join(' · ') || null,
+          'Контакты заявителя — на странице заявок. Ответьте, пока клуб не передумал.',
+        ),
+        link: { label: 'Заявки клубов', url: `${context.webOrigin}/platform/clubs#zayavki` },
       };
     }
 
@@ -494,6 +600,10 @@ function entryLines(p: EntryPayload): string[] {
 
 /** Деньги отмены: у абонемента — судьба визита, у разовой записи — сумма. */
 function cancelMoney(p: EntryPayload): string {
+  if (p.clubSuspended) {
+    return p.prepaid ? 'Визит вернулся на абонемент.' : 'Платить за неё ничего не нужно.';
+  }
+
   if (p.prepaid) {
     return p.chargePercent ? 'Визит с абонемента сгорел: отмена позже срока.' : 'Визит вернулся на абонемент.';
   }
@@ -525,6 +635,18 @@ function lines(...parts: (string | null | undefined)[]): string {
  */
 export function quoted(name: string): string {
   return /[«"„]/.test(name) ? name : `«${name}»`;
+}
+
+/** «1 зал», «2 зала», «5 залов». Своя копия: модуль чистый, без относительных импортов. */
+function plural(count: number, one: string, few: string, many: string): string {
+  const tens = count % 100;
+  const units = count % 10;
+
+  if (tens >= 11 && tens <= 14) return many;
+  if (units === 1) return one;
+  if (units >= 2 && units <= 4) return few;
+
+  return many;
 }
 
 /** «2026-09-23» → «23 сентября». Дата уже местная — пояс не нужен. */

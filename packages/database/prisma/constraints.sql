@@ -203,16 +203,9 @@ ALTER TABLE "RefreshToken"
   ADD CONSTRAINT "RefreshToken_expiry_after_issue"
   CHECK ("expiresAt" > "createdAt");
 
--- Платящая подписка клуба обязана иметь тариф и зафиксированную цену.
--- Без тарифа остаётся только EXEMPT — статус «Енисея» как пилотного клуба.
--- Иначе джоба биллинга однажды получит подписку, по которой неизвестно,
--- сколько списывать.
-ALTER TABLE "TenantSubscription"
-  ADD CONSTRAINT "TenantSubscription_plan_required_unless_exempt"
-  CHECK (
-    status = 'EXEMPT'::"PlatformSubscriptionStatus"
-    OR ("planId" IS NOT NULL AND "priceAtPurchase" IS NOT NULL)
-  );
+-- Платящая подписка клуба обязана иметь тариф и зафиксированную цену —
+-- иначе джоба биллинга однажды получит подписку, по которой неизвестно,
+-- сколько списывать. Остальные правила подписки — раздел 36.
 
 -- Цена тарифа платформы неотрицательна, срок — хотя бы месяц.
 ALTER TABLE "PlatformPlan"
@@ -632,7 +625,9 @@ ALTER TABLE "StoredFile"
 
 -- Лимит своего вида. Аватар хранится уже пережатым (512×512 WebP, обычно
 -- десятки килобайт), и мегабайт — потолок с запасом: больше означает, что
--- пережатие не сработало. Приказ — до 10 МБ: PDF хранится как есть.
+-- пережатие не сработало. Приказ — до 10 МБ: PDF хранится как есть. Логотип
+-- клуба — тот же квадрат 512×512 WebP, что аватар, и потолок у него тот же
+-- (миграция *_club_logo_file, до неё здесь был баннер 1600×500 до 2 МБ).
 ALTER TABLE "StoredFile"
   ADD CONSTRAINT "StoredFile_size_within_limit"
   CHECK (
@@ -641,7 +636,7 @@ ALTER TABLE "StoredFile"
       WHEN 'AVATAR' THEN "size" <= 1048576
       WHEN 'RANK_DOCUMENT' THEN "size" <= 10485760
       WHEN 'COACH_PHOTO' THEN "size" <= 1048576
-      WHEN 'CLUB_BANNER' THEN "size" <= 2097152
+      WHEN 'CLUB_LOGO' THEN "size" <= 1048576
     END
   );
 
@@ -654,7 +649,7 @@ ALTER TABLE "StoredFile"
       WHEN 'AVATAR' THEN "contentType" = 'image/webp'
       WHEN 'RANK_DOCUMENT' THEN "contentType" IN ('image/jpeg', 'image/png', 'image/webp', 'application/pdf')
       WHEN 'COACH_PHOTO' THEN "contentType" = 'image/webp'
-      WHEN 'CLUB_BANNER' THEN "contentType" = 'image/webp'
+      WHEN 'CLUB_LOGO' THEN "contentType" = 'image/webp'
     END
   );
 
@@ -1125,18 +1120,20 @@ ALTER TABLE "City"
   CHECK ("population" IS NULL OR "population" > 0);
 
 -- ---------------------------------------------------------------------------
--- 26. Страница клуба: баннер и описание
+-- 26. Страница клуба: логотип и описание
 -- ---------------------------------------------------------------------------
 --
--- Накатано миграцией *_club_page (размер и тип баннера — в разделе 18).
--- Владелец файла ровно один: человек или клуб. Файл клуба — только баннер,
--- и баннер — только файл клуба: иначе аватар ушёл бы в баннер или баннер
--- пережил бы увольнение загрузившего его администратора вместе с его учёткой.
+-- Накатано миграцией *_club_page, вид файла клуба сменён миграцией
+-- *_club_logo_file (размер и тип логотипа — в разделе 18). Владелец файла
+-- ровно один: человек или клуб. Файл клуба — только логотип (с 02.10.2026
+-- других снимков у клуба нет), и логотип — только файл клуба: иначе аватар
+-- ушёл бы в логотип или логотип пережил бы увольнение загрузившего его
+-- администратора вместе с его учёткой.
 ALTER TABLE "StoredFile"
   ADD CONSTRAINT "StoredFile_one_owner"
   CHECK (
     num_nonnulls("ownerUserId", "ownerTenantId") = 1
-    AND ("ownerTenantId" IS NOT NULL) = ("kind" = 'CLUB_BANNER')
+    AND ("ownerTenantId" IS NOT NULL) = ("kind" = 'CLUB_LOGO')
   );
 
 ALTER TABLE "Tenant"
@@ -1339,3 +1336,110 @@ ALTER TABLE "ClubPost"
 CREATE UNIQUE INDEX "ClubPost_one_welcome"
   ON "ClubPost" ("tenantId")
   WHERE "welcome";
+
+-- ---------------------------------------------------------------------------
+-- 35. Мои тренеры
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_favourite_coaches (решение владельца от 02.10.2026).
+-- Себя в избранные тренеры не отмечают: строка была бы бессмысленной, а
+-- тренер видел бы себя в своей же плитке «Мои тренеры».
+ALTER TABLE "UserCoach"
+  ADD CONSTRAINT "UserCoach_not_self"
+  CHECK ("userId" <> "coachId");
+
+-- ---------------------------------------------------------------------------
+-- 36. Подписка клуба на КНТ: пробный период, платежи, акты, реквизиты
+-- ---------------------------------------------------------------------------
+--
+-- Накатано миграцией *_platform_billing_data (решения владельца от
+-- 02.10.2026). Переходы статусов делает BillingJob, правила — чистые функции
+-- apps/api/src/billing/billing-rules.ts; здесь — форма строк, которую никакой
+-- путь записи не должен нарушить.
+-- Тариф обязателен у активной подписки: по нему джоба списывает продление.
+-- Без тарифа живут EXEMPT («Енисей»), TRIAL — и PAST_DUE с SUSPENDED клуба,
+-- который после пробного периода так ничего и не купил (миграция
+-- *_platform_billing_plan_rule).
+ALTER TABLE "TenantSubscription"
+  ADD CONSTRAINT "TenantSubscription_plan_required_unless_exempt"
+  CHECK (
+    status <> 'ACTIVE'::"PlatformSubscriptionStatus"
+    OR ("planId" IS NOT NULL AND "priceAtPurchase" IS NOT NULL)
+  );
+
+-- У пробного периода есть конец: иначе джоба не знает, когда его закрыть.
+ALTER TABLE "TenantSubscription"
+  ADD CONSTRAINT "TenantSubscription_trial_has_end"
+  CHECK (status <> 'TRIAL'::"PlatformSubscriptionStatus" OR "trialEndsAt" IS NOT NULL);
+
+-- Просрочка начинается с момента: от него считаются льготные три дня.
+ALTER TABLE "TenantSubscription"
+  ADD CONSTRAINT "TenantSubscription_past_due_has_start"
+  CHECK (status <> 'PAST_DUE'::"PlatformSubscriptionStatus" OR "pastDueSince" IS NOT NULL);
+
+ALTER TABLE "TenantSubscription"
+  ADD CONSTRAINT "TenantSubscription_attempts_sane"
+  CHECK ("chargeAttempts" >= 0);
+
+-- Платёж платформе — положительная сумма в копейках.
+ALTER TABLE "PlatformPayment"
+  ADD CONSTRAINT "PlatformPayment_amount_positive"
+  CHECK ("amount" > 0);
+
+-- Счёт — с номером, карта — без; платёж ЮKassa бывает только у карты.
+ALTER TABLE "PlatformPayment"
+  ADD CONSTRAINT "PlatformPayment_method_shape"
+  CHECK (
+    ("method" = 'INVOICE'::"PlatformPaymentMethod") = ("invoiceNumber" IS NOT NULL)
+    AND ("method" = 'CARD'::"PlatformPaymentMethod" OR "providerPaymentId" IS NULL)
+    AND ("method" = 'CARD'::"PlatformPaymentMethod" OR NOT "autoCharge")
+  );
+
+-- Оплаченный — с моментом оплаты и сроком доступа; неоплаченный — без них.
+ALTER TABLE "PlatformPayment"
+  ADD CONSTRAINT "PlatformPayment_paid_shape"
+  CHECK (
+    ("status" = 'SUCCEEDED'::"PlatformPaymentStatus")
+      = ("paidAt" IS NOT NULL AND "periodFrom" IS NOT NULL AND "periodTo" IS NOT NULL)
+    AND ("periodTo" IS NULL OR "periodFrom" IS NULL OR "periodTo" > "periodFrom")
+  );
+
+ALTER TABLE "PlatformAct"
+  ADD CONSTRAINT "PlatformAct_sane"
+  CHECK ("amount" >= 0 AND "periodTo" > "periodFrom" AND "number" > 0);
+
+-- Реквизиты для счёта: ИНН — 10 цифр у организации, 12 у ИП; КПП — 9.
+ALTER TABLE "ClubRequisites"
+  ADD CONSTRAINT "ClubRequisites_sane"
+  CHECK (
+    "inn" ~ '^([0-9]{10}|[0-9]{12})$'
+    AND ("kpp" IS NULL OR "kpp" ~ '^[0-9]{9}$')
+    AND "legalName" = btrim("legalName") AND char_length("legalName") BETWEEN 2 AND 300
+    AND "address" = btrim("address") AND char_length("address") BETWEEN 5 AND 500
+    AND "email" ~ '^[^@[:space:]]+@[^@[:space:]]+$'
+  );
+
+-- ---------------------------------------------------------------------------
+-- Заявки клубов на подключение (решение владельца от 03.10.2026)
+-- ---------------------------------------------------------------------------
+
+-- Форма открыта без входа: связаться с заявителем можно, только если он
+-- оставил телефон или почту. Без контакта заявка бесполезна.
+ALTER TABLE "ClubApplication"
+  ADD CONSTRAINT "ClubApplication_contact_present"
+  CHECK ("phone" IS NOT NULL OR "email" IS NOT NULL);
+
+-- Форма полей — как у учётки: телефон в E.164, почта с «@», тексты без
+-- пустых краёв и не длиннее разумного; залов и столов — правдоподобно.
+ALTER TABLE "ClubApplication"
+  ADD CONSTRAINT "ClubApplication_sane"
+  CHECK (
+    "contactName" = btrim("contactName") AND char_length("contactName") BETWEEN 2 AND 100
+    AND "clubName" = btrim("clubName") AND char_length("clubName") BETWEEN 2 AND 120
+    AND ("phone" IS NULL OR "phone" ~ '^\+7[0-9]{10}$')
+    AND ("email" IS NULL OR ("email" ~ '^[^@[:space:]]+@[^@[:space:]]+$' AND char_length("email") <= 254))
+    AND ("halls" IS NULL OR "halls" BETWEEN 1 AND 100)
+    AND ("tables" IS NULL OR "tables" BETWEEN 1 AND 1000)
+    AND ("comment" IS NULL OR char_length("comment") BETWEEN 1 AND 2000)
+    AND ("note" IS NULL OR char_length("note") <= 2000)
+  );

@@ -68,7 +68,7 @@ export default function CabinetPage() {
   const readOnly = !child && user !== null && isChildBirthDate(user.birthDate);
 
   return (
-    <AppShell>
+    <AppShell footer="line">
       {user && family.children.length > 0 && (
         <PersonSwitch people={family.children} selected={child} onChoose={family.choose} className="mb-8" />
       )}

@@ -111,10 +111,8 @@ export class UpdateClubSettingsDto implements UpdateClubSettingsRequest {
   @MaxLength(300)
   maxUrl?: string | null;
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  logoUrl?: string | null;
+  // Логотипа здесь нет: с 02.10.2026 он загружается файлом
+  // (`PUT settings/logo`), и `logoUrl` в правке отклонит forbidNonWhitelisted.
 
   /**
    * Фирменный цвет. Формат проверяется и здесь, и CHECK'ом в базе: значение

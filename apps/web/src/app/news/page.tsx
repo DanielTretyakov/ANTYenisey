@@ -8,6 +8,7 @@ import { NewsRow } from '@/components/news/NewsParts';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
+import { CompactSelect } from '@/components/ui/CompactSelect';
 import { Tab } from '@/components/ui/Tab';
 import { api, ApiError } from '@/lib/api';
 import { useSession } from '@/lib/useSession';
@@ -106,7 +107,19 @@ export default function NewsPage() {
         клуба.
       </p>
 
-      <div className="mb-5 flex flex-wrap gap-1.5" role="group" aria-label="Раздел новостей">
+      {/* На телефоне — список разделов (решение от 03.10.2026). */}
+      <CompactSelect
+        label="Раздел"
+        value={section ?? ''}
+        options={[
+          { value: '', label: 'Все' },
+          ...(feed?.sections ?? []).map((item) => ({ value: item, label: NEWS_SECTION_LABELS[item] })),
+        ]}
+        onChange={(value) => choose((feed?.sections ?? []).find((item) => item === value) ?? null)}
+        className="mb-5 sm:hidden"
+      />
+
+      <div className="mb-5 hidden flex-wrap gap-1.5 sm:flex" role="group" aria-label="Раздел новостей">
         <Tab active={section === null} onClick={() => choose(null)}>
           Все
         </Tab>

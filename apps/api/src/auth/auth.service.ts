@@ -100,6 +100,8 @@ export class AuthService {
             fullName: joinFullName(dto),
             gender: dto.gender,
             birthDate,
+            // Доказательство согласия: момент ставит сервер, а не форма.
+            personalDataConsentAt: new Date(),
           },
         });
 
@@ -350,6 +352,7 @@ export class AuthService {
         gender: true,
         birthDate: true,
         platformRole: true,
+        personalDataConsentAt: true,
         memberships: {
           // Отключённые в клубе не показываются: человек этим клубом больше
           // не пользуется, и держать его в шапке незачем.
@@ -378,6 +381,7 @@ export class AuthService {
         roles: membership.roles,
       })),
       platformOwner: user.platformRole === 'OWNER',
+      consentAt: user.personalDataConsentAt?.toISOString() ?? null,
     };
   }
 

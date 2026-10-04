@@ -1,4 +1,4 @@
-import { IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { Equals, IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import type { Gender, RegisterRequest } from '@yenisey/types';
 
@@ -100,6 +100,17 @@ export class AccountDto extends PersonDto implements Omit<RegisterRequest, 'tena
     message: 'birthDate: ожидается дата в виде 2001-05-17',
   })
   birthDate: string;
+
+  /**
+   * Согласие на обработку персональных данных и принятие пользовательского
+   * соглашения (152-ФЗ, решение владельца от 03.10.2026). Только `true`:
+   * галочку в форме можно обойти запросом напрямую, а учётка без согласия —
+   * обработка данных без основания. Здесь, а не в регистрации, — чтобы им
+   * были закрыты и учётка ребёнка из кабинета, и учётка ребёнка у стойки:
+   * там галочку ставит родитель.
+   */
+  @Equals(true, { message: 'consent: нужно согласие на обработку персональных данных' })
+  consent: true;
 }
 
 export class RegisterDto extends AccountDto implements RegisterRequest {

@@ -9,7 +9,7 @@
 export type StoredContentType = 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf';
 
 /** Вид файла — то же перечисление, что `StoredFileKind` в схеме. */
-export type FileKind = 'AVATAR' | 'RANK_DOCUMENT' | 'COACH_PHOTO' | 'CLUB_BANNER';
+export type FileKind = 'AVATAR' | 'RANK_DOCUMENT' | 'COACH_PHOTO' | 'CLUB_LOGO';
 
 const MB = 1024 * 1024;
 
@@ -35,10 +35,10 @@ export const FILE_RULES: Record<FileKind, { maxInputBytes: number; accepts: read
     maxInputBytes: 5 * MB,
     accepts: ['image/jpeg', 'image/png', 'image/webp'],
   },
-  // Баннер клуба — широкий снимок зала, до 8 МБ на входе; хранится пережатым
-  // до 1600×500 WebP (потолок хранения — 2 МБ, constraints.sql, раздел 18).
-  CLUB_BANNER: {
-    maxInputBytes: 8 * MB,
+  // Логотип клуба — квадратный знак, до 5 МБ на входе; хранится пережатым
+  // до 512×512 WebP (потолок хранения — 1 МБ, constraints.sql, раздел 18).
+  CLUB_LOGO: {
+    maxInputBytes: 5 * MB,
     accepts: ['image/jpeg', 'image/png', 'image/webp'],
   },
 };
@@ -48,7 +48,7 @@ const REJECTIONS: Record<FileKind, string> = {
   AVATAR: 'Аватар — картинка JPEG, PNG или WebP',
   RANK_DOCUMENT: 'Приказ — картинка JPEG, PNG, WebP или PDF',
   COACH_PHOTO: 'Фотография — картинка JPEG, PNG или WebP',
-  CLUB_BANNER: 'Баннер — картинка JPEG, PNG или WebP',
+  CLUB_LOGO: 'Логотип — картинка JPEG, PNG или WebP',
 };
 
 /** Потолок любой загрузки: разбор запроса обрывается на нём, не дочитывая тело. */

@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { hasAnyRole, MANAGING_ROLES, type ClubCoach, type ClubTable, type Hall, type Role, type Tournament, type TournamentType, type TrainingType } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
+import { CompactSelect } from '@/components/ui/CompactSelect';
 import { Tab } from '@/components/ui/Tab';
 import { rolesInClub } from '@/lib/membership';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
@@ -139,8 +140,31 @@ export default function SchedulePage() {
       {data && hall && (
         <>
           <div className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-3">
+            {/* На телефоне — список залов (решение от 03.10.2026); звезда
+                «Открывать первым» остаётся кнопкой рядом. */}
             {data.halls.length > 1 && (
-              <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Зал">
+              <div className="flex w-full flex-wrap items-center gap-2 sm:hidden">
+                <CompactSelect
+                  label="Зал"
+                  value={hallId}
+                  options={withPreferredFirst(data.halls, preferred.preferredHallId).map((item) => ({
+                    value: item.id,
+                    label: item.name,
+                  }))}
+                  onChange={setHallId}
+                  className="min-w-[13rem] grow"
+                />
+                <PreferredHallButton
+                  hallId={hallId}
+                  preferredHallId={preferred.preferredHallId}
+                  pending={preferred.pending}
+                  onToggle={(id) => void preferred.toggle(id)}
+                />
+              </div>
+            )}
+
+            {data.halls.length > 1 && (
+              <div className="hidden flex-wrap gap-1.5 sm:flex" role="tablist" aria-label="Зал">
                 {withPreferredFirst(data.halls, preferred.preferredHallId).map((item) => (
                   <Tab
                     key={item.id}

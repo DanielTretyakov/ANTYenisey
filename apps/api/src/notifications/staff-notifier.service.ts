@@ -200,6 +200,28 @@ export class StaffNotifier {
    * администраторы видят в утренней сводке, а не отдельными сообщениями
    * (решение владельца от 24.09.2026).
    */
+  /**
+   * Руководителям клуба — о подписке на КНТ (решение владельца от 02.10.2026):
+   * платит клуб, страница оплаты — только у руководителя. Тихие часы
+   * соблюдаются.
+   */
+  async toOwners(db: Db, tenantId: string, type: NotificationType, payload: object, dedupeKey: string, now: Date): Promise<number> {
+    const owners = await clubStaff(db, tenantId, [Role.OWNER]);
+    const clock = zoneClock(await clubTimezone(db, tenantId));
+
+    return this.notifications.enqueue(
+      db,
+      owners.map((userId) => ({
+        userId,
+        tenantId,
+        type,
+        payload: payload as Prisma.InputJsonValue,
+        dedupeKey,
+        sendAfter: sendAfterFor(now, clock, false),
+      })),
+    );
+  }
+
   async toStaff(
     db: Db,
     tenantId: string,

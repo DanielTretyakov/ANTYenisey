@@ -5,7 +5,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { Role } from '@yenisey/database';
+import { OPEN_WHEN_SUSPENDED } from '../../billing/open-when-suspended.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthenticatedRequest } from './jwt-auth.guard';
 
@@ -28,7 +30,10 @@ import type { AuthenticatedRequest } from './jwt-auth.guard';
  */
 @Injectable()
 export class ClubContextGuard implements CanActivate {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly reflector: Reflector,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
@@ -41,11 +46,23 @@ export class ClubContextGuard implements CanActivate {
 
     const tenant = await this.prisma.tenant.findUnique({
       where: { slug },
-      select: { id: true },
+      select: { id: true, platformSubscription: { select: { status: true } } },
     });
 
     if (!tenant) {
       throw new NotFoundException('Клуб не найден');
+    }
+
+    // Подписка клуба на КНТ приостановлена за неоплату (ТЗ: «блокирующая
+    // доступ всех пользователей клуба»): клуб только читается — страница,
+    // история, — а записать, забронировать или поправить нельзя никому.
+    // Открыта оплата подписки, иначе клуб не вернул бы себе доступ.
+    if (
+      tenant.platformSubscription?.status === 'SUSPENDED' &&
+      !['GET', 'HEAD', 'OPTIONS'].includes(request.method) &&
+      !this.reflector.getAllAndOverride<boolean>(OPEN_WHEN_SUSPENDED, [context.getHandler(), context.getClass()])
+    ) {
+      throw new ForbiddenException('Клуб временно не принимает записи: его подписка на КНТ приостановлена');
     }
 
     const userId = request.user?.sub;

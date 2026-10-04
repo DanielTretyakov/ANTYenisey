@@ -1,8 +1,15 @@
 'use client';
 
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import type { Role } from '@yenisey/types';
-import { NavLink } from '@/components/layout/SiteHeader';
+import { useEffect, useState } from 'react';
+import type { PublicTenant, PublicUser, Role } from '@yenisey/types';
+import { ClubMark } from '@/components/club/ClubMark';
+import { CLUB_BAR_HEIGHT } from '@/components/layout/metrics';
+import { NavLink } from '@/components/layout/NavLink';
+import { NavSelect } from '@/components/ui/CompactSelect';
+import { api } from '@/lib/api';
+import { cn } from '@/lib/cn';
 import { rolesInClub } from '@/lib/membership';
 import { useSession } from '@/lib/useSession';
 
@@ -44,36 +51,85 @@ export function clubPath(slug: string, path = ''): string {
   return `/clubs/${slug}${path}`;
 }
 
-export function ClubNav({ slug }: { slug: string }) {
+/**
+ * Разделы клуба для этого человека: страница клуба первой, дальше — по ролям.
+ * Гость и человек без привязки видят то же, что клиент: записаться может любой
+ * пользователь платформы, и прятать от него бронь значило бы закрыть
+ * единственный вход в клуб. Ролей несколько (решение от 26.09.2026):
+ * администратор-тренер видит и рабочее место, и свои группы.
+ */
+export function clubSections(user: PublicUser | null, slug: string): { href: string; label: string }[] {
+  const own = user ? rolesInClub(user, slug) : [];
+  const roles: Role[] = own.length > 0 ? own : ['CLIENT'];
+
+  return [
+    { href: clubPath(slug), label: 'Страница клуба' },
+    ...SECTIONS.filter((section) => section.roles.some((role) => roles.includes(role))).map((section) => ({
+      href: clubPath(slug, section.path),
+      label: section.label,
+    })),
+  ];
+}
+
+/**
+ * Строка клуба — вторая тонкая полоса шапки на страницах клуба (шапка,
+ * вариант А, решение от 03.10.2026). Знак и название клуба и его разделы
+ * отдельно от разделов платформы: раньше они стояли в одной строке, и у
+ * тренера-руководителя рядом оказывалось восемь ссылок и три значка. На
+ * телефоне разделы — выпадающим списком, а не лентой вбок.
+ */
+export function ClubBar({ slug }: { slug: string }) {
   const session = useSession();
   const pathname = usePathname();
+  const [club, setClub] = useState<Pick<PublicTenant, 'name' | 'accentColor' | 'logoFileId'> | null>(null);
 
-  // Пока сессия грузится, ничего не рисуем: место под правую группу уже
-  // зарезервировано заглушкой в SiteHeader, и вторая заглушка рядом дала бы
-  // полосу из серых прямоугольников во всю ширину.
-  if (session.status !== 'ready') {
-    return null;
-  }
+  useEffect(() => {
+    let cancelled = false;
 
-  // Человек без привязки к этому клубу видит то же, что клиент: записаться
-  // может любой пользователь платформы, и прятать от него кнопку брони значило
-  // бы закрыть единственный вход в клуб.
-  // Ролей несколько (решение владельца от 26.09.2026): администратор-тренер
-  // видит и рабочее место, и свои группы.
-  const own = rolesInClub(session.user, slug);
-  const roles = own.length > 0 ? own : ['CLIENT'];
+    api
+      .tenant(slug)
+      .then((tenant) => {
+        if (!cancelled) setClub(tenant);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+
+  const sections = clubSections(session.status === 'ready' ? session.user : null, slug);
+  const current = [...sections].reverse().find((section) => pathname === section.href || pathname.startsWith(`${section.href}/`));
 
   return (
-    <nav className="flex items-center gap-1 sm:gap-2" aria-label="Разделы клуба">
-      {SECTIONS.filter((section) => section.roles.some((role) => roles.includes(role))).map((section) => {
-        const href = clubPath(slug, section.path);
+    <div className={cn('border-t border-border bg-surface/95', CLUB_BAR_HEIGHT)}>
+      <div className="mx-auto flex h-full w-full max-w-6xl items-center gap-3 px-5 sm:px-8">
+        <Link href={clubPath(slug)} className="flex min-w-0 shrink items-center gap-2.5">
+          {club ? <ClubMark club={club} size="sm" className="h-7 w-7" /> : <span className="h-7 w-7 shrink-0 rounded-control bg-border/50" />}
+          <span className="truncate text-[0.875rem] font-semibold text-text">{club?.name ?? ''}</span>
+        </Link>
 
-        return (
-          <NavLink key={section.path} href={href} active={pathname === href}>
-            {section.label}
-          </NavLink>
-        );
-      })}
-    </nav>
+        {session.status !== 'loading' && (
+          <>
+            <span aria-hidden="true" className="hidden h-5 w-px shrink-0 bg-border sm:block" />
+            <nav aria-label="Разделы клуба" className="hidden min-w-0 items-center gap-1 sm:flex">
+              {sections.map((section) => (
+                <NavLink key={section.href} href={section.href} active={current?.href === section.href}>
+                  {section.label}
+                </NavLink>
+              ))}
+            </nav>
+            {sections.length > 1 && (
+              <NavSelect
+                label="Раздел"
+                current={current?.href ?? sections[0]!.href}
+                options={sections}
+                className="ml-auto w-[11.5rem] shrink-0 sm:hidden [&_label]:sr-only"
+              />
+            )}
+          </>
+        )}
+      </div>
+    </div>
   );
 }

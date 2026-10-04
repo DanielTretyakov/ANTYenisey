@@ -14,7 +14,7 @@ export function Card({ className, children }: { className?: string; children: Re
   );
 }
 
-export function CardHeader({ title, description }: { title: string; description?: string }) {
+export function CardHeader({ title, description }: { title: string; description?: ReactNode }) {
   return (
     <div className="border-b border-border px-6 py-5">
       <h2 className="text-lg">{title}</h2>

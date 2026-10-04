@@ -1,8 +1,9 @@
 import { Controller, Delete, Get, Param, Put } from '@nestjs/common';
-import type { AccessTokenPayload, BookingEntry, FavouriteClub, FeedEvent } from '@yenisey/types';
+import type { AccessTokenPayload, BookingEntry, FavouriteClub, FavouriteCoach, FeedEvent } from '@yenisey/types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { EntriesService } from '../entries/entries.service';
 import { Acting, ClientAction, type ActingClient } from '../guardianship/acting-client.guard';
+import { FavouriteCoachesService } from './favourite-coaches.service';
 import { MeService } from './me.service';
 
 /**
@@ -18,6 +19,7 @@ export class MeController {
   constructor(
     private readonly me: MeService,
     private readonly entries: EntriesService,
+    private readonly coaches: FavouriteCoachesService,
   ) {}
 
   /** Клубы, которые человек отметил своими. Не больше трёх. */
@@ -46,6 +48,23 @@ export class MeController {
     @Param('slug') slug: string,
   ): Promise<FavouriteClub[]> {
     return this.me.removeClub(user.sub, slug);
+  }
+
+  /** Мои тренеры — избранные, у каждого ближайшее занятие. Предела нет. */
+  @Get('coaches')
+  favouriteCoaches(@CurrentUser() user: AccessTokenPayload): Promise<FavouriteCoach[]> {
+    return this.coaches.list(user.sub);
+  }
+
+  /** Отметить тренера. PUT, как у клуба: повтор ничего не меняет. */
+  @Put('coaches/:id')
+  addCoach(@CurrentUser() user: AccessTokenPayload, @Param('id') id: string): Promise<FavouriteCoach[]> {
+    return this.coaches.add(user.sub, id);
+  }
+
+  @Delete('coaches/:id')
+  removeCoach(@CurrentUser() user: AccessTokenPayload, @Param('id') id: string): Promise<FavouriteCoach[]> {
+    return this.coaches.remove(user.sub, id);
   }
 
   /** Ближайшие мероприятия моих клубов — лента стартовой страницы. */

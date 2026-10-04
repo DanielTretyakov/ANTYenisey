@@ -13,3 +13,20 @@ export const HEADER_HEIGHT = 'h-20';
 
 /** Высота логотипа в шапке, rem. Одинаковая везде — см. HEADER_HEIGHT. */
 export const HEADER_LOGO_HEIGHT = 1.625;
+
+/**
+ * Высота строки клуба — второй полосы шапки на страницах клуба (шапка,
+ * вариант А, решение от 03.10.2026). Липкое меню разделов страницы клуба
+ * встаёт под шапкой ПЛЮС эта строка: `STICKY_BELOW_CLUB_HEADER`.
+ */
+export const CLUB_BAR_HEIGHT = 'h-12';
+
+/** Отступ липкого меню под шапкой со строкой клуба: 5rem + 3rem. */
+export const STICKY_BELOW_CLUB_HEADER = 'top-32';
+
+/**
+ * Порог «раздел под меню» для подсветки пункта при прокрутке, px: шапка,
+ * строка клуба и само меню разделов. На стартовой строки клуба нет.
+ */
+export const SECTION_ACTIVE_OFFSET_CLUB = 200;
+export const SECTION_ACTIVE_OFFSET_START = 180;

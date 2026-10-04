@@ -144,6 +144,8 @@ export class FamilyService {
             fullName: joinFullName(dto),
             gender: dto.gender,
             birthDate: childBirthDate,
+            // Согласие за ребёнка дал родитель галочкой формы (152-ФЗ).
+            personalDataConsentAt: new Date(),
           },
           select: { id: true, fullName: true, email: true, birthDate: true },
         });

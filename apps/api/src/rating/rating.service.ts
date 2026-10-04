@@ -140,7 +140,7 @@ export class RatingService {
 
     const tenants = await this.prisma.tenant.findMany({
       where: { id: { in: [...new Set(days.map((day) => day.tenantId))] } },
-      select: { id: true, slug: true, name: true, accentColor: true, logoUrl: true },
+      select: { id: true, slug: true, name: true, accentColor: true, logoFileId: true },
     });
     const byId = new Map(tenants.map((tenant) => [tenant.id, tenant]));
     const zones = new Map(days.map((day) => [day.tenantId, day.zone]));

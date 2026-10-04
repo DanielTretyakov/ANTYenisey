@@ -3,8 +3,8 @@
  *
  * Всё со страницы «Настройки» — клуб, залы, столы — вступает в силу в
  * ближайшие 00:00 по поясу зала, а не посреди рабочего дня. Сразу меняется
- * только оформление страницы клуба: описание, ценности, логотип, цвет, баннер
- * и тренерский состав.
+ * только оформление страницы клуба: описание, ценности, цвет, логотип
+ * (загрузкой, `PUT settings/logo`) и тренерский состав.
  */
 
 export type SettingsChangeKind =
@@ -55,7 +55,7 @@ export interface SettingsChange {
  * Поля настроек клуба, которые меняются сразу: это оформление страницы, а не
  * правила работы. Остальное ждёт полуночи.
  */
-export const IMMEDIATE_CLUB_FIELDS = ['description', 'values', 'logoUrl', 'accentColor'] as const;
+export const IMMEDIATE_CLUB_FIELDS = ['description', 'values', 'accentColor'] as const;
 
 /** Сколько столов можно завести вместе с новым залом. */
 export const MAX_TABLES_WITH_HALL = 40;

@@ -14,7 +14,7 @@ import { PrismaService } from '../prisma/prisma.service';
 const CARD_SELECT = {
   slug: true,
   name: true,
-  logoUrl: true,
+  logoFileId: true,
   accentColor: true,
   city: { select: { name: true } },
   halls: { select: { city: { select: { name: true } } } },
@@ -25,7 +25,7 @@ const CITY_SELECT = { id: true, name: true, region: true } as const;
 type CardRow = {
   slug: string;
   name: string;
-  logoUrl: string | null;
+  logoFileId: string | null;
   accentColor: string | null;
   city: { name: string } | null;
   halls: { city: { name: string } | null }[];
@@ -158,7 +158,7 @@ export class TenantsService {
         values: true,
         vkUrl: true,
         maxUrl: true,
-        bannerFileId: true,
+        platformSubscription: { select: { status: true } },
         // Состав — все действующие тренеры, кроме скрытых администратором
         // (решение владельца от 25.09.2026): новый тренер появляется на
         // странице сам. Уволенный остаётся без роли — и из списка уходит.
@@ -222,7 +222,8 @@ export class TenantsService {
       name: card.name,
       city: card.city,
       otherCities: card.otherCities,
-      logoUrl: card.logoUrl,
+      logoFileId: card.logoFileId,
+      suspended: tenant.platformSubscription?.status === 'SUSPENDED',
       accentColor: card.accentColor,
       phone: tenant.phone,
       email: tenant.email,
@@ -230,7 +231,6 @@ export class TenantsService {
       values: readClubValues(tenant.values),
       vkUrl: tenant.vkUrl,
       maxUrl: tenant.maxUrl,
-      bannerFileId: tenant.bannerFileId,
       // Упорядоченные администратором — первыми, по месту; остальные — по ФИО.
       coaches: [...tenant.memberships]
         .sort(
@@ -296,7 +296,7 @@ function toCard(row: CardRow): ClubCard {
   return {
     slug: row.slug,
     name: row.name,
-    logoUrl: row.logoUrl,
+    logoFileId: row.logoFileId,
     accentColor: row.accentColor,
     city,
     otherCities,

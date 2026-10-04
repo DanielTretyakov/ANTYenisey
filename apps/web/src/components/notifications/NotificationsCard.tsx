@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MaxLinkResponse, NotificationCategoryName, NotificationSettingsView } from '@yenisey/types';
+import { HelpHint } from '@/components/help/HelpHint';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -182,7 +183,12 @@ export function NotificationsCard() {
       <Card className="mt-6 max-w-2xl">
         <CardHeader
           title="Уведомления"
-          description="Напоминания о записях и новости клуба — в мессенджере MAX и в браузере."
+          description={
+            <>
+              Напоминания о записях и новости клуба — в мессенджере MAX и в браузере.{' '}
+              <HelpHint slug="uvedomleniya" />
+            </>
+          }
         />
         <CardBody>
           {error && <Alert>{error}</Alert>}

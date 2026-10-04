@@ -7,15 +7,20 @@ import type {
   CoachPrices,
   CoachStats,
   CoachStatsPeriod,
+  FeedEvent,
   PublicCoach,
 } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
 import { coachStats, periodStart } from './coach-stats';
+import { upcomingCoachSessions } from '../events/coach-sessions';
 import { FileIntake } from '../files/file-intake.service';
 import { FileStorage } from '../files/file-storage';
 import { PrismaService } from '../prisma/prisma.service';
 import { checkPriceNote, checkText, parseSocialLinks, readSocialLinks } from './coach-rules';
 import type { UpdateCoachCardDto, UpdateCoachPricesDto } from './dto/coach.dto';
+
+/** Сколько ближайших занятий показывает страница тренера. */
+const COACH_PAGE_UPCOMING = 5;
 
 const CARD_SELECT = {
   userId: true,
@@ -240,6 +245,29 @@ export class CoachesService {
         priceNote: membership.coachProfile?.priceNote ?? null,
       })),
     };
+  }
+
+  /**
+   * Ближайшие занятия тренера на его странице — пять, по всем клубам. Тот, у
+   * кого страницы нет (не тренирует нигде), получает 404, как и сама страница.
+   */
+  async upcoming(coachId: string, viewerId: string | null): Promise<FeedEvent[]> {
+    const coaching = await this.prisma.tenantMembership.findFirst({
+      where: {
+        userId: coachId,
+        roles: { has: 'COACH' },
+        deactivatedAt: null,
+        coachProfile: { isNot: null },
+        user: { deactivatedAt: null, anonymizedAt: null },
+      },
+      select: { userId: true },
+    });
+
+    if (!coaching) {
+      throw new NotFoundException('Карточка тренера не найдена');
+    }
+
+    return upcomingCoachSessions(this.prisma, [coachId], viewerId, COACH_PAGE_UPCOMING);
   }
 
   // --- Группы и статистика (клубные) ---------------------------------------

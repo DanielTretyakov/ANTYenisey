@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Put, Query, Req, UseInterceptors } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import type { CoachCard, CoachGroup, CoachPrices, CoachStats, PublicCoach } from '@yenisey/types';
+import type { CoachCard, CoachGroup, CoachPrices, CoachStats, FeedEvent, PublicCoach } from '@yenisey/types';
 import type { ClubContext } from '../auth/club-context';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Public } from '../auth/decorators/public.decorator';
@@ -111,5 +111,16 @@ export class CoachesController {
   @Get(':id')
   coach(@Param('id') id: string): Promise<PublicCoach> {
     return this.coaches.publicProfile(id);
+  }
+
+  /**
+   * Ближайшие занятия тренера по всем его клубам (решение от 02.10.2026).
+   * Открыт, но вошедшему отвечает и на «а я записан?»: токен на открытом
+   * маршруте всё равно разбирается.
+   */
+  @Public()
+  @Get(':id/upcoming')
+  upcoming(@Param('id') id: string, @Req() request: AuthenticatedRequest): Promise<FeedEvent[]> {
+    return this.coaches.upcoming(id, request.user?.sub ?? null);
   }
 }

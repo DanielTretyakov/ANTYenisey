@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { CoachGroup } from '@yenisey/types';
 import { WhenSpan } from '@/components/club/When';
 import { CoachStatsPanel } from '@/components/coach/CoachStatsPanel';
+import { HelpHint } from '@/components/help/HelpHint';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -41,8 +42,9 @@ export default function CoachGroupsPage() {
   }, [club]);
 
   return (
-    <AppShell clubSlug={slug}>
-      <h1 className="mb-6 text-[2rem] leading-tight">Мои группы</h1>
+    <AppShell footer="line" clubSlug={slug}>
+      <h1 className="text-[2rem] leading-tight">Мои группы</h1>
+      <HelpHint slug="moi-gruppy" className="mt-1 mb-6" />
 
       {error && <Alert tone="warning">{error}</Alert>}
 

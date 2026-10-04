@@ -61,7 +61,7 @@ import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { SingleFileUpload, uploadedBytes } from '../files/single-file-upload.interceptor';
 import type { Env } from '../config/env';
 
-/** Загрузка баннера — тот же предел, что у аватара и фото тренера. */
+/** Загрузка логотипа — тот же предел, что у аватара и фото тренера. */
 const UPLOAD_LIMIT = { default: { limit: 20, ttl: 60_000 } };
 
 /**
@@ -134,19 +134,22 @@ export class ClubController {
     return this.changes.applyDue({ tenantId: club.tenantId, force: true });
   }
 
-  // --- Страница клуба: баннер и тренерский состав -------------------------
+  // --- Страница клуба: логотип и тренерский состав ------------------------
 
-  /** Баннер — файлом в поле `file`. PUT: новый заменяет старый целиком. */
+  /**
+   * Логотип — квадратной картинкой в поле `file`. PUT: новый заменяет старый
+   * целиком. Неквадратный — 400 с размерами (решение от 02.10.2026).
+   */
   @Throttle(UPLOAD_LIMIT)
-  @Put('settings/banner')
+  @Put('settings/logo')
   @UseInterceptors(SingleFileUpload)
-  setBanner(@CurrentClub() club: ClubContext, @Req() request: AuthenticatedRequest): Promise<ClubSettings> {
-    return this.club.setBanner(club.tenantId, uploadedBytes(request));
+  setLogo(@CurrentClub() club: ClubContext, @Req() request: AuthenticatedRequest): Promise<ClubSettings> {
+    return this.club.setLogo(club.tenantId, uploadedBytes(request));
   }
 
-  @Delete('settings/banner')
-  removeBanner(@CurrentClub() club: ClubContext): Promise<ClubSettings> {
-    return this.club.removeBanner(club.tenantId);
+  @Delete('settings/logo')
+  removeLogo(@CurrentClub() club: ClubContext): Promise<ClubSettings> {
+    return this.club.removeLogo(club.tenantId);
   }
 
   @Get('settings/coaches')

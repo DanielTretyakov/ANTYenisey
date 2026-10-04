@@ -23,7 +23,7 @@ const CLUB_SELECT = {
 const CARD_SELECT = {
   slug: true,
   name: true,
-  logoUrl: true,
+  logoFileId: true,
   accentColor: true,
   city: { select: { name: true } },
   halls: { select: { city: { select: { name: true } } } },
@@ -210,7 +210,7 @@ function firstFreeSlot(taken: number[]): number | null {
 function toCard(row: {
   slug: string;
   name: string;
-  logoUrl: string | null;
+  logoFileId: string | null;
   accentColor: string | null;
   city: { name: string } | null;
   halls: { city: { name: string } | null }[];
@@ -220,7 +220,7 @@ function toCard(row: {
   return {
     slug: row.slug,
     name: row.name,
-    logoUrl: row.logoUrl,
+    logoFileId: row.logoFileId,
     accentColor: row.accentColor,
     city,
     otherCities: [

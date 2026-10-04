@@ -3,12 +3,16 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { PublicCoach } from '@yenisey/types';
+import type { FeedEvent, PublicCoach } from '@yenisey/types';
+import { CoachHeart } from '@/components/coach/CoachHeart';
 import { CoachCardBody, CoachPricesView } from '@/components/coach/CoachView';
+import { EventDialog } from '@/components/events/EventDialog';
+import { FeedEventCard } from '@/components/events/FeedEventCard';
 import { AppShell } from '@/components/layout/AppShell';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { Alert } from '@/components/ui/Alert';
 import { api, ApiError } from '@/lib/api';
+import { useSession } from '@/lib/useSession';
 
 /**
  * Страница тренера — открыта всем, без входа.
@@ -19,11 +23,37 @@ import { api, ApiError } from '@/lib/api';
  *
  * Карточка одна на все клубы, а цены у каждого клуба свои — поэтому клубы
  * перечислены отдельным блоком, каждый со своей стоимостью занятий.
+ *
+ * С 02.10.2026 — сердечко «в мои тренеры» и «Ближайшие занятия» по всем его
+ * клубам: ради них тренера и отмечают.
  */
 export default function CoachPage() {
   const params = useParams<{ id: string }>();
+  const session = useSession();
   const [coach, setCoach] = useState<PublicCoach | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [favourite, setFavourite] = useState<boolean | null>(null);
+  const [upcoming, setUpcoming] = useState<FeedEvent[] | null>(null);
+  const [open, setOpen] = useState<FeedEvent | null>(null);
+
+  const loadUpcoming = (): void => {
+    api
+      .coachUpcoming(params.id)
+      .then(setUpcoming)
+      .catch(() => setUpcoming([]));
+  };
+
+  useEffect(loadUpcoming, [params.id]);
+
+  // Отмечен ли — только у вошедшего; гостя сердечко ведёт на вход.
+  useEffect(() => {
+    if (session.status !== 'ready') return;
+
+    api
+      .myCoaches()
+      .then((list) => setFavourite(list.some((item) => item.id === params.id)))
+      .catch(() => setFavourite(false));
+  }, [session.status, params.id]);
 
   useEffect(() => {
     api
@@ -66,7 +96,34 @@ export default function CoachPage() {
                 ))}
               </p>
             </div>
+            {/* Себя тренер в избранное не отмечает — база тоже не даст. */}
+            {!(session.status === 'ready' && session.user.id === coach.id) && (
+              <CoachHeart
+                coachId={coach.id}
+                anonymous={session.status === 'anonymous'}
+                favourite={session.status === 'anonymous' ? false : favourite}
+                onChange={(list) => setFavourite(list.some((item) => item.id === coach.id))}
+                className="ml-auto self-start"
+              />
+            )}
           </header>
+
+          <section>
+            <h3 className="mb-3 text-[0.9375rem] font-medium">Ближайшие занятия</h3>
+            {upcoming === null && <div className="h-32 rounded-card border border-border bg-surface-raised" aria-busy="true" />}
+            {upcoming !== null && upcoming.length === 0 && (
+              <p className="text-[0.9375rem] text-text-muted">Ближайших занятий в расписании клубов пока нет.</p>
+            )}
+            {upcoming !== null && upcoming.length > 0 && (
+              <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {upcoming.map((event) => (
+                  <li key={`${event.club.slug}-${event.id}`}>
+                    <FeedEventCard event={event} onOpen={setOpen} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
 
           <CoachCardBody card={coach} />
 
@@ -92,13 +149,23 @@ export default function CoachPage() {
           </section>
         </div>
       )}
+
+      {open && (
+        <EventDialog
+          slug={open.club.slug}
+          kind={open.kind}
+          id={open.id}
+          onClose={() => setOpen(null)}
+          onChanged={loadUpcoming}
+        />
+      )}
     </AppShell>
   );
 }
 
 function Skeleton() {
   return (
-    <div className="grid gap-6" aria-busy="true">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6" aria-busy="true">
       <div className="flex items-center gap-6">
         <span className="h-28 w-28 rounded-full bg-border/50" />
         <span className="h-8 w-56 rounded-full bg-border/50" />

@@ -86,7 +86,7 @@ export function ClubSubscriptionsBlock({
         title="Абонементы"
         description="Оплачивают записи на занятия и турниры, которые покрывает тариф: визит списывается при записи и возвращается при отмене."
       />
-      <CardBody className="grid gap-5">
+      <CardBody className="grid grid-cols-[minmax(0,1fr)] gap-5">
         {error && <Alert>{error}</Alert>}
 
         {subscriptions.length === 0 ? (

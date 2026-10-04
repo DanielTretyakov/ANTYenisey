@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { checkUpload, type FileKind, type StoredContentType } from './file-signature';
-import { normalizeAvatar, normalizeBanner, normalizeDocumentImage } from './image-normalizer';
+import { LogoShapeError, normalizeAvatar, normalizeDocumentImage, normalizeLogo } from './image-normalizer';
 
 /** Файл, готовый к записи: тип определён по байтам, картинка перекодирована. */
 export interface PreparedFile {
@@ -41,12 +41,19 @@ export class FileIntake {
         return { kind, contentType: 'image/webp', data: await normalizeAvatar(upload) };
       }
 
-      if (kind === 'CLUB_BANNER') {
-        return { kind, contentType: 'image/webp', data: await normalizeBanner(upload) };
+      // Логотип клуба — только квадрат: неквадратный отклоняется, а не
+      // обрезается (решение от 02.10.2026).
+      if (kind === 'CLUB_LOGO') {
+        return { kind, contentType: 'image/webp', data: await normalizeLogo(upload) };
       }
 
       return { kind, contentType: checked.contentType, data: await normalizeDocumentImage(upload, checked.contentType) };
-    } catch {
+    } catch (error) {
+      // Неквадратный логотип — отказ по делу, его текст человеку и нужен.
+      if (error instanceof LogoShapeError) {
+        throw new BadRequestException(error.message);
+      }
+
       // Сигнатура совпала, а прочитать не вышло: файл обрезан, повреждён или
       // слишком велик по разрешению. Подробности sharp человеку не помогут.
       throw new BadRequestException('Не удалось прочитать картинку: файл повреждён или слишком большой по разрешению');

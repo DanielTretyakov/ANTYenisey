@@ -60,7 +60,7 @@ export function ClubNewsColumn() {
   return (
     <section
       id={NEWS_ANCHOR}
-      className="flex min-w-0 scroll-mt-40 flex-col rounded-card border border-border bg-surface-raised"
+      className="flex min-w-0 scroll-mt-48 flex-col rounded-card border border-border bg-surface-raised"
     >
       <header className="border-b border-border px-5 pt-4 pb-3">
         <SectionHeading

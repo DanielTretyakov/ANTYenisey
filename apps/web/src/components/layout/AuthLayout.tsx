@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { PlatformLogo } from '@/components/brand/PlatformLogo';
 import { RiverBackdrop } from '@/components/brand/RiverBackdrop';
+import { SiteFooter } from '@/components/layout/SiteFooter';
 import { HEADER_HEIGHT, HEADER_LOGO_HEIGHT } from '@/components/layout/metrics';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { cn } from '@/lib/cn';
@@ -48,7 +49,9 @@ export function AuthLayout({
         </div>
 
         <p className="relative z-10 text-[0.8125rem] tracking-wide text-brand-200">
-          Доступность · Профессионализм · Развитие характера · Комьюнити
+          {/* Строка платформы, а не ценности одного клуба: до аудита 03.10.2026
+              здесь стояли ценности «Енисея» — чужие для любого другого клуба. */}
+          Тренировки · Турниры · Аренда столов · Один аккаунт на все клубы
         </p>
       </aside>
 
@@ -77,6 +80,8 @@ export function AuthLayout({
             {footer && <div className="mt-7 text-[0.875rem] text-text-muted">{footer}</div>}
           </div>
         </div>
+
+        <SiteFooter variant="line" />
       </main>
     </div>
   );
