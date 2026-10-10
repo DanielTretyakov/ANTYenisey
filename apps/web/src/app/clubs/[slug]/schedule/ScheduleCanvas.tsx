@@ -1,5 +1,7 @@
 'use client';
 
+import type { ReactNode } from 'react';
+import type { SlotRange } from '@/lib/closureGrid';
 import { NightNotice, ScheduleGrid, ScheduleLegend, type BookedCell } from './ScheduleGrid';
 import { SchedulePalette } from './SchedulePalette';
 import type { ScheduleGridState } from './useScheduleGrid';
@@ -14,32 +16,30 @@ import type { ScheduleGridState } from './useScheduleGrid';
 export function ScheduleCanvas({
   grid,
   lane,
-  askCapacity,
-  allowClient = false,
   booked,
-  onRange,
+  onPick,
+  seat,
+  seatPanel,
   nightCount,
   nowMinute = null,
 }: {
   grid: ScheduleGridState;
   lane: string;
-  /**
-   * Спрашивать ли число мест. Только в дне: занятие с лимитом заводится из
-   * расписания даты, а шаблон повторяется и конкретного занятия не несёт.
-   */
-  askCapacity: boolean;
-  /** Сажать ли клиента кистью аренды — только в расписании даты. */
-  allowClient?: boolean;
   /** Брони этого дня: сетка их показывает, но кистью не трогает. */
   booked?: Map<string, BookedCell>;
-  /** Протяжка выделяет промежуток под бронь вместо закраски. */
-  onRange?: (tableId: string, startSlot: number, endSlot: number) => void;
+  /** Протяжка или щелчок выделяет промежуток под бронь вместо закраски. */
+  onPick?: (pick: SlotRange) => void;
+  /** Выбранное под бронь и карточка решения рядом с ним. */
+  seat?: SlotRange | null;
+  seatPanel?: ReactNode;
   nightCount: number;
   nowMinute?: number | null;
 }) {
   return (
     <>
-      <SchedulePalette {...grid.palette} askCapacity={askCapacity} allowClient={allowClient} />
+      {/* Число мест и клиент — только в расписании даты: занятие с лимитом и
+          бронь заводятся на конкретное время, а шаблон повторяется. */}
+      <SchedulePalette {...grid.palette} askCapacity={grid.day} allowClient={grid.day} />
 
       {grid.loading ? (
         <div
@@ -50,6 +50,7 @@ export function ScheduleCanvas({
         <ScheduleGrid
           tables={grid.own}
           lane={lane}
+          day={grid.day}
           cells={grid.cells}
           booked={booked}
           nameOf={grid.nameOf}
@@ -58,13 +59,15 @@ export function ScheduleCanvas({
           painting={grid.painting}
           brushValue={grid.brushValue}
           onPaint={grid.paint}
-          onRange={onRange}
+          onPick={onPick}
+          seat={seat}
+          seatPanel={seatPanel}
           nowMinute={nowMinute}
         />
       )}
 
       {!grid.loading && (
-        <ScheduleLegend cells={grid.cells} lane={lane} nameOf={grid.nameOf} colors={grid.colors} />
+        <ScheduleLegend cells={grid.cells} lane={lane} day={grid.day} nameOf={grid.nameOf} colors={grid.colors} />
       )}
 
       <NightNotice count={nightCount} />

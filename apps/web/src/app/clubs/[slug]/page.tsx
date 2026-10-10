@@ -171,13 +171,16 @@ export default function ClubPage() {
 
   // Виды мероприятий нужны двоим — вкладке «Мероприятия клуба» и чипам
   // фильтра в «Предстоящих», — поэтому грузятся здесь, один раз. Перечитываются
-  // вместе со списком: после записи «ближайшее» у вида могло сдвинуться.
+  // вместе со списком: после записи «ближайшее» у вида могло сдвинуться. И при
+  // смене зала: «Ближайшее» у вида — в выбранных залах, как список под ним.
+  const catalogHalls = hallIds?.join(',') ?? '';
+
   useEffect(() => {
     club
-      .catalog()
+      .catalog(catalogHalls || undefined)
       .then(setCatalog)
       .catch(() => setCatalog([]));
-  }, [club, eventsVersion]);
+  }, [club, eventsVersion, catalogHalls]);
 
   useEffect(() => {
     club
@@ -384,7 +387,7 @@ function MyEvents({
               key={entry.entryId}
               className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-border py-4"
             >
-              <WhenSpan startsAt={entry.startsAt} endsAt={entry.endsAt} />
+              <WhenSpan startsAt={entry.startsAt} endsAt={entry.endsAt} timezone={entry.timezone} />
 
               <span className="min-w-0 grow">
                 <span className="block text-[0.9375rem] text-text">{entry.title}</span>

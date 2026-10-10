@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@yenisey/database';
+import { BookingStatus, Prisma } from '@yenisey/database';
 import type {
   ClosureRule,
   ClosureRuleDraft,
@@ -10,6 +10,7 @@ import type {
   Weekday,
 } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
+import { ClientNotifier } from '../notifications/client-notifier.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { hallScopeViolations, refKey, type ScopedRef } from './hall-scope';
 import {
@@ -18,8 +19,10 @@ import {
   instantAt,
   ruleGroupKey,
   slotViolations,
+  syncedTimes,
   templateViolations,
   weekdayOf,
+  type Span,
 } from './closures';
 
 const WEEKDAY_NAMES = [
@@ -47,6 +50,20 @@ const SLOT_SELECT = {
 const TEMPLATE_SELECT = { ...SLOT_SELECT, weekday: true, tournamentTypeId: true } as const;
 
 /**
+ * Окно даты — с проведением и его типом.
+ *
+ * Тип в окне даты не хранится, а выводится из турнира: без него сетке
+ * пришлось бы тянуть все турниры клуба за всю историю ради подписи «Клуб 100»,
+ * а при правке дня — гадать, есть ли в нём уже турнир этого типа.
+ */
+const DAY_SELECT = {
+  ...SLOT_SELECT,
+  tournamentId: true,
+  trainingSessionId: true,
+  tournament: { select: { tournamentTypeId: true } },
+} as const;
+
+/**
  * Расписание зала: постоянный шаблон недели и правки на конкретные даты.
  *
  * Шаблон описывает, как зал живёт обычно; расписание даты говорит «а вот
@@ -56,7 +73,10 @@ const TEMPLATE_SELECT = { ...SLOT_SELECT, weekday: true, tournamentTypeId: true 
  */
 @Injectable()
 export class ScheduleService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifier: ClientNotifier,
+  ) {}
 
   // --- Шаблон недели -------------------------------------------------------
 
@@ -142,21 +162,17 @@ export class ScheduleService {
     const schedule = await this.prisma.hallDaySchedule.findFirst({
       where: { tenantId, hallId, date: parseDate(date) },
       select: {
-        closures: {
-          select: { ...SLOT_SELECT, tournamentId: true, trainingSessionId: true },
-          orderBy: { startMinute: 'asc' },
-        },
+        closures: { select: DAY_SELECT, orderBy: { startMinute: 'asc' } },
       },
     });
 
     return {
       date,
       customised: schedule !== null,
-      // Тип турнира у окна даты не хранится: там уже есть само проведение,
-      // заведённое из этого типа.
-      closures: (schedule?.closures ?? []).map((closure) => ({
+      // Тип турнира у окна даты не хранится — он берётся у самого проведения.
+      closures: (schedule?.closures ?? []).map(({ tournament, ...closure }) => ({
         ...closure,
-        tournamentTypeId: null,
+        tournamentTypeId: tournament?.tournamentTypeId ?? null,
       })),
     };
   }
@@ -222,11 +238,10 @@ export class ScheduleService {
       });
 
       await this.dropOrphanedEvents(tx, tenantId, before);
-      await this.syncTournamentEnds(
-        tx,
-        tenantId,
-        closures.map((closure) => closure.tournamentId),
-      );
+      await this.syncEventTimes(tx, tenantId, {
+        sessionIds: closures.map((closure) => closure.trainingSessionId),
+        tournamentIds: closures.map((closure) => closure.tournamentId),
+      });
     });
 
     return this.findDay(tenantId, hallId, date);
@@ -436,63 +451,153 @@ export class ScheduleService {
   }
 
   /**
-   * Окончание турниров — по концу их окон в расписании.
+   * Границы занятий и турниров — по их окнам в расписании.
    *
-   * Администратор растянул турнир в сетке на час — и экран смены, и джоба
-   * автонеявки должны узнать об этом сразу, а не читать окончание, указанное
-   * при заведении. Считается по ВСЕМ окнам турнира, а не только по окнам этого
-   * дня: турнир одного дня законно идёт в двух залах.
+   * Администратор растянул группу или турнир в сетке на час — и экран смены,
+   * и напоминания, и джоба автонеявки должны узнать об этом сразу, а не читать
+   * границы, указанные при заведении. Считается по ВСЕМ окнам мероприятия, а
+   * не только по окнам этого дня: турнир одного дня законно идёт в двух залах.
    *
-   * Начало не трогается: от него считается порог отмены, и сдвигать его
-   * задним числом у тех, кто уже записался, значит менять условия сделки.
-   * Окончание, которое оказалось бы не позже начала (окна перенесли раньше
-   * старта), не пишется: такой турнир база не примет, а у администратора
-   * остаётся прежнее, осмысленное.
+   * Что именно двигается — решает `syncedTimes`: границы следуют за окнами,
+   * кроме начала уже начавшегося. Сдвинулось начало — записавшимся сообщение
+   * «время изменилось» той же транзакцией (решение владельца от 05.10.2026,
+   * вариант «б»): порог бесплатной отмены считается теперь от нового начала,
+   * и человек должен об этом знать.
    */
-  private async syncTournamentEnds(
+  private async syncEventTimes(
     tx: Prisma.TransactionClient,
     tenantId: string,
-    ids: (string | null | undefined)[],
+    ids: { sessionIds: (string | null | undefined)[]; tournamentIds: (string | null | undefined)[] },
   ): Promise<void> {
-    const tournamentIds = [...new Set(ids.filter((id): id is string => typeof id === 'string'))];
+    const present = (list: (string | null | undefined)[]): string[] => [
+      ...new Set(list.filter((id): id is string => typeof id === 'string')),
+    ];
+    const sessionIds = present(ids.sessionIds);
+    const tournamentIds = present(ids.tournamentIds);
 
-    if (tournamentIds.length === 0) {
+    if (sessionIds.length === 0 && tournamentIds.length === 0) {
       return;
     }
 
     const closures = await tx.dayClosure.findMany({
-      where: { tenantId, tournamentId: { in: tournamentIds } },
+      where: {
+        tenantId,
+        OR: [{ trainingSessionId: { in: sessionIds } }, { tournamentId: { in: tournamentIds } }],
+      },
       select: {
+        trainingSessionId: true,
         tournamentId: true,
+        startMinute: true,
         endMinute: true,
         schedule: { select: { date: true, hall: { select: { timezone: true } } } },
       },
     });
 
-    const ends = new Map<string, number>();
+    const spans = new Map<string, Span>();
+    const widen = (key: string, startsAt: number, endsAt: number): void => {
+      const span = spans.get(key);
+
+      spans.set(key, {
+        startsAt: Math.min(span?.startsAt ?? startsAt, startsAt),
+        endsAt: Math.max(span?.endsAt ?? endsAt, endsAt),
+      });
+    };
 
     for (const closure of closures) {
-      const end = instantAt(
-        formatDate(closure.schedule.date),
-        closure.endMinute,
-        closure.schedule.hall.timezone,
-      ).getTime();
+      const date = formatDate(closure.schedule.date);
+      const timezone = closure.schedule.hall.timezone;
+      const startsAt = instantAt(date, closure.startMinute, timezone).getTime();
+      const endsAt = instantAt(date, closure.endMinute, timezone).getTime();
 
-      ends.set(closure.tournamentId!, Math.max(ends.get(closure.tournamentId!) ?? end, end));
+      if (closure.trainingSessionId) widen(`session:${closure.trainingSessionId}`, startsAt, endsAt);
+      if (closure.tournamentId) widen(`tournament:${closure.tournamentId}`, startsAt, endsAt);
     }
 
-    const tournaments = await tx.tournament.findMany({
-      where: { tenantId, id: { in: [...ends.keys()] } },
-      select: { id: true, startsAt: true, endsAt: true },
-    });
+    const [sessions, tournaments] = await Promise.all([
+      sessionIds.length > 0
+        ? tx.trainingSession.findMany({
+            where: { tenantId, id: { in: sessionIds } },
+            select: {
+              id: true,
+              startsAt: true,
+              endsAt: true,
+              bookings: { where: { status: BookingStatus.BOOKED }, select: { id: true } },
+            },
+          })
+        : [],
+      tournamentIds.length > 0
+        ? tx.tournament.findMany({
+            where: { tenantId, id: { in: tournamentIds } },
+            select: {
+              id: true,
+              startsAt: true,
+              endsAt: true,
+              registrations: { where: { status: BookingStatus.BOOKED }, select: { id: true } },
+            },
+          })
+        : [],
+    ]);
 
-    for (const tournament of tournaments) {
-      const end = ends.get(tournament.id)!;
+    const now = Date.now();
 
-      if (end > tournament.startsAt.getTime() && end !== tournament.endsAt.getTime()) {
-        await tx.tournament.update({ where: { id: tournament.id }, data: { endsAt: new Date(end) } });
+    for (const session of sessions) {
+      const next = this.nextTimes(session, spans.get(`session:${session.id}`), session.startsAt.getTime() <= now);
+
+      if (next) {
+        await tx.trainingSession.update({ where: { id: session.id }, data: next });
+        await this.tellRescheduled(tx, tenantId, 'TRAINING', session.bookings, session.startsAt, next.startsAt);
       }
     }
+
+    for (const tournament of tournaments) {
+      const next = this.nextTimes(
+        tournament,
+        spans.get(`tournament:${tournament.id}`),
+        tournament.startsAt.getTime() <= now,
+      );
+
+      if (next) {
+        await tx.tournament.update({ where: { id: tournament.id }, data: next });
+        await this.tellRescheduled(tx, tenantId, 'TOURNAMENT', tournament.registrations, tournament.startsAt, next.startsAt);
+      }
+    }
+  }
+
+  /** Записавшимся — «время изменилось», если сдвинулось начало. Конец порога отмены не меняет. */
+  private async tellRescheduled(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    kind: 'TRAINING' | 'TOURNAMENT',
+    entries: { id: string }[],
+    before: Date,
+    after: Date,
+  ): Promise<void> {
+    if (before.getTime() === after.getTime()) {
+      return;
+    }
+
+    for (const entry of entries) {
+      await this.notifier.entryRescheduled(tx, tenantId, kind, entry.id, before);
+    }
+  }
+
+  /** Границы мероприятия после правки окон — или null, если менять нечего. */
+  private nextTimes(
+    event: { startsAt: Date; endsAt: Date },
+    windows: Span | undefined,
+    started: boolean,
+  ): { startsAt: Date; endsAt: Date } | null {
+    if (!windows) {
+      return null;
+    }
+
+    const next = syncedTimes(
+      { startsAt: event.startsAt.getTime(), endsAt: event.endsAt.getTime() },
+      windows,
+      started,
+    );
+
+    return next ? { startsAt: new Date(next.startsAt), endsAt: new Date(next.endsAt) } : null;
   }
 
   // --- Залы видов и тренеров ------------------------------------------------

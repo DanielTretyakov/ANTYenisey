@@ -9,6 +9,7 @@ import { seatsLabel, useEventAction, type EventViewer } from '@/lib/eventViewer'
 import { formatKopecks } from '@/lib/money';
 import { loginHref } from '@/lib/next';
 import { tintFill, tintMark } from '@/lib/personColor';
+import { dateIn, timeIn, viewerTime, viewerZone } from '@/lib/zonedTime';
 
 /**
  * Цвет вида мероприятия — те же краски, что у кистей расписания: занятие —
@@ -67,7 +68,7 @@ export function EventRow({
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
         {/* У занятия известно окончание, у турнира нет: WhenSpan сам сводится к
             одной строке времени, когда конца не задано. */}
-        <WhenSpan startsAt={event.startsAt} endsAt={event.endsAt} />
+        <WhenSpan startsAt={event.startsAt} endsAt={event.endsAt} timezone={event.timezone} />
 
         <span className="min-w-0 grow">
           {/* Название открывает окно мероприятия: там описание, зал и кто
@@ -166,12 +167,15 @@ export function RowSkeleton() {
 }
 
 /** «чт 26 сентября, 18:00» — по часам браузера, как вся страница. */
-export function shortWhen(instant: string): string {
-  const value = new Date(instant);
-  const day = new Intl.DateTimeFormat('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' }).format(value);
-  const time = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(value);
+export function shortWhen(instant: string, timezone?: string | null, withHint = true): string {
+  // По часам зала, а если у смотрящего пояс другой — его время в скобках
+  // (решение от 05.10.2026); без пояса — по часам браузера, как прежде.
+  const zone = timezone ?? viewerZone();
+  const day = dateIn(instant, zone, { weekday: 'short', day: 'numeric', month: 'long' });
+  // Крупному заголовку время смотрящего ставят отдельной мелкой строкой.
+  const hint = timezone && withHint ? viewerTime(instant, null, timezone) : null;
 
-  return `${day}, ${time}`;
+  return `${day}, ${timeIn(instant, zone)}${hint ? ` (${hint})` : ''}`;
 }
 
 function HallPin() {

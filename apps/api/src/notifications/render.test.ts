@@ -86,6 +86,18 @@ describe('сообщения о записи', () => {
     assert.match(text, /обратитесь к администратору/);
   });
 
+  it('клуб изменил время — новое время, прежнее и что делать', () => {
+    const { text } = renderNotification(
+      'BOOKING_TIME_CHANGED',
+      { ...training, previousStartsAt: '2026-09-25T12:00:00.000Z', person: 'Иванов К.' },
+      context,
+    );
+
+    assert.match(text, /^Клуб изменил время · Иванов К\./);
+    assert.match(text, /Было: .*19:00/);
+    assert.match(text, /отмените запись или позвоните в клуб/);
+  });
+
   it('аренда стола', () => {
     const table = { ...training, entry: { ...training.entry, kind: 'TABLE' as const }, title: 'Стол 3' };
 

@@ -4,7 +4,7 @@ import type { ClubContext } from '../auth/club-context';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { Acting, ClientAction, type ActingClient } from '../guardianship/acting-client.guard';
-import { EventsRangeDto } from './events-range.dto';
+import { CatalogQueryDto, EventsRangeDto } from './events-range.dto';
 import { EventsService } from './events.service';
 
 /**
@@ -41,11 +41,12 @@ export class EventsController {
   /**
    * Что есть в клубе: действующие типы занятий и турниров с ближайшим
    * проведением — вкладка «Мероприятия клуба». Открыто, как и список.
+   * С `?halls=` ближайшее — в этих залах, по тому же правилу, что список.
    */
   @Public()
   @Get('catalog')
-  catalog(@CurrentClub() club: ClubContext): Promise<ClubCatalogItem[]> {
-    return this.events.catalog(club.tenantId);
+  catalog(@CurrentClub() club: ClubContext, @Query() query: CatalogQueryDto): Promise<ClubCatalogItem[]> {
+    return this.events.catalog(club.tenantId, query.halls);
   }
 
   /**

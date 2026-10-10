@@ -14,6 +14,10 @@ import {
   TOURNAMENT_EVENT_SELECT,
   TRAINING_DETAIL_SELECT,
   TRAINING_EVENT_SELECT,
+  CLUB_ZONE_SELECT,
+  eventZone,
+  HALL_NAME_SELECT,
+  TYPE_HALLS_SELECT,
   tournamentDetail,
   tournamentEvent,
   trainingDetail,
@@ -46,6 +50,33 @@ import { StaffService } from '../staff/staff.service';
  */
 /** Самое широкое окно списка: месяц с запасом — неделя страницы клуба и ещё три. */
 const MAX_RANGE_MS = 31 * 24 * 3600_000;
+
+/**
+ * Мероприятия в залах страницы клуба (решение владельца от 25.09.2026):
+ * мероприятие — в зале, если стоит в его расписании; без окна в сетке — там,
+ * где идёт его вид (пусто — во всех залах).
+ *
+ * Одно правило на список «Предстоящих» и на «Ближайшее» у вида: разойдись
+ * они, карточка вида и список под ней называли бы разные проведения.
+ */
+function hallScope(value: string | undefined): {
+  training: Prisma.TrainingSessionWhereInput;
+  tournament: Prisma.TournamentWhereInput;
+} {
+  const halls = value ? value.split(',').filter(Boolean) : null;
+
+  if (!halls) {
+    return { training: {}, tournament: {} };
+  }
+
+  const typeInHalls = { OR: [{ halls: { none: {} } }, { halls: { some: { hallId: { in: halls } } } }] };
+  const placedInHalls = { some: { table: { hallId: { in: halls } } } };
+
+  return {
+    training: { OR: [{ dayClosures: placedInHalls }, { dayClosures: { none: {} }, trainingType: typeInHalls }] },
+    tournament: { OR: [{ dayClosures: placedInHalls }, { dayClosures: { none: {} }, tournamentType: typeInHalls }] },
+  };
+}
 
 @Injectable()
 export class EventsService {
@@ -85,14 +116,7 @@ export class EventsService {
     }
 
     const startsAt = { gte: from, ...(to ? { lt: to } : {}) };
-    // Залы страницы клуба (решение владельца от 25.09.2026): мероприятие — в
-    // зале, если стоит в его расписании; без окна в сетке — там, где идёт его
-    // вид (пусто — во всех залах).
-    const halls = range.halls ? range.halls.split(',').filter(Boolean) : null;
-    const typeInHalls = halls
-      ? { OR: [{ halls: { none: {} } }, { halls: { some: { hallId: { in: halls } } } }] }
-      : undefined;
-    const placedInHalls = halls ? { some: { table: { hallId: { in: halls } } } } : undefined;
+    const inHalls = hallScope(range.halls);
     // Вид отсекает вторую таблицу целиком: «только детские тренировки» не
     // должны тянуть турниры, чтобы потом их выбросить.
     const take = range.limit;
@@ -105,9 +129,7 @@ export class EventsService {
               tenantId,
               startsAt,
               ...(range.typeId ? { tournamentTypeId: range.typeId } : {}),
-              ...(halls
-                ? { OR: [{ dayClosures: placedInHalls }, { dayClosures: { none: {} }, tournamentType: typeInHalls }] }
-                : {}),
+              ...inHalls.tournament,
             },
             select: TOURNAMENT_EVENT_SELECT,
             orderBy: { startsAt: 'asc' },
@@ -120,9 +142,7 @@ export class EventsService {
               tenantId,
               startsAt,
               ...(range.typeId ? { trainingTypeId: range.typeId } : {}),
-              ...(halls
-                ? { OR: [{ dayClosures: placedInHalls }, { dayClosures: { none: {} }, trainingType: typeInHalls }] }
-                : {}),
+              ...inHalls.training,
             },
             select: TRAINING_EVENT_SELECT,
             orderBy: { startsAt: 'asc' },
@@ -177,8 +197,41 @@ export class EventsService {
    * от 25.09.2026): действующие типы занятий и турниров с ближайшим
    * проведением. Открыто, как и список: это витрина клуба.
    */
-  async catalog(tenantId: string): Promise<ClubCatalogItem[]> {
+  async catalog(tenantId: string, halls?: string): Promise<ClubCatalogItem[]> {
     const now = new Date();
+    // «Ближайшее» у вида — в выбранных залах, тем же правилом, что «Предстоящие»
+    // под ним: иначе карточка в «Пирогах» звала бы на занятие в «Баках».
+    const inHalls = hallScope(halls);
+    // Ближайшее проведение каждого вида — ради пояса его зала: время в
+    // карточке показывается по часам зала, как в сетке и в сообщениях.
+    const zoneSelect = { dayClosures: HALL_NAME_SELECT } as const;
+    const [trainingZones, tournamentZones] = await Promise.all([
+      this.prisma.trainingSession.findMany({
+        where: { tenantId, startsAt: { gte: now }, ...inHalls.training },
+        distinct: ['trainingTypeId'],
+        orderBy: { startsAt: 'asc' },
+        select: {
+          ...zoneSelect,
+          trainingTypeId: true,
+          trainingType: { select: { halls: TYPE_HALLS_SELECT, tenant: CLUB_ZONE_SELECT } },
+        },
+      }),
+      this.prisma.tournament.findMany({
+        where: { tenantId, startsAt: { gte: now }, ...inHalls.tournament },
+        distinct: ['tournamentTypeId'],
+        orderBy: { startsAt: 'asc' },
+        select: {
+          ...zoneSelect,
+          tournamentTypeId: true,
+          tournamentType: { select: { halls: TYPE_HALLS_SELECT, tenant: CLUB_ZONE_SELECT } },
+        },
+      }),
+    ]);
+    const trainingZone = new Map(trainingZones.map((row) => [row.trainingTypeId, eventZone(row, row.trainingType)]));
+    const tournamentZone = new Map(
+      tournamentZones.map((row) => [row.tournamentTypeId, eventZone(row, row.tournamentType)]),
+    );
+
     const [trainingTypes, tournamentTypes, trainingNext, tournamentNext] = await Promise.all([
       this.prisma.trainingType.findMany({
         where: { tenantId, isActive: true },
@@ -197,13 +250,13 @@ export class EventsService {
       }),
       this.prisma.trainingSession.groupBy({
         by: ['trainingTypeId'],
-        where: { tenantId, startsAt: { gte: now } },
+        where: { tenantId, startsAt: { gte: now }, ...inHalls.training },
         _min: { startsAt: true },
         _count: { _all: true },
       }),
       this.prisma.tournament.groupBy({
         by: ['tournamentTypeId'],
-        where: { tenantId, startsAt: { gte: now } },
+        where: { tenantId, startsAt: { gte: now }, ...inHalls.tournament },
         _min: { startsAt: true },
         _count: { _all: true },
       }),
@@ -219,8 +272,12 @@ export class EventsService {
     // Сначала то, что скоро будет, потом — без проведений впереди, по имени:
     // «что есть в клубе» читается от того, куда можно пойти на этой неделе.
     return [
-      ...trainingTypes.map((type) => catalogItem('TRAINING', type, trainingByType.get(type.id))),
-      ...tournamentTypes.map((type) => catalogItem('TOURNAMENT', type, tournamentByType.get(type.id))),
+      ...trainingTypes.map((type) =>
+        catalogItem('TRAINING', type, trainingByType.get(type.id), trainingZone.get(type.id) ?? null),
+      ),
+      ...tournamentTypes.map((type) =>
+        catalogItem('TOURNAMENT', type, tournamentByType.get(type.id), tournamentZone.get(type.id) ?? null),
+      ),
     ].sort(
       (a, b) =>
         (a.nextStartsAt ?? '\uffff').localeCompare(b.nextStartsAt ?? '\uffff') || a.name.localeCompare(b.name, 'ru'),

@@ -7,6 +7,7 @@ import {
 import { Prisma } from '@yenisey/database';
 import { BookingStatus } from '@yenisey/database';
 import type {
+  EventPageQuery,
   Tournament,
   TournamentRequest,
   TournamentType,
@@ -346,9 +347,14 @@ export class CatalogService {
 
   // --- Турниры -------------------------------------------------------------
 
-  async listTournaments(tenantId: string): Promise<Tournament[]> {
+  async listTournaments(
+    tenantId: string,
+    filter: { ids?: string[]; page?: Partial<EventPageQuery> } = {},
+  ): Promise<Tournament[]> {
+    const { ids, page } = filter;
     const tournaments = await this.prisma.tournament.findMany({
-      where: { tenantId },
+      where: { tenantId, ...(ids ? { id: { in: ids } } : {}), ...periodOf(page) },
+      ...pageOf(page),
       select: {
         id: true,
         tournamentTypeId: true,
@@ -357,9 +363,8 @@ export class CatalogService {
         tournamentType: { select: { name: true } },
         _count: { select: { dayClosures: true } },
       },
-      // Ближайшие сверху: администратор заводит турнир и тут же ставит его в
-      // сетку, а прошедшие нужны реже.
-      orderBy: { startsAt: 'desc' },
+      // Без страницы — поздние сверху, как было; со страницей — см. `pageOf`.
+      orderBy: { startsAt: orderOf(page) },
     });
 
     return tournaments.map((tournament) => ({
@@ -402,7 +407,9 @@ export class CatalogService {
       select: { id: true },
     });
 
-    const found = (await this.listTournaments(tenantId)).find((item) => item.id === created.id);
+    // Только заведённый, а не весь список: турниров у клуба за годы — тысячи,
+    // а сетка заводит их по одному на каждое сохранение дня.
+    const [found] = await this.listTournaments(tenantId, { ids: [created.id] });
 
     if (!found) {
       throw new NotFoundException('Турнир не найден');
@@ -441,9 +448,10 @@ export class CatalogService {
 
   // --- Занятия -------------------------------------------------------------
 
-  async listTrainingSessions(tenantId: string): Promise<TrainingSession[]> {
+  async listTrainingSessions(tenantId: string, page?: Partial<EventPageQuery>): Promise<TrainingSession[]> {
     const sessions = await this.prisma.trainingSession.findMany({
-      where: { tenantId },
+      where: { tenantId, ...periodOf(page) },
+      ...pageOf(page),
       select: {
         id: true,
         trainingTypeId: true,
@@ -462,9 +470,8 @@ export class CatalogService {
           },
         },
       },
-      // Ближайшие сверху — как у турниров: администратор заводит занятие и тут
-      // же ставит его в сетку, а прошедшие нужны реже.
-      orderBy: { startsAt: 'desc' },
+      // Без страницы — поздние сверху, как было; со страницей — см. `pageOf`.
+      orderBy: { startsAt: orderOf(page) },
     });
 
     return sessions.map((session) => ({
@@ -671,4 +678,28 @@ function descriptionOf(value: string | null | undefined): string | null | undefi
   const trimmed = value?.trim() ?? '';
 
   return trimmed === '' ? null : trimmed;
+}
+
+/**
+ * Предстоящие или прошедшие — по окончанию: идущее занятие ещё предстоит, его
+ * отмечают и правят. Без `when` — всё, как до разбивки на страницы.
+ */
+function periodOf(page: Partial<EventPageQuery> | undefined): { endsAt?: { gte: Date } | { lt: Date } } {
+  if (!page?.when) return {};
+
+  const now = new Date();
+
+  return { endsAt: page.when === 'upcoming' ? { gte: now } : { lt: now } };
+}
+
+/** Предстоящие — ближайшие сверху, прошедшие — свежие сверху. */
+function orderOf(page: Partial<EventPageQuery> | undefined): 'asc' | 'desc' {
+  return page?.when === 'upcoming' ? 'asc' : 'desc';
+}
+
+/** Страница по 20, если размер не назван; без `when` — без ограничения. */
+function pageOf(page: Partial<EventPageQuery> | undefined): { take?: number; skip?: number } {
+  if (!page?.when) return {};
+
+  return { take: page.limit ?? 20, skip: page.offset ?? 0 };
 }

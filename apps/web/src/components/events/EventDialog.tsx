@@ -12,6 +12,8 @@ import { eventViewerOf, seatsLabel, useEventAction } from '@/lib/eventViewer';
 import { formatKopecks } from '@/lib/money';
 import { loginHref } from '@/lib/next';
 import { useSession } from '@/lib/useSession';
+import { ViewerTime } from '@/components/events/FeedEventCard';
+import { dateIn, timeIn } from '@/lib/zonedTime';
 
 /**
  * Окно мероприятия: когда, где, почём, о чём и кто уже записан.
@@ -94,12 +96,13 @@ export function EventDialog({
           <>
             <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
               <Fact label="Когда">
-                <span className="block first-letter:uppercase">{dayOf(event.startsAt)}</span>
+                <span className="block first-letter:uppercase">{dayOf(event.startsAt, event.timezone)}</span>
                 <span className="block font-display text-[1.0625rem]">
-                  {timeOf(event.startsAt)}
+                  {timeOf(event.startsAt, event.timezone)}
                   <span className="text-text-subtle"> – </span>
-                  {timeOf(event.endsAt)}
+                  {timeOf(event.endsAt, event.timezone)}
                 </span>
+                <ViewerTime startsAt={event.startsAt} endsAt={event.endsAt} timezone={event.timezone} />
               </Fact>
 
               <Fact label="Где">
@@ -319,17 +322,15 @@ function DetailSkeleton() {
 }
 
 /**
- * «четверг, 26 сентября». По часам браузера, как и строка списка (см. `When`):
- * человеку важно, во сколько выходить ЕМУ.
+ * «четверг, 26 сентября». По часам зала, как строка списка (см. `When`); время
+ * по часам смотрящего, если они другие, — строкой `ViewerTime` под ним.
  */
-function dayOf(instant: string): string {
-  return new Intl.DateTimeFormat('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }).format(
-    new Date(instant),
-  );
+function dayOf(instant: string, timezone: string): string {
+  return dateIn(instant, timezone, { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
-function timeOf(instant: string): string {
-  return new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(new Date(instant));
+function timeOf(instant: string, timezone: string): string {
+  return timeIn(instant, timezone);
 }
 
 /**

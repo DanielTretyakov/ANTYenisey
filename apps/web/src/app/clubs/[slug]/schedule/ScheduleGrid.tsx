@@ -1,23 +1,28 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ClubTable } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
 import { formatMinute } from '@/lib/bookingGrid';
 import {
+  cellBlocks,
   cellKey,
   GRID_END_MINUTE,
   GRID_START_MINUTE,
+  matchesBrush,
   personOf,
+  sameKind,
   SLOT_MINUTES,
   slotLabel,
   SLOTS_PER_DAY,
+  type CellBlock,
   type CellValue,
   type Cells,
+  type SlotRange,
 } from '@/lib/closureGrid';
 import { cn } from '@/lib/cn';
 import type { PersonColor } from '@/lib/personColor';
-import { PURPOSE_CELL, PURPOSE_LABEL, PURPOSE_MARK } from './SchedulePalette';
+import { PURPOSE_CELL, PURPOSE_CHIP, PURPOSE_LABEL, PURPOSE_MARK } from './SchedulePalette';
 
 /**
  * Таблица «время × столы» одной дорожки.
@@ -37,11 +42,35 @@ import { PURPOSE_CELL, PURPOSE_LABEL, PURPOSE_MARK } from './SchedulePalette';
  *
  * Ключ карты — `tableId|slot`, как у клеток расписания.
  */
-/** Промежуток, выделяемый протяжкой: клетки одного стола подряд. */
+/** Промежуток, выделяемый протяжкой: клетки одного стола подряд, `to` включительно. */
 interface Range {
   tableId: string;
   from: number;
   to: number;
+}
+
+/**
+ * Сколько строк под концом выбранного должно остаться, чтобы карточка
+ * встала ниже него. Меньше — встаёт над началом: у полуночи ей вниз некуда.
+ */
+const PANEL_ROWS_BELOW = 6;
+
+/**
+ * Штриховка окна тренировки без занятия — «стол закрыт, но записи нет».
+ *
+ * Не подписью: в узкой колонке подпись обрезается раньше, чем до неё доходит
+ * дело, и пометка «без записи» пропадала ровно там, где столов много.
+ */
+const NO_BOOKING_STRIPES =
+  'repeating-linear-gradient(135deg, transparent 0 7px, color-mix(in oklab, var(--text) 13%, transparent) 7px 9px)';
+
+/** Где лежат строки и столбцы — чтобы положить блок мероприятия поверх клеток. */
+interface Geometry {
+  /** Верх первой строки от верха сетки. */
+  top: number;
+  /** Высота строки. */
+  row: number;
+  columns: { left: number; width: number }[];
 }
 
 export interface BookedCell {
@@ -54,6 +83,7 @@ export interface BookedCell {
 export function ScheduleGrid({
   tables,
   lane,
+  day = false,
   cells,
   booked,
   nameOf,
@@ -62,11 +92,15 @@ export function ScheduleGrid({
   painting,
   brushValue,
   onPaint,
-  onRange,
+  onPick,
+  seat = null,
+  seatPanel,
   nowMinute = null,
 }: {
   tables: ClubTable[];
   lane: string;
+  /** Расписание даты: окна тренировок без занятия помечаются «без записи». */
+  day?: boolean;
   cells: Cells;
   /**
    * Брони этого дня. Сетка их только показывает: бронь — это чужие деньги и
@@ -82,13 +116,21 @@ export function ScheduleGrid({
   brushValue: () => CellValue | null;
   onPaint: (tableId: string, slot: number, value: CellValue | null) => void;
   /**
-   * Протяжка выделяет промежуток вместо закрашивания клеток.
+   * Протяжка или щелчок выделяет промежуток вместо закрашивания клеток.
    *
    * Так работает кисть аренды с выбранным клиентом: закрашивать нечего —
    * из промежутка получится бронь. Пока проп не передан, сетка красит как
-   * обычно.
+   * обычно. Промежуток — `[from, to)`, сверху вниз, как бы ни тянули.
    */
-  onRange?: (tableId: string, startSlot: number, endSlot: number) => void;
+  onPick?: (pick: SlotRange) => void;
+  /** Выбранное под бронь: подсвечено, пока администратор не решил. */
+  seat?: SlotRange | null;
+  /**
+   * Карточка решения по выбранному — рядом с ним, а не под сеткой (решение
+   * от 05.10.2026: подтверждение аренды уезжало на экран вниз, и до него
+   * приходилось листать).
+   */
+  seatPanel?: ReactNode;
   /**
    * Который сейчас час в зале — только на сегодняшнем дне. `null` — линии нет:
    * в шаблоне недели «сегодня» не существует, а у вчерашнего дня нет «сейчас».
@@ -96,7 +138,9 @@ export function ScheduleGrid({
   nowMinute?: number | null;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
+  const wrapper = useRef<HTMLDivElement>(null);
   const firstRow = useRef<HTMLTableRowElement>(null);
+  const headerCells = useRef<(HTMLTableCellElement | null)[]>([]);
   /** Что выделено протяжкой — только в режиме промежутка. */
   const [range, setRange] = useState<Range | null>(null);
   /**
@@ -146,10 +190,63 @@ export function ScheduleGrid({
     return () => observer.disconnect();
   }, [nowMinute, showLine, tables.length]);
 
+  // --- Мероприятия блоками -------------------------------------------------
+  //
+  // Занятие и турнир рисуются прямоугольником поверх своих клеток (решение от
+  // 05.10.2026): группа на столах 1 и 2 — один блок с одной подписью. Блок не
+  // ловит указатель — кисть по-прежнему красит и стирает клетки под ним, а
+  // склейку пересчитывает `cellBlocks` после каждого мазка.
+  const blocks = useMemo(() => cellBlocks(cells, lane, tables.map((table) => table.id)), [cells, lane, tables]);
+  const covered = useMemo(() => {
+    const keys = new Set<string>();
+
+    for (const block of blocks) {
+      for (let index = block.firstTable; index <= block.lastTable; index += 1) {
+        for (let slot = block.from; slot < block.to; slot += 1) keys.add(`${tables[index]!.id}|${slot}`);
+      }
+    }
+
+    return keys;
+  }, [blocks, tables]);
+
+  const [geometry, setGeometry] = useState<Geometry | null>(null);
+
+  // Положение измеряется, а не считается из классов — как у линии «сейчас».
+  useLayoutEffect(() => {
+    const measure = (): void => {
+      const box = wrapper.current?.getBoundingClientRect();
+      const row = firstRow.current?.getBoundingClientRect();
+
+      if (!box || !row) {
+        setGeometry(null);
+        return;
+      }
+
+      setGeometry({
+        top: row.top - box.top,
+        row: row.height,
+        columns: tables.map((_, index) => {
+          const cell = headerCells.current[index]?.getBoundingClientRect();
+
+          return cell ? { left: cell.left - box.left, width: cell.width } : { left: 0, width: 0 };
+        }),
+      });
+    };
+
+    measure();
+
+    const observer = new ResizeObserver(measure);
+
+    if (wrapper.current) observer.observe(wrapper.current);
+
+    return () => observer.disconnect();
+  }, [tables]);
+
   // Промежуток отдаётся наверх, когда кнопку отпустили, — где угодно, хоть
   // за пределами таблицы: иначе выделение «залипало» бы до следующего клика.
+  // Протянутое снизу вверх разворачивается: начало — всегда верхняя клетка.
   useEffect(() => {
-    if (!onRange) return;
+    if (!onPick) return;
 
     const done = (): void => {
       const current = rangeRef.current;
@@ -157,7 +254,11 @@ export function ScheduleGrid({
       if (!current) return;
 
       select(null);
-      onRange(current.tableId, current.from, current.to + 1);
+      onPick({
+        tableId: current.tableId,
+        from: Math.min(current.from, current.to),
+        to: Math.max(current.from, current.to) + 1,
+      });
     };
 
     window.addEventListener('pointerup', done);
@@ -167,7 +268,20 @@ export function ScheduleGrid({
       window.removeEventListener('pointerup', done);
       window.removeEventListener('pointercancel', done);
     };
-  }, [onRange]);
+  }, [onPick]);
+
+  // Карточка решения сама показывается целиком: щелчок у нижнего края окна
+  // иначе открыл бы её за краем, и пришлось бы снова листать.
+  const panel = useRef<HTMLDivElement>(null);
+  const seatKey = seat ? `${seat.tableId}|${seat.from}|${seat.to}` : null;
+
+  useEffect(() => {
+    if (seatKey) panel.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [seatKey]);
+
+  const seatIndex = seat ? tables.findIndex((table) => table.id === seat.tableId) : -1;
+  const panelBelow = seat !== null && seat.to <= SLOTS_PER_DAY - PANEL_ROWS_BELOW;
+  const panelSlot = seat ? (panelBelow ? seat.to - 1 : seat.from) : -1;
 
   // На сегодняшнем дне сетка один раз прокручивается к текущему часу: иначе
   // администратор каждый раз открывает её на шести утра и крутит до вечера.
@@ -190,6 +304,7 @@ export function ScheduleGrid({
       className="max-h-[calc(100dvh-19rem)] min-h-[24rem] touch-pan-y overflow-auto rounded-control border border-border bg-surface-raised"
     >
       <div
+        ref={wrapper}
         className="relative w-full"
         // Нижняя граница ширины — по числу столов: при двенадцати столах сетка
         // уходит вбок и прокручивается, а не сжимает клетку до нечитаемой.
@@ -209,9 +324,12 @@ export function ScheduleGrid({
               <th className="sticky top-0 left-0 z-30 w-[4.5rem] border-r border-b border-border bg-surface-raised px-2.5 py-2.5 text-left font-medium text-text-subtle">
                 Время
               </th>
-              {tables.map((table) => (
+              {tables.map((table, index) => (
                 <th
                   key={table.id}
+                  ref={(cell) => {
+                    headerCells.current[index] = cell;
+                  }}
                   // Левая граница у первого стола снята: её рисует закреплённый
                   // столбец времени, иначе между ними легла бы двойная линия.
                   className="sticky top-0 z-20 min-w-[7rem] border-b border-l border-border bg-surface-raised px-2.5 py-2.5 font-medium text-text-muted [&:nth-child(2)]:border-l-0"
@@ -239,13 +357,15 @@ export function ScheduleGrid({
                   {slot % 2 === 0 ? slotLabel(slot) : <span className="text-[0.75rem]">{slotLabel(slot)}</span>}
                 </th>
 
-                {tables.map((table) => (
+                {tables.map((table, index) => (
                   <GridCell
                     key={table.id}
                     table={table}
                     slot={slot}
                     lane={lane}
+                    day={day}
                     cells={cells}
+                    inBlock={covered.has(`${table.id}|${slot}`)}
                     booking={booked?.get(`${table.id}|${slot}`)}
                     nameOf={nameOf}
                     captionOf={captionOf}
@@ -253,12 +373,17 @@ export function ScheduleGrid({
                     painting={painting}
                     brushValue={brushValue}
                     onPaint={onPaint}
-                    selecting={onRange !== undefined}
+                    selecting={onPick !== undefined}
                     selected={
-                      range !== null &&
-                      range.tableId === table.id &&
-                      slot >= range.from &&
-                      slot <= range.to
+                      (range !== null &&
+                        range.tableId === table.id &&
+                        slot >= Math.min(range.from, range.to) &&
+                        slot <= Math.max(range.from, range.to)) ||
+                      (range === null &&
+                        seat !== null &&
+                        seat.tableId === table.id &&
+                        slot >= seat.from &&
+                        slot < seat.to)
                     }
                     onSelectStart={() => select({ tableId: table.id, from: slot, to: slot })}
                     onSelectTo={() => {
@@ -268,12 +393,42 @@ export function ScheduleGrid({
                         select({ ...current, to: slot });
                       }
                     }}
+                    panel={
+                      seatPanel && index === seatIndex && slot === panelSlot ? (
+                        <div
+                          ref={panel}
+                          className={cn(
+                            'absolute z-[32] w-[min(24rem,calc(100vw-3rem))]',
+                            panelBelow ? 'top-full mt-1.5' : 'bottom-full mb-1.5',
+                            // У правых столов карточка открывается влево: иначе
+                            // она уходила бы за край сетки.
+                            index < tables.length / 2 ? 'left-0' : 'right-0',
+                          )}
+                        >
+                          {seatPanel}
+                        </div>
+                      ) : null
+                    }
                   />
                 ))}
               </tr>
             ))}
           </tbody>
         </table>
+
+        {geometry &&
+          blocks.map((block) => (
+            <EventBlock
+              key={`${block.key}|${block.firstTable}|${block.from}`}
+              block={block}
+              geometry={geometry}
+              day={day}
+              tables={tables}
+              nameOf={nameOf}
+              captionOf={captionOf}
+              colors={colors}
+            />
+          ))}
 
         {lineTop !== null && nowMinute !== null && (
           <>
@@ -312,7 +467,9 @@ function GridCell({
   table,
   slot,
   lane,
+  day,
   cells,
+  inBlock,
   booking,
   nameOf,
   captionOf,
@@ -324,11 +481,15 @@ function GridCell({
   selected,
   onSelectStart,
   onSelectTo,
+  panel,
 }: {
   table: ClubTable;
   slot: number;
   lane: string;
+  day: boolean;
   cells: Cells;
+  /** Клетка под блоком мероприятия: подпись и буква — у блока, не у клетки. */
+  inBlock: boolean;
   booking: BookedCell | undefined;
   nameOf: (id: string) => string;
   captionOf: (value: CellValue) => string | null;
@@ -340,6 +501,8 @@ function GridCell({
   selected: boolean;
   onSelectStart: () => void;
   onSelectTo: () => void;
+  /** Карточка решения по выбранному под бронь — висит у этой клетки. */
+  panel: ReactNode;
 }) {
   const value = cells.get(cellKey(lane, table.id, slot));
   const purposeLabel = value ? PURPOSE_LABEL.get(value.purpose) : 'свободно';
@@ -349,13 +512,20 @@ function GridCell({
   const color = personId ? colors.get(personId) : undefined;
 
   // Подпись ставится только там, где окно начинается: иначе четырёхчасовая
-  // тренировка повторила бы фамилию восемь раз подряд.
+  // тренировка повторила бы фамилию восемь раз подряд. Сравнивается всё, что
+  // подписано, — раньше только назначение и тренер, и «Детская» встык с
+  // «Первой подачей» того же тренера читалась одним окном.
   const above = cells.get(cellKey(lane, table.id, slot - 1));
   const startsHere =
     value !== undefined &&
-    (above === undefined || above.purpose !== value.purpose || above.coachId !== value.coachId);
+    (above === undefined ||
+      !sameKind(above, value) ||
+      (day && (above.trainingSessionId === null) !== (value.trainingSessionId === null)));
 
   const needsCoach = value?.purpose === 'TRAINING' && !personId;
+  // Окно тренировки без занятия закрывает стол, но записаться на него нельзя:
+  // так выглядит день, пришедший из шаблона. Администратор должен это видеть.
+  const closedForBooking = day && value?.purpose === 'TRAINING' && value.trainingSessionId === null;
 
   // Цвет человека, если он закреплён; иначе — назначения. Ставится стилем, а не
   // классом: краска вычисляется из палитры и поверхности через color-mix.
@@ -366,6 +536,7 @@ function GridCell({
       className={cn(
         'border-b border-l border-border p-0 first-of-type:border-l-0',
         slot % 2 === 1 && 'border-b-border-strong',
+        panel !== null && 'relative',
       )}
     >
       <button
@@ -376,12 +547,19 @@ function GridCell({
         aria-label={
           booking
             ? `${table.label}, ${slotLabel(slot)} — бронь, ${booking.person}`
-            : `${table.label}, ${slotLabel(slot)} — ${[purposeLabel, caption, person].filter(Boolean).join(', ')}`
+            : `${table.label}, ${slotLabel(slot)} — ${[purposeLabel, caption, person, closedForBooking && 'без записи'].filter(Boolean).join(', ')}`
         }
         title={
           booking
             ? `Бронь · ${booking.person} — отменить или перенести можно на экране смены`
-            : [purposeLabel, caption, person].filter(Boolean).join(' · ')
+            : [
+                purposeLabel,
+                caption,
+                person,
+                closedForBooking && 'без записи — закрасьте кистью тренировки, чтобы открыть запись',
+              ]
+                .filter(Boolean)
+                .join(' · ')
         }
         onPointerDown={(event) => {
           // Захват мешает pointerenter на соседних клетках: без снятия все
@@ -397,11 +575,7 @@ function GridCell({
           }
 
           const next = brushValue();
-          const same =
-            value !== undefined &&
-            next !== null &&
-            value.purpose === next.purpose &&
-            value.coachId === next.coachId;
+          const same = value !== undefined && next !== null && matchesBrush(value, next);
 
           painting.current = same ? null : next;
           onPaint(table.id, slot, painting.current);
@@ -417,7 +591,11 @@ function GridCell({
             onPaint(table.id, slot, painting.current);
           }
         }}
-        style={background && !booking ? { background } : undefined}
+        style={
+          background && !booking
+            ? { backgroundColor: background, backgroundImage: closedForBooking ? NO_BOOKING_STRIPES : undefined }
+            : undefined
+        }
         className={cn(
           'relative flex h-9 w-full items-center overflow-hidden pr-1.5 pl-7 text-left text-[0.8125rem] leading-none whitespace-nowrap transition-colors',
           // Подпись берёт обычный цвет текста: заливка по построению светлая на
@@ -442,7 +620,7 @@ function GridCell({
 
         {booking?.startsHere && <span className="truncate">{shortName(booking.person)}</span>}
 
-        {!booking && value && (
+        {!booking && value && !inBlock && (
           // Буква назначения, а не вторая цветная полоса: цвет клетки занят
           // человеком, и второй цвет рядом с ним местами сливается.
           <span
@@ -454,25 +632,112 @@ function GridCell({
           </span>
         )}
 
-        {!booking && startsHere && (caption || person) && (
+        {!booking && !inBlock && startsHere && (caption || person) && (
           // Сначала чем занято, потом кто ведёт: администратор ищет в сетке
           // занятие, а тренера уже уточняет.
           <span className="truncate">
             {caption}
             {caption && person ? ' · ' : ''}
             {person ? shortName(person) : ''}
+            {closedForBooking && <span className="text-text-muted"> · без записи</span>}
           </span>
         )}
-        {!booking && startsHere && !caption && !person && value && !needsCoach && (
+        {!booking && !inBlock && startsHere && !caption && !person && value && !needsCoach && (
           <span className="text-text-muted">{purposeLabel}</span>
         )}
-        {!booking && startsHere && needsCoach && (
+        {!booking && !inBlock && startsHere && needsCoach && (
           // Тренировка без тренера не сохранится: сервер её отклонит. Лучше
           // сказать об этом в клетке, чем сообщением после «Сохранить».
           <span className="text-warning">нужен тренер</span>
         )}
       </button>
+
+      {panel}
     </td>
+  );
+}
+
+/**
+ * Занятие или турнир — одним прямоугольником поверх своих клеток.
+ *
+ * Вид — как у блока в сетке брони: заливка, полоса цвета слева, название
+ * шрифтом платформы. Цвет — тренера, если он есть, иначе назначения, как у
+ * клеток. Указатель блок пропускает насквозь: кисть работает по клеткам под
+ * ним, а подсказку с полным составом показывает сама клетка.
+ */
+function EventBlock({
+  block,
+  geometry,
+  day,
+  tables,
+  nameOf,
+  captionOf,
+  colors,
+}: {
+  block: CellBlock;
+  geometry: Geometry;
+  day: boolean;
+  tables: ClubTable[];
+  nameOf: (id: string) => string;
+  captionOf: (value: CellValue) => string | null;
+  colors: Map<string, PersonColor>;
+}) {
+  const { value } = block;
+  const first = geometry.columns[block.firstTable];
+  const last = geometry.columns[block.lastTable];
+
+  if (!first || !last) return null;
+
+  const personId = personOf(value);
+  const color = personId ? colors.get(personId) : undefined;
+  const caption = captionOf(value) ?? PURPOSE_LABEL.get(value.purpose) ?? '';
+  const coach = personId ? shortName(nameOf(personId)) : null;
+  const closedForBooking = day && value.purpose === 'TRAINING' && value.trainingSessionId === null;
+  const needsCoach = value.purpose === 'TRAINING' && !personId;
+  const time = `${slotLabel(block.from)}–${block.to < SLOTS_PER_DAY ? slotLabel(block.to) : '24:00'}`;
+  const tall = block.to - block.from >= 2;
+  const tablesLabel =
+    block.firstTable === block.lastTable
+      ? null
+      : `${tables[block.firstTable]!.label} — ${tables[block.lastTable]!.label}`;
+
+  // Блок чуть меньше своих клеток: линии сетки вокруг него остаются видны.
+  const inset = 2;
+
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute z-[5] flex flex-col overflow-hidden rounded-[6px] border-l-[3px] px-2 py-1 text-left leading-snug"
+      style={{
+        top: geometry.top + block.from * geometry.row + inset,
+        height: (block.to - block.from) * geometry.row - inset * 2,
+        left: first.left + inset,
+        width: last.left + last.width - first.left - inset * 2,
+        backgroundColor: color ? color.cell : PURPOSE_CELL.get(value.purpose),
+        backgroundImage: closedForBooking ? NO_BOOKING_STRIPES : undefined,
+        borderLeftColor: color ? color.dot : PURPOSE_CHIP.get(value.purpose),
+      }}
+    >
+      <span className="truncate font-display text-[0.8125rem] text-text">
+        <span className="mr-1.5 text-[0.75rem] font-medium text-text-muted">{PURPOSE_MARK.get(value.purpose)}</span>
+        {caption}
+        {/* В получасовом блоке второй строки нет — всё встаёт в первую. */}
+        {!tall && (coach || closedForBooking) && (
+          <span className="font-sans text-[0.75rem] text-text-muted">
+            {coach ? ` · ${coach}` : ''}
+            {closedForBooking ? ' · без записи' : ''}
+          </span>
+        )}
+        {!tall && needsCoach && <span className="font-sans text-[0.75rem] text-warning"> · нужен тренер</span>}
+      </span>
+      {tall && (
+        <span className="truncate text-[0.75rem] text-text-muted">
+          {[coach, time, tablesLabel].filter(Boolean).join(' · ')}
+        </span>
+      )}
+      {tall && needsCoach && <span className="truncate text-[0.75rem] text-warning">нужен тренер</span>}
+      {tall && closedForBooking && <span className="truncate text-[0.75rem] text-text-muted">без записи</span>}
+    </div>
   );
 }
 
@@ -480,28 +745,43 @@ function GridCell({
 export function ScheduleLegend({
   cells,
   lane,
+  day = false,
   nameOf,
   colors,
 }: {
   cells: Cells;
   lane: string;
+  /** Расписание даты: объяснить штриховку, если она в сетке есть. */
+  day?: boolean;
   nameOf: (id: string) => string;
   colors: Map<string, PersonColor>;
 }) {
   const ids = new Set<string>();
+  let striped = false;
 
   for (const [key, value] of cells) {
     if (!key.startsWith(`${lane}|`)) continue;
     const person = personOf(value);
     if (person) ids.add(person);
+    if (day && value.purpose === 'TRAINING' && value.trainingSessionId === null) striped = true;
   }
 
-  if (ids.size === 0) {
+  if (ids.size === 0 && !striped) {
     return null;
   }
 
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.8125rem] text-text-muted">
+      {striped && (
+        <span className="flex items-center gap-1.5">
+          <span
+            className="h-3 w-5 rounded-sm border border-border"
+            style={{ backgroundImage: NO_BOOKING_STRIPES }}
+            aria-hidden="true"
+          />
+          Тренировка без записи: стол закрыт, записаться нельзя — закрасьте кистью тренировки, чтобы открыть запись
+        </span>
+      )}
       {[...ids]
         .map((id) => ({ id, name: nameOf(id) }))
         .sort((a, b) => a.name.localeCompare(b.name, 'ru'))

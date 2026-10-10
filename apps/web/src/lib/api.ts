@@ -116,6 +116,7 @@ import type {
   StaffSchedule,
   DeskAccess,
   Role,
+  EventPageQuery,
   Tournament,
   TournamentRequest,
   TournamentType,
@@ -818,7 +819,9 @@ export function clubApi(slug: string = TENANT_SLUG) {
     deleteTournamentType: (id: string): Promise<void> =>
       authorized(`${club}/tournament-types/${id}`, { method: 'DELETE' }),
 
-    tournaments: (): Promise<Tournament[]> => authorized(`${club}/tournaments`),
+    /** Страница турниров: предстоящие или прошедшие (без страницы — все, как раньше). */
+    tournaments: (page?: EventPageQuery): Promise<Tournament[]> =>
+      authorized(`${club}/tournaments${eventPage(page)}`),
 
     createTournament: (payload: TournamentRequest): Promise<Tournament> =>
       authorized(`${club}/tournaments`, json('POST', payload)),
@@ -826,7 +829,8 @@ export function clubApi(slug: string = TENANT_SLUG) {
     deleteTournament: (id: string): Promise<void> =>
       authorized(`${club}/tournaments/${id}`, { method: 'DELETE' }),
 
-    trainingSessions: (): Promise<TrainingSession[]> => authorized(`${club}/training-sessions`),
+    trainingSessions: (page?: EventPageQuery): Promise<TrainingSession[]> =>
+      authorized(`${club}/training-sessions${eventPage(page)}`),
 
     createTrainingSession: (payload: TrainingSessionRequest): Promise<TrainingSession> =>
       authorized(`${club}/training-sessions`, json('POST', payload)),
@@ -891,7 +895,9 @@ export function clubApi(slug: string = TENANT_SLUG) {
     },
 
     /** Что есть в клубе: виды занятий и турниров с ближайшим проведением. */
-    catalog: (): Promise<ClubCatalogItem[]> => optionallyAuthorized(`${club}/catalog`),
+    /** `halls` — залы страницы клуба через запятую: «Ближайшее» у вида — в них. */
+    catalog: (halls?: string): Promise<ClubCatalogItem[]> =>
+      optionallyAuthorized(`${club}/catalog${halls ? `?halls=${encodeURIComponent(halls)}` : ''}`),
 
     /**
      * Одно мероприятие для окна подробностей: описание, зал, тренер и
@@ -1192,4 +1198,9 @@ export interface DeskBookingsQuery {
   from?: string;
   to?: string;
   limit?: number;
+}
+
+/** Параметры страницы проведений для адреса; без страницы — пусто. */
+function eventPage(page: EventPageQuery | undefined): string {
+  return page ? `?${new URLSearchParams({ when: page.when, limit: String(page.limit), offset: String(page.offset) })}` : '';
 }

@@ -2,12 +2,17 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { ClosureSlot } from '@yenisey/types';
 import {
+  cellBlocks,
   cellKey,
   cellsToSlots,
   copyLane,
   countOnLane,
   GRID_START_MINUTE,
-  markTouched,
+  markForOpening,
+  matchesBrush,
+  NEW_SESSION,
+  planDayEvents,
+  seatAfterPick,
   nowMinuteIn,
   sameCells,
   sameValue,
@@ -432,49 +437,288 @@ describe('nowMinuteIn', () => {
   });
 });
 
-describe('markTouched', () => {
-  /** Окно 06:00–07:00 на первом столе: клетки 0 и 1. */
-  const window = slot({ startMinute: GRID_START_MINUTE, endMinute: GRID_START_MINUTE + 60 });
-  const half = (tableId: string) =>
-    slot({ tableId, startMinute: GRID_START_MINUTE, endMinute: GRID_START_MINUTE + 30 });
+describe('matchesBrush', () => {
+  const brush = value({ trainingSessionId: null });
 
-  it('нетронутое окно не метится', () => {
-    const same = cells([
-      [cellKey('day', 't1', 0), value()],
-      [cellKey('day', 't1', 1), value()],
-    ]);
-
-    assert.equal(markTouched([window], same, same, oneLane)[0]!.touched, false);
+  it('совпало всё, что задаёт кисть, — стирает', () => {
+    assert.equal(matchesBrush(value(), brush), true);
   });
 
-  /**
-   * Ровно то, ради чего функция нужна: день, отвязанный от шаблона, полон окон
-   * с типом тренировки и без занятия. Заводить по ним занятия нельзя —
-   * администратор их не размечал, он их просто увидел.
-   */
-  it('окно из шаблона остаётся нетронутым при правке соседнего стола', () => {
-    const before = cells([[cellKey('day', 't1', 0), value()]]);
-    const after = cells([
-      [cellKey('day', 't1', 0), value()],
-      [cellKey('day', 't2', 0), value()],
-    ]);
-
-    const marked = markTouched([half('t1'), half('t2')], after, before, oneLane);
-
-    assert.equal(marked[0]!.touched, false);
-    assert.equal(marked[1]!.touched, true);
+  it('другой тип занятия того же тренера — перекраска, а не стирание', () => {
+    assert.equal(matchesBrush(value({ trainingTypeId: 'type-2' }), brush), false);
   });
 
-  it('правка одной клетки метит всё окно', () => {
-    const before = cells([
-      [cellKey('day', 't1', 0), value()],
-      [cellKey('day', 't1', 1), value()],
-    ]);
-    const after = cells([
-      [cellKey('day', 't1', 0), value()],
-      [cellKey('day', 't1', 1), value({ coachId: 'coach-2' })],
-    ]);
+  it('другой тип турнира — перекраска', () => {
+    const cup = value({ purpose: 'TOURNAMENT', coachId: null, trainingTypeId: null, tournamentTypeId: 'cup-1' });
 
-    assert.equal(markTouched([window], after, before, oneLane)[0]!.touched, true);
+    assert.equal(matchesBrush(cup, { ...cup, tournamentTypeId: 'cup-2' }), false);
+    // Сохранённое окно дня несёт и проведение, и его тип — для кисти это тот же турнир.
+    assert.equal(matchesBrush({ ...cup, tournamentId: 'x' }, cup), true);
+  });
+
+  it('кисть дня перекрашивает окно тренировки без занятия — так открывают запись', () => {
+    const dayBrush = value({ trainingSessionId: NEW_SESSION });
+
+    assert.equal(matchesBrush(value({ trainingSessionId: null }), dayBrush), false);
+    assert.equal(matchesBrush(value({ trainingSessionId: 's1' }), dayBrush), true);
+    assert.equal(matchesBrush(value({ trainingSessionId: NEW_SESSION }), dayBrush), true);
+  });
+});
+
+describe('planDayEvents', () => {
+  const at = (hour: number) => hour * 60;
+  const training = (overrides: Partial<ClosureSlot> = {}) =>
+    slot({ trainingSessionId: NEW_SESSION, startMinute: at(18), endMinute: at(19), ...overrides });
+  const cup = (overrides: Partial<ClosureSlot> = {}) =>
+    slot({
+      purpose: 'TOURNAMENT',
+      coachId: null,
+      trainingTypeId: null,
+      tournamentTypeId: 'cup-1',
+      startMinute: at(10),
+      endMinute: at(12),
+      ...overrides,
+    });
+
+  it('группа на четырёх столах — одно занятие', () => {
+    const plan = planDayEvents(['t1', 't2', 't3', 't4'].map((tableId) => training({ tableId })), []);
+
+    assert.deepEqual(plan.sessions, [
+      { trainingTypeId: 'type-1', coachId: 'coach-1', startMinute: at(18), endMinute: at(19) },
+    ]);
+    assert.ok(plan.slots.every((item) => JSON.stringify(item.session) === JSON.stringify({ create: 0 })));
+  });
+
+  it('утренняя и вечерняя группа одного тренера — два занятия, а не одно на весь день', () => {
+    const plan = planDayEvents(
+      [training({ startMinute: at(10), endMinute: at(11) }), training({ startMinute: at(18), endMinute: at(19) })],
+      [],
+    );
+
+    assert.equal(plan.sessions.length, 2);
+    assert.deepEqual(plan.sessions.map((session) => session.startMinute), [at(10), at(18)]);
+  });
+
+  it('встык во времени — одна группа, даже на разных столах', () => {
+    const plan = planDayEvents(
+      [training({ tableId: 't1' }), training({ tableId: 't2', startMinute: at(19), endMinute: at(20) })],
+      [],
+    );
+
+    assert.deepEqual(plan.sessions.map(({ startMinute, endMinute }) => [startMinute, endMinute]), [
+      [at(18), at(20)],
+    ]);
+  });
+
+  it('разные тренеры — разные занятия', () => {
+    const plan = planDayEvents([training(), training({ tableId: 't2', coachId: 'coach-2' })], []);
+
+    assert.equal(plan.sessions.length, 2);
+  });
+
+  it('продление заведённой группы идёт к ней, а не заводит вторую', () => {
+    const existing = training({ trainingSessionId: 's1' });
+    const extension = training({ startMinute: at(19), endMinute: at(19) + 30 });
+    const plan = planDayEvents([existing, extension], []);
+
+    assert.equal(plan.sessions.length, 0);
+    assert.deepEqual(plan.slots[1]!.session, { id: 's1' });
+  });
+
+  it('группа, перенесённая на другие столы в то же время, остаётся своим занятием', () => {
+    const before = training({ tableId: 't1', trainingSessionId: 's1' });
+    const moved = training({ tableId: 't5' });
+    const plan = planDayEvents([moved], [before]);
+
+    assert.deepEqual(plan.slots[0]!.session, { id: 's1' });
+  });
+
+  it('окна из шаблона без метки занятия не заводят', () => {
+    const plan = planDayEvents([training({ trainingSessionId: null })], []);
+
+    assert.equal(plan.sessions.length, 0);
+    assert.equal(plan.slots[0]!.session, null);
+  });
+
+  it('метка без тренера остаётся без занятия — откажет сервер с причиной', () => {
+    const plan = planDayEvents([training({ coachId: null })], []);
+
+    assert.equal(plan.sessions.length, 0);
+    assert.equal(plan.slots[0]!.session, null);
+  });
+
+  it('турнир — один на тип, границы — по всем его окнам', () => {
+    const plan = planDayEvents(
+      [cup({ tableId: 't1' }), cup({ tableId: 't2', startMinute: at(11), endMinute: at(14) })],
+      [],
+    );
+
+    assert.deepEqual(plan.tournaments, [{ tournamentTypeId: 'cup-1', startMinute: at(10), endMinute: at(14) }]);
+    assert.ok(plan.slots.every((item) => JSON.stringify(item.tournament) === JSON.stringify({ create: 0 })));
+  });
+
+  it('дорисованный турнир того же типа идёт к уже заведённому, а не заводит второй', () => {
+    const plan = planDayEvents([cup({ tournamentId: 'x' }), cup({ tableId: 't2', tournamentId: null })], []);
+
+    assert.equal(plan.tournaments.length, 0);
+    assert.deepEqual(plan.slots[1]!.tournament, { id: 'x' });
+  });
+
+  it('стёртый и нарисованный заново турнир остаётся тем же проведением', () => {
+    const plan = planDayEvents([cup({ tableId: 't3' })], [cup({ tournamentId: 'x' })]);
+
+    assert.deepEqual(plan.slots[0]!.tournament, { id: 'x' });
+  });
+
+  it('у аренды мероприятий нет', () => {
+    const plan = planDayEvents([slot({ purpose: 'RENT', coachId: null, trainingTypeId: null })], []);
+
+    assert.deepEqual(plan.slots[0], { slot: plan.slots[0]!.slot, tournament: null, session: null });
+  });
+});
+
+describe('seatAfterPick', () => {
+  const free = () => false;
+  const pick = (from: number, to = from + 1, tableId = 't1') => ({ tableId, from, to });
+
+  it('щелчок — минимальная бронь от клетки', () => {
+    assert.deepEqual(seatAfterPick(null, pick(4), 2, free), pick(4, 6));
+  });
+
+  it('щелчок ниже на том же столе — конец отрезка там', () => {
+    assert.deepEqual(seatAfterPick(pick(4, 6), pick(8), 2, free), pick(4, 9));
+    // И укоротить можно тем же щелчком.
+    assert.deepEqual(seatAfterPick(pick(4, 9), pick(5), 2, free), pick(4, 6));
+  });
+
+  it('щелчок по началу снимает выбор', () => {
+    assert.equal(seatAfterPick(pick(4, 6), pick(4), 2, free), null);
+  });
+
+  it('щелчок выше начала или на другом столе — новый выбор', () => {
+    assert.deepEqual(seatAfterPick(pick(4, 6), pick(2), 2, free), pick(2, 4));
+    assert.deepEqual(seatAfterPick(pick(4, 6), pick(8, 9, 't2'), 2, free), pick(8, 10, 't2'));
+  });
+
+  it('протяжка — ровно протянутое', () => {
+    assert.deepEqual(seatAfterPick(pick(1, 2), pick(10, 15), 2, free), pick(10, 15));
+  });
+
+  it('обрезается на чужой брони и не начинается на ней', () => {
+    const busy = (_table: string, slot: number) => slot === 7;
+
+    assert.deepEqual(seatAfterPick(null, pick(4, 10), 2, busy), pick(4, 7));
+    assert.equal(seatAfterPick(null, pick(7), 2, busy), null);
+  });
+
+  it('не выходит за полночь', () => {
+    assert.deepEqual(seatAfterPick(null, pick(SLOTS_PER_DAY - 1), 2, free), pick(SLOTS_PER_DAY - 1, SLOTS_PER_DAY));
+  });
+});
+
+describe('cellBlocks', () => {
+  const lane = 'day';
+  const fill = (entries: [string, number, number, CellValue][]): Cells => {
+    const result: Cells = new Map();
+
+    for (const [tableId, from, to, cell] of entries) {
+      for (let at = from; at < to; at += 1) result.set(cellKey(lane, tableId, at), cell);
+    }
+
+    return result;
+  };
+  const group = value({ trainingSessionId: 's1' });
+  const shape = (blocks: ReturnType<typeof cellBlocks>) =>
+    blocks.map(({ firstTable, lastTable, from, to }) => [firstTable, lastTable, from, to]);
+
+  it('одно занятие на столах 1 и 2 в одно время — один блок', () => {
+    const blocks = cellBlocks(fill([['t1', 24, 26, group], ['t2', 24, 26, group]]), lane, ['t1', 't2', 't3']);
+
+    assert.deepEqual(shape(blocks), [[0, 1, 24, 26]]);
+  });
+
+  it('разное время на соседних столах — разные блоки', () => {
+    const blocks = cellBlocks(fill([['t1', 24, 26, group], ['t2', 24, 27, group]]), lane, ['t1', 't2']);
+
+    assert.deepEqual(shape(blocks), [[0, 0, 24, 26], [1, 1, 24, 27]]);
+  });
+
+  it('столы не подряд не склеиваются', () => {
+    const blocks = cellBlocks(fill([['t1', 24, 26, group], ['t3', 24, 26, group]]), lane, ['t1', 't2', 't3']);
+
+    assert.deepEqual(shape(blocks), [[0, 0, 24, 26], [2, 2, 24, 26]]);
+  });
+
+  it('разные занятия рядом — разные блоки', () => {
+    const other = value({ trainingSessionId: 's2' });
+    const blocks = cellBlocks(fill([['t1', 24, 26, group], ['t2', 24, 26, other]]), lane, ['t1', 't2']);
+
+    assert.equal(blocks.length, 2);
+  });
+
+  it('окна шаблона склеиваются по виду, типу и тренеру', () => {
+    const template = value({ trainingSessionId: null });
+    const blocks = cellBlocks(
+      fill([['t1', 20, 22, template], ['t2', 20, 22, template], ['t3', 20, 22, value({ coachId: 'coach-2' })]]),
+      lane,
+      ['t1', 't2', 't3'],
+    );
+
+    assert.deepEqual(shape(blocks), [[0, 1, 20, 22], [2, 2, 20, 22]]);
+  });
+
+  it('турнир склеивается по проведению', () => {
+    const cup = value({ purpose: 'TOURNAMENT', coachId: null, trainingTypeId: null, tournamentId: 'x', tournamentTypeId: 'c' });
+    const blocks = cellBlocks(fill([['t1', 8, 12, cup], ['t2', 8, 12, cup]]), lane, ['t1', 't2']);
+
+    assert.deepEqual(shape(blocks), [[0, 1, 8, 12]]);
+  });
+
+  it('аренда и робот блоками не становятся', () => {
+    const rent = value({ purpose: 'RENT', coachId: null, trainingTypeId: null });
+
+    assert.equal(cellBlocks(fill([['t1', 8, 12, rent], ['t2', 8, 12, rent]]), lane, ['t1', 't2']).length, 0);
+  });
+
+  it('несохранённое продление — отдельным блоком до сохранения', () => {
+    const extension = value({ trainingSessionId: NEW_SESSION });
+    const blocks = cellBlocks(fill([['t1', 24, 26, group], ['t1', 26, 27, extension]]), lane, ['t1']);
+
+    assert.deepEqual(shape(blocks), [[0, 0, 24, 26], [0, 0, 26, 27]]);
+  });
+});
+
+describe('markForOpening', () => {
+  const usable = { trainingTypeIds: new Set(['type-1']), coachIds: new Set(['coach-1']) };
+
+  it('метит тренировки без записи — и только их', () => {
+    const marked = markForOpening(
+      [
+        slot({ trainingSessionId: null }),
+        slot({ trainingSessionId: 's1' }),
+        slot({ purpose: 'RENT', coachId: null, trainingTypeId: null }),
+      ],
+      usable,
+    );
+
+    assert.deepEqual(
+      marked.map((item) => item.trainingSessionId),
+      [NEW_SESSION, 's1', null],
+    );
+  });
+
+  it('снятый с продажи вид и ушедший тренер остаются без записи', () => {
+    const marked = markForOpening(
+      [slot({ trainingTypeId: 'type-old' }), slot({ coachId: 'coach-gone' })],
+      usable,
+    );
+
+    assert.ok(marked.every((item) => item.trainingSessionId === null));
+  });
+
+  it('вместе с планом даёт одно занятие на группу', () => {
+    const marked = markForOpening(['t1', 't2', 't3'].map((tableId) => slot({ tableId })), usable);
+
+    assert.equal(planDayEvents(marked, []).sessions.length, 1);
   });
 });

@@ -8,6 +8,21 @@ import type { EventKind } from '@yenisey/types';
  * всё предстоящее, как раньше. Прошедшее не отдаётся и с окном: начало окна
  * поднимается до «сейчас».
  */
+const HALLS_PATTERN = /^[A-Za-z0-9_-]+(,[A-Za-z0-9_-]+){0,19}$/;
+const HALLS_MESSAGE = 'halls: идентификаторы залов через запятую, не больше 20';
+
+/**
+ * Залы вкладки «Мероприятия» страницы клуба: «Ближайшее» у вида считается в
+ * выбранных залах, как и список «Предстоящих» под ней (05.10.2026).
+ */
+export class CatalogQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(1400)
+  @Matches(HALLS_PATTERN, { message: HALLS_MESSAGE })
+  halls?: string;
+}
+
 export class EventsRangeDto {
   @IsOptional()
   @IsISO8601({ strict: true }, { message: 'from — момент времени в ISO-8601' })
@@ -38,7 +53,7 @@ export class EventsRangeDto {
   @IsOptional()
   @IsString()
   @MaxLength(1400)
-  @Matches(/^[A-Za-z0-9_-]+(,[A-Za-z0-9_-]+){0,19}$/, { message: 'halls: идентификаторы залов через запятую, не больше 20' })
+  @Matches(HALLS_PATTERN, { message: HALLS_MESSAGE })
   halls?: string;
 
   /** Сколько ближайших отдать; без окна и с видом — «ближайшие N по всем датам». */

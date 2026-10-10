@@ -13,6 +13,7 @@ import {
   ruleGroupKey,
   slotsForDate,
   slotViolations,
+  syncedTimes,
   templateViolations,
 } from './closures.ts';
 
@@ -503,5 +504,38 @@ describe('instantAt', () => {
     // UTC+2. Одной поправки на такой границе не хватает.
     assert.equal(instantAt('2026-03-28', 12 * 60, BERLIN).toISOString(), '2026-03-28T11:00:00.000Z');
     assert.equal(instantAt('2026-03-30', 12 * 60, BERLIN).toISOString(), '2026-03-30T10:00:00.000Z');
+  });
+});
+
+describe('syncedTimes', () => {
+  const hour = 3_600_000;
+  const current = { startsAt: 18 * hour, endsAt: 19 * hour };
+
+  it('окончание следует за окнами всегда', () => {
+    assert.deepEqual(syncedTimes(current, { startsAt: 18 * hour, endsAt: 19.5 * hour }, true), {
+      startsAt: 18 * hour,
+      endsAt: 19.5 * hour,
+    });
+  });
+
+  it('начало следует за окнами — и при записях (вариант «б»)', () => {
+    const windows = { startsAt: 17.5 * hour, endsAt: 19 * hour };
+
+    assert.deepEqual(syncedTimes(current, windows, false), windows);
+  });
+
+  it('начало начавшегося мероприятия не трогается', () => {
+    const windows = { startsAt: 17.5 * hour, endsAt: 19 * hour };
+
+    assert.equal(syncedTimes(current, windows, true), null);
+  });
+
+  it('ничего не меняет, если границы совпали', () => {
+    assert.equal(syncedTimes(current, current, false), null);
+  });
+
+  it('не пишет окончание не позже начала', () => {
+    // Окна перенесли раньше старта, а мероприятие уже идёт.
+    assert.equal(syncedTimes(current, { startsAt: 16 * hour, endsAt: 17 * hour }, true), null);
   });
 });

@@ -285,7 +285,7 @@ function Row({
         style={{ background: entry.club.accentColor ?? 'var(--accent)' }}
       />
 
-      <WhenSpan startsAt={entry.startsAt} endsAt={entry.endsAt} />
+      <WhenSpan startsAt={entry.startsAt} endsAt={entry.endsAt} timezone={entry.timezone} />
 
       <span className="min-w-0 grow">
         <span className="block text-[0.9375rem] text-text">{entry.title}</span>

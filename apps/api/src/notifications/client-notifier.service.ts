@@ -85,6 +85,35 @@ export class ClientNotifier {
   }
 
   /**
+   * Клуб сдвинул в расписании время мероприятия, на которое человек записан
+   * (решение владельца от 05.10.2026, вариант «б»). Ключ — с новым началом:
+   * второй перенос того же занятия — второе сообщение. Запись уже содержит
+   * новое время; прежнее приходит аргументом.
+   */
+  async entryRescheduled(
+    db: Db,
+    tenantId: string,
+    kind: EntryKind,
+    entryId: string,
+    previousStartsAt: Date,
+  ): Promise<void> {
+    const facts = await loadEntry(db, tenantId, kind, entryId);
+
+    if (!facts || facts.status !== BookingStatus.BOOKED) {
+      return;
+    }
+
+    await this.toClient(
+      db,
+      facts,
+      'BOOKING_TIME_CHANGED',
+      `time:${kind}:${entryId}:${facts.startsAt.getTime()}`,
+      'club',
+      { previousStartsAt: previousStartsAt.toISOString() },
+    );
+  }
+
+  /**
    * Отмечена неявка — администратором или джобой.
    *
    * Ключ с моментом: неявку можно исправить на «пришёл» и поставить снова, и

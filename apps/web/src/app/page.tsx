@@ -17,7 +17,7 @@ import { RiverBackdrop } from '@/components/brand/RiverBackdrop';
 import { ClubMark } from '@/components/club/ClubMark';
 import { WhenSpan } from '@/components/club/When';
 import { EventDialog } from '@/components/events/EventDialog';
-import { dayLabel, FeedEventCard, timeLabel } from '@/components/events/FeedEventCard';
+import { dayLabel, FeedEventCard, timeLabel, ViewerTime } from '@/components/events/FeedEventCard';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { excerpt, NewsRow, newsDate } from '@/components/news/NewsParts';
 import { DevNotice } from '@/components/layout/DevNotice';
@@ -517,13 +517,14 @@ function MyEntries() {
           плитки до неё не доходит. */}
       {first && (
         <div className="mt-4">
-          <p className="text-[0.875rem] font-medium text-text-muted">{dayLabel(first.startsAt)}</p>
+          <p className="text-[0.875rem] font-medium text-text-muted">{dayLabel(first.startsAt, first.timezone)}</p>
           <p className="mt-1 font-display text-[2.25rem] leading-none text-text">
-            {timeLabel(first.startsAt)}
+            {timeLabel(first.startsAt, first.timezone)}
             {first.endsAt && (
-              <span className="text-[1.375rem] text-text-subtle"> – {timeLabel(first.endsAt)}</span>
+              <span className="text-[1.375rem] text-text-subtle"> – {timeLabel(first.endsAt, first.timezone)}</span>
             )}
           </p>
+          <ViewerTime startsAt={first.startsAt} endsAt={first.endsAt} timezone={first.timezone} className="mt-1.5 block text-[0.875rem] text-text-muted" />
           <p className="mt-3 text-[1.0625rem] text-text">{first.title}</p>
           <p className="text-[0.875rem] text-text-muted">
             {first.club.name}
@@ -539,7 +540,7 @@ function MyEntries() {
               key={entry.entryId}
               className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-border py-4"
             >
-              <WhenSpan startsAt={entry.startsAt} endsAt={entry.endsAt} />
+              <WhenSpan startsAt={entry.startsAt} endsAt={entry.endsAt} timezone={entry.timezone} />
 
               <span className="min-w-0 grow">
                 <span className="block text-[0.9375rem] text-text">{entry.title}</span>
@@ -681,7 +682,13 @@ function MyCoaches() {
                   className="grid gap-0.5 border-l-[3px] border-accent pl-2.5 text-left text-[0.875rem] hover:underline"
                 >
                   <span className="font-medium tabular-nums text-text">
-                    {dayLabel(coach.next.startsAt)}, {timeLabel(coach.next.startsAt)}
+                    {dayLabel(coach.next.startsAt, coach.next.timezone)}, {timeLabel(coach.next.startsAt, coach.next.timezone)}
+                    <ViewerTime
+                      startsAt={coach.next.startsAt}
+                      endsAt={null}
+                      timezone={coach.next.timezone}
+                      className="ml-1.5 font-normal text-text-muted"
+                    />
                   </span>
                   <span className="text-text-muted">
                     {coach.next.title} · {coach.next.club.name}

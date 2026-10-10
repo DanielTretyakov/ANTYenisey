@@ -158,6 +158,8 @@ export interface BookingEntry {
   subtitle: string | null;
   startsAt: string;
   endsAt: string;
+  /** Пояс зала: время записи показывается по нему, а если у смотрящего другой — и по его часам. */
+  timezone: string;
   /** Копейки. Цена зафиксирована на момент записи. */
   price: number;
   status: BookingStatus;
@@ -233,6 +235,12 @@ export interface ClubEvent {
    * нескольких залах, а в сетку проведение не поставлено.
    */
   hall: string | null;
+  /**
+   * Пояс зала мероприятия (решение владельца от 05.10.2026): время
+   * показывается по часам зала, а если у смотрящего пояс другой — ещё и по его
+   * часам. Зал не определить — пояс клуба (старшего зала).
+   */
+  timezone: string;
   /** Цена участия, копейки. */
   price: number;
   /**
@@ -281,6 +289,8 @@ export interface ClubCatalogItem {
   ratingLabel: string | null;
   /** Ближайшее проведение; пусто — в расписании его пока нет. */
   nextStartsAt: string | null;
+  /** Пояс зала ближайшего проведения — его время показывается по нему. */
+  nextTimezone: string | null;
   /** Сколько проведений впереди. */
   upcomingCount: number;
   /** Залы, где идёт; пусто — во всех. По ним фильтрует страница клуба. */

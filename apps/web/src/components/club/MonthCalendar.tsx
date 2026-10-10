@@ -5,6 +5,7 @@ import { cn } from '@/lib/cn';
 import { dayKey, monthGrid } from '@/lib/month';
 import { tintFill, tintMark } from '@/lib/personColor';
 import { KIND_PAINT } from './EventRow';
+import { dayIn, timeIn, viewerTime } from '@/lib/zonedTime';
 
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 /** Сколько плашек влезает в клетку, остальное — «+N». */
@@ -35,12 +36,12 @@ export function MonthCalendar({
   const byDay = new Map<string, ClubEvent[]>();
 
   for (const event of events) {
-    const key = dayKey(new Date(event.startsAt));
+    // День и время — по часам зала мероприятия, как в строке списка.
+    const key = dayIn(event.startsAt, event.timezone);
     byDay.set(key, [...(byDay.get(key) ?? []), event]);
   }
 
   const today = dayKey(new Date());
-  const time = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
   return (
     <div className="overflow-hidden rounded-card border border-border bg-surface-raised">
@@ -118,9 +119,11 @@ export function MonthCalendar({
                       background: tintFill(KIND_PAINT[event.kind]),
                       boxShadow: `inset 2px 0 0 ${tintMark(KIND_PAINT[event.kind])}`,
                     }}
-                    title={`${time.format(new Date(event.startsAt))} ${event.title}`}
+                    title={[timeIn(event.startsAt, event.timezone), event.title, viewerTime(event.startsAt, null, event.timezone)]
+                      .filter(Boolean)
+                      .join(' ')}
                   >
-                    <span className="font-display">{time.format(new Date(event.startsAt))}</span> {event.title}
+                    <span className="font-display">{timeIn(event.startsAt, event.timezone)}</span> {event.title}
                   </button>
                 ))}
                 {list.length > CHIPS_PER_DAY && (

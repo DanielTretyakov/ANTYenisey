@@ -45,6 +45,7 @@ import {
   ReplaceTemplateDto,
   UpdateHallDto, HallManagerDto } from './dto/schedule.dto';
 import {
+  EventPageDto,
   TournamentDto,
   TournamentTypeDto,
   TrainingSessionDto,
@@ -360,8 +361,8 @@ export class ClubController {
   // --- Турниры -------------------------------------------------------------
 
   @Get('tournaments')
-  listTournaments(@CurrentClub() club: ClubContext): Promise<Tournament[]> {
-    return this.catalog.listTournaments(club.tenantId);
+  listTournaments(@CurrentClub() club: ClubContext, @Query() page: EventPageDto): Promise<Tournament[]> {
+    return this.catalog.listTournaments(club.tenantId, { page });
   }
 
   @Post('tournaments')
@@ -384,8 +385,8 @@ export class ClubController {
   // --- Занятия -------------------------------------------------------------
 
   @Get('training-sessions')
-  listTrainingSessions(@CurrentClub() club: ClubContext): Promise<TrainingSession[]> {
-    return this.catalog.listTrainingSessions(club.tenantId);
+  listTrainingSessions(@CurrentClub() club: ClubContext, @Query() page: EventPageDto): Promise<TrainingSession[]> {
+    return this.catalog.listTrainingSessions(club.tenantId, page);
   }
 
   @Post('training-sessions')

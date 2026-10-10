@@ -1,8 +1,9 @@
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsISO8601,
   IsInt,
   IsOptional,
@@ -13,11 +14,36 @@ import {
   MinLength,
 } from 'class-validator';
 import type {
+  EventPageQuery,
   TournamentRequest,
   TournamentTypeRequest,
   TrainingSessionRequest,
   TrainingTypeRequest,
 } from '@yenisey/types';
+
+/**
+ * Страница проведений. Без `when` маршрут отдаёт прежний полный список — на нём
+ * стоят проверочные сценарии; экран раздела всегда просит страницу.
+ */
+export class EventPageDto implements Partial<EventPageQuery> {
+  @IsOptional()
+  @IsIn(['upcoming', 'past'], { message: 'when: upcoming или past' })
+  when?: EventPageQuery['when'];
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(100_000)
+  offset?: number;
+}
 
 /** Тот же потолок, что у цен зала: опечатка в форме иначе уезжает в базу молча. */
 const MAX_PRICE = 10_000_000;

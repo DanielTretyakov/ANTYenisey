@@ -50,6 +50,19 @@ export const WEEKDAYS: { value: Weekday; short: string; full: string }[] = [
 /** Будни — для кнопки «скопировать на все будни». */
 export const WORKDAYS: Weekday[] = [1, 2, 3, 4, 5];
 
+/**
+ * «Занятие заведётся при сохранении» — метка клетки, закрашенной кистью
+ * тренировки в расписании даты.
+ *
+ * Заменила прежнее «окно тронуто в этой правке» (`markTouched`), которое
+ * сравнивало клетку со снимком: окно тренировки из шаблона, перекрашенное той
+ * же кистью, выглядело нетронутым — и открыть на него запись было нечем, кроме
+ * «стереть, сохранить, нарисовать, сохранить». Метка же стоит ровно на том,
+ * что закрасила кисть, и на сервер не уходит никогда: `planDayEvents`
+ * заменяет её настоящим занятием.
+ */
+export const NEW_SESSION = 'new';
+
 /** Чем занят стол в клетке. `null` в карте не хранится — клетка просто отсутствует. */
 export interface CellValue {
   purpose: ClosurePurpose;
@@ -64,7 +77,8 @@ export interface CellValue {
   /**
    * Конкретное занятие — только у тренировки и только в расписании даты.
    * Необязательно даже там: индивидуальное занятие закрывает стол, но
-   * записываться на него некому.
+   * записываться на него некому. `NEW_SESSION` — занятие заведётся при
+   * сохранении.
    */
   trainingSessionId: string | null;
   /** Турнир — только у турнира и только в расписании даты. */
@@ -434,38 +448,421 @@ export function slotRange(startMinute: number, endMinute: number): { from: numbe
 }
 
 /**
- * Пометка окон, которых администратор коснулся в этой правке.
+ * Совпадает ли клетка с кистью — по тому, что кисть задаёт: назначению,
+ * тренеру, типу занятия и типу турнира.
  *
- * Нужна, чтобы не заводить занятия и турниры по окнам, которые он не размечал,
- * а просто увидел. День, отвязанный от шаблона, приходит полным окон с типом
- * тренировки, но без занятия — и следующая правка одной-единственной клетки
- * аренды заводила бы занятия сразу на все такие окна: отличить их по полям
- * нельзя, они выглядят одинаково.
+ * Решает, что делает нажатие: совпала — стирает, нет — красит. Раньше
+ * сравнивались только назначение и тренер, и клетка «Детской тренировки» под
+ * кистью «Первой подачи» того же тренера стиралась вместо перекраски.
  *
- * Сравнение идёт по клеткам, а не по окнам: окно — это уже результат склейки,
- * и продление тренировки на полчаса даёт другое окно с теми же полями.
+ * Окно тренировки без занятия кисти дня не равно: кисть дня заводит занятие,
+ * и перекраска такого окна — способ открыть на него запись.
  */
-export function markTouched<T extends ClosureSlot>(
+export function matchesBrush(cell: CellValue, brush: CellValue): boolean {
+  if (!sameKind(cell, brush)) {
+    return false;
+  }
+
+  if (brush.trainingSessionId === NEW_SESSION) {
+    return cell.trainingSessionId !== null;
+  }
+
+  return true;
+}
+
+/**
+ * Одно ли это по виду: назначение, тренер, тип занятия и тип турнира — то, что
+ * подписано в клетке. Конкретные занятие и турнир не сравниваются: продление
+ * группы, ещё не сохранённое, читается тем же окном, а не вторым.
+ */
+export function sameKind(a: CellValue, b: CellValue): boolean {
+  return (
+    a.purpose === b.purpose &&
+    a.coachId === b.coachId &&
+    a.trainingTypeId === b.trainingTypeId &&
+    a.tournamentTypeId === b.tournamentTypeId
+  );
+}
+
+/** Ссылка окна на мероприятие: уже заведённое или то, что заведётся по плану. */
+export type EventRef = { id: string } | { create: number };
+
+export interface DayEventsPlan<T extends ClosureSlot> {
+  /** Турниры, которые надо завести: один на тип в этом дне. */
+  tournaments: { tournamentTypeId: string; startMinute: number; endMinute: number }[];
+  /** Занятия, которые надо завести: одно на связный отрезок времени пары «тип + тренер». */
+  sessions: { trainingTypeId: string; coachId: string; startMinute: number; endMinute: number }[];
+  slots: { slot: T; tournament: EventRef | null; session: EventRef | null }[];
+}
+
+/** Соприкасаются ли окна по времени — стык считается: 18:00–19:00 и 19:00–20:00 — одна группа. */
+function touches(a: ClosureSlot, b: ClosureSlot): boolean {
+  return a.startMinute <= b.endMinute && b.startMinute <= a.endMinute;
+}
+
+function overlapMinutes(a: ClosureSlot, b: ClosureSlot): number {
+  return Math.max(0, Math.min(a.endMinute, b.endMinute) - Math.max(a.startMinute, b.startMinute));
+}
+
+/**
+ * Какие турниры и занятия завести под окна дня — и на что сослаться каждому окну.
+ *
+ * Мероприятие заводится не мазком кисти, а сохранением: иначе база
+ * наполнялась бы турнирами, которые тут же стёрли. Правила:
+ *
+ * - **Турнир — один на тип в дне.** Окно турнира в расписании даты обязано
+ *   ссылаться на проведение (`DayClosure_attachments_match_purpose`), поэтому
+ *   заводится на каждый тип без проведения — в том числе пришедший из
+ *   шаблона. Если турнир этого типа в дне уже есть (стоит в сетке или стоял до
+ *   правки), новые окна идут к нему: раньше дорисованный час заводил второй
+ *   «Клуб 100» на ту же субботу.
+ * - **Занятие — только по окнам с `NEW_SESSION`**, то есть закрашенным кистью
+ *   тренировки в этой правке. Окна из шаблона несут тип, но не занятие, и
+ *   заводить запись на каждое значило бы открыть клиентам группы, которые
+ *   никто не собирал.
+ * - **Одно занятие — связный отрезок времени пары «тип + тренер»**, на
+ *   скольких бы столах он ни шёл. Раньше пара давала одно занятие на весь
+ *   день, и утренняя с вечерней группой одного тренера сливались в занятие
+ *   10:00–19:00.
+ * - **Окно, примыкающее к уже заведённому занятию той же пары, — продолжение
+ *   этого занятия**, а не новое: записавшиеся остаются в своей группе, а
+ *   границы сервер подтянет по окнам. Это же — и для окон, которые стояли до
+ *   правки: перенос группы на другие столы в то же время её не пересоздаёт.
+ *
+ * Окно без типа или без тренера остаётся без мероприятия — его отклонит
+ * сервер с внятной причиной.
+ *
+ * `saved` — окна дня до правки: по ним узнаются мероприятия, стёртые и тут же
+ * нарисованные заново.
+ */
+export function planDayEvents<T extends ClosureSlot>(
   slots: readonly T[],
-  cells: Cells,
-  saved: Cells,
-  lane: (slot: T) => string,
-): (T & { touched: boolean })[] {
-  return slots.map((slot) => {
-    const first = Math.max(0, Math.floor((slot.startMinute - GRID_START_MINUTE) / SLOT_MINUTES));
-    const last = Math.min(
-      SLOTS_PER_DAY,
-      Math.ceil((slot.endMinute - GRID_START_MINUTE) / SLOT_MINUTES),
-    );
+  saved: readonly ClosureSlot[],
+): DayEventsPlan<T> {
+  // --- Турниры
+  const knownTournaments = new Map<string, string>();
 
-    let touched = false;
+  for (const slot of [...slots, ...saved]) {
+    if (
+      slot.purpose === 'TOURNAMENT' &&
+      slot.tournamentId &&
+      slot.tournamentTypeId &&
+      !knownTournaments.has(slot.tournamentTypeId)
+    ) {
+      knownTournaments.set(slot.tournamentTypeId, slot.tournamentId);
+    }
+  }
 
-    for (let index = first; index < last && !touched; index += 1) {
-      const key = cellKey(lane(slot), slot.tableId, index);
+  const tournaments: DayEventsPlan<T>['tournaments'] = [];
+  const tournamentIndex = new Map<string, number>();
 
-      touched = !sameValue(cells.get(key), saved.get(key));
+  const tournamentOf = (slot: T): EventRef | null => {
+    if (slot.purpose !== 'TOURNAMENT') return null;
+    if (slot.tournamentId) return { id: slot.tournamentId };
+
+    const typeId = slot.tournamentTypeId;
+
+    if (!typeId) return null;
+
+    const known = knownTournaments.get(typeId);
+
+    if (known) return { id: known };
+
+    const index = tournamentIndex.get(typeId);
+
+    if (index === undefined) {
+      tournamentIndex.set(typeId, tournaments.length);
+      tournaments.push({ tournamentTypeId: typeId, startMinute: slot.startMinute, endMinute: slot.endMinute });
+
+      return { create: tournaments.length - 1 };
     }
 
-    return { ...slot, touched };
+    const planned = tournaments[index]!;
+
+    planned.startMinute = Math.min(planned.startMinute, slot.startMinute);
+    planned.endMinute = Math.max(planned.endMinute, slot.endMinute);
+
+    return { create: index };
+  };
+
+  // --- Занятия
+  const pairOf = (slot: ClosureSlot): string => `${slot.trainingTypeId}|${slot.coachId}`;
+  const pending = slots
+    .map((slot, index) => ({ slot, index }))
+    .filter(
+      ({ slot }) =>
+        slot.purpose === 'TRAINING' &&
+        slot.trainingSessionId === NEW_SESSION &&
+        slot.trainingTypeId !== null &&
+        slot.coachId !== null,
+    );
+  const anchors = [...slots, ...saved].filter(
+    (slot) => slot.purpose === 'TRAINING' && slot.trainingSessionId && slot.trainingSessionId !== NEW_SESSION,
+  );
+
+  const sessions: DayEventsPlan<T>['sessions'] = [];
+  const sessionOfPending = new Map<number, EventRef>();
+
+  for (const pair of new Set(pending.map(({ slot }) => pairOf(slot)))) {
+    const own = pending.filter(({ slot }) => pairOf(slot) === pair);
+    const ownAnchors = anchors.filter((anchor) => pairOf(anchor) === pair);
+
+    // Связные отрезки — объединением по соприкосновению во времени, без
+    // оглядки на стол: группа на четырёх столах — одна группа.
+    const parent = own.map((_, index) => index);
+    const root = (index: number): number => {
+      let at = index;
+
+      while (parent[at] !== at) at = parent[at]!;
+
+      return at;
+    };
+
+    for (let a = 0; a < own.length; a += 1) {
+      for (let b = a + 1; b < own.length; b += 1) {
+        if (touches(own[a]!.slot, own[b]!.slot)) parent[root(a)] = root(b);
+      }
+    }
+
+    const groups = new Map<number, number[]>();
+
+    own.forEach((_, index) => {
+      groups.set(root(index), [...(groups.get(root(index)) ?? []), index]);
+    });
+
+    for (const members of groups.values()) {
+      // Заведённые занятия, к которым отрезок примыкает, — по суммарному
+      // перекрытию; поровну — то, что начинается раньше.
+      const score = new Map<string, { overlap: number; start: number }>();
+
+      for (const member of members) {
+        for (const anchor of ownAnchors) {
+          if (!touches(own[member]!.slot, anchor)) continue;
+
+          const id = anchor.trainingSessionId!;
+          const current = score.get(id) ?? { overlap: 0, start: anchor.startMinute };
+
+          score.set(id, {
+            overlap: current.overlap + overlapMinutes(own[member]!.slot, anchor),
+            start: Math.min(current.start, anchor.startMinute),
+          });
+        }
+      }
+
+      const best = [...score.entries()].sort(
+        ([idA, a], [idB, b]) => b.overlap - a.overlap || a.start - b.start || idA.localeCompare(idB),
+      )[0];
+
+      let ref: EventRef;
+
+      if (best) {
+        ref = { id: best[0] };
+      } else {
+        const first = own[members[0]!]!.slot;
+
+        sessions.push({
+          trainingTypeId: first.trainingTypeId!,
+          coachId: first.coachId!,
+          startMinute: Math.min(...members.map((member) => own[member]!.slot.startMinute)),
+          endMinute: Math.max(...members.map((member) => own[member]!.slot.endMinute)),
+        });
+        ref = { create: sessions.length - 1 };
+      }
+
+      for (const member of members) sessionOfPending.set(own[member]!.index, ref);
+    }
+  }
+
+  const sessionOf = (slot: T, index: number): EventRef | null => {
+    if (slot.purpose !== 'TRAINING' || !slot.trainingSessionId) return null;
+    if (slot.trainingSessionId !== NEW_SESSION) return { id: slot.trainingSessionId };
+
+    return sessionOfPending.get(index) ?? null;
+  };
+
+  return {
+    tournaments,
+    sessions,
+    slots: slots.map((slot, index) => ({
+      slot,
+      tournament: tournamentOf(slot),
+      session: sessionOf(slot, index),
+    })),
+  };
+}
+
+/** Промежуток клеток одного стола: `[from, to)`. */
+export interface SlotRange {
+  tableId: string;
+  from: number;
+  to: number;
+}
+
+/**
+ * Что выбрано под бронь после протяжки или щелчка кистью аренды с клиентом.
+ *
+ * Щелчок, а не только протяжка (решение от 05.10.2026, как в сетке брони
+ * клиента): на телефоне протяжка вниз прокручивает сетку, и отрезок длиннее
+ * клетки там иначе не выбрать.
+ *
+ * - протяжка — ровно протянутое;
+ * - щелчок — минимальная бронь (`minSlots`) от этой клетки;
+ * - щелчок ниже начала выбранного на том же столе — конец отрезка там;
+ * - щелчок по началу выбранного — выбор снимается.
+ *
+ * Отрезок обрезается на первой занятой бронью клетке: сквозь чужую бронь
+ * сервер всё равно не посадит, и узнать об этом лучше до «Посадить».
+ */
+export function seatAfterPick(
+  current: SlotRange | null,
+  pick: SlotRange,
+  minSlots: number,
+  busy: (tableId: string, slot: number) => boolean,
+): SlotRange | null {
+  const tap = pick.to - pick.from === 1;
+  let next: SlotRange;
+
+  if (tap && current && current.tableId === pick.tableId && pick.from === current.from) {
+    return null;
+  }
+
+  if (tap && current && current.tableId === pick.tableId && pick.from > current.from) {
+    next = { tableId: pick.tableId, from: current.from, to: pick.from + 1 };
+  } else if (tap) {
+    next = { tableId: pick.tableId, from: pick.from, to: pick.from + minSlots };
+  } else {
+    next = pick;
+  }
+
+  if (busy(next.tableId, next.from)) {
+    return null;
+  }
+
+  let to = next.from + 1;
+
+  while (to < Math.min(next.to, SLOTS_PER_DAY) && !busy(next.tableId, to)) {
+    to += 1;
+  }
+
+  return { tableId: next.tableId, from: next.from, to };
+}
+
+/**
+ * Чем окно — одно мероприятие: занятием или турниром, а если их ещё нет (окно
+ * шаблона, только что закрашенное) — видом, типом и тренером. Аренда, робот,
+ * спарринг и прочее — `null`: две брони рядом — две разные брони, и склеивать
+ * их значило бы соврать (то же правило, что `blockSpans` в сетке брони).
+ */
+export function eventKey(value: CellValue): string | null {
+  if (value.purpose === 'TRAINING') {
+    if (value.trainingSessionId && value.trainingSessionId !== NEW_SESSION) {
+      return `session:${value.trainingSessionId}`;
+    }
+
+    const state = value.trainingSessionId === NEW_SESSION ? 'new' : 'none';
+
+    return `training:${state}|${value.trainingTypeId}|${value.coachId}`;
+  }
+
+  if (value.purpose === 'TOURNAMENT') {
+    return value.tournamentId ? `tournament:${value.tournamentId}` : `cup:${value.tournamentTypeId}`;
+  }
+
+  return null;
+}
+
+/** Прямоугольник мероприятия в сетке расписания: столы `[firstTable, lastTable]`, клетки `[from, to)`. */
+export interface CellBlock {
+  key: string;
+  value: CellValue;
+  firstTable: number;
+  lastTable: number;
+  from: number;
+  to: number;
+}
+
+/**
+ * Мероприятия дорожки — прямоугольниками (решение от 05.10.2026, как в сетке
+ * брони с 01.10): группа на столах 1 и 2 с 18:00 до 19:00 — один блок, а не
+ * два столбца клеток с одинаковой подписью.
+ *
+ * Сливаются клетки одного стола подряд с тем же мероприятием (`eventKey`) и
+ * соседние столы с тем же мероприятием в ТО ЖЕ время. Разное время на соседних
+ * столах — разные блоки: прямоугольник с зубцом соврал бы о границах.
+ */
+export function cellBlocks(cells: Cells, lane: string, tableIds: readonly string[]): CellBlock[] {
+  const blocks: CellBlock[] = [];
+  // Открытые для продолжения на следующий стол: ключ — мероприятие и клетки.
+  let open = new Map<string, CellBlock>();
+
+  tableIds.forEach((tableId, tableIndex) => {
+    const next = new Map<string, CellBlock>();
+    let slot = 0;
+
+    while (slot < SLOTS_PER_DAY) {
+      const value = cells.get(cellKey(lane, tableId, slot));
+      const key = value ? eventKey(value) : null;
+
+      if (!value || key === null) {
+        slot += 1;
+        continue;
+      }
+
+      let to = slot + 1;
+
+      while (to < SLOTS_PER_DAY) {
+        const following = cells.get(cellKey(lane, tableId, to));
+
+        if (!following || eventKey(following) !== key) break;
+
+        to += 1;
+      }
+
+      const spanKey = `${key}|${slot}|${to}`;
+      const previous = open.get(spanKey);
+
+      if (previous && previous.lastTable === tableIndex - 1) {
+        previous.lastTable = tableIndex;
+        next.set(spanKey, previous);
+      } else {
+        const block: CellBlock = { key, value, firstTable: tableIndex, lastTable: tableIndex, from: slot, to };
+
+        blocks.push(block);
+        next.set(spanKey, block);
+      }
+
+      slot = to;
+    }
+
+    open = next;
   });
+
+  return blocks;
+}
+
+/**
+ * Окна дня, на которые кнопка «Открыть запись» заведёт занятия (решение от
+ * 05.10.2026): тренировки без занятия — ровно те, что в сетке заштрихованы
+ * «без записи». Метка та же, что ставит кисть, — дальше их ведёт
+ * `planDayEvents`, и группа на четырёх столах становится одним занятием.
+ *
+ * Только с действующим типом и тренером клуба: занятие снятого с продажи вида
+ * или ушедшего тренера сервер не заведёт, и такое окно уронило бы весь день.
+ * Остальные окна возвращаются как есть — турниры из шаблона заводятся при
+ * сохранении дня и без метки.
+ */
+export function markForOpening<T extends ClosureSlot>(
+  slots: readonly T[],
+  usable: { trainingTypeIds: ReadonlySet<string>; coachIds: ReadonlySet<string> },
+): T[] {
+  return slots.map((slot) =>
+    slot.purpose === 'TRAINING' &&
+    slot.trainingSessionId === null &&
+    slot.trainingTypeId !== null &&
+    slot.coachId !== null &&
+    usable.trainingTypeIds.has(slot.trainingTypeId) &&
+    usable.coachIds.has(slot.coachId)
+      ? { ...slot, trainingSessionId: NEW_SESSION }
+      : slot,
+  );
 }

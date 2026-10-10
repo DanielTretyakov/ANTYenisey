@@ -363,6 +363,44 @@ export function weekdayOf(date: string): Weekday {
   return (day === 0 ? 7 : day) as Weekday;
 }
 
+/** Промежуток в миллисекундах UTC: границы мероприятия или его окон. */
+export interface Span {
+  startsAt: number;
+  endsAt: number;
+}
+
+/**
+ * Новые границы занятия или турнира по его окнам в расписании — или null,
+ * если менять нечего.
+ *
+ * Границы следуют за окнами: администратор растянул группу на полчаса или
+ * перенёс начало — экран смены, напоминания, порог отмены и страница клуба
+ * узнают об этом сразу. И для записавшихся тоже (решение владельца от
+ * 05.10.2026, вариант «б»): сетка и карточка занятия не расходятся, а
+ * записавшимся уходит сообщение «время изменилось» — его ставит вызывающий.
+ *
+ * Начало уже начавшегося мероприятия (`started`) не трогается: по нему
+ * отмечают присутствие и считают неявку, и перенос задним числом спутал бы
+ * деньги.
+ *
+ * Окончание не позже начала не пишется: такое мероприятие база не примет, а у
+ * администратора остаются прежние, осмысленные границы.
+ */
+export function syncedTimes(current: Span, windows: Span, started: boolean): Span | null {
+  const startsAt = started ? current.startsAt : windows.startsAt;
+  const endsAt = windows.endsAt;
+
+  if (endsAt <= startsAt) {
+    return null;
+  }
+
+  if (startsAt === current.startsAt && endsAt === current.endsAt) {
+    return null;
+  }
+
+  return { startsAt, endsAt };
+}
+
 /** Минуты от полуночи в «15:00» — для сообщений человеку. */
 export function formatMinutes(minutes: number): string {
   const hours = Math.floor(minutes / 60);

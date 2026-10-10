@@ -1,12 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import type {
   ClosureRule,
   ClosureRuleDraft,
   ClubCoach,
   ClubTable,
-  Tournament,
   TournamentType,
   TrainingType,
   Weekday,
@@ -45,14 +44,15 @@ export function TemplateBoard({
   coaches,
   trainingTypes,
   tournamentTypes,
-  tournaments,
+  onDirtyChange,
 }: {
   hallId: string;
   tables: ClubTable[];
   coaches: ClubCoach[];
   trainingTypes: TrainingType[];
   tournamentTypes: TournamentType[];
-  tournaments: Tournament[];
+  /** Есть ли несохранённые правки — странице, чтобы не потерять их сменой зала или режима. */
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const club = useClubApi();
   const [weekday, setWeekday] = useState<Weekday>(1);
@@ -61,12 +61,20 @@ export function TemplateBoard({
   const grid = useScheduleGrid({
     hallId,
     lane,
+    day: false,
     tables,
     coaches,
     trainingTypes,
     tournamentTypes,
-    tournaments,
   });
+
+  const { dirty } = grid;
+
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
+
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   /** Ночные окна (до 06:00) в сетку не попадают и уезжают обратно нетронутыми. */
   const [night, setNight] = useState<ClosureRuleDraft[]>([]);
@@ -175,9 +183,9 @@ export function TemplateBoard({
         })}
       </div>
 
-      <ScheduleCanvas grid={grid} lane={lane} askCapacity={false} nightCount={night.length} />
+      <ScheduleCanvas grid={grid} lane={lane} nightCount={night.length} />
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <ActionBar>
         <Button
           type="button"
           variant="secondary"
@@ -211,8 +219,23 @@ export function TemplateBoard({
             Сохранить шаблон
           </Button>
         </span>
-      </div>
+      </ActionBar>
     </>
+  );
+}
+
+/**
+ * Действия под сеткой — прилипают к низу экрана.
+ *
+ * Сетка занимает почти всю высоту окна, и «Сохранить» под ней оказывалась за
+ * краем: администратор закрашивал вечер и листал страницу, чтобы сохранить
+ * (решение от 05.10.2026 — «слишком далеко листать вниз»).
+ */
+export function ActionBar({ children }: { children: ReactNode }) {
+  return (
+    <div className="sticky bottom-0 z-[31] -mx-4 mt-4 flex flex-wrap items-center gap-2 border-t border-border bg-surface-raised/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+      {children}
+    </div>
   );
 }
 

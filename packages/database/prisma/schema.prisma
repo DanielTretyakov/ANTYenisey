@@ -214,6 +214,7 @@ enum NotificationType {
   BOOKING_CANCELLED
   BOOKING_REMINDER
   BOOKING_NO_SHOW // клиенту: отмечена неявка — администратором или джобой
+  BOOKING_TIME_CHANGED // клиенту: клуб сдвинул время занятия или турнира, на которое он записан
   SUBSCRIPTION_ENDING // клиенту: абонемент кончается по сроку или по визитам
   RANK_DECIDED // игроку: клуб подтвердил или отклонил разряд
   GUARDIANSHIP_REQUESTED // ребёнку: родитель просит закрепить его

@@ -1410,6 +1410,119 @@ async function main() {
     });
     check('шаблон возвращён как был', 200, r.status);
 
+    console.log('=== 22п. Окна дня знают тип турнира, границы мероприятий — по окнам');
+    // Решения от 05.10.2026. Тип турнира в окне дня избавляет сетку от
+    // загрузки всех турниров клуба; границы занятия и турнира следуют за их
+    // окнами: окончание — всегда, начало — пока никто не записан.
+    {
+      const date = dayAhead(59);
+      const dayPath = `/clubs/yenisey/halls/${hallId}/days/${date}`;
+      const spanOf = (event) => (event ? (Date.parse(event.endsAt) - Date.parse(event.startsAt)) / 60_000 : null);
+
+      r = await asAdmin('/clubs/yenisey/tournaments', {
+        method: 'POST',
+        json: { tournamentTypeId, startsAt: `${date}T03:00:00.000Z`, endsAt: `${date}T04:00:00.000Z` },
+      });
+      check('турнир для дня заведён', 201, r.status);
+      const cupId = r.body?.id;
+
+      let sessionId = null;
+
+      if (coachId) {
+        r = await asAdmin('/clubs/yenisey/training-sessions', {
+          method: 'POST',
+          json: {
+            trainingTypeId,
+            coachId,
+            startsAt: `${date}T10:00:00.000Z`,
+            endsAt: `${date}T11:00:00.000Z`,
+            capacity: 6,
+          },
+        });
+        check('занятие для дня заведено', 201, r.status);
+        sessionId = r.body?.id;
+      }
+
+      const closures = [
+        { tableId, startMinute: 600, endMinute: 780, purpose: 'TOURNAMENT', coachId: null, tournamentId: cupId },
+        ...(sessionId
+          ? [
+              {
+                tableId,
+                startMinute: 1050,
+                endMinute: 1170,
+                purpose: 'TRAINING',
+                coachId,
+                trainingTypeId,
+                trainingSessionId: sessionId,
+              },
+            ]
+          : []),
+      ];
+
+      r = await asAdmin(dayPath, { method: 'PUT', json: { closures } });
+      check('день с турниром и занятием сохранён', 200, r.status);
+      const cupWindow = (r.body?.closures ?? []).find((closure) => closure.purpose === 'TOURNAMENT');
+      assert('окно турнира в дне несёт тип своего турнира', cupWindow?.tournamentTypeId === tournamentTypeId);
+
+      // Ответ можно прислать обратно как есть — с типом у окна турнира.
+      r = await asAdmin(dayPath, {
+        method: 'PUT',
+        json: { closures: (r.body?.closures ?? []).map(({ id: _id, ...closure }) => closure) },
+      });
+      check('день, присланный обратно как есть, принят', 200, r.status);
+
+      const cup = ((await asAdmin('/clubs/yenisey/tournaments')).body ?? []).find((item) => item.id === cupId);
+      assert('турнир без записей растянут по окнам целиком: три часа', spanOf(cup) === 180);
+
+      // Время мероприятия — по часам его зала (решение от 05.10.2026): пояс
+      // приходит с самим мероприятием, в списке и в «Ближайшем» у вида.
+      r = await call(`/clubs/yenisey/events?${new URLSearchParams({ kind: 'TOURNAMENT', typeId: tournamentTypeId, halls: hallId })}`);
+      const listed = (r.body ?? []).find((event) => event.id === cupId);
+      assert('мероприятие несёт пояс своего зала', listed?.timezone === 'Asia/Krasnoyarsk');
+      r = await call(`/clubs/yenisey/catalog?${new URLSearchParams({ halls: hallId })}`);
+      const kind = (r.body ?? []).find((item) => item.kind === 'TOURNAMENT' && item.typeId === tournamentTypeId);
+      assert('и «Ближайшее» у вида — тоже', kind?.nextTimezone === 'Asia/Krasnoyarsk');
+
+      // Проведения страницами: предстоящие — ближайшие сверху.
+      r = await asAdmin('/clubs/yenisey/tournaments?when=upcoming&limit=2&offset=0');
+      check('страница предстоящих турниров', 200, r.status);
+      assert(
+        'не длиннее запрошенного и по возрастанию',
+        (r.body ?? []).length <= 2 && (r.body ?? []).every((item, index, all) => index === 0 || all[index - 1].startsAt <= item.startsAt),
+      );
+      r = await asAdmin('/clubs/yenisey/training-sessions?when=past&limit=2');
+      assert(
+        'прошедшие — свежие сверху',
+        (r.body ?? []).every((item, index, all) => index === 0 || all[index - 1].startsAt >= item.startsAt),
+      );
+      r = await asAdmin('/clubs/yenisey/training-sessions?when=soon');
+      check('неизвестный период отклонён', 400, r.status);
+
+      if (sessionId) {
+        const session = ((await asAdmin('/clubs/yenisey/training-sessions')).body ?? []).find(
+          (item) => item.id === sessionId,
+        );
+        assert('занятие без записей встало на свои окна: два часа', spanOf(session) === 120);
+        assert('и начало у него — начало окон', session?.startsAt !== `${date}T10:00:00.000Z`);
+      }
+
+      r = await asAdmin(dayPath, { method: 'DELETE' });
+      check('день возвращён к шаблону', 200, r.status);
+      const left = ((await asAdmin('/clubs/yenisey/tournaments')).body ?? []).some((item) => item.id === cupId);
+      assert('турнир дня ушёл вместе с днём', !left);
+    }
+
+    // Тело больше 100 КБ разбирается: шестьсот окон на одном столе
+    // накладываются, и сервер отвечает об этом, а не «слишком большой запрос»
+    // (413), как до 05.10.2026 — шаблон зала на восемь столов не сохранялся.
+    r = await asAdmin(`/clubs/yenisey/halls/${hallId}/template`, {
+      method: 'PUT',
+      json: { rules: Array.from({ length: 600 }, () => window({ startMinute: 600, endMinute: 630 })) },
+    });
+    check('шаблон больше 100 КБ дошёл до проверок', 400, r.status);
+    assert('и отказ — о наложении окон', JSON.stringify(r.body?.message ?? '').includes('накладываются'));
+
     console.log('=== 24. Бронирование стола клиентом');
     // Бронь заводится в ОСНОВНОМ зале клуба, а не в зале проверки: за бронью
     // стоит платёж, внешний ключ стоит на Restrict, и стол с историей уже не
@@ -5313,6 +5426,17 @@ async function hallScope() {
     assert('в другом зале — нет', !(r.body ?? []).some((event) => event.id === scopedSession));
     r = await call(`/clubs/yenisey/events?${new URLSearchParams({ kind: 'TRAINING', typeId: type.id })}`);
     assert('без фильтра — видно', (r.body ?? []).some((event) => event.id === scopedSession));
+
+    // «Ближайшее» у вида — тем же правилом, что список под ним (05.10.2026):
+    // карточка вида в чужом зале не зовёт на занятие пробного.
+    const nearestIn = async (halls) =>
+      ((await call(`/clubs/yenisey/catalog?${new URLSearchParams({ halls })}`)).body ?? []).find(
+        (item) => item.kind === 'TRAINING' && item.typeId === type.id,
+      );
+    assert('«Ближайшее» в своём зале — это занятие', (await nearestIn(probeHall))?.nextStartsAt === start.toISOString());
+    assert('«Ближайшее» в другом зале его не называет', (await nearestIn(otherHall))?.nextStartsAt !== start.toISOString());
+    r = await call('/clubs/yenisey/catalog?halls=,,');
+    check('мусор в залах «Ближайшего» отклонён', 400, r.status);
 
     r = await asAdmin(`/clubs/yenisey/training-sessions/${scopedSession}`, { method: 'DELETE' });
     check('пробное занятие убрано', 204, r.status);

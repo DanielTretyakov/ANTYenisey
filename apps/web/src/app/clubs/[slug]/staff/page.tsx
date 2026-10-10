@@ -134,8 +134,10 @@ export default function StaffSchedulePage() {
 
       {allowed && halls && (
         <>
-          {/* На телефоне — список залов (решение от 03.10.2026). */}
-          {halls.length > 1 && (
+          {/* Зал — списком на любом экране, как в «Расписании залов» (решение
+              от 05.10.2026): залов у организации бывает много, и ряд кнопок
+              переносился на несколько строк. */}
+          {halls.length > 1 ? (
             <CompactSelect
               label="Зал"
               value={hallId ?? ''}
@@ -144,23 +146,23 @@ export default function StaffSchedulePage() {
                 label: item.canPlan ? item.name : `${item.name} — только просмотр`,
               }))}
               onChange={setHallId}
-              className="mb-5 sm:hidden"
+              className="mb-5 sm:w-[24rem]"
             />
+          ) : (
+            <div className="mb-5 flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-[0.8125rem] tracking-[0.06em] text-text-subtle uppercase">Зал</span>
+              {halls.map((item) => (
+                <Tab
+                  key={item.id}
+                  active={item.id === hallId}
+                  onClick={() => setHallId(item.id)}
+                  title={item.canPlan ? undefined : 'Смены здесь назначает управляющий этого зала'}
+                >
+                  {item.name}
+                </Tab>
+              ))}
+            </div>
           )}
-
-          <div className={cn('mb-5 flex-wrap items-center gap-1.5', halls.length > 1 ? 'hidden sm:flex' : 'flex')}>
-            <span className="mr-1 text-[0.8125rem] tracking-[0.06em] text-text-subtle uppercase">Залы</span>
-            {halls.map((item) => (
-              <Tab
-                key={item.id}
-                active={item.id === hallId}
-                onClick={() => setHallId(item.id)}
-                title={item.canPlan ? undefined : 'Смены здесь назначает управляющий этого зала'}
-              >
-                {item.name}
-              </Tab>
-            ))}
-          </div>
 
           {hall && owner && (
             <Card className="mb-6">

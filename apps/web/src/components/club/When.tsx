@@ -1,4 +1,5 @@
 import { cn } from '@/lib/cn';
+import { dateIn, timeIn, viewerTime, viewerZone } from '@/lib/zonedTime';
 
 /**
  * Когда мероприятие: дата строкой, время под ней.
@@ -8,25 +9,23 @@ import { cn } from '@/lib/cn';
  * перенос задан, а не случается. Время отдельной строкой к тому же и есть то,
  * что в расписании ищут глазами.
  *
- * Момент показывается по часам браузера. Пояс зала сюда не передаётся
- * сознательно: человек в Красноярске, смотрящий на турнир в Абакане, должен
- * увидеть, во сколько ЕМУ выходить, а разница поясов между залами одной
- * платформы — забота страницы зала, а не строки списка.
+ * Момент показывается по часам ЗАЛА (`timezone`), а если у смотрящего пояс
+ * другой — ещё строкой «у вас 14:00» (решение владельца от 05.10.2026). Раньше
+ * время шло по часам браузера, и человек из Москвы видел красноярскую
+ * тренировку в 14:00, а в сетке, на афише и в сообщении MAX она стояла в 18:00.
+ * Без `timezone` — по часам браузера, как прежде.
  */
-export function When({ instant, className }: { instant: string; className?: string }) {
-  const value = new Date(instant);
-
-  const date = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' }).format(value);
-  const time = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(
-    value,
-  );
+export function When({ instant, timezone, className }: { instant: string; timezone?: string; className?: string }) {
+  const zone = timezone ?? viewerZone();
+  const hint = timezone ? viewerTime(instant, null, timezone) : null;
 
   return (
     <span className={cn('block w-32 shrink-0', className)}>
       <time dateTime={instant} className="block font-display text-[0.9375rem] text-text">
-        {date}
+        {dateIn(instant, zone, { day: 'numeric', month: 'long' })}
       </time>
-      <span className="mt-0.5 block font-display text-[1.0625rem] text-text">{time}</span>
+      <span className="mt-0.5 block font-display text-[1.0625rem] text-text">{timeIn(instant, zone)}</span>
+      {hint && <span className="mt-0.5 block text-[0.75rem] text-text-muted">{hint}</span>}
     </span>
   );
 }
@@ -35,22 +34,25 @@ export function When({ instant, className }: { instant: string; className?: stri
 export function WhenSpan({
   startsAt,
   endsAt,
+  timezone,
   className,
 }: {
   startsAt: string;
   endsAt: string | null;
+  /** Пояс зала; без него — часы браузера. */
+  timezone?: string;
   className?: string;
 }) {
   if (!endsAt) {
-    return <When instant={startsAt} className={className} />;
+    return <When instant={startsAt} timezone={timezone} className={className} />;
   }
 
-  const start = new Date(startsAt);
-  const end = new Date(endsAt);
-
-  const date = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' }).format(start);
-  const time = (value: Date): string =>
-    new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(value);
+  const zone = timezone ?? viewerZone();
+  const start = startsAt;
+  const end = endsAt;
+  const date = dateIn(start, zone, { day: 'numeric', month: 'long' });
+  const time = (value: string): string => timeIn(value, zone);
+  const hint = timezone ? viewerTime(startsAt, endsAt, timezone) : null;
 
   return (
     <span className={cn('block w-32 shrink-0', className)}>
@@ -62,6 +64,7 @@ export function WhenSpan({
         <span className="text-text-subtle"> – </span>
         {time(end)}
       </span>
+      {hint && <span className="mt-0.5 block text-[0.75rem] whitespace-nowrap text-text-muted">{hint}</span>}
     </span>
   );
 }

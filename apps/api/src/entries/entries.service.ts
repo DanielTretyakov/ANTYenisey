@@ -3,6 +3,7 @@ import { BookingStatus } from '@yenisey/database';
 import type { BookingEntry, ClubRef, PaidBySubscription } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
 import { cancellationOpen, cancellationPercent } from '../booking/availability';
+import { CLUB_ZONE_SELECT, eventZone, HALL_NAME_SELECT, TYPE_HALLS_SELECT } from '../events/event-view';
 import { PrismaService } from '../prisma/prisma.service';
 import { subscriptionCancelRatio } from '../subscriptions/subscription-rules';
 
@@ -48,7 +49,7 @@ export class EntriesService {
           subscription: SUBSCRIPTION_SELECT,
           sparringType: { select: { name: true } },
           coach: { select: { membership: { select: { user: { select: { fullName: true } } } } } },
-          table: { select: { label: true, hall: { select: { name: true } } } },
+          table: { select: { label: true, hall: { select: { name: true, timezone: true } } } },
         },
       }),
       this.prisma.trainingBooking.findMany({
@@ -65,7 +66,8 @@ export class EntriesService {
               id: true,
               startsAt: true,
               endsAt: true,
-              trainingType: { select: { name: true } },
+              dayClosures: HALL_NAME_SELECT,
+              trainingType: { select: { name: true, halls: TYPE_HALLS_SELECT, tenant: CLUB_ZONE_SELECT } },
               coach: {
                 select: { membership: { select: { user: { select: { fullName: true } } } } },
               },
@@ -87,7 +89,10 @@ export class EntriesService {
               id: true,
               startsAt: true,
               endsAt: true,
-              tournamentType: { select: { name: true, ratingLabel: true } },
+              dayClosures: HALL_NAME_SELECT,
+              tournamentType: {
+                select: { name: true, ratingLabel: true, halls: TYPE_HALLS_SELECT, tenant: CLUB_ZONE_SELECT },
+              },
             },
           },
         },
@@ -116,6 +121,7 @@ export class EntriesService {
             : `${booking.table.hall.name}, ${booking.table.label}`,
         startsAt: booking.startsAt.toISOString(),
         endsAt: booking.endsAt.toISOString(),
+        timezone: booking.table.hall.timezone,
         price: booking.priceAtBooking,
         status: booking.status,
         chargeRatio: booking.chargeRatio,
@@ -134,6 +140,7 @@ export class EntriesService {
         subtitle: `Тренер: ${shortName(booking.session.coach.membership.user.fullName)}`,
         startsAt: booking.session.startsAt.toISOString(),
         endsAt: booking.session.endsAt.toISOString(),
+        timezone: eventZone(booking.session, booking.session.trainingType),
         price: booking.priceAtBooking,
         status: booking.status,
         chargeRatio: booking.chargeRatio,
@@ -155,6 +162,7 @@ export class EntriesService {
         subtitle: null,
         startsAt: registration.tournament.startsAt.toISOString(),
         endsAt: registration.tournament.endsAt.toISOString(),
+        timezone: eventZone(registration.tournament, registration.tournament.tournamentType),
         price: registration.priceAtBooking,
         status: registration.status,
         chargeRatio: registration.chargeRatio,

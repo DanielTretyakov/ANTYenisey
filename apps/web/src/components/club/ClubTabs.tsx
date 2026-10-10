@@ -288,7 +288,7 @@ function CatalogTab({
               <div className="mt-auto pt-4">
                 <p className="font-display text-[1.125rem] text-text">{formatKopecks(item.price)}</p>
                 <p className="mt-0.5 text-[0.8125rem] text-text-muted">
-                  {item.nextStartsAt ? `Ближайшее: ${shortWhen(item.nextStartsAt)}` : 'Сейчас в расписании нет'}
+                  {item.nextStartsAt ? `Ближайшее: ${shortWhen(item.nextStartsAt, item.nextTimezone)}` : 'Сейчас в расписании нет'}
                 </p>
 
                 {item.upcomingCount > 0 && (

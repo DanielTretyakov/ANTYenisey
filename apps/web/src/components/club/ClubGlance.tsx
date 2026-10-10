@@ -64,7 +64,7 @@ export function ClubGlance({
         <span className={kicker}>Моя ближайшая запись</span>
         {next ? (
           <>
-            <span className="mt-3 font-display text-[1.0625rem] text-text">{shortWhen(next.startsAt)}</span>
+            <span className="mt-3 font-display text-[1.0625rem] text-text">{shortWhen(next.startsAt, next.timezone)}</span>
             <span className="mt-0.5 truncate text-[0.875rem] text-text-muted">{next.title}</span>
           </>
         ) : (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import type {
   ClosurePurpose,
   ClubCoach,
@@ -13,6 +13,7 @@ import { ClientPicker } from '@/components/club/ClientPicker';
 import { inputClassName } from '@/components/ui/Field';
 import { cn } from '@/lib/cn';
 import { tintFill, tintMark, type PersonColor } from '@/lib/personColor';
+import { useClubSlug } from '@/lib/useClubApi';
 
 /** Кисть «освободить»: отдельное значение, потому что назначением она не является. */
 export const ERASER = 'ERASE';
@@ -99,6 +100,7 @@ export function seatsClient(purpose: Brush): boolean {
  * закрашенного.
  */
 export function SchedulePalette({
+  day,
   brush,
   onBrush,
   coaches,
@@ -118,6 +120,8 @@ export function SchedulePalette({
   onTournamentType,
   allowClient,
 }: {
+  /** Расписание даты, а не шаблон: от этого зависит, что кисть заведёт. */
+  day: boolean;
   brush: Brush;
   onBrush: (brush: Brush) => void;
   coaches: ClubCoach[];
@@ -151,6 +155,7 @@ export function SchedulePalette({
   const attachment = attachmentOf(brush);
   const seating = allowClient && seatsClient(brush);
   const currentCoach = coaches.find((coach) => coach.id === coachId);
+  const currentTournament = tournamentTypes.find((type) => type.id === tournamentTypeId);
   const attachedId = attachment === 'coach' ? coachId : null;
   const attachedColor = attachedId ? colors.get(attachedId) : undefined;
 
@@ -198,7 +203,10 @@ export function SchedulePalette({
         </button>
       </div>
 
-      {(attachment !== 'none' || seating || brush === 'TRAINING') && (
+      {/* Вторая строка — у каждой кисти, которую что-то уточняет. Турнира в
+          условии раньше не было, и выбрать его тип было негде ни в дне, ни в
+          шаблоне недели: красился первый по алфавиту (поймано 05.10.2026). */}
+      {(attachment !== 'none' || seating || brush === 'TRAINING' || brush === 'TOURNAMENT') && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           {brush === 'TRAINING' && (
             <label className="flex items-center gap-2 text-[0.875rem] text-text-muted">
@@ -273,35 +281,102 @@ export function SchedulePalette({
           )}
 
           {seating && <ClientPicker value={client} onChange={onClient} inline />}
+
+          <Missing brush={brush} coaches={coaches} trainingTypes={trainingTypes} tournamentTypes={tournamentTypes} />
         </div>
       )}
 
-      {(attachment !== 'none' || seating) && (
+      {brush !== ERASER && (
         <p className="flex w-full items-center gap-2 text-[0.8125rem] text-text-subtle">
           {attachedColor && (
             <span
-              className="h-3 w-3 rounded-sm"
+              className="h-3 w-3 shrink-0 rounded-sm"
               style={{ background: attachedColor.dot }}
               aria-hidden="true"
             />
           )}
-          {seating && client ? (
-            <>
-              Посадите {shortName(client.fullName)}: протяните по нужным часам — получится бронь с
-              ценой, отменой и строкой в «Моих записях» у человека.
-            </>
-          ) : (
-            <>
-              Закрашиваете: {PURPOSE_LABEL.get(brush as ClosurePurpose)?.toLowerCase()}
-              {attachment === 'coach' && currentCoach
-                ? `, ${shortName(currentCoach.fullName)}`
-                : ''}
-              {seating ? ' без клиента — окно просто закроет стол' : ''} — закрасьте нужные часы,
-              поверх уже закрашенного тоже можно.
-            </>
-          )}
+          <span>
+            {seating && client ? (
+              <>
+                Посадите {shortName(client.fullName)}: щёлкните по клетке начала или протяните по
+                нужным часам — рядом появится бронь с ценой. Щелчок ниже на том же столе продлит её.
+              </>
+            ) : (
+              <>
+                Закрашиваете: {PURPOSE_LABEL.get(brush as ClosurePurpose)?.toLowerCase()}
+                {brush === 'TOURNAMENT' && currentTournament ? ` «${currentTournament.name}»` : ''}
+                {attachment === 'coach' && currentCoach ? `, ${shortName(currentCoach.fullName)}` : ''}
+                {seating ? ' без клиента — окно просто закроет стол' : ''} — {consequence(brush, day)}
+              </>
+            )}
+          </span>
         </p>
       )}
     </div>
+  );
+}
+
+/** Что будет с закрашенным при сохранении — у кистей, которые что-то заводят. */
+function consequence(brush: Brush, day: boolean): string {
+  if (brush === 'TRAINING') {
+    return day
+      ? 'после сохранения на занятие можно будет записаться. Окно «без записи» из шаблона открывается так же: закрасьте его заново.'
+      : 'в шаблоне это тип и тренер, запись открывается в расписании дня.';
+  }
+
+  if (brush === 'TOURNAMENT') {
+    return day
+      ? 'при сохранении заведётся турнир дня; если турнир этого типа в дне уже стоит, окна добавятся к нему.'
+      : 'в шаблоне хранится тип, сам турнир заведётся, когда день сохранят или отвяжут от шаблона.';
+  }
+
+  return 'закрасьте нужные часы, поверх уже закрашенного тоже можно.';
+}
+
+/**
+ * Пустой список у кисти — не тупик, а ссылка туда, где его заполняют.
+ *
+ * Без неё кисть тренировки в клубе без типов молча красила окна, которые
+ * сервер потом отклонял при сохранении.
+ */
+function Missing({
+  brush,
+  coaches,
+  trainingTypes,
+  tournamentTypes,
+}: {
+  brush: Brush;
+  coaches: ClubCoach[];
+  trainingTypes: TrainingType[];
+  tournamentTypes: TournamentType[];
+}) {
+  const slug = useClubSlug();
+  const noTypes =
+    (brush === 'TRAINING' && trainingTypes.length === 0) || (brush === 'TOURNAMENT' && tournamentTypes.length === 0);
+  const noCoaches = brush === 'TRAINING' && coaches.length === 0;
+
+  if (!noTypes && !noCoaches) return null;
+
+  return (
+    <span className="text-[0.8125rem] text-warning">
+      {noTypes && (
+        <>
+          Для этого зала нет действующих типов —{' '}
+          <Link href={`/clubs/${slug}/catalog`} className="underline underline-offset-2">
+            заведите в «Занятиях и турнирах»
+          </Link>
+          .{' '}
+        </>
+      )}
+      {noCoaches && (
+        <>
+          В этом зале нет тренеров — роль выдаётся в{' '}
+          <Link href={`/clubs/${slug}/people`} className="underline underline-offset-2">
+            «Составе клуба»
+          </Link>
+          .
+        </>
+      )}
+    </span>
   );
 }

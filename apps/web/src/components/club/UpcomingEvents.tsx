@@ -12,10 +12,12 @@ import type { EventViewer } from '@/lib/eventViewer';
 import { dayKey, monthEnd, monthLabel, monthStart } from '@/lib/month';
 import { tintMark } from '@/lib/personColor';
 import { useClubApi } from '@/lib/useClubApi';
-import { sameDay, weekDays, weekEnd, weekLabel, weekStart } from '@/lib/week';
+import { weekDays, weekEnd, weekLabel, weekStart } from '@/lib/week';
 import { EventRow, KIND_PAINT, RowSkeleton, shortWhen } from './EventRow';
 import { MonthCalendar } from './MonthCalendar';
 import { SectionHeading } from './SectionHeading';
+import { dayIn } from '@/lib/zonedTime';
+import { ViewerTime } from '@/components/events/FeedEventCard';
 
 /** Выбранный вид мероприятия — «только детские тренировки». */
 export interface KindFilter {
@@ -165,11 +167,13 @@ export function UpcomingEvents({
         ? inWindow.filter((event) =>
             searching
               ? `${event.title} ${event.subtitle ?? ''}`.toLowerCase().includes(needle)
-              : day === null || sameDay(new Date(event.startsAt), days[day]!),
+              // День мероприятия — по часам его зала: занятие в 01:00 по
+              // Красноярску стоит в своём дне, а не в соседнем по Москве.
+              : day === null || dayIn(event.startsAt, event.timezone) === dayKey(days[day]!),
           )
         : monthDay === null
           ? []
-          : inWindow.filter((event) => dayKey(new Date(event.startsAt)) === monthDay);
+          : inWindow.filter((event) => dayIn(event.startsAt, event.timezone) === monthDay);
 
   const chips = (catalog ?? []).filter(
     (item) => item.upcomingCount > 0 && (!hallIds || availableInAny(item.hallIds, hallIds)),
@@ -478,8 +482,9 @@ function Nearest({
       {first && (
         <button type="button" onClick={() => onOpen(first)} className="mt-2 block text-left">
           <span className="block font-display text-[1.375rem] leading-tight text-text hover:underline">
-            {shortWhen(first.startsAt)}
+            {shortWhen(first.startsAt, first.timezone, false)}
           </span>
+          <ViewerTime startsAt={first.startsAt} endsAt={null} timezone={first.timezone} />
           <span className="mt-0.5 block text-[0.875rem] text-text-muted">
             {first.subtitle ? `${first.subtitle} · ` : ''}
             {first.freeSeats === null ? 'места без ограничений' : first.freeSeats > 0 ? `свободно ${first.freeSeats}` : 'мест нет'}
@@ -498,7 +503,7 @@ function Nearest({
               onClick={() => onOpen(event)}
               className="text-text underline-offset-2 hover:underline"
             >
-              {shortWhen(event.startsAt)}
+              {shortWhen(event.startsAt, event.timezone)}
             </button>
           ))}
         </p>

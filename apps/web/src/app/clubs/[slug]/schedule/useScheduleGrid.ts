@@ -2,15 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { availableIn } from '@yenisey/types';
-import type {
-  ClubCoach,
-  ClubPerson,
-  ClubTable,
-  Tournament,
-  TournamentType,
-  TrainingType,
-} from '@yenisey/types';
-import { cellKey, personOf, sameCells, type CellValue, type Cells } from '@/lib/closureGrid';
+import type { ClubCoach, ClubPerson, ClubTable, TournamentType, TrainingType } from '@yenisey/types';
+import { cellKey, NEW_SESSION, personOf, sameCells, type CellValue, type Cells } from '@/lib/closureGrid';
 import { personColors } from '@/lib/personColor';
 import { useClubApi } from '@/lib/useClubApi';
 import { attachmentOf, ERASER, type Brush } from './SchedulePalette';
@@ -24,41 +17,42 @@ import { attachmentOf, ERASER, type Brush } from './SchedulePalette';
  * к шаблону» — под сеткой, у шаблона — вкладки дней недели и копирование. Хук
  * отдаёт объект и в раскладку не лезет.
  *
- * О режиме хук не знает вовсе: дорожку (`lane`) ему передают. Это единственное
- * место, где шаблон недели отличается от дня, — у шаблона семь дорожек по дням
- * недели, у дня одна.
+ * Режимы различаются двумя вещами: дорожками (`lane`: у шаблона семь по дням
+ * недели, у дня одна) и тем, что кисть тренировки в дне заводит занятие
+ * (`day`), а в шаблоне — нет: у шаблона дат нет.
  */
 export function useScheduleGrid({
   hallId,
   lane,
+  day,
   tables,
   coaches,
   trainingTypes,
   tournamentTypes,
-  tournaments,
 }: {
   hallId: string;
   lane: string;
+  /** Расписание даты: кисть тренировки ставит метку «занятие заведётся». */
+  day: boolean;
   tables: ClubTable[];
   coaches: ClubCoach[];
+  /** Все типы клуба, и снятые с продажи: по ним подписываются уже стоящие окна. */
   trainingTypes: TrainingType[];
   tournamentTypes: TournamentType[];
-  /** Уже заведённые турниры — чтобы подписать окна, поставленные раньше. */
-  tournaments: Tournament[];
 }) {
   const club = useClubApi();
 
-  // Палитра зала — только его виды и тренеры (решение владельца от
-  // 25.09.2026, «строго»; сервер проверяет то же). Подписи окон по-прежнему
-  // берутся из полных списков: окно, поставленное до сужения привязки, должно
-  // читаться своим названием, а не «неизвестно».
+  // Палитра зала — только его действующие виды и тренеры (решение владельца
+  // от 25.09.2026, «строго»; сервер проверяет то же). Подписи окон берутся из
+  // полных списков: окно, поставленное до сужения привязки или снятия типа с
+  // продажи, должно читаться своим названием, а не пустой клеткой.
   const hallCoaches = useMemo(() => coaches.filter((coach) => availableIn(coach.hallIds, hallId)), [coaches, hallId]);
   const hallTrainingTypes = useMemo(
-    () => trainingTypes.filter((type) => availableIn(type.hallIds, hallId)),
+    () => trainingTypes.filter((type) => type.isActive && availableIn(type.hallIds, hallId)),
     [trainingTypes, hallId],
   );
   const hallTournamentTypes = useMemo(
-    () => tournamentTypes.filter((type) => availableIn(type.hallIds, hallId)),
+    () => tournamentTypes.filter((type) => type.isActive && availableIn(type.hallIds, hallId)),
     [tournamentTypes, hallId],
   );
 
@@ -127,19 +121,16 @@ export function useScheduleGrid({
         return trainingTypes.find((type) => type.id === value.trainingTypeId)?.name ?? null;
       }
 
-      if (value.purpose === 'TOURNAMENT') {
-        // Тип турнира — у окна, которое только что закрасили или которое пришло
-        // из шаблона; проведение — у окна, уже сохранённого в дне.
-        if (value.tournamentTypeId) {
-          return tournamentTypes.find((type) => type.id === value.tournamentTypeId)?.name ?? null;
-        }
-
-        return tournaments.find((item) => item.id === value.tournamentId)?.typeName ?? null;
+      if (value.purpose === 'TOURNAMENT' && value.tournamentTypeId) {
+        // Тип есть у каждого турнирного окна: у шаблонного и только что
+        // закрашенного — свой, у сохранённого в дне — тип его проведения (его
+        // отдаёт сервер). Список всех турниров клуба ради подписи не нужен.
+        return tournamentTypes.find((type) => type.id === value.tournamentTypeId)?.name ?? null;
       }
 
       return null;
     },
-    [trainingTypes, tournamentTypes, tournaments],
+    [trainingTypes, tournamentTypes],
   );
 
   const nameOf = useCallback(
@@ -213,8 +204,9 @@ export function useScheduleGrid({
       coachId: attachment === 'coach' ? coachId : null,
       trainingTypeId: brush === 'TRAINING' ? trainingTypeId : null,
       // Занятие и проведение турнира в клетке не хранятся: они заводятся при
-      // сохранении дня — из типа, тренера и границ закрашенного окна.
-      trainingSessionId: null,
+      // сохранении дня — из типа, тренера и границ закрашенного окна. Кисть
+      // тренировки в дне лишь помечает: «здесь будет занятие с записью».
+      trainingSessionId: day && brush === 'TRAINING' ? NEW_SESSION : null,
       tournamentId: null,
       tournamentTypeId: brush === 'TOURNAMENT' ? tournamentTypeId : null,
     };
@@ -257,6 +249,7 @@ export function useScheduleGrid({
   }, []);
 
   return {
+    day,
     own,
     tableIds,
     cells,
@@ -278,6 +271,7 @@ export function useScheduleGrid({
     pending,
     setPending,
     palette: {
+      day,
       brush,
       onBrush: setBrush,
       coaches: hallCoaches,

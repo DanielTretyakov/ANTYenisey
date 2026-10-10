@@ -55,6 +55,8 @@ export interface EntryPayload {
   freeCancelUntil?: string | null;
   /** Отменено, потому что подписка клуба на КНТ приостановлена: денег нет, визит вернулся. */
   clubSuspended?: boolean;
+  /** Прежнее начало — у сообщения «время изменилось». */
+  previousStartsAt?: string;
 }
 
 /** Подписка клуба на КНТ — руководителю (решения владельца от 02.10.2026). */
@@ -286,6 +288,17 @@ export function renderNotification(type: string, payload: unknown, context: Rend
           : null;
 
       return { text: lines(head, ...entryLines(p), until), link: myBookings };
+    }
+
+    case 'BOOKING_TIME_CHANGED': {
+      const p = payload as EntryPayload;
+      const head = `Клуб изменил время${p.person ? ` · ${p.person}` : ''}`;
+      const before = p.previousStartsAt ? `Было: ${when(p.previousStartsAt, p.timezone)}.` : null;
+
+      return {
+        text: lines(head, ...entryLines(p), before, 'Если новое время не подходит — отмените запись или позвоните в клуб.'),
+        link: myBookings,
+      };
     }
 
     case 'BOOKING_NO_SHOW': {

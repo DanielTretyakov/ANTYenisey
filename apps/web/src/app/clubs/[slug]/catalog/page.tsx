@@ -1,8 +1,8 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, type FormEvent } from 'react';
-import { hasAnyRole, MANAGING_ROLES, type Hall, type Role, type SubscriptionPlan, type Tournament, type TournamentType, type TrainingSession, type TrainingType } from '@yenisey/types';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { hasAnyRole, MANAGING_ROLES, type EventPageQuery, type Hall, type SubscriptionPlan, type Tournament, type TournamentType, type TrainingSession, type TrainingType } from '@yenisey/types';
 import { SparringTypesCard } from './SparringTypesCard';
 import { SubscriptionPlansCard } from './SubscriptionPlansCard';
 import { AdminShell } from '@/components/layout/AdminShell';
@@ -35,8 +35,6 @@ export default function CatalogPage() {
 
   const [trainingTypes, setTrainingTypes] = useState<TrainingType[]>([]);
   const [tournamentTypes, setTournamentTypes] = useState<TournamentType[]>([]);
-  const [tournaments, setTournaments] = useState<Tournament[]>([]);
-  const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [halls, setHalls] = useState<Hall[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -67,21 +65,14 @@ export default function CatalogPage() {
 
     let cancelled = false;
 
-    Promise.all([
-      club.trainingTypes(),
-      club.tournamentTypes(),
-      club.tournaments(),
-      club.trainingSessions(),
-      club.subscriptionPlans(),
-      club.halls(),
-    ])
-      .then(([training, types, events, training_sessions, subscriptionPlans, clubHalls]) => {
+    // Проведения здесь не грузятся: их у клуба за годы тысячи, и вкладка с
+    // ними сама просит страницу, когда её откроют.
+    Promise.all([club.trainingTypes(), club.tournamentTypes(), club.subscriptionPlans(), club.halls()])
+      .then(([training, types, subscriptionPlans, clubHalls]) => {
         if (cancelled) return;
         setHalls(clubHalls);
         setTrainingTypes(training);
         setTournamentTypes(types);
-        setTournaments(events);
-        setSessions(training_sessions);
         setPlans(subscriptionPlans);
       })
       .catch((cause: unknown) => {
@@ -166,8 +157,8 @@ export default function CatalogPage() {
 
             {tab === 'events' && (
               <>
-                <TrainingSessionsCard sessions={sessions} onChange={setSessions} onError={setError} />
-                <TournamentsCard tournaments={tournaments} onChange={setTournaments} onError={setError} />
+                <TrainingSessionsCard onError={setError} />
+                <TournamentsCard onError={setError} />
               </>
             )}
           </div>
@@ -542,17 +533,12 @@ function TournamentTypesCard({
 }
 
 /** Конкретные турниры: тип плюс дата и время проведения. */
-function TournamentsCard({
-  tournaments,
-  onChange,
-  onError,
-}: {
-  tournaments: Tournament[];
-  onChange: (tournaments: Tournament[]) => void;
-  onError: (message: string | null) => void;
-}) {
+function TournamentsCard({ onError }: { onError: (message: string | null) => void }) {
   const club = useClubApi();
   const [pending, setPending] = useState(false);
+  const pages = usePagedEvents(useCallback((page: EventPageQuery) => club.tournaments(page), [club]), onError);
+  const tournaments = pages.items ?? [];
+  const onChange = pages.setItems;
 
   return (
     <Card>
@@ -561,8 +547,14 @@ function TournamentsCard({
         description="Заводятся прямо в расписании зала: выбираете тип, закрашиваете время — турнир появляется здесь уже с датой и числом занятых окон."
       />
       <CardBody>
-        {tournaments.length === 0 ? (
-          <p className="mb-4 text-[0.9375rem] text-text-muted">Турниров пока нет.</p>
+        <PeriodSwitch when={pages.when} onWhen={pages.setWhen} />
+
+        {pages.items === null ? (
+          <p className="mb-4 text-[0.9375rem] text-text-muted">Загружаю…</p>
+        ) : tournaments.length === 0 ? (
+          <p className="mb-4 text-[0.9375rem] text-text-muted">
+            {pages.when === 'upcoming' ? 'Предстоящих турниров нет.' : 'Прошедших турниров нет.'}
+          </p>
         ) : (
           <ul className="mb-5 divide-y divide-border border-y border-border">
             {tournaments.map((tournament) => (
@@ -608,6 +600,8 @@ function TournamentsCard({
           </ul>
         )}
 
+        <MoreButton pages={pages} />
+
         <p className="text-[0.8125rem] text-text-subtle">
           Турнир заводится в расписании зала: выберите кисть «Турнир», его тип и закрасьте
           время, которое он занимает. Дата и время начала берутся из сетки — вводить их
@@ -625,17 +619,12 @@ function TournamentsCard({
  * стол, и тренер. Здесь их видно списком, и здесь же правится число мест:
  * ошибиться в нём легко, а перекрашивать ради этого расписание не за чем.
  */
-function TrainingSessionsCard({
-  sessions,
-  onChange,
-  onError,
-}: {
-  sessions: TrainingSession[];
-  onChange: (sessions: TrainingSession[]) => void;
-  onError: (message: string | null) => void;
-}) {
+function TrainingSessionsCard({ onError }: { onError: (message: string | null) => void }) {
   const club = useClubApi();
   const [pending, setPending] = useState(false);
+  const pages = usePagedEvents(useCallback((page: EventPageQuery) => club.trainingSessions(page), [club]), onError);
+  const sessions = pages.items ?? [];
+  const onChange = pages.setItems;
 
   async function run(action: () => Promise<TrainingSession[]>): Promise<void> {
     onError(null);
@@ -657,8 +646,14 @@ function TrainingSessionsCard({
         description="Заводятся в расписании зала: выбираете тип занятия, тренера и число мест, закрашиваете время — занятие появляется здесь, и на него можно записаться."
       />
       <CardBody>
-        {sessions.length === 0 ? (
-          <p className="mb-4 text-[0.9375rem] text-text-muted">Занятий пока нет.</p>
+        <PeriodSwitch when={pages.when} onWhen={pages.setWhen} />
+
+        {pages.items === null ? (
+          <p className="mb-4 text-[0.9375rem] text-text-muted">Загружаю…</p>
+        ) : sessions.length === 0 ? (
+          <p className="mb-4 text-[0.9375rem] text-text-muted">
+            {pages.when === 'upcoming' ? 'Предстоящих занятий нет.' : 'Прошедших занятий нет.'}
+          </p>
         ) : (
           <ul className="mb-5 divide-y divide-border border-y border-border">
             {sessions.map((session) => (
@@ -740,6 +735,8 @@ function TrainingSessionsCard({
           </ul>
         )}
 
+        <MoreButton pages={pages} />
+
         <p className="text-[0.8125rem] text-text-subtle">
           Занятие заводится в расписании зала: выберите кисть «Тренировка», тип, тренера и число
           мест, затем закрасьте время. Время начала и окончания берутся из сетки — вводить их
@@ -747,6 +744,95 @@ function TrainingSessionsCard({
         </p>
       </CardBody>
     </Card>
+  );
+}
+
+/** Строк на странице проведений. */
+const EVENT_PAGE = 20;
+
+/**
+ * Проведения страницами (решение владельца от 05.10.2026): за годы у клуба их
+ * тысячи, и прежний список «все сразу» рос без предела. Предстоящие —
+ * ближайшие сверху, прошедшие — свежие сверху; «Показать ещё» дочитывает
+ * следующую страницу. Строкой больше, чем показывается, — чтобы знать, есть
+ * ли что дочитывать, без отдельного счётчика.
+ */
+function usePagedEvents<T>(load: (page: EventPageQuery) => Promise<T[]>, onError: (message: string | null) => void) {
+  const [when, setWhen] = useState<EventPageQuery['when']>('upcoming');
+  const [items, setItems] = useState<T[] | null>(null);
+  const [more, setMore] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const fetchPage = useCallback(
+    async (offset: number): Promise<{ rows: T[]; more: boolean }> => {
+      const rows = await load({ when, limit: EVENT_PAGE + 1, offset });
+
+      return { rows: rows.slice(0, EVENT_PAGE), more: rows.length > EVENT_PAGE };
+    },
+    [load, when],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setItems(null);
+    fetchPage(0)
+      .then((page) => {
+        if (cancelled) return;
+        setItems(page.rows);
+        setMore(page.more);
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) onError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchPage, onError]);
+
+  const loadMore = (): void => {
+    setLoading(true);
+    fetchPage(items?.length ?? 0)
+      .then((page) => {
+        setItems((previous) => [...(previous ?? []), ...page.rows]);
+        setMore(page.more);
+      })
+      .catch((cause: unknown) => onError(cause instanceof ApiError ? cause.message : 'Сервис недоступен'))
+      .finally(() => setLoading(false));
+  };
+
+  return { when, setWhen, items, setItems, more, loading, loadMore };
+}
+
+function PeriodSwitch({
+  when,
+  onWhen,
+}: {
+  when: EventPageQuery['when'];
+  onWhen: (when: EventPageQuery['when']) => void;
+}) {
+  return (
+    <div className="mb-4 flex gap-1.5" role="group" aria-label="Период">
+      <Tab active={when === 'upcoming'} onClick={() => onWhen('upcoming')}>
+        Предстоящие
+      </Tab>
+      <Tab active={when === 'past'} onClick={() => onWhen('past')}>
+        Прошедшие
+      </Tab>
+    </div>
+  );
+}
+
+function MoreButton({ pages }: { pages: { more: boolean; loading: boolean; loadMore: () => void } }) {
+  if (!pages.more) return null;
+
+  return (
+    <div className="mb-5 -mt-2 flex justify-center">
+      <Button type="button" variant="secondary" size="sm" pending={pages.loading} onClick={pages.loadMore}>
+        Показать ещё
+      </Button>
+    </div>
   );
 }
 
