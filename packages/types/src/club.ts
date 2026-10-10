@@ -1,3 +1,4 @@
+import type { EventKind } from './platform';
 import type { WorkingHours } from './working-hours';
 /**
  * Профиль клуба — то, что владелец и администратор настраивают сами, без
@@ -643,6 +644,24 @@ export interface EventCancelRequest {
    * (тренер заболел); `false` — оставить закрытыми как «Стол занят» (зал не работает).
    */
   freeTables: boolean;
+}
+
+/**
+ * Клуб записывает человека на занятие или турнир — звонок «запишите на
+ * субботу» (решения владельца от 10.10.2026). На начавшееся — сразу «пришёл».
+ */
+export interface ClubEnrollRequest {
+  kind: EventKind;
+  eventId: string;
+  clientId: string;
+}
+
+/** Клуб отменяет запись: по правилам отмены клуба или без списания. */
+export interface ClubEntryCancelRequest {
+  kind: EventKind;
+  /** Строка записи, а не проведения. */
+  entryId: string;
+  waiveCharge?: boolean;
 }
 
 /** Что сделала отмена: момент, причина и сколько записей отменено с возвратом. */

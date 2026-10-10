@@ -2519,6 +2519,7 @@ async function main() {
   await platformBilling();
   await clubApplications();
   await eventCancellation();
+  await clubEntries();
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
@@ -6969,4 +6970,136 @@ async function cancellationScenario({ asAdmin, as, coachId, trainingTypeId, tour
   check('на отменённый турнир не записаться', 400, r.status);
 
   // Проведения без окон уберёт clean-probes вместе с пробными учётками.
+}
+
+/**
+ * Клуб записывает человека и отменяет его запись — по звонку (решения
+ * владельца от 10.10.2026). Учётка смоука — руководитель: правило смены его
+ * пускает всегда. Мероприятия вне сетки: запись от сетки не зависит.
+ */
+async function clubEntries() {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('\n=== 53. Запись и отмена клубом — ПРОПУЩЕНА (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 53. Запись и отмена клубом');
+
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+
+  let r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const asAdmin = as(r.body?.accessToken ?? '');
+  const coachId = (await asAdmin('/clubs/yenisey/coaches')).body?.[0]?.id;
+  const trainingTypeId = (await asAdmin('/clubs/yenisey/training-types')).body?.find((type) => type.isActive)?.id;
+  const tournamentTypeId = (await asAdmin('/clubs/yenisey/tournament-types')).body?.find((type) => type.isActive)?.id;
+
+  if (!coachId || !trainingTypeId || !tournamentTypeId) {
+    console.log('     в клубе нет тренера или действующих типов — сценарий пропущен');
+    return;
+  }
+
+  // Клиенты — пробные, привязаны к клубу регистрацией: администратор ищет
+  // только людей своего клуба.
+  r = await post('/auth/register', registration({ lastName: 'Звонков' }));
+  const asFirst = as(r.body?.accessToken ?? '');
+  const firstId = (await asFirst('/auth/me')).body?.id;
+  r = await post('/auth/register', registration({ lastName: 'Звонкова', gender: 'FEMALE' }));
+  const secondId = (await as(r.body?.accessToken ?? '')('/auth/me')).body?.id;
+
+  const week = new Date(Date.now() + 7 * 24 * 3600_000);
+  r = await asAdmin('/clubs/yenisey/training-sessions', {
+    method: 'POST',
+    json: {
+      trainingTypeId,
+      coachId,
+      startsAt: week.toISOString(),
+      endsAt: new Date(week.getTime() + 90 * 60_000).toISOString(),
+      capacity: 1,
+    },
+  });
+  check('занятие на одного заведено', 201, r.status);
+  const sessionId = r.body?.id;
+
+  const enroll = (json, who = asAdmin) => who('/clubs/yenisey/desk/event-entries', { method: 'POST', json });
+  const cancel = (json, who = asAdmin) => who('/clubs/yenisey/desk/event-entries/cancel', { method: 'POST', json });
+
+  // --- Запись по звонку.
+  r = await enroll({ kind: 'TRAINING', eventId: sessionId, clientId: secondId }, asFirst);
+  check('клиенту запись за другого закрыта', 403, r.status);
+
+  r = await enroll({ kind: 'TRAINING', eventId: sessionId, clientId: firstId });
+  check('клуб записал человека на занятие', 201, r.status);
+  assert('запись — его и действующая', r.body?.status === 'BOOKED' && r.body?.id === sessionId);
+  const entryId = r.body?.entryId;
+
+  r = await enroll({ kind: 'TRAINING', eventId: sessionId, clientId: firstId });
+  check('повторно того же — 409', 409, r.status);
+
+  r = await enroll({ kind: 'TRAINING', eventId: sessionId, clientId: secondId });
+  check('в полную группу клуб тоже не записывает', 409, r.status);
+
+  r = await asFirst('/me/bookings');
+  assert('человек видит запись у себя', (r.body ?? []).some((item) => item.entryId === entryId && item.status === 'BOOKED'));
+
+  // --- Отмена по звонку: без списания.
+  r = await cancel({ kind: 'TRAINING', entryId }, asFirst);
+  check('клиенту отмена клубным маршрутом закрыта', 403, r.status);
+
+  r = await cancel({ kind: 'TRAINING', entryId, waiveCharge: true });
+  check('клуб отменил запись', 200, r.status);
+  assert('отменена без списания', r.body?.status === 'CANCELLED' && r.body?.chargePercent === 0);
+
+  r = await cancel({ kind: 'TRAINING', entryId, waiveCharge: true });
+  check('повторная отмена — 400', 400, r.status);
+
+  r = await enroll({ kind: 'TRAINING', eventId: sessionId, clientId: secondId });
+  check('освободившееся место клуб отдал другому', 201, r.status);
+
+  // --- Турнир: запись клубом и отмена по правилам (за неделю — 0 %).
+  r = await asAdmin('/clubs/yenisey/tournaments', {
+    method: 'POST',
+    json: { tournamentTypeId, startsAt: week.toISOString(), endsAt: new Date(week.getTime() + 3 * 3600_000).toISOString() },
+  });
+  check('турнир для записи клубом заведён', 201, r.status);
+  const cupId = r.body?.id;
+
+  r = await enroll({ kind: 'TOURNAMENT', eventId: cupId, clientId: firstId });
+  check('клуб записал человека на турнир', 201, r.status);
+
+  r = await cancel({ kind: 'TOURNAMENT', entryId: r.body?.entryId });
+  check('клуб отменил запись на турнир по правилам', 200, r.status);
+  assert('за неделю — без списания и по правилам', r.body?.chargePercent === 0);
+
+  // --- Уже началось: запись клубом — сразу «пришёл», отменить её нельзя.
+  const began = new Date(Date.now() - 10 * 60_000);
+  r = await asAdmin('/clubs/yenisey/training-sessions', {
+    method: 'POST',
+    json: { trainingTypeId, coachId, startsAt: began.toISOString(), endsAt: new Date(began.getTime() + 3600_000).toISOString(), capacity: 4 },
+  });
+  check('начавшееся занятие заведено', 201, r.status);
+  const startedId = r.body?.id;
+
+  r = await asFirst(`/clubs/yenisey/trainings/${startedId}/booking`, { method: 'POST' });
+  check('сам на начавшееся не записаться', 400, r.status);
+
+  r = await enroll({ kind: 'TRAINING', eventId: startedId, clientId: firstId });
+  check('клуб записал на начавшееся', 201, r.status);
+  assert('и сразу «пришёл»', r.body?.status === 'ATTENDED');
+
+  r = await cancel({ kind: 'TRAINING', entryId: r.body?.entryId });
+  check('отметку отменой не снять', 400, r.status);
+
+  // --- Отменённое клубом — не записать и клубу.
+  r = await asAdmin(`/clubs/yenisey/training-sessions/${startedId}/cancel`, {
+    method: 'POST',
+    json: { reason: 'Проверка записи на отменённое', freeTables: true },
+  });
+  check('начавшееся занятие отменено', 200, r.status);
+
+  r = await enroll({ kind: 'TRAINING', eventId: startedId, clientId: secondId });
+  check('на отменённое клуб не записывает', 400, r.status);
 }

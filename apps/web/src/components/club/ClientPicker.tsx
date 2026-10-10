@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ClubPerson } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
 import { inputClassName } from '@/components/ui/Field';
+import { clubApi } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { useClubApi } from '@/lib/useClubApi';
 
@@ -28,13 +29,17 @@ export function ClientPicker({
   label = 'Клиент',
   /** Строкой в ряд с подписью (палитра расписания) или блоком во всю ширину (форма). */
   inline = false,
+  slug,
 }: {
   value: ClubPerson | null;
   onChange: (person: ClubPerson | null) => void;
   label?: string;
   inline?: boolean;
+  /** Клуб, если его нет в адресе страницы: окно мероприятия открывают и на стартовой. */
+  slug?: string;
 }) {
-  const club = useClubApi();
+  const fromUrl = useClubApi();
+  const club = useMemo(() => (slug ? clubApi(slug) : fromUrl), [slug, fromUrl]);
 
   const [query, setQuery] = useState('');
   const [found, setFound] = useState<ClubPerson[]>([]);

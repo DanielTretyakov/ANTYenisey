@@ -2,14 +2,16 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import type { EventDetail, EventKind, EventParticipant } from '@yenisey/types';
+import { hasAnyRole, MANAGING_ROLES, type EventDetail, type EventKind, type EventParticipant } from '@yenisey/types';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
+import { EnrollClientForm } from '@/components/events/EnrollClientForm';
 import { ApiError, clubApi } from '@/lib/api';
 import { eventViewerOf, seatsLabel, useEventAction } from '@/lib/eventViewer';
 import { formatKopecks } from '@/lib/money';
+import { rolesInClub } from '@/lib/membership';
 import { loginHref } from '@/lib/next';
 import { useSession } from '@/lib/useSession';
 import { ViewerTime } from '@/components/events/FeedEventCard';
@@ -70,6 +72,7 @@ export function EventDialog({
 
   const action = useEventAction(slug, forPerson, changed);
   const viewer = eventViewerOf(session, slug, forPerson, selfIsChild);
+  const managing = session.status === 'ready' && hasAnyRole(rolesInClub(session.user, slug), MANAGING_ROLES);
 
   return (
     <Dialog
@@ -187,10 +190,39 @@ export function EventDialog({
               error={action.error}
               onToggle={() => void action.toggle(event)}
             />
+
+            {/* Записать по звонку (10.10.2026): тем, кто работает в клубе, — и на
+                начавшееся тоже, тогда сразу «пришёл». Кого пускать, решает сервер
+                правилом смены; здесь — только кому показать. */}
+            {managing && !forPerson && event.cancelReason === null && (
+              <ClubEnroll event={event} onEnrolled={changed} />
+            )}
           </>
         )}
       </div>
     </Dialog>
+  );
+}
+
+function ClubEnroll({ event, onEnrolled }: { event: EventDetail; onEnrolled: () => void }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <section className="border-t border-border pt-5">
+      {open ? (
+        <EnrollClientForm
+          slug={event.club.slug}
+          kind={event.kind}
+          eventId={event.id}
+          started={new Date(event.startsAt).getTime() <= Date.now()}
+          onEnrolled={onEnrolled}
+        />
+      ) : (
+        <Button variant="secondary" onClick={() => setOpen(true)}>
+          Записать клиента
+        </Button>
+      )}
+    </section>
   );
 }
 

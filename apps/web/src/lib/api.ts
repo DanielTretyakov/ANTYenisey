@@ -1,5 +1,7 @@
 import type {
   BillingView,
+  ClubEnrollRequest,
+  ClubEntryCancelRequest,
   EventCancelRequest,
   EventCancelResult,
   CardPaymentStart,
@@ -1074,6 +1076,17 @@ export function clubApi(slug: string = TENANT_SLUG) {
      * Отмена брони администратором. POST, а не DELETE: у неё есть тело
      * («простить списание»), а тело DELETE-запроса режет половина прокси.
      */
+    /**
+     * Клуб записывает человека на занятие или турнир (решения владельца от
+     * 10.10.2026) — тем, кто на смене. На начавшееся — сразу «пришёл».
+     */
+    enrollClient: (payload: ClubEnrollRequest): Promise<BookingEntry> =>
+      authorized(`${club}/desk/event-entries`, json('POST', payload)),
+
+    /** Клуб отменяет запись человека: по правилам отмены или без списания. */
+    cancelClientEntry: (payload: ClubEntryCancelRequest): Promise<BookingEntry> =>
+      authorized(`${club}/desk/event-entries/cancel`, json('POST', payload)),
+
     cancelDeskBooking: (
       id: string,
       payload: CancelDeskBookingRequest = {},

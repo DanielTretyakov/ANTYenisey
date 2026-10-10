@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { hasAnyRole, MANAGING_ROLES, type ClubPerson, type DeskBooking, type DeskDay, type DeskEvent, type DeskTableNow, type DeskAccess, type Hall, type Role } from '@yenisey/types';
+import { hasAnyRole, MANAGING_ROLES, type ClubPerson, type DeskBooking, type DeskDay, type DeskEvent, type DeskParticipant, type DeskTableNow, type DeskAccess, type Hall, type Role } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -12,7 +12,10 @@ import { MarkedBlock } from './MarkedBlock';
 import { NewClientDialog } from './NewClientDialog';
 import { PendingBlock } from './PendingBlock';
 import { VisitDialog } from './VisitDialog';
+import { ClubCancelButton } from '@/components/club/ClubCancelButton';
 import { CancelEventDialog } from '@/components/events/CancelEventDialog';
+import { EnrollClientForm } from '@/components/events/EnrollClientForm';
+import { Dialog } from '@/components/ui/Dialog';
 import { inputClassName } from '@/components/ui/Field';
 import { ApiError } from '@/lib/api';
 import { pendingCounts } from '@/lib/attendance';
@@ -613,7 +616,13 @@ function Ahead({
   rows: Row[];
   onChanged: () => void;
 }) {
+  const club = useClubApi();
+  const slug = useClubSlug();
   const [cancelling, setCancelling] = useState<Row['event'] | null>(null);
+  const [enrolling, setEnrolling] = useState<Row['event'] | null>(null);
+  // Состав раскрывается по нажатию: двадцать строк ленты с полным составом
+  // каждой группы прятали бы саму ленту.
+  const [open, setOpen] = useState<string | null>(null);
 
   return (
     <Card>
@@ -647,15 +656,37 @@ function Ahead({
               <span className="text-[0.875rem] whitespace-nowrap text-text-muted tabular-nums">
                 {formatKopecks(row.price)}
               </span>
-              {row.bookingId && <CancelBooking id={row.bookingId} onDone={onChanged} />}
-              {row.event && (
-                <Button variant="danger-ghost" size="sm" onClick={() => setCancelling(row.event ?? null)}>
-                  Отменить
-                </Button>
+              {row.bookingId && (
+                <ClubCancelButton
+                  cancel={(waiveCharge) => club.cancelDeskBooking(row.bookingId ?? '', { waiveCharge })}
+                  onDone={onChanged}
+                />
               )}
+              {row.event && (
+                <span className="flex flex-wrap items-center gap-1">
+                  <Button variant="ghost" size="sm" onClick={() => setOpen(open === row.key ? null : row.key)}>
+                    Состав ({row.event.participants.length})
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => setEnrolling(row.event ?? null)}>
+                    Записать
+                  </Button>
+                  <Button variant="danger-ghost" size="sm" onClick={() => setCancelling(row.event ?? null)}>
+                    Отменить
+                  </Button>
+                </span>
+              )}
+              {row.event && open === row.key && <Lineup event={row.event} onChanged={onChanged} />}
             </li>
           ))}
         </ul>
+      )}
+
+      {enrolling && (
+        <Dialog title="Записать клиента" description={enrolling.title} onClose={() => setEnrolling(null)}>
+          <div className="px-6 py-5">
+            <EnrollClientForm slug={slug} kind={enrolling.kind} eventId={enrolling.id} started={false} onEnrolled={onChanged} />
+          </div>
+        </Dialog>
       )}
 
       {cancelling && (
@@ -677,60 +708,33 @@ function Ahead({
 }
 
 /**
- * Отмена брони администратором.
- *
- * Два шага, а не один: отмена списывает с человека деньги по политике клуба, и
- * случайное нажатие в ленте из двадцати строк обошлось бы клубу дороже, чем
- * лишний вопрос. Второй шаг заодно предлагает простить списание — «стол
- * сломался» в политику отмены не заложено, и без этой кнопки администратору
- * осталось бы звонить в бухгалтерию.
+ * Кто записан на занятие или турнир — с телефоном и отменой за человека
+ * (решения владельца от 10.10.2026): звонок «я не приду» администратор
+ * закрывает здесь же, по политике клуба или без списания.
  */
-function CancelBooking({ id, onDone }: { id: string; onDone: () => void }) {
+function Lineup({ event, onChanged }: { event: NonNullable<Row['event']>; onChanged: () => void }) {
   const club = useClubApi();
-  const [asking, setAsking] = useState(false);
-  const [pending, setPending] = useState(false);
 
-  async function cancel(waiveCharge: boolean): Promise<void> {
-    setPending(true);
-
-    try {
-      await club.cancelDeskBooking(id, { waiveCharge });
-      onDone();
-    } finally {
-      setPending(false);
-      setAsking(false);
-    }
-  }
-
-  if (!asking) {
-    return (
-      <button
-        type="button"
-        onClick={() => setAsking(true)}
-        className="text-[0.8125rem] text-text-subtle underline underline-offset-2 hover:text-danger"
-      >
-        Отменить
-      </button>
-    );
+  if (event.participants.length === 0) {
+    return <p className="basis-full pl-[4.5rem] text-[0.8125rem] text-text-muted">Пока никто не записался.</p>;
   }
 
   return (
-    <span className="flex flex-wrap items-center gap-2 text-[0.8125rem]">
-      <span className="text-text-muted">Списать по политике клуба?</span>
-      <Button size="sm" variant="danger" pending={pending} onClick={() => void cancel(false)}>
-        Да, отменить
-      </Button>
-      <Button size="sm" variant="secondary" disabled={pending} onClick={() => void cancel(true)}>
-        Без списания
-      </Button>
-      <button
-        type="button"
-        onClick={() => setAsking(false)}
-        className="text-text-subtle underline underline-offset-2 hover:text-text"
-      >
-        не надо
-      </button>
-    </span>
+    <ul className="grid basis-full gap-1.5 pl-[4.5rem]">
+      {event.participants.map((person) => (
+        <li key={person.entryId} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.875rem]">
+          <span className="min-w-0 flex-1">
+            {person.fullName}
+            <span className="ml-2 text-text-muted tabular-nums">{person.phone}</span>
+            {person.bySubscription && <span className="ml-2 text-text-subtle">по абонементу</span>}
+          </span>
+          <ClubCancelButton
+            cancel={(waiveCharge) => club.cancelClientEntry({ kind: event.kind, entryId: person.entryId, waiveCharge })}
+            onDone={onChanged}
+          />
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -791,7 +795,15 @@ interface Row {
    * владельца от 10.10.2026): отменить проведение — не то же самое, что
    * отменить одну бронь, и записавшимся уходит возврат и сообщение.
    */
-  event?: { kind: DeskEvent['kind']; id: string; title: string; booked: number; placed: boolean };
+  event?: {
+    kind: DeskEvent['kind'];
+    id: string;
+    title: string;
+    booked: number;
+    placed: boolean;
+    /** Действующие записи — состав, который администратор может поправить. */
+    participants: DeskParticipant[];
+  };
 }
 
 const PURPOSE: Record<string, string> = {
@@ -851,12 +863,13 @@ function bookingRow(booking: DeskBooking): Row {
 }
 
 function eventRow(event: DeskEvent, placed: boolean): Row {
-  const booked = event.participants.filter((entry) => entry.status === 'BOOKED').length;
+  const participants = event.participants.filter((entry) => entry.status === 'BOOKED');
+  const booked = participants.length;
   const title = [event.title, event.coachName].filter(Boolean).join(' · ');
 
   return {
     key: `event-${event.id}`,
-    event: { kind: event.kind, id: event.id, title: `${title} · ${clock(event.startsAt)}`, booked, placed },
+    event: { kind: event.kind, id: event.id, title: `${title} · ${clock(event.startsAt)}`, booked, placed, participants },
     at: event.startsAt,
     note: event.kind === 'TRAINING' ? 'занятие' : 'турнир',
     title,

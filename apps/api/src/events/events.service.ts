@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BookingStatus, Prisma } from '@yenisey/database';
+import { AuditAction, BookingSource, BookingStatus, Prisma } from '@yenisey/database';
 import { isStaff, type BookingEntry, type ClubCatalogItem, type ClubEvent, type EventDetail, type EventKind } from '@yenisey/types';
 import { cancellationOpen, cancellationPercent } from '../booking/availability';
 import {
@@ -23,6 +23,7 @@ import {
   trainingDetail,
   trainingEvent,
 } from './event-view';
+import { AttendanceService, type Actor } from '../attendance/attendance.service';
 import { MembershipService } from '../club/membership.service';
 import { ClientNotifier } from '../notifications/client-notifier.service';
 import { StaffNotifier } from '../notifications/staff-notifier.service';
@@ -46,7 +47,7 @@ import { StaffService } from '../staff/staff.service';
  * Занятие и турнир похожи ровно настолько, чтобы их хотелось объединить, и
  * различаются в одном месте по существу: у занятия есть лимит мест. Из-за него
  * запись на занятие — не такая же операция, как регистрация на турнир: её
- * приходится сериализовать блокировкой строки, см. `registerForTraining`.
+ * приходится сериализовать блокировкой строки, см. `enroll`.
  */
 /** Самое широкое окно списка: месяц с запасом — неделя страницы клуба и ещё три. */
 const MAX_RANGE_MS = 31 * 24 * 3600_000;
@@ -92,6 +93,7 @@ export class EventsService {
     private readonly notifier: ClientNotifier,
     private readonly staffNotifier: StaffNotifier,
     private readonly staff: StaffService,
+    private readonly attendance: AttendanceService,
   ) {}
 
   /**
@@ -341,7 +343,7 @@ export class EventsService {
   }
 
   /**
-   * Запись на турнир.
+   * Запись на турнир — сам человек (или родитель за ребёнка).
    *
    * Вступать в клуб заранее не нужно: записаться может любой пользователь
    * платформы, а привязка и анкета клиента заводятся первым же действием — тем
@@ -351,8 +353,217 @@ export class EventsService {
    * ТЗ ограничения не требует. Число записавшихся показывается справочно.
    */
   async register(tenantId: string, userId: string, tournamentId: string): Promise<BookingEntry> {
+    const entryId = await this.enroll(tenantId, userId, 'TOURNAMENT', tournamentId, null);
+
+    return this.entryFor(tenantId, userId, entryId);
+  }
+
+  /** Запись на занятие — сам человек (или родитель за ребёнка). См. `enroll`. */
+  async registerForTraining(tenantId: string, userId: string, sessionId: string): Promise<BookingEntry> {
+    const entryId = await this.enroll(tenantId, userId, 'TRAINING', sessionId, null);
+
+    return this.entryFor(tenantId, userId, entryId);
+  }
+
+  /**
+   * Клуб записывает человека на занятие или турнир — звонок «запишите внука
+   * на субботу» (решения владельца от 10.10.2026).
+   *
+   * Тот же путь, что у самозаписи, — лимит мест, замок проведения, абонемент,
+   * правила сотрудников, — с двумя отличиями: запись помечена `MANUAL` с
+   * автором, а на уже начавшееся записать можно, и такая запись сразу
+   * «пришёл»: человек уже в зале, а без отметки её закрыла бы неявкой джоба.
+   * Снятый с продажи вид и полная группа клубу не уступают.
+   */
+  async enrollByClub(
+    tenantId: string,
+    actor: Actor,
+    request: { kind: EventKind; eventId: string; clientId: string },
+  ): Promise<BookingEntry> {
+    const entryId = await this.enroll(tenantId, request.clientId, request.kind, request.eventId, actor);
+
+    return this.entryFor(tenantId, request.clientId, entryId);
+  }
+
+  /**
+   * Запись на занятие или турнир — одна на самозапись и на запись клубом.
+   *
+   * Занятие отличается от турнира лимитом мест, и из-за него запись идёт
+   * транзакцией с блокировкой строки сессии. Проверка «занято меньше, чем
+   * мест» без блокировки не работает: два параллельных запроса оба прочитают
+   * «занято 9 из 10» и оба вставят запись. Констрейнтом это не выражается —
+   * рецепт с `FOR UPDATE` записан в constraints.sql (раздел 4), и здесь ровно
+   * он. Турнир берёт свою строку `FOR SHARE` — против отмены клубом в ту же
+   * секунду: записи друг другу не мешают, а отмена (`FOR UPDATE`) их ждёт.
+   * Замок — до абонемента: порядок «проведение → абонемент» везде один.
+   */
+  private async enroll(
+    tenantId: string,
+    clientId: string,
+    kind: EventKind,
+    eventId: string,
+    club: Actor | null,
+  ): Promise<string> {
+    const event = await this.enrollable(tenantId, kind, eventId);
+    const now = new Date();
+    const started = event.startsAt.getTime() <= now.getTime();
+    const cancelled = kind === 'TRAINING' ? CANCELLED_TRAINING : CANCELLED_TOURNAMENT;
+
+    if (event.cancelledAt) {
+      throw new BadRequestException(cancelled);
+    }
+
+    if (started && !club) {
+      throw new BadRequestException(kind === 'TRAINING' ? 'Это занятие уже началось' : 'Этот турнир уже начался');
+    }
+
+    if (!event.isActive) {
+      throw new BadRequestException(kind === 'TRAINING' ? 'Запись на это занятие закрыта' : 'Запись на этот турнир закрыта');
+    }
+
+    await this.assertStaffMayJoin(tenantId, clientId, event.startsAt, event.coachId);
+    await this.membership.ensureClient(tenantId, clientId);
+
+    // Политика неявки — для отметки «пришёл» у записи на начавшееся.
+    const policy = club && started ? await this.attendance.policy(tenantId) : null;
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        if (kind === 'TRAINING') {
+          // Блокировка именно строки сессии, а не пересчёт после вставки:
+          // откатывать уже созданную запись пришлось бы вручную.
+          const locked = await tx.$queryRaw<{ capacity: number; cancelledAt: Date | null }[]>`
+            SELECT "capacity", "cancelledAt" FROM "TrainingSession" WHERE "id" = ${event.id} FOR UPDATE
+          `;
+          const capacity = locked[0]?.capacity;
+
+          if (capacity === undefined) {
+            throw new NotFoundException('Занятие не найдено');
+          }
+
+          // Клуб мог отменить занятие, пока запрос шёл: замок тот же, что у отмены.
+          if (locked[0]?.cancelledAt) {
+            throw new BadRequestException(cancelled);
+          }
+
+          const taken = await tx.trainingBooking.count({ where: { sessionId: event.id, status: BookingStatus.BOOKED } });
+
+          if (taken >= capacity) {
+            throw new ConflictException('На это занятие мест больше нет');
+          }
+        } else {
+          const locked = await tx.$queryRaw<{ cancelledAt: Date | null }[]>`
+            SELECT "cancelledAt" FROM "Tournament" WHERE "id" = ${event.id} FOR SHARE
+          `;
+
+          if (locked[0]?.cancelledAt) {
+            throw new BadRequestException(cancelled);
+          }
+        }
+
+        const sub = await this.subscriptions.reserveInTx(tx, tenantId, clientId, {
+          kind,
+          typeId: event.typeId,
+          startsAt: event.startsAt,
+        });
+
+        // Копия цены на момент записи: поднятый через месяц прайс не должен
+        // переписывать то, о чём клуб уже договорился с человеком. Пишется и
+        // при оплате абонементом — иначе стоимость визита не восстановить.
+        // Ручную запись подписывает сотрудник (CHECK: MANUAL — только с автором).
+        const common = {
+          tenantId,
+          clientId,
+          priceAtBooking: event.price,
+          subscriptionId: sub?.id ?? null,
+          ...(club ? { source: BookingSource.MANUAL, createdByUserId: club.userId } : {}),
+        };
+        const created =
+          kind === 'TRAINING'
+            ? await tx.trainingBooking.create({ data: { ...common, sessionId: event.id }, select: { id: true } })
+            : await tx.tournamentRegistration.create({ data: { ...common, tournamentId: event.id }, select: { id: true } });
+
+        if (sub) {
+          await this.subscriptions.chargeInTx(
+            tx,
+            tenantId,
+            sub,
+            kind === 'TRAINING' ? { trainingBookingId: created.id } : { tournamentRegistrationId: created.id },
+          );
+        }
+
+        // Сначала визит, потом отметка: отметка сверяет журнал с записью.
+        if (club && policy) {
+          await this.attendance.applyInTx(
+            tx,
+            tenantId,
+            kind,
+            created.id,
+            { status: 'ATTENDED', reason: 'Записан клубом после начала — человек уже в зале' },
+            club,
+            { now, noShowChargePercent: policy.noShowChargePercent },
+          );
+        }
+
+        // Записанному «уже в зале» подтверждать незачем — notifier сам
+        // пропустит всё, что не BOOKED.
+        await this.notifier.entryBooked(tx, tenantId, kind, created.id, club ? 'club' : 'self');
+
+        if (kind === 'TRAINING') {
+          await this.staffNotifier.trainingChanged(tx, tenantId, created.id, 'BOOKED');
+        }
+
+        return created.id;
+      });
+    } catch (error) {
+      // Повторную запись ловит частичный уникальный индекс из constraints.sql
+      // (частичный — записаться заново после своей отмены законно). Ловим по
+      // КОДУ: имени индекса, заведённого сырым SQL, Prisma не знает, и в
+      // тексте ошибки его нет. Других уникальных ограничений на вставке нет.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const what = kind === 'TRAINING' ? 'это занятие' : 'этот турнир';
+
+        throw new ConflictException(club ? `Человек уже записан на ${what}` : `Вы уже записаны на ${what}`);
+      }
+
+      throw error;
+    }
+  }
+
+  /** Проведение в том объёме, в каком его судит запись. */
+  private async enrollable(
+    tenantId: string,
+    kind: EventKind,
+    id: string,
+  ): Promise<{
+    id: string;
+    startsAt: Date;
+    cancelledAt: Date | null;
+    typeId: string;
+    coachId: string | null;
+    price: number;
+    isActive: boolean;
+  }> {
+    if (kind === 'TRAINING') {
+      const session = await this.prisma.trainingSession.findFirst({
+        where: { id, tenantId },
+        select: {
+          id: true,
+          startsAt: true,
+          cancelledAt: true,
+          trainingTypeId: true,
+          coachId: true,
+          trainingType: { select: { price: true, isActive: true } },
+        },
+      });
+
+      if (!session) throw new NotFoundException('Занятие не найдено');
+
+      return { ...session, typeId: session.trainingTypeId, ...session.trainingType };
+    }
+
     const tournament = await this.prisma.tournament.findFirst({
-      where: { id: tournamentId, tenantId },
+      where: { id, tenantId },
       select: {
         id: true,
         startsAt: true,
@@ -362,214 +573,92 @@ export class EventsService {
       },
     });
 
-    if (!tournament) {
-      throw new NotFoundException('Турнир не найден');
-    }
+    if (!tournament) throw new NotFoundException('Турнир не найден');
 
-    if (tournament.cancelledAt) {
-      throw new BadRequestException(CANCELLED_TOURNAMENT);
-    }
-
-    if (tournament.startsAt.getTime() <= Date.now()) {
-      throw new BadRequestException('Этот турнир уже начался');
-    }
-
-    if (!tournament.tournamentType.isActive) {
-      throw new BadRequestException('Запись на этот турнир закрыта');
-    }
-
-    await this.assertStaffMayJoin(tenantId, userId, tournament.startsAt, null);
-    await this.membership.ensureClient(tenantId, userId);
-
-    let entryId: string;
-
-    try {
-      // Транзакция — ради абонемента: запись и списание визита либо вместе,
-      // либо никак. Повторная запись (P2002) откатывает и списание.
-      entryId = await this.prisma.$transaction(async (tx) => {
-        // Строка турнира под FOR SHARE — против отмены клубом в ту же секунду:
-        // отмена берёт её FOR UPDATE и отменяет записи, которые успела увидеть.
-        // Записи друг другу не мешают, а отменённое здесь видно наверняка.
-        // Замок — до абонемента: порядок «проведение → абонемент» везде один.
-        const locked = await tx.$queryRaw<{ cancelledAt: Date | null }[]>`
-          SELECT "cancelledAt" FROM "Tournament" WHERE "id" = ${tournament.id} FOR SHARE
-        `;
-
-        if (locked[0]?.cancelledAt) {
-          throw new BadRequestException(CANCELLED_TOURNAMENT);
-        }
-
-        const sub = await this.subscriptions.reserveInTx(tx, tenantId, userId, {
-          kind: 'TOURNAMENT',
-          typeId: tournament.tournamentTypeId,
-          startsAt: tournament.startsAt,
-        });
-
-        const created = await tx.tournamentRegistration.create({
-          select: { id: true },
-          data: {
-            tenantId,
-            tournamentId: tournament.id,
-            clientId: userId,
-            // Копия цены на момент записи: поднятый через месяц прайс не должен
-            // переписывать то, о чём клуб уже договорился с человеком. Пишется
-            // и при оплате абонементом — иначе стоимость визита не восстановить.
-            priceAtBooking: tournament.tournamentType.price,
-            subscriptionId: sub?.id ?? null,
-          },
-        });
-
-        if (sub) {
-          await this.subscriptions.chargeInTx(tx, tenantId, sub, { tournamentRegistrationId: created.id });
-        }
-
-        await this.notifier.entryBooked(tx, tenantId, 'TOURNAMENT', created.id, 'self');
-
-        return created.id;
-      });
-    } catch (error) {
-      // Повторную запись ловит частичный уникальный индекс из constraints.sql.
-      // Частичный он намеренно: записаться заново после собственной отмены —
-      // законный сценарий, и обычный UNIQUE его бы запретил.
-      //
-      // Ловим по КОДУ, а не по имени индекса. Prisma индексов, заведённых
-      // сырым SQL, не знает и отдаёт «Unique constraint failed on the (not
-      // available)» — имени в тексте нет вовсе, и проверка по нему молча
-      // пропускала бы ошибку наружу пятисоткой. Приём из BookingService (там
-      // ищется имя exclusion-констрейнта) здесь не работает именно поэтому.
-      //
-      // Код достаточно точен: на вставке регистрации других уникальных
-      // ограничений нет — первичный ключ генерируется cuid'ом.
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException('Вы уже записаны на этот турнир');
-      }
-
-      throw error;
-    }
-
-    return this.entryFor(tenantId, userId, entryId);
+    return { ...tournament, typeId: tournament.tournamentTypeId, coachId: null, ...tournament.tournamentType };
   }
 
   /**
-   * Запись на занятие.
-   *
-   * Отличается от турнира одним — лимитом мест, и именно из-за него запись
-   * идёт транзакцией с блокировкой строки сессии. Проверка «занято меньше, чем
-   * мест» в коде без блокировки не работает: два параллельных запроса оба
-   * прочитают «занято 9 из 10» и оба вставят запись. Констрейнтом это тоже не
-   * выражается — проверка требует подсчёта строк в другой таблице, — поэтому
-   * рецепт с `FOR UPDATE` записан прямо в constraints.sql (раздел 4), и здесь
-   * ровно он.
-   *
-   * `SELECT ... FOR UPDATE` держит блокировку до конца транзакции, так что
-   * вторая запись ждёт первую и видит уже обновлённое число занятых мест.
+   * Клуб отменяет запись человека — по его звонку (решения владельца от
+   * 10.10.2026). Деньги — по политике клуба, как если бы отменил он сам, или
+   * без списания (`waiveCharge`): «тренер перенёс группу» в политику не
+   * заложено. После начала отмены нет и у клуба — дальше отметка.
    */
-  async registerForTraining(
+  async cancelByClub(
     tenantId: string,
-    userId: string,
-    sessionId: string,
+    actor: Actor,
+    request: { kind: EventKind; entryId: string; waiveCharge: boolean },
   ): Promise<BookingEntry> {
-    const session = await this.prisma.trainingSession.findFirst({
-      where: { id: sessionId, tenantId },
-      select: {
-        id: true,
-        startsAt: true,
-        cancelledAt: true,
-        trainingTypeId: true,
-        coachId: true,
-        trainingType: { select: { price: true, isActive: true } },
-      },
-    });
+    const { kind, entryId } = request;
+    const entry =
+      kind === 'TRAINING'
+        ? await this.prisma.trainingBooking.findFirst({
+            where: { id: entryId, tenantId },
+            select: { status: true, clientId: true, subscriptionId: true, session: { select: { startsAt: true } } },
+          })
+        : await this.prisma.tournamentRegistration.findFirst({
+            where: { id: entryId, tenantId },
+            select: { status: true, clientId: true, subscriptionId: true, tournament: { select: { startsAt: true } } },
+          });
 
-    if (!session) {
-      throw new NotFoundException('Занятие не найдено');
+    if (!entry) {
+      throw new NotFoundException('Запись не найдена');
     }
 
-    if (session.cancelledAt) {
-      throw new BadRequestException(CANCELLED_TRAINING);
+    const startsAt = 'session' in entry ? entry.session.startsAt : entry.tournament.startsAt;
+
+    if (entry.status !== BookingStatus.BOOKED) {
+      throw new BadRequestException('Эту запись уже нельзя отменить');
     }
 
-    if (session.startsAt.getTime() <= Date.now()) {
-      throw new BadRequestException('Это занятие уже началось');
+    if (!cancellationOpen(startsAt, new Date())) {
+      throw new BadRequestException('Уже началось — отметьте присутствие или неявку');
     }
 
-    if (!session.trainingType.isActive) {
-      throw new BadRequestException('Запись на это занятие закрыта');
-    }
+    await this.prisma.$transaction(async (tx) => {
+      const ratio = request.waiveCharge ? 0 : await this.cancelRatio(tx, tenantId, startsAt, entry.subscriptionId);
+      const where = { id: entryId, status: BookingStatus.BOOKED };
+      const data = { status: BookingStatus.CANCELLED, cancelledAt: new Date(), chargeRatio: ratio };
 
-    await this.assertStaffMayJoin(tenantId, userId, session.startsAt, session.coachId);
-    await this.membership.ensureClient(tenantId, userId);
+      await this.cancelEntry(
+        kind === 'TRAINING' ? tx.trainingBooking.updateMany({ where, data }) : tx.tournamentRegistration.updateMany({ where, data }),
+      );
 
-    let entryId: string;
-
-    try {
-      entryId = await this.prisma.$transaction(async (tx) => {
-        // Блокировка именно строки сессии, а не пересчёт после вставки:
-        // откатывать уже созданную запись пришлось бы вручную, и при отказе
-        // клиенту досталась бы половина операции.
-        const locked = await tx.$queryRaw<{ capacity: number; cancelledAt: Date | null }[]>`
-          SELECT "capacity", "cancelledAt" FROM "TrainingSession" WHERE "id" = ${session.id} FOR UPDATE
-        `;
-
-        const capacity = locked[0]?.capacity;
-
-        if (capacity === undefined) {
-          throw new NotFoundException('Занятие не найдено');
-        }
-
-        // Клуб мог отменить занятие, пока запрос шёл: замок тот же, что у отмены.
-        if (locked[0]?.cancelledAt) {
-          throw new BadRequestException(CANCELLED_TRAINING);
-        }
-
-        const taken = await tx.trainingBooking.count({
-          where: { sessionId: session.id, status: BookingStatus.BOOKED },
-        });
-
-        if (taken >= capacity) {
-          throw new ConflictException('На это занятие мест больше нет');
-        }
-
-        // Абонемент — после блокировки занятия: порядок блокировок везде один.
-        const sub = await this.subscriptions.reserveInTx(tx, tenantId, userId, {
-          kind: 'TRAINING',
-          typeId: session.trainingTypeId,
-          startsAt: session.startsAt,
-        });
-
-        const created = await tx.trainingBooking.create({
-          data: {
-            tenantId,
-            sessionId: session.id,
-            clientId: userId,
-            // Копия цены на момент записи — по той же причине, что у турнира.
-            priceAtBooking: session.trainingType.price,
-            subscriptionId: sub?.id ?? null,
-          },
-          select: { id: true },
-        });
-
-        if (sub) {
-          await this.subscriptions.chargeInTx(tx, tenantId, sub, { trainingBookingId: created.id });
-        }
-
-        await this.notifier.entryBooked(tx, tenantId, 'TRAINING', created.id, 'self');
-        await this.staffNotifier.trainingChanged(tx, tenantId, created.id, 'BOOKED');
-
-        return created.id;
-      });
-    } catch (error) {
-      // Повторную запись ловит тот же частичный уникальный индекс, что у
-      // турнира, и ловится он так же по коду: имени индекса, заведённого сырым
-      // SQL, Prisma не знает.
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException('Вы уже записаны на это занятие');
+      if (entry.subscriptionId) {
+        await this.subscriptions.settleInTx(
+          tx,
+          tenantId,
+          entry.subscriptionId,
+          true,
+          consumed({ status: 'CANCELLED', chargeRatio: ratio }),
+          kind === 'TRAINING' ? { trainingBookingId: entryId } : { tournamentRegistrationId: entryId },
+        );
       }
 
-      throw error;
-    }
+      // За отменой клубом стоят чужие деньги: «кто снял меня с записи» должно
+      // иметь ответ.
+      await tx.auditLog.create({
+        data: {
+          tenantId,
+          action: AuditAction.BOOKING_CANCELLED,
+          actorUserId: actor.userId,
+          ipAddress: actor.ipAddress,
+          entityType: kind === 'TRAINING' ? 'TrainingBooking' : 'TournamentRegistration',
+          entityId: entryId,
+          before: { status: BookingStatus.BOOKED },
+          after: { status: BookingStatus.CANCELLED, chargeRatio: ratio },
+          reason: request.waiveCharge ? 'Клуб отменил запись без списания' : 'Клуб отменил запись по правилам отмены',
+        },
+      });
 
-    return this.entryFor(tenantId, userId, entryId);
+      await this.notifier.entryCancelled(tx, tenantId, kind, entryId, 'club');
+
+      if (kind === 'TRAINING') {
+        await this.staffNotifier.trainingChanged(tx, tenantId, entryId, 'CANCELLED');
+      }
+    });
+
+    return this.entryFor(tenantId, entry.clientId, entryId);
   }
 
   /**
