@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { hasAnyRole, MANAGING_ROLES, type EventPageQuery, type Hall, type SubscriptionPlan, type Tournament, type TournamentType, type TrainingSession, type TrainingType } from '@yenisey/types';
 import { SparringTypesCard } from './SparringTypesCard';
 import { SubscriptionPlansCard } from './SubscriptionPlansCard';
+import { CancelEventDialog } from '@/components/events/CancelEventDialog';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -539,6 +540,7 @@ function TournamentsCard({ onError }: { onError: (message: string | null) => voi
   const pages = usePagedEvents(useCallback((page: EventPageQuery) => club.tournaments(page), [club]), onError);
   const tournaments = pages.items ?? [];
   const onChange = pages.setItems;
+  const [cancelling, setCancelling] = useState<Tournament | null>(null);
 
   return (
     <Card>
@@ -558,46 +560,56 @@ function TournamentsCard({ onError }: { onError: (message: string | null) => voi
         ) : (
           <ul className="mb-5 divide-y divide-border border-y border-border">
             {tournaments.map((tournament) => (
-              <li key={tournament.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
+              <li
+                key={tournament.id}
+                className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5', tournament.cancelledAt && 'opacity-60')}
+              >
                 <span className="flex-1 text-[0.9375rem] text-text">{tournament.typeName}</span>
-                <span className="text-[0.875rem] text-text-muted">
-                  {new Intl.DateTimeFormat('ru-RU', {
-                    dateStyle: 'medium',
-                    timeStyle: 'short',
-                  }).format(new Date(tournament.startsAt))}
-                </span>
-                <span className="text-[0.75rem] tracking-[0.06em] text-text-subtle uppercase">
-                  {tournament.placedCount > 0 ? `в сетке: ${tournament.placedCount}` : 'не в сетке'}
-                </span>
-                <Button
-                  type="button"
-                  variant="danger-ghost"
-                  size="sm"
-                  // Турнир, стоящий в сетке, удалить нельзя: вместе с ним
-                  // молча ушли бы куски расписания.
-                  disabled={pending || tournament.placedCount > 0}
-                  title={
-                    tournament.placedCount > 0
-                      ? 'Турнир стоит в расписании — сначала уберите его из сетки'
-                      : undefined
-                  }
-                  onClick={() => {
-                    onError(null);
-                    setPending(true);
-                    club
-                      .deleteTournament(tournament.id)
-                      .then(() => onChange(tournaments.filter((item) => item.id !== tournament.id)))
-                      .catch((cause: unknown) =>
-                        onError(cause instanceof ApiError ? cause.message : 'Сервис недоступен'),
-                      )
-                      .finally(() => setPending(false));
-                  }}
-                >
-                  Удалить
-                </Button>
+                <span className="text-[0.875rem] text-text-muted">{eventMoment(tournament.startsAt)}</span>
+                {tournament.cancelledAt ? (
+                  <CancelledNote reason={tournament.cancelReason} />
+                ) : (
+                  <>
+                    <span className="text-[0.75rem] tracking-[0.06em] text-text-subtle uppercase">
+                      {tournament.placedCount > 0 ? `в сетке: ${tournament.placedCount}` : 'не в сетке'}
+                      {` · записались: ${tournament.bookedCount}`}
+                    </span>
+                    <EventActions
+                      event={tournament}
+                      pending={pending}
+                      onCancel={() => setCancelling(tournament)}
+                      onDelete={() => {
+                        onError(null);
+                        setPending(true);
+                        club
+                          .deleteTournament(tournament.id)
+                          .then(() => onChange(tournaments.filter((item) => item.id !== tournament.id)))
+                          .catch((cause: unknown) =>
+                            onError(cause instanceof ApiError ? cause.message : 'Сервис недоступен'),
+                          )
+                          .finally(() => setPending(false));
+                      }}
+                    />
+                  </>
+                )}
               </li>
             ))}
           </ul>
+        )}
+
+        {cancelling && (
+          <CancelEventDialog
+            kind="TOURNAMENT"
+            id={cancelling.id}
+            title={`${cancelling.typeName} · ${eventMoment(cancelling.startsAt)}`}
+            bookedCount={cancelling.bookedCount}
+            placed={cancelling.placedCount > 0}
+            onClose={() => setCancelling(null)}
+            onCancelled={(result) => {
+              onChange(tournaments.map((item) => (item.id === cancelling.id ? cancelledRow(item, result) : item)));
+              setCancelling(null);
+            }}
+          />
         )}
 
         <MoreButton pages={pages} />
@@ -625,6 +637,7 @@ function TrainingSessionsCard({ onError }: { onError: (message: string | null) =
   const pages = usePagedEvents(useCallback((page: EventPageQuery) => club.trainingSessions(page), [club]), onError);
   const sessions = pages.items ?? [];
   const onChange = pages.setItems;
+  const [cancelling, setCancelling] = useState<TrainingSession | null>(null);
 
   async function run(action: () => Promise<TrainingSession[]>): Promise<void> {
     onError(null);
@@ -657,82 +670,88 @@ function TrainingSessionsCard({ onError }: { onError: (message: string | null) =
         ) : (
           <ul className="mb-5 divide-y divide-border border-y border-border">
             {sessions.map((session) => (
-              <li key={session.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
+              <li
+                key={session.id}
+                className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5', session.cancelledAt && 'opacity-60')}
+              >
                 <span className="flex-1 text-[0.9375rem] text-text">
                   {session.typeName}
                   <span className="ml-2 text-[0.8125rem] text-text-muted">{session.coachName}</span>
                 </span>
 
-                <span className="text-[0.875rem] text-text-muted">
-                  {new Intl.DateTimeFormat('ru-RU', {
-                    dateStyle: 'medium',
-                    timeStyle: 'short',
-                  }).format(new Date(session.startsAt))}
-                </span>
+                <span className="text-[0.875rem] text-text-muted">{eventMoment(session.startsAt)}</span>
 
-                <label className="flex items-center gap-1.5 text-[0.8125rem] text-text-subtle">
-                  мест
-                  <input
-                    type="number"
-                    min={session.bookedCount || 1}
-                    max={200}
-                    defaultValue={session.capacity}
-                    disabled={pending}
-                    className={cn(inputClassName, 'w-16 py-1 text-[0.8125rem]')}
-                    // По уходу с поля, а не по каждому нажатию: иначе набор
-                    // «12» отправил бы сначала «1» — и отказ, если записан
-                    // хотя бы один человек.
-                    onBlur={(event) => {
-                      const capacity = Number(event.target.value);
+                {session.cancelledAt ? (
+                  <CancelledNote reason={session.cancelReason} />
+                ) : (
+                  <>
+                    <label className="flex items-center gap-1.5 text-[0.8125rem] text-text-subtle">
+                      мест
+                      <input
+                        type="number"
+                        min={session.bookedCount || 1}
+                        max={200}
+                        defaultValue={session.capacity}
+                        disabled={pending}
+                        className={cn(inputClassName, 'w-16 py-1 text-[0.8125rem]')}
+                        // По уходу с поля, а не по каждому нажатию: иначе набор
+                        // «12» отправил бы сначала «1» — и отказ, если записан
+                        // хотя бы один человек.
+                        onBlur={(event) => {
+                          const capacity = Number(event.target.value);
 
-                      if (capacity === session.capacity) return;
+                          if (capacity === session.capacity) return;
 
-                      void run(async () => {
-                        const updated = await club.updateTrainingSession(session.id, {
-                          trainingTypeId: session.trainingTypeId,
-                          coachId: session.coachId,
-                          startsAt: session.startsAt,
-                          endsAt: session.endsAt,
-                          capacity,
+                          void run(async () => {
+                            const updated = await club.updateTrainingSession(session.id, {
+                              trainingTypeId: session.trainingTypeId,
+                              coachId: session.coachId,
+                              startsAt: session.startsAt,
+                              endsAt: session.endsAt,
+                              capacity,
+                            });
+
+                            return sessions.map((item) => (item.id === updated.id ? updated : item));
+                          });
+                        }}
+                      />
+                    </label>
+
+                    <span className="text-[0.75rem] tracking-[0.06em] text-text-subtle uppercase">
+                      записались: {session.bookedCount}
+                    </span>
+
+                    <EventActions
+                      event={session}
+                      pending={pending}
+                      onCancel={() => setCancelling(session)}
+                      onDelete={() => {
+                        void run(async () => {
+                          await club.deleteTrainingSession(session.id);
+                          return sessions.filter((item) => item.id !== session.id);
                         });
-
-                        return sessions.map((item) => (item.id === updated.id ? updated : item));
-                      });
-                    }}
-                  />
-                </label>
-
-                <span className="text-[0.75rem] tracking-[0.06em] text-text-subtle uppercase">
-                  записались: {session.bookedCount}
-                </span>
-
-                <Button
-                  type="button"
-                  variant="danger-ghost"
-                  size="sm"
-                  // Те же два запрета, что у турнира: занятие в сетке унесло бы
-                  // с собой куски расписания, а занятие с записями — чужие
-                  // планы на вечер.
-                  disabled={pending || session.placedCount > 0 || session.bookedCount > 0}
-                  title={
-                    session.placedCount > 0
-                      ? 'Занятие стоит в расписании — сначала уберите его из сетки'
-                      : session.bookedCount > 0
-                        ? 'На занятие уже записались'
-                        : undefined
-                  }
-                  onClick={() => {
-                    void run(async () => {
-                      await club.deleteTrainingSession(session.id);
-                      return sessions.filter((item) => item.id !== session.id);
-                    });
-                  }}
-                >
-                  Удалить
-                </Button>
+                      }}
+                    />
+                  </>
+                )}
               </li>
             ))}
           </ul>
+        )}
+
+        {cancelling && (
+          <CancelEventDialog
+            kind="TRAINING"
+            id={cancelling.id}
+            title={`${cancelling.typeName} · ${cancelling.coachName} · ${eventMoment(cancelling.startsAt)}`}
+            bookedCount={cancelling.bookedCount}
+            placed={cancelling.placedCount > 0}
+            onClose={() => setCancelling(null)}
+            onCancelled={(result) => {
+              onChange(sessions.map((item) => (item.id === cancelling.id ? cancelledRow(item, result) : item)));
+              setCancelling(null);
+            }}
+          />
         )}
 
         <MoreButton pages={pages} />
@@ -745,6 +764,65 @@ function TrainingSessionsCard({ onError }: { onError: (message: string | null) =
       </CardBody>
     </Card>
   );
+}
+
+/** Момент проведения в строке списка. */
+function eventMoment(startsAt: string): string {
+  return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(startsAt));
+}
+
+/** Отменённое: причину видно в строке — её получили записавшиеся. */
+function CancelledNote({ reason }: { reason: string | null }) {
+  return (
+    <span className="basis-full text-[0.8125rem] text-text-subtle sm:basis-auto">
+      Отменено клубом{reason ? ` · ${reason}` : ''}
+    </span>
+  );
+}
+
+/**
+ * Удалить или отменить (решение владельца от 10.10.2026).
+ *
+ * Удаляется только пустое: без действующих записей и вне сетки — за записью
+ * стоит чужой план на вечер, а за окном — кусок расписания. Всё остальное, пока
+ * не кончилось, отменяется: записавшимся — возврат и сообщение с причиной.
+ */
+function EventActions({
+  event,
+  pending,
+  onCancel,
+  onDelete,
+}: {
+  event: { endsAt: string; bookedCount: number; placedCount: number };
+  pending: boolean;
+  onCancel: () => void;
+  onDelete: () => void;
+}) {
+  const ended = new Date(event.endsAt).getTime() <= Date.now();
+  const empty = event.bookedCount === 0 && event.placedCount === 0;
+
+  return (
+    <span className="flex items-center gap-1">
+      {!ended && (
+        <Button type="button" variant="danger-ghost" size="sm" disabled={pending} onClick={onCancel}>
+          Отменить
+        </Button>
+      )}
+      {empty && (
+        <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={onDelete}>
+          Удалить
+        </Button>
+      )}
+    </span>
+  );
+}
+
+/** Строка после отмены: окна сняты или стали «Стол занят», записей нет. */
+function cancelledRow<T extends { bookedCount: number; placedCount: number }>(
+  item: T,
+  result: { cancelledAt: string; cancelReason: string },
+): T {
+  return { ...item, cancelledAt: result.cancelledAt, cancelReason: result.cancelReason, bookedCount: 0, placedCount: 0 };
 }
 
 /** Строк на странице проведений. */

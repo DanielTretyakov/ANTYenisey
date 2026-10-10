@@ -585,6 +585,12 @@ export interface Tournament {
   endsAt: string;
   /** Сколько окон расписания уже отдано этому турниру. */
   placedCount: number;
+  /** Сколько записей на турнир сейчас действует. Отменённые не считаются. */
+  bookedCount: number;
+  /** Клуб отменил турнир — когда; пусто — турнир в силе. */
+  cancelledAt: string | null;
+  /** Причина отмены — её получили записавшиеся. */
+  cancelReason: string | null;
 }
 
 export interface TournamentRequest {
@@ -616,7 +622,39 @@ export interface TrainingSession {
   bookedCount: number;
   /** Сколько окон расписания уже отдано этому занятию. */
   placedCount: number;
+  /** Клуб отменил занятие — когда; пусто — занятие в силе. */
+  cancelledAt: string | null;
+  /** Причина отмены — её получили записавшиеся. */
+  cancelReason: string | null;
 }
+
+/**
+ * Отмена занятия или турнира клубом (решение владельца от 10.10.2026).
+ *
+ * Действующие записи отменяются с полным возвратом, причина уходит каждому
+ * записавшемуся. Отмечённые («пришёл», «не пришёл») не трогаются — отменить
+ * можно до окончания, свет отключили и посреди занятия.
+ */
+export interface EventCancelRequest {
+  /** Обязательна: её прочтут записавшиеся. От 3 до 300 знаков. */
+  reason: string;
+  /**
+   * Окна проведения в сетке: `true` — убрать, столы свободны под аренду
+   * (тренер заболел); `false` — оставить закрытыми как «Стол занят» (зал не работает).
+   */
+  freeTables: boolean;
+}
+
+/** Что сделала отмена: момент, причина и сколько записей отменено с возвратом. */
+export interface EventCancelResult {
+  cancelledAt: string;
+  cancelReason: string;
+  cancelledEntries: number;
+}
+
+/** Границы причины отмены — те же, что у CHECK `*_cancel_explained`. */
+export const CANCEL_REASON_MIN = 3;
+export const CANCEL_REASON_MAX = 300;
 
 export interface TrainingSessionRequest {
   trainingTypeId: string;

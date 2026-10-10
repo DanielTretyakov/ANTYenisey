@@ -12,6 +12,7 @@ import { MarkedBlock } from './MarkedBlock';
 import { NewClientDialog } from './NewClientDialog';
 import { PendingBlock } from './PendingBlock';
 import { VisitDialog } from './VisitDialog';
+import { CancelEventDialog } from '@/components/events/CancelEventDialog';
 import { inputClassName } from '@/components/ui/Field';
 import { ApiError } from '@/lib/api';
 import { pendingCounts } from '@/lib/attendance';
@@ -612,6 +613,8 @@ function Ahead({
   rows: Row[];
   onChanged: () => void;
 }) {
+  const [cancelling, setCancelling] = useState<Row['event'] | null>(null);
+
   return (
     <Card>
       <CardHeader
@@ -645,9 +648,29 @@ function Ahead({
                 {formatKopecks(row.price)}
               </span>
               {row.bookingId && <CancelBooking id={row.bookingId} onDone={onChanged} />}
+              {row.event && (
+                <Button variant="danger-ghost" size="sm" onClick={() => setCancelling(row.event ?? null)}>
+                  Отменить
+                </Button>
+              )}
             </li>
           ))}
         </ul>
+      )}
+
+      {cancelling && (
+        <CancelEventDialog
+          kind={cancelling.kind}
+          id={cancelling.id}
+          title={cancelling.title}
+          bookedCount={cancelling.booked}
+          placed={cancelling.placed}
+          onClose={() => setCancelling(null)}
+          onCancelled={() => {
+            setCancelling(null);
+            onChanged();
+          }}
+        />
       )}
     </Card>
   );
@@ -761,13 +784,14 @@ interface Row {
   title: string;
   subtitle: string;
   price: number;
-  /**
-   * Идентификатор брони, если строка — аренда стола.
-   *
-   * У занятия и турнира его нет: отменить их целиком — не то же самое, что
-   * отменить одну бронь, и делается это в расписании зала.
-   */
+  /** Идентификатор брони, если строка — аренда стола. */
   bookingId?: string;
+  /**
+   * Занятие или турнир — отменяется целиком, окном с причиной (решение
+   * владельца от 10.10.2026): отменить проведение — не то же самое, что
+   * отменить одну бронь, и записавшимся уходит возврат и сообщение.
+   */
+  event?: { kind: DeskEvent['kind']; id: string; title: string; booked: number; placed: boolean };
 }
 
 const PURPOSE: Record<string, string> = {
@@ -793,10 +817,9 @@ function aheadOf(day: DeskDay): Row[] {
     ...day.bookings
       .filter((booking) => booking.status !== 'CANCELLED' && booking.phase === 'UPCOMING')
       .map(bookingRow),
+    ...day.events.filter((event) => event.phase === 'UPCOMING').map((event) => eventRow(event, true)),
     // Мероприятия вне сетки не видны ни в одном зале, кроме как здесь.
-    ...[...day.events, ...day.unplaced]
-      .filter((event) => event.phase === 'UPCOMING')
-      .map(eventRow),
+    ...day.unplaced.filter((event) => event.phase === 'UPCOMING').map((event) => eventRow(event, false)),
   ];
 
   return rows.sort((a, b) => a.at.localeCompare(b.at));
@@ -827,14 +850,16 @@ function bookingRow(booking: DeskBooking): Row {
   };
 }
 
-function eventRow(event: DeskEvent): Row {
+function eventRow(event: DeskEvent, placed: boolean): Row {
   const booked = event.participants.filter((entry) => entry.status === 'BOOKED').length;
+  const title = [event.title, event.coachName].filter(Boolean).join(' · ');
 
   return {
     key: `event-${event.id}`,
+    event: { kind: event.kind, id: event.id, title: `${title} · ${clock(event.startsAt)}`, booked, placed },
     at: event.startsAt,
     note: event.kind === 'TRAINING' ? 'занятие' : 'турнир',
-    title: [event.title, event.coachName].filter(Boolean).join(' · '),
+    title,
     subtitle:
       event.capacity === null
         ? `записались ${booked}`

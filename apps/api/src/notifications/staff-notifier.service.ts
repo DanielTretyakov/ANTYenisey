@@ -88,6 +88,66 @@ export class StaffNotifier {
   }
 
   /**
+   * Тренеру: клуб отменил его занятие (решение владельца от 10.10.2026). Одно
+   * сообщение вместо «отмена в группе» по каждой записи: важно, что занятия
+   * не будет, а не кто из группы его покинул. Тихие часы — как у всего
+   * персонала, кроме занятия, которое начнётся раньше утра.
+   */
+  async sessionCancelled(
+    db: Db,
+    tenantId: string,
+    sessionId: string,
+    actorUserId: string,
+    cancelledEntries: number,
+    now = new Date(),
+  ): Promise<void> {
+    const session = await db.trainingSession.findFirst({
+      where: { id: sessionId, tenantId },
+      select: {
+        coachId: true,
+        startsAt: true,
+        capacity: true,
+        cancelReason: true,
+        trainingType: { select: { name: true } },
+        tenant: { select: { name: true, slug: true } },
+        dayClosures: { take: 1, select: { schedule: { select: { hall: { select: { timezone: true } } } } } },
+      },
+    });
+
+    if (!session || session.coachId === actorUserId) {
+      return;
+    }
+
+    const actor = await db.user.findUnique({ where: { id: actorUserId }, select: { fullName: true } });
+    // Зовётся до снятия окон: пояс — у зала занятия, без сетки — у клуба.
+    const timezone = session.dayClosures[0]?.schedule.hall.timezone ?? (await clubTimezone(db, tenantId));
+
+    const payload: CoachEntryPayload = {
+      change: 'SESSION_CANCELLED',
+      person: actor ? shortName(actor.fullName) : 'администратор',
+      title: session.trainingType.name,
+      startsAt: session.startsAt.toISOString(),
+      timezone,
+      club: session.tenant.name,
+      slug: session.tenant.slug,
+      booked: cancelledEntries,
+      capacity: session.capacity,
+      reason: session.cancelReason ?? undefined,
+    };
+
+    await this.notifications.enqueue(db, [
+      {
+        userId: session.coachId,
+        tenantId,
+        type: 'COACH_ENTRY_CHANGED',
+        payload: payload as unknown as Prisma.InputJsonValue,
+        dedupeKey: `coach:session-cancelled:${sessionId}`,
+        sendAfter: sendAfterFor(now, zoneClock(timezone), false, session.startsAt),
+      },
+    ]);
+  }
+
+  /**
    * Игрок заявил или поправил разряд — администраторам всех его клубов:
    * проверить может любой из них, и первый решивший закрывает вопрос.
    */

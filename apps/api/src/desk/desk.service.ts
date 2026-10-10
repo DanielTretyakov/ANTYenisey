@@ -895,7 +895,8 @@ export class DeskService {
    * принадлежит клубу, а не залу.
    */
   private async unplacedRows(tenantId: string, from: Date, to: Date): Promise<EventRows> {
-    const where = { tenantId, startsAt: { gte: from, lt: to }, dayClosures: { none: {} } };
+    // Отменённое клубом окон не имеет, но мероприятием дня уже не является.
+    const where = { tenantId, startsAt: { gte: from, lt: to }, dayClosures: { none: {} }, cancelledAt: null };
 
     const [sessions, tournaments] = await Promise.all([
       this.prisma.trainingSession.findMany({ where, select: SESSION_SELECT }),

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
-import { isStaff, type PublicUser } from '@yenisey/types';
+import { hasAnyRole, isStaff, MANAGING_ROLES, type PublicUser } from '@yenisey/types';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { rolesLabel } from '@/lib/roles';
@@ -116,7 +116,7 @@ export function AccountMenu({ user }: { user: PublicUser }) {
             <MenuLink href={`/clubs/${membership.slug}`} grow hint={isStaff(membership.roles) ? rolesLabel(membership.roles) : undefined}>
               {membership.name}
             </MenuLink>
-            {isStaff(membership.roles) && (
+            {hasAnyRole(membership.roles, MANAGING_ROLES) && (
               <Link
                 href={`/clubs/${membership.slug}/desk`}
                 className="shrink-0 rounded-control px-2.5 py-2 text-[0.8125rem] whitespace-nowrap text-text-accent hover:bg-surface-sunken"

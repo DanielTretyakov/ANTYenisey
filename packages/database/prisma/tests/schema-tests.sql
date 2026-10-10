@@ -1839,3 +1839,40 @@ SELECT pg_temp.expect('GA',
   $q$INSERT INTO "ClubApplication" (id,"contactName","clubName",email,tables,"updatedAt") VALUES ('ca3','Иван Петров','Клуб «Столбы»','ivan@example.ru',0,now())$q$,
   '23514', 'ClubApplication_sane');
 
+
+-- ---------------------------------------------------------------------------
+-- 44. Отмена занятия и турнира клубом
+-- ---------------------------------------------------------------------------
+
+-- GB. Отмена без причины — записавшимся нечего сказать.
+SELECT pg_temp.expect('GB',
+  $q$UPDATE "TrainingSession" SET "cancelledAt" = now() WHERE id = 'ts1'$q$,
+  '23514', 'TrainingSession_cancel_explained');
+
+-- GC. Причина без отметки отмены — занятие и живо, и отменено.
+SELECT pg_temp.expect('GC',
+  $q$UPDATE "TrainingSession" SET "cancelReason" = 'Тренер заболел' WHERE id = 'ts1'$q$,
+  '23514', 'TrainingSession_cancel_explained');
+
+-- GD. Причина из пробелов — то же, что без причины.
+SELECT pg_temp.expect('GD',
+  $q$UPDATE "TrainingSession" SET "cancelledAt" = now(), "cancelReason" = '   ' WHERE id = 'ts1'$q$,
+  '23514', 'TrainingSession_cancel_explained');
+
+-- GE. Турнир, отменённый без причины.
+DO $$ BEGIN
+  INSERT INTO "TournamentType" (id,"tenantId",name,price,"updatedAt") VALUES ('tt_cn','t1','Кубок отмены',50000,now());
+  INSERT INTO "Tournament" (id,"tenantId","tournamentTypeId","startsAt","endsAt","updatedAt")
+  VALUES ('tn_cn','t1','tt_cn','2026-10-17 10:00+07','2026-10-17 14:00+07',now());
+EXCEPTION WHEN others THEN RAISE NOTICE 'GE. ПРОВАЛ подготовки: %', SQLERRM; END $$;
+
+SELECT pg_temp.expect('GE',
+  $q$UPDATE "Tournament" SET "cancelledAt" = now() WHERE id = 'tn_cn'$q$,
+  '23514', 'Tournament_cancel_explained');
+
+-- GF. Отмена с причиной — законно.
+DO $$ BEGIN
+  UPDATE "TrainingSession" SET "cancelledAt" = now(), "cancelReason" = 'Тренер заболел' WHERE id = 'ts1';
+  UPDATE "Tournament" SET "cancelledAt" = now(), "cancelReason" = 'Зал закрыт на ремонт' WHERE id = 'tn_cn';
+  RAISE NOTICE 'GF. Отмена занятия и турнира с причиной....... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'GF. ПРОВАЛ: %', SQLERRM; END $$;

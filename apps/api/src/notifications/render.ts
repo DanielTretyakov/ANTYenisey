@@ -55,6 +55,11 @@ export interface EntryPayload {
   freeCancelUntil?: string | null;
   /** Отменено, потому что подписка клуба на КНТ приостановлена: денег нет, визит вернулся. */
   clubSuspended?: boolean;
+  /**
+   * Клуб отменил само занятие или турнир (решение владельца от 10.10.2026):
+   * денег нет, визит вернулся, причину человек читает в сообщении.
+   */
+  eventCancelled?: { reason: string };
   /** Прежнее начало — у сообщения «время изменилось». */
   previousStartsAt?: string;
 }
@@ -98,9 +103,13 @@ export interface GuardianshipPayload {
   guardian: string;
 }
 
-/** Тренеру: запись или отмена в его группе. */
+/**
+ * Тренеру: запись или отмена в его группе — или клуб отменил всё занятие
+ * (`SESSION_CANCELLED`: `person` — кто отменил, `booked` — сколько записей
+ * отменено, `reason` — причина).
+ */
 export interface CoachEntryPayload {
-  change: 'BOOKED' | 'CANCELLED';
+  change: 'BOOKED' | 'CANCELLED' | 'SESSION_CANCELLED';
   person: string;
   title: string;
   startsAt: string;
@@ -109,6 +118,7 @@ export interface CoachEntryPayload {
   slug: string;
   booked: number;
   capacity: number;
+  reason?: string;
 }
 
 /** Тренеру утром: его занятия на сегодня. */
@@ -272,11 +282,15 @@ export function renderNotification(type: string, payload: unknown, context: Rend
 
     case 'BOOKING_CANCELLED': {
       const p = payload as EntryPayload;
+      const who = p.person ? ` · ${p.person}` : '';
       const head = p.clubSuspended
-        ? `Клуб временно не принимает записи — запись отменена${p.person ? ` · ${p.person}` : ''}`
-        : `${p.byClub ? 'Клуб отменил запись' : 'Запись отменена'}${p.person ? ` · ${p.person}` : ''}`;
+        ? `Клуб временно не принимает записи — запись отменена${who}`
+        : p.eventCancelled
+          ? `Клуб отменил ${p.entry.kind === 'TOURNAMENT' ? 'турнир' : 'занятие'}${who}`
+          : `${p.byClub ? 'Клуб отменил запись' : 'Запись отменена'}${who}`;
+      const reason = p.eventCancelled ? `Причина: ${p.eventCancelled.reason}` : null;
 
-      return { text: lines(head, ...entryLines(p), cancelMoney(p)), link: myBookings };
+      return { text: lines(head, ...entryLines(p), reason, cancelMoney(p)), link: myBookings };
     }
 
     case 'BOOKING_REMINDER': {
@@ -354,6 +368,20 @@ export function renderNotification(type: string, payload: unknown, context: Rend
 
     case 'COACH_ENTRY_CHANGED': {
       const p = payload as CoachEntryPayload;
+
+      if (p.change === 'SESSION_CANCELLED') {
+        return {
+          text: lines(
+            `Клуб отменил ваше занятие · ${p.person}`,
+            `Занятие «${p.title}»`,
+            when(p.startsAt, p.timezone),
+            p.reason ? `Причина: ${p.reason}` : null,
+            p.booked > 0 ? `Записавшимся (${p.booked}) — полный возврат и сообщение.` : 'Записавшихся не было.',
+          ),
+          link: { label: 'Мои группы', url: `${context.webOrigin}/clubs/${p.slug}/coach` },
+        };
+      }
+
       const head = p.change === 'BOOKED' ? `Запись в группу · ${p.person}` : `Отмена в группе · ${p.person}`;
 
       return {
@@ -613,7 +641,7 @@ function entryLines(p: EntryPayload): string[] {
 
 /** Деньги отмены: у абонемента — судьба визита, у разовой записи — сумма. */
 function cancelMoney(p: EntryPayload): string {
-  if (p.clubSuspended) {
+  if (p.clubSuspended || p.eventCancelled) {
     return p.prepaid ? 'Визит вернулся на абонемент.' : 'Платить за неё ничего не нужно.';
   }
 

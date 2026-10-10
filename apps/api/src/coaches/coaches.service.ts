@@ -282,7 +282,7 @@ export class CoachesService {
    */
   async myGroups(tenantId: string, coachId: string): Promise<CoachGroup[]> {
     const sessions = await this.prisma.trainingSession.findMany({
-      where: { tenantId, coachId, endsAt: { gte: new Date() } },
+      where: { tenantId, coachId, endsAt: { gte: new Date() }, cancelledAt: null },
       select: {
         id: true,
         startsAt: true,
@@ -336,6 +336,9 @@ export class CoachesService {
         tenantId,
         coachId,
         endsAt: { lte: now, ...(from ? { gte: from } : {}) },
+        // Отменённое клубом занятие не проведено: ни в посещаемость, ни в
+        // число занятий оно не идёт.
+        cancelledAt: null,
       },
       select: {
         endsAt: true,

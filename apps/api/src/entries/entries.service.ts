@@ -61,11 +61,14 @@ export class EntriesService {
           chargeRatio: true,
           tenant: CLUB_SELECT,
           subscription: SUBSCRIPTION_SELECT,
+          cancelledAt: true,
           session: {
             select: {
               id: true,
               startsAt: true,
               endsAt: true,
+              cancelledAt: true,
+              cancelReason: true,
               dayClosures: HALL_NAME_SELECT,
               trainingType: { select: { name: true, halls: TYPE_HALLS_SELECT, tenant: CLUB_ZONE_SELECT } },
               coach: {
@@ -84,11 +87,14 @@ export class EntriesService {
           chargeRatio: true,
           tenant: CLUB_SELECT,
           subscription: SUBSCRIPTION_SELECT,
+          cancelledAt: true,
           tournament: {
             select: {
               id: true,
               startsAt: true,
               endsAt: true,
+              cancelledAt: true,
+              cancelReason: true,
               dayClosures: HALL_NAME_SELECT,
               tournamentType: {
                 select: { name: true, ratingLabel: true, halls: TYPE_HALLS_SELECT, tenant: CLUB_ZONE_SELECT },
@@ -125,6 +131,7 @@ export class EntriesService {
         price: booking.priceAtBooking,
         status: booking.status,
         chargeRatio: booking.chargeRatio,
+        clubCancelReason: null,
       })),
       ...trainings.map((booking) => ({
         // Идентификатор ЗАНЯТИЯ, а не строки записи — по той же причине, что у
@@ -144,6 +151,7 @@ export class EntriesService {
         price: booking.priceAtBooking,
         status: booking.status,
         chargeRatio: booking.chargeRatio,
+        clubCancelReason: clubCancelReasonOf(booking, booking.session),
       })),
       ...tournaments.map((registration) => ({
         // Идентификатор ТУРНИРА, а не строки регистрации: по нему идёт отмена
@@ -166,6 +174,7 @@ export class EntriesService {
         price: registration.priceAtBooking,
         status: registration.status,
         chargeRatio: registration.chargeRatio,
+        clubCancelReason: clubCancelReasonOf(registration, registration.tournament),
       })),
     ].map(({ chargeRatio, softRule, ...entry }) => {
       const cancellable =
@@ -270,4 +279,21 @@ function paidByOf(sub: { id: string; plan: { name: string } } | null): PaidBySub
 /** Сколько минут осталось до момента. Отрицательное — момент уже прошёл. */
 function minutesUntil(instant: Date): number {
   return Math.floor((instant.getTime() - Date.now()) / 60_000);
+}
+
+/**
+ * Причина, если запись отменена вместе с проведением (решение владельца от
+ * 10.10.2026). Отмена проведения пишет записям тот же момент, что себе, — по
+ * нему и узнаётся: человек, отменивший запись сам за день до этого, «клуб
+ * отменил» видеть не должен.
+ */
+function clubCancelReasonOf(
+  entry: { status: BookingStatus; cancelledAt: Date | null },
+  event: { cancelledAt: Date | null; cancelReason: string | null },
+): string | null {
+  return entry.status === BookingStatus.CANCELLED &&
+    event.cancelledAt !== null &&
+    entry.cancelledAt?.getTime() === event.cancelledAt.getTime()
+    ? event.cancelReason
+    : null;
 }

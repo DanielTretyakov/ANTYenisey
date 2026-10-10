@@ -1,8 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  ActorType,
-  AuditAction,
   BookingStatus,
   Prisma,
   type NotificationType,
@@ -21,6 +19,7 @@ import {
   type PlatformStatus,
 } from '@yenisey/types';
 import { webOrigin, type Env } from '../config/env';
+import { cancelEntryByClubInTx } from '../events/club-cancel';
 import { ClientNotifier } from '../notifications/client-notifier.service';
 import { clubTimezone } from '../notifications/clock';
 import type { PlatformBillingPayload } from '../notifications/render';
@@ -579,39 +578,14 @@ export class BillingService {
     ];
 
     for (const entry of entries) {
-      const done = await this.prisma.$transaction(async (tx) => {
-        const data = { status: BookingStatus.CANCELLED, cancelledAt: now, chargeRatio: 0 };
-        const where = { id: entry.id, status: BookingStatus.BOOKED };
-        const updated =
-          entry.kind === 'TABLE'
-            ? await tx.tableBooking.updateMany({ where, data })
-            : entry.kind === 'TRAINING'
-              ? await tx.trainingBooking.updateMany({ where, data })
-              : await tx.tournamentRegistration.updateMany({ where, data });
-
-        if (updated.count === 0) return false;
-
-        if (entry.subscriptionId) {
-          await this.subscriptions.settleInTx(tx, tenantId, entry.subscriptionId, true, false, linkOf(entry.kind, entry.id));
-        }
-
-        await tx.auditLog.create({
-          data: {
-            tenantId,
-            action: AuditAction.BOOKING_CANCELLED,
-            actorType: ActorType.SYSTEM_JOB,
-            entityType: ENTITY_TYPE[entry.kind],
-            entityId: entry.id,
-            before: { status: BookingStatus.BOOKED },
-            after: { status: BookingStatus.CANCELLED, chargeRatio: 0 },
-            reason: 'Подписка клуба на КНТ приостановлена за неоплату — отмена с полным возвратом',
-          },
-        });
-
-        await this.clients.entryCancelled(tx, tenantId, entry.kind, entry.id, 'club', 'CLUB_SUSPENDED');
-
-        return true;
-      });
+      const done = await this.prisma.$transaction((tx) =>
+        cancelEntryByClubInTx(tx, { subscriptions: this.subscriptions, clients: this.clients }, tenantId, entry, {
+          now,
+          reason: 'Подписка клуба на КНТ приостановлена за неоплату — отмена с полным возвратом',
+          actorUserId: null,
+          notice: 'CLUB_SUSPENDED',
+        }),
+      );
 
       if (done) count += 1;
     }
@@ -804,12 +778,6 @@ export class BillingService {
       corrAccount: get('BILLING_SELLER_CORR_ACCOUNT') ?? null,
     };
   }
-}
-
-const ENTITY_TYPE = { TABLE: 'TableBooking', TRAINING: 'TrainingBooking', TOURNAMENT: 'TournamentRegistration' } as const;
-
-function linkOf(kind: 'TABLE' | 'TRAINING' | 'TOURNAMENT', id: string) {
-  return kind === 'TABLE' ? { tableBookingId: id } : kind === 'TRAINING' ? { trainingBookingId: id } : { tournamentRegistrationId: id };
 }
 
 async function lockSubscription(tx: Tx, tenantId: string): Promise<void> {

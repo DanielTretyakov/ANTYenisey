@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { isStaff } from '@yenisey/types';
+import { hasAnyRole, MANAGING_ROLES } from '@yenisey/types';
 import { PlatformLogo } from '@/components/brand/PlatformLogo';
 import { cn } from '@/lib/cn';
 import { OPERATOR, operatorLine, PENDING } from '@/lib/operator';
@@ -105,7 +105,8 @@ function StaffLinks() {
 
   if (session.status !== 'ready') return null;
 
-  const club = session.user.memberships.find((membership) => isStaff(membership.roles));
+  // Рабочее место — администраторам и руководству; тренеру /desk закрыт.
+  const club = session.user.memberships.find((membership) => hasAnyRole(membership.roles, MANAGING_ROLES));
 
   return club ? <FooterLink href={`/clubs/${club.slug}/desk`}>Рабочее место</FooterLink> : null;
 }

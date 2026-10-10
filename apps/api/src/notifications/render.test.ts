@@ -57,6 +57,35 @@ describe('сообщения о записи', () => {
     assert.match(renderNotification('BOOKING_CANCELLED', { ...training, byClub: true }, context).text, /^Клуб отменил запись/);
   });
 
+  it('клуб отменил занятие — с причиной и без денег', () => {
+    const { text } = renderNotification(
+      'BOOKING_CANCELLED',
+      { ...training, byClub: true, charge: 0, chargePercent: 0, eventCancelled: { reason: 'Тренер заболел' } },
+      context,
+    );
+
+    assert.match(text, /^Клуб отменил занятие/);
+    assert.match(text, /Причина: Тренер заболел/);
+    assert.match(text, /Платить за неё ничего не нужно/);
+  });
+
+  it('клуб отменил турнир — по абонементу визит вернулся', () => {
+    const { text } = renderNotification(
+      'BOOKING_CANCELLED',
+      {
+        ...training,
+        entry: { ...training.entry, kind: 'TOURNAMENT' },
+        prepaid: true,
+        chargePercent: 0,
+        eventCancelled: { reason: 'Зал закрыт' },
+      },
+      context,
+    );
+
+    assert.match(text, /^Клуб отменил турнир/);
+    assert.match(text, /Визит вернулся на абонемент/);
+  });
+
   it('отмена по абонементу — судьба визита', () => {
     assert.match(
       renderNotification('BOOKING_CANCELLED', { ...training, prepaid: true, chargePercent: 0 }, context).text,
@@ -178,6 +207,29 @@ describe('buttonAllowed', () => {
 });
 
 describe('сообщения персоналу', () => {
+  it('тренеру: клуб отменил занятие — кто, почему и сколько записей', () => {
+    const { text } = renderNotification(
+      'COACH_ENTRY_CHANGED',
+      {
+        change: 'SESSION_CANCELLED',
+        person: 'Петрова А.',
+        title: 'Начинающие',
+        startsAt: '2026-09-25T11:00:00.000Z',
+        timezone: 'Asia/Krasnoyarsk',
+        club: 'Енисей',
+        slug: 'yenisey',
+        booked: 6,
+        capacity: 10,
+        reason: 'Зал закрыт',
+      },
+      context,
+    );
+
+    assert.match(text, /^Клуб отменил ваше занятие · Петрова А\./);
+    assert.match(text, /Причина: Зал закрыт/);
+    assert.match(text, /Записавшимся \(6\) — полный возврат/);
+  });
+
   it('тренеру: запись в группу — кто и сколько мест занято', () => {
     const { text, link } = renderNotification(
       'COACH_ENTRY_CHANGED',

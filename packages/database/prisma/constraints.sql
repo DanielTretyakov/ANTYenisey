@@ -1443,3 +1443,26 @@ ALTER TABLE "ClubApplication"
     AND ("comment" IS NULL OR char_length("comment") BETWEEN 1 AND 2000)
     AND ("note" IS NULL OR char_length("note") <= 2000)
   );
+
+-- ---------------------------------------------------------------------------
+-- Отмена занятия и турнира клубом (решение владельца от 10.10.2026)
+-- ---------------------------------------------------------------------------
+
+-- Отменённое проведение несёт причину: она уходит каждому записавшемуся в
+-- сообщении и показывается в «Моих записях». Отметка и причина — вместе или
+-- никак; причина — без пустых краёв и не длиннее строки сообщения.
+ALTER TABLE "TrainingSession"
+  ADD CONSTRAINT "TrainingSession_cancel_explained"
+  CHECK (
+    ("cancelledAt" IS NULL) = ("cancelReason" IS NULL)
+    AND ("cancelReason" IS NULL
+      OR ("cancelReason" = btrim("cancelReason") AND char_length("cancelReason") BETWEEN 3 AND 300))
+  );
+
+ALTER TABLE "Tournament"
+  ADD CONSTRAINT "Tournament_cancel_explained"
+  CHECK (
+    ("cancelledAt" IS NULL) = ("cancelReason" IS NULL)
+    AND ("cancelReason" IS NULL
+      OR ("cancelReason" = btrim("cancelReason") AND char_length("cancelReason") BETWEEN 3 AND 300))
+  );

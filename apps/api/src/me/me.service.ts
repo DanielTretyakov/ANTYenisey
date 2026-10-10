@@ -152,6 +152,7 @@ export class MeService {
     const scope = {
       tenantId: { in: favourites.map((row) => row.tenantId) },
       startsAt: { gte: new Date() },
+      cancelledAt: null,
     };
 
     const [tournaments, sessions] = await Promise.all([

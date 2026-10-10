@@ -94,6 +94,14 @@ export function EventDialog({
 
         {event && (
           <>
+            {/* Окно открывают и по ссылке из сообщения об отмене — скажем сразу. */}
+            {event.cancelReason !== null && (
+              <Alert>
+                Клуб отменил {event.kind === 'TRAINING' ? 'это занятие' : 'этот турнир'}: {event.cancelReason}. Записавшимся
+                — полный возврат.
+              </Alert>
+            )}
+
             <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
               <Fact label="Когда">
                 <span className="block first-letter:uppercase">{dayOf(event.startsAt, event.timezone)}</span>
@@ -158,7 +166,9 @@ export function EventDialog({
               </h3>
 
               {event.people.length === 0 ? (
-                <p className="text-[0.875rem] text-text-muted">Станьте первым.</p>
+                <p className="text-[0.875rem] text-text-muted">
+                  {event.cancelReason !== null ? 'Действующих записей нет.' : 'Станьте первым.'}
+                </p>
               ) : (
                 <ul className="flex flex-wrap gap-x-2 gap-y-3">
                   {event.people.map((person, index) => (
@@ -258,6 +268,11 @@ function EventActions({
   const started = new Date(event.startsAt).getTime() <= Date.now();
   // Мест нет — но записанному кнопка отмены нужна и на переполненном занятии.
   const full = event.freeSeats === 0 && !event.registered;
+
+  // Отменённое клубом: плашка наверху окна уже всё сказала.
+  if (event.cancelReason !== null) {
+    return null;
+  }
 
   if (started) {
     return (

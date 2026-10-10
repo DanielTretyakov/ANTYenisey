@@ -279,7 +279,7 @@ export class StaffSchedule {
 
     const next = new Date(Date.parse(`${date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
     const sessions = await this.prisma.trainingSession.findMany({
-      where: { tenantId, coachId, startsAt: { gte: clock.instant(date, 0), lt: clock.instant(next, 0) } },
+      where: { tenantId, coachId, startsAt: { gte: clock.instant(date, 0), lt: clock.instant(next, 0) }, cancelledAt: null },
       select: {
         startsAt: true,
         capacity: true,

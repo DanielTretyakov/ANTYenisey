@@ -137,10 +137,10 @@ export class DigestSchedule {
     const [unmarked, todaySessions, todayTournaments, todayTables, expiring, empty] = await Promise.all([
       this.unmarked(tenantId, tenant.attendanceTrackedSince, now),
       db.trainingSession.findMany({
-        where: { tenantId, startsAt: todayWindow },
+        where: { tenantId, startsAt: todayWindow, cancelledAt: null },
         select: { capacity: true, _count: { select: { bookings: { where: { status: BookingStatus.BOOKED } } } } },
       }),
-      db.tournament.count({ where: { tenantId, startsAt: todayWindow } }),
+      db.tournament.count({ where: { tenantId, startsAt: todayWindow, cancelledAt: null } }),
       db.tableBooking.count({ where: { tenantId, startsAt: todayWindow, status: BookingStatus.BOOKED } }),
       db.subscription.findMany({
         where: {

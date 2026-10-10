@@ -51,6 +51,10 @@ import { StaffService } from '../staff/staff.service';
 /** Самое широкое окно списка: месяц с запасом — неделя страницы клуба и ещё три. */
 const MAX_RANGE_MS = 31 * 24 * 3600_000;
 
+/** Отказ записи на отменённое клубом (решение владельца от 10.10.2026). */
+const CANCELLED_TRAINING = 'Клуб отменил это занятие — записаться на него нельзя';
+const CANCELLED_TOURNAMENT = 'Клуб отменил этот турнир — записаться на него нельзя';
+
 /**
  * Мероприятия в залах страницы клуба (решение владельца от 25.09.2026):
  * мероприятие — в зале, если стоит в его расписании; без окна в сетке — там,
@@ -128,6 +132,9 @@ export class EventsService {
             where: {
               tenantId,
               startsAt,
+              // Отменённое клубом из открытых списков уходит (10.10.2026); его
+              // показывают «Мои записи» и окно мероприятия — по ссылке.
+              cancelledAt: null,
               ...(range.typeId ? { tournamentTypeId: range.typeId } : {}),
               ...inHalls.tournament,
             },
@@ -141,6 +148,7 @@ export class EventsService {
             where: {
               tenantId,
               startsAt,
+              cancelledAt: null,
               ...(range.typeId ? { trainingTypeId: range.typeId } : {}),
               ...inHalls.training,
             },
@@ -207,7 +215,7 @@ export class EventsService {
     const zoneSelect = { dayClosures: HALL_NAME_SELECT } as const;
     const [trainingZones, tournamentZones] = await Promise.all([
       this.prisma.trainingSession.findMany({
-        where: { tenantId, startsAt: { gte: now }, ...inHalls.training },
+        where: { tenantId, startsAt: { gte: now }, cancelledAt: null, ...inHalls.training },
         distinct: ['trainingTypeId'],
         orderBy: { startsAt: 'asc' },
         select: {
@@ -217,7 +225,7 @@ export class EventsService {
         },
       }),
       this.prisma.tournament.findMany({
-        where: { tenantId, startsAt: { gte: now }, ...inHalls.tournament },
+        where: { tenantId, startsAt: { gte: now }, cancelledAt: null, ...inHalls.tournament },
         distinct: ['tournamentTypeId'],
         orderBy: { startsAt: 'asc' },
         select: {
@@ -250,13 +258,13 @@ export class EventsService {
       }),
       this.prisma.trainingSession.groupBy({
         by: ['trainingTypeId'],
-        where: { tenantId, startsAt: { gte: now }, ...inHalls.training },
+        where: { tenantId, startsAt: { gte: now }, cancelledAt: null, ...inHalls.training },
         _min: { startsAt: true },
         _count: { _all: true },
       }),
       this.prisma.tournament.groupBy({
         by: ['tournamentTypeId'],
-        where: { tenantId, startsAt: { gte: now }, ...inHalls.tournament },
+        where: { tenantId, startsAt: { gte: now }, cancelledAt: null, ...inHalls.tournament },
         _min: { startsAt: true },
         _count: { _all: true },
       }),
@@ -348,6 +356,7 @@ export class EventsService {
       select: {
         id: true,
         startsAt: true,
+        cancelledAt: true,
         tournamentTypeId: true,
         tournamentType: { select: { price: true, isActive: true } },
       },
@@ -355,6 +364,10 @@ export class EventsService {
 
     if (!tournament) {
       throw new NotFoundException('Турнир не найден');
+    }
+
+    if (tournament.cancelledAt) {
+      throw new BadRequestException(CANCELLED_TOURNAMENT);
     }
 
     if (tournament.startsAt.getTime() <= Date.now()) {
@@ -374,6 +387,18 @@ export class EventsService {
       // Транзакция — ради абонемента: запись и списание визита либо вместе,
       // либо никак. Повторная запись (P2002) откатывает и списание.
       entryId = await this.prisma.$transaction(async (tx) => {
+        // Строка турнира под FOR SHARE — против отмены клубом в ту же секунду:
+        // отмена берёт её FOR UPDATE и отменяет записи, которые успела увидеть.
+        // Записи друг другу не мешают, а отменённое здесь видно наверняка.
+        // Замок — до абонемента: порядок «проведение → абонемент» везде один.
+        const locked = await tx.$queryRaw<{ cancelledAt: Date | null }[]>`
+          SELECT "cancelledAt" FROM "Tournament" WHERE "id" = ${tournament.id} FOR SHARE
+        `;
+
+        if (locked[0]?.cancelledAt) {
+          throw new BadRequestException(CANCELLED_TOURNAMENT);
+        }
+
         const sub = await this.subscriptions.reserveInTx(tx, tenantId, userId, {
           kind: 'TOURNAMENT',
           typeId: tournament.tournamentTypeId,
@@ -449,6 +474,7 @@ export class EventsService {
       select: {
         id: true,
         startsAt: true,
+        cancelledAt: true,
         trainingTypeId: true,
         coachId: true,
         trainingType: { select: { price: true, isActive: true } },
@@ -457,6 +483,10 @@ export class EventsService {
 
     if (!session) {
       throw new NotFoundException('Занятие не найдено');
+    }
+
+    if (session.cancelledAt) {
+      throw new BadRequestException(CANCELLED_TRAINING);
     }
 
     if (session.startsAt.getTime() <= Date.now()) {
@@ -477,14 +507,19 @@ export class EventsService {
         // Блокировка именно строки сессии, а не пересчёт после вставки:
         // откатывать уже созданную запись пришлось бы вручную, и при отказе
         // клиенту досталась бы половина операции.
-        const locked = await tx.$queryRaw<{ capacity: number }[]>`
-          SELECT "capacity" FROM "TrainingSession" WHERE "id" = ${session.id} FOR UPDATE
+        const locked = await tx.$queryRaw<{ capacity: number; cancelledAt: Date | null }[]>`
+          SELECT "capacity", "cancelledAt" FROM "TrainingSession" WHERE "id" = ${session.id} FOR UPDATE
         `;
 
         const capacity = locked[0]?.capacity;
 
         if (capacity === undefined) {
           throw new NotFoundException('Занятие не найдено');
+        }
+
+        // Клуб мог отменить занятие, пока запрос шёл: замок тот же, что у отмены.
+        if (locked[0]?.cancelledAt) {
+          throw new BadRequestException(CANCELLED_TRAINING);
         }
 
         const taken = await tx.trainingBooking.count({

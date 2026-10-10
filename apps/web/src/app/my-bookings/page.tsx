@@ -213,6 +213,11 @@ function statusOf(entry: BookingEntry): string {
     return entry.cancellable ? STATUS_LABELS.BOOKED : 'Ждёт отметки клуба';
   }
 
+  // Клуб отменил само занятие или турнир — без денег, визит вернулся.
+  if (entry.clubCancelReason !== null) {
+    return entry.paidBy ? 'Отменена клубом, визит вернулся' : 'Отменена клубом, без списания';
+  }
+
   // У записи по абонементу процент — судьба визита, а не деньги.
   if (entry.paidBy && (entry.status === 'CANCELLED' || entry.status === 'NO_SHOW')) {
     return `${STATUS_LABELS[entry.status]}, ${visitFateLabel(entry.chargePercent)}`;
@@ -293,6 +298,9 @@ function Row({
           {entry.subtitle ? `${entry.subtitle} · ` : ''}
           {entryPriceLabel(entry)}
         </span>
+        {entry.clubCancelReason !== null && (
+          <span className="mt-0.5 block text-[0.8125rem] text-text-muted">Причина: {entry.clubCancelReason}</span>
+        )}
       </span>
 
       <span className="text-[0.8125rem] whitespace-nowrap text-text-subtle">{statusOf(entry)}</span>

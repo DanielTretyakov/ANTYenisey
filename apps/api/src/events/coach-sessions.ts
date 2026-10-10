@@ -29,6 +29,7 @@ export async function upcomingCoachSessions(
     where: {
       coachId: { in: coachIds },
       startsAt: { gte: new Date() },
+      cancelledAt: null,
       coach: { membership: { deactivatedAt: null } },
     },
     select: { ...TRAINING_EVENT_SELECT, coachId: true, tenant: CLUB_SELECT },

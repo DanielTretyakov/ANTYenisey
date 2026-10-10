@@ -290,6 +290,7 @@ enum AuditAction {
   RANK_REJECTED // …или отклонил его, с причиной
   CHILD_ACCOUNT_CREATED // администратор завёл учётку ребёнка родителю у стойки
   GUARDIANSHIP_REVOKED // администратор снял закрепление ребёнка за родителем, с причиной
+  EVENT_CANCELLED // клуб отменил занятие или турнир, с причиной; записи — отдельными BOOKING_CANCELLED
 }
 
 /// Закрепление ребёнка за родителем.
@@ -1402,6 +1403,15 @@ model TrainingSession {
   endsAt   DateTime @db.Timestamptz(3)
 
   capacity  Int // лимит мест в группе
+
+  /// Клуб отменил занятие (решение владельца от 10.10.2026): тренер заболел,
+  /// зал закрыт. Строка не удаляется — за записями на неё стоит история денег;
+  /// записи отменяются с полным возвратом той же транзакцией. Причина
+  /// обязательна и уходит записавшимся (CHECK `TrainingSession_cancel_explained`);
+  /// кто отменил — в журнале аудита (`EVENT_CANCELLED`).
+  cancelledAt  DateTime? @db.Timestamptz(3)
+  cancelReason String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1520,6 +1530,10 @@ model Tournament {
   /// сетке, окон нет вовсе, и второй расчёт разошёлся бы с первым. Правка дня
   /// в расписании пересчитывает его по концу своих окон.
   endsAt DateTime @db.Timestamptz(3)
+
+  /// Клуб отменил турнир — то же правило, что у `TrainingSession.cancelledAt`.
+  cancelledAt  DateTime? @db.Timestamptz(3)
+  cancelReason String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

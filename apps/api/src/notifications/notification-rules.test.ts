@@ -47,6 +47,18 @@ describe('sendAfterFor: тихие часы', () => {
     assert.equal(sendAfterFor(kr('2026-09-23T23:30:00'), krasnoyarsk, true), undefined);
   });
 
+  it('то, что к утру опоздает, тишину не соблюдает: отмена ночью занятия в 07:00', () => {
+    assert.equal(sendAfterFor(kr('2026-09-23T23:30:00'), krasnoyarsk, false, kr('2026-09-24T07:00:00')), undefined);
+    assert.equal(sendAfterFor(kr('2026-09-23T23:30:00'), krasnoyarsk, false, kr('2026-09-24T08:00:00')), undefined);
+  });
+
+  it('то, что начнётся после утра, ждёт 08:00 как обычно', () => {
+    assert.deepEqual(
+      sendAfterFor(kr('2026-09-23T23:30:00'), krasnoyarsk, false, kr('2026-09-24T10:00:00')),
+      kr('2026-09-24T08:00:00'),
+    );
+  });
+
   it('пояс — зала: в Москве 18:30 — ещё день, хотя в Красноярске уже тихо', () => {
     const moscow: LocalClock = {
       local: (instant) => localParts(instant, 'Europe/Moscow'),

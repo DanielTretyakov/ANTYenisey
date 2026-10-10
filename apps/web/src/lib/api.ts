@@ -1,5 +1,7 @@
 import type {
   BillingView,
+  EventCancelRequest,
+  EventCancelResult,
   CardPaymentStart,
   ClubApplicationRequest,
   ClubApplicationUpdate,
@@ -843,6 +845,13 @@ export function clubApi(slug: string = TENANT_SLUG) {
 
     deleteTrainingSession: (id: string): Promise<void> =>
       authorized(`${club}/training-sessions/${id}`, { method: 'DELETE' }),
+
+    /**
+     * Клуб отменяет занятие или турнир (решение владельца от 10.10.2026):
+     * записавшимся — полный возврат и сообщение с причиной.
+     */
+    cancelEvent: (kind: EventKind, id: string, payload: EventCancelRequest): Promise<EventCancelResult> =>
+      authorized(`${club}/${kind === 'TRAINING' ? 'training-sessions' : 'tournaments'}/${id}/cancel`, json('POST', payload)),
 
     // --- Расписание зала
     /** Постоянный шаблон недели: как зал живёт обычно. */

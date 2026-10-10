@@ -360,8 +360,15 @@ export class CatalogService {
         tournamentTypeId: true,
         startsAt: true,
         endsAt: true,
+        cancelledAt: true,
+        cancelReason: true,
         tournamentType: { select: { name: true } },
-        _count: { select: { dayClosures: true } },
+        _count: {
+          select: {
+            dayClosures: true,
+            registrations: { where: { status: BookingStatus.BOOKED } },
+          },
+        },
       },
       // Без страницы — поздние сверху, как было; со страницей — см. `pageOf`.
       orderBy: { startsAt: orderOf(page) },
@@ -374,6 +381,9 @@ export class CatalogService {
       startsAt: tournament.startsAt.toISOString(),
       endsAt: tournament.endsAt.toISOString(),
       placedCount: tournament._count.dayClosures,
+      bookedCount: tournament._count.registrations,
+      cancelledAt: tournament.cancelledAt?.toISOString() ?? null,
+      cancelReason: tournament.cancelReason,
     }));
   }
 
@@ -459,6 +469,8 @@ export class CatalogService {
         startsAt: true,
         endsAt: true,
         capacity: true,
+        cancelledAt: true,
+        cancelReason: true,
         trainingType: { select: { name: true } },
         coach: { select: { membership: { select: { user: { select: { fullName: true } } } } } },
         _count: {
@@ -485,6 +497,8 @@ export class CatalogService {
       capacity: session.capacity,
       bookedCount: session._count.bookings,
       placedCount: session._count.dayClosures,
+      cancelledAt: session.cancelledAt?.toISOString() ?? null,
+      cancelReason: session.cancelReason,
     }));
   }
 
@@ -542,12 +556,18 @@ export class CatalogService {
       where: { id, tenantId },
       select: {
         id: true,
+        cancelledAt: true,
         _count: { select: { bookings: { where: { status: BookingStatus.BOOKED } } } },
       },
     });
 
     if (!session) {
       throw new NotFoundException('Занятие не найдено');
+    }
+
+    // Отменённое — история: записавшимся уже сказали, что его не будет.
+    if (session.cancelledAt) {
+      throw new ConflictException('Занятие отменено — править его нельзя');
     }
 
     if (dto.capacity < session._count.bookings) {

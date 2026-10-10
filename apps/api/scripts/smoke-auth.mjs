@@ -2518,6 +2518,7 @@ async function main() {
   await favouriteCoaches();
   await platformBilling();
   await clubApplications();
+  await eventCancellation();
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
@@ -6762,4 +6763,210 @@ async function clubApplications() {
 
   r = await asAdmin('/platform/club-applications/net-takoy-zayavki', { method: 'PATCH', json: { status: 'DECLINED', note: null } });
   check('несуществующая заявка', 404, r.status);
+}
+
+/**
+ * Клуб отменяет занятие и турнир (решения владельца от 10.10.2026).
+ *
+ * Мероприятия стоят в сетке настоящего зала на дальний день: отмена решает,
+ * что делать с окнами, и проверить это без окон нельзя. День берётся только
+ * неотвязанный — возврат к шаблону в конце не должен снести расписание клуба.
+ * Записываются две пробные учётки; одна привязана к поддельному MAX — сообщение
+ * с причиной должно дойти.
+ */
+async function eventCancellation() {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('\n=== 52. Отмена занятия и турнира клубом — ПРОПУЩЕНА (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 52. Отмена занятия и турнира клубом');
+
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+
+  let r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const asAdmin = as(r.body?.accessToken ?? '');
+
+  const coachId = (await asAdmin('/clubs/yenisey/coaches')).body?.[0]?.id;
+  const trainingTypeId = (await asAdmin('/clubs/yenisey/training-types')).body?.find((type) => type.isActive)?.id;
+  const tournamentTypeId = (await asAdmin('/clubs/yenisey/tournament-types')).body?.find((type) => type.isActive)?.id;
+  const hall = (await asAdmin('/clubs/yenisey/halls')).body?.[0];
+  const tableId = ((await asAdmin('/clubs/yenisey/tables')).body ?? []).find((table) => table.hallId === hall?.id)?.id;
+
+  if (!coachId || !trainingTypeId || !tournamentTypeId || !hall || !tableId) {
+    console.log('     в клубе нет тренера, типов, зала или стола — сценарий пропущен');
+    return;
+  }
+
+  // Первый неотвязанный день, начиная с 56-го: возврат к шаблону в конце не
+  // должен снести расписание, которое клуб составил руками.
+  let date = null;
+
+  for (let offset = 56; offset < 76 && date === null; offset += 1) {
+    const candidate = dayAhead(offset);
+
+    if ((await asAdmin(`/clubs/yenisey/halls/${hall.id}/days/${candidate}`)).body?.customised === false) {
+      date = candidate;
+    }
+  }
+
+  if (date === null) {
+    check('нашёлся неотвязанный день для отмены', true, false);
+    return;
+  }
+
+  const dayPath = `/clubs/yenisey/halls/${hall.id}/days/${date}`;
+
+  // Уборка дня — даже если сценарий упадёт посередине: иначе следующий прогон
+  // найдёт день отвязанным, а клуб — с чужими окнами.
+  try {
+    await cancellationScenario({ asAdmin, as, coachId, trainingTypeId, tournamentTypeId, tableId, date, dayPath });
+  } finally {
+    r = await asAdmin(dayPath, { method: 'DELETE' });
+    check('день возвращён к шаблону', 200, r.status);
+  }
+}
+
+async function cancellationScenario({ asAdmin, as, coachId, trainingTypeId, tournamentTypeId, tableId, date, dayPath }) {
+  let r = await asAdmin('/clubs/yenisey/training-sessions', {
+    method: 'POST',
+    json: { trainingTypeId, coachId, startsAt: `${date}T10:00:00.000Z`, endsAt: `${date}T12:00:00.000Z`, capacity: 5 },
+  });
+  check('занятие для отмены заведено', 201, r.status);
+  const sessionId = r.body?.id;
+
+  r = await asAdmin('/clubs/yenisey/tournaments', {
+    method: 'POST',
+    json: { tournamentTypeId, startsAt: `${date}T03:00:00.000Z`, endsAt: `${date}T06:00:00.000Z` },
+  });
+  check('турнир для отмены заведён', 201, r.status);
+  const cupId = r.body?.id;
+
+  r = await asAdmin(dayPath, {
+    method: 'PUT',
+    json: {
+      closures: [
+        { tableId, startMinute: 600, endMinute: 780, purpose: 'TOURNAMENT', coachId: null, tournamentId: cupId },
+        { tableId, startMinute: 1020, endMinute: 1140, purpose: 'TRAINING', coachId, trainingTypeId, trainingSessionId: sessionId },
+      ],
+    },
+  });
+  check('занятие и турнир поставлены в сетку', 200, r.status);
+
+  // --- Записались двое; первый слушает поддельный MAX, если он есть.
+  const maxOn = (await call('/dev/max/sent?maxUserId=0')).status === 200;
+  const maxId = (RUN % 1_000_000_000) * 10 + 8;
+
+  r = await post('/auth/register', registration({ lastName: 'Отменов' }));
+  const asFirst = as(r.body?.accessToken ?? '');
+
+  if (maxOn) {
+    r = await asFirst('/me/notifications/max', { method: 'POST' });
+    const token = new URL(r.body?.url ?? 'https://x.invalid').searchParams.get('start');
+    await call('/dev/max/events', {
+      method: 'POST',
+      json: {
+        update_type: 'bot_started',
+        timestamp: Date.now(),
+        chat_id: maxId,
+        user: { user_id: maxId, first_name: 'Проба', name: 'Проба', username: null, is_bot: false, last_activity_time: 0 },
+        payload: token,
+      },
+    });
+  }
+
+  r = await post('/auth/register', registration({ lastName: 'Отменова', gender: 'FEMALE' }));
+  const asSecond = as(r.body?.accessToken ?? '');
+
+  check('первый записался на занятие', 201, (await asFirst(`/clubs/yenisey/trainings/${sessionId}/booking`, { method: 'POST' })).status);
+  check('второй записался на занятие', 201, (await asSecond(`/clubs/yenisey/trainings/${sessionId}/booking`, { method: 'POST' })).status);
+  check('первый записался на турнир', 201, (await asFirst(`/clubs/yenisey/tournaments/${cupId}/registration`, { method: 'POST' })).status);
+
+  // --- Кто и с чем может отменить.
+  const cancelSession = (body, who = asAdmin) =>
+    who(`/clubs/yenisey/training-sessions/${sessionId}/cancel`, { method: 'POST', json: body });
+
+  r = await cancelSession({ reason: 'Тренер заболел', freeTables: false }, asFirst);
+  check('клиенту отмена проведения закрыта', 403, r.status);
+
+  r = await cancelSession({ reason: '  ', freeTables: false });
+  check('отмена без причины отклонена', 400, r.status);
+
+  r = await cancelSession({ reason: 'Тренер заболел' });
+  check('без решения о столах — отклонена', 400, r.status);
+
+  // --- Отмена занятия; столы остаются закрытыми.
+  r = await cancelSession({ reason: '  Тренер заболел  ', freeTables: false });
+  check('занятие отменено', 200, r.status);
+  assert('отменены обе записи', r.body?.cancelledEntries === 2);
+  assert('причина сохранена без пустых краёв', r.body?.cancelReason === 'Тренер заболел');
+
+  r = await cancelSession({ reason: 'Ещё раз', freeTables: false });
+  check('повторная отмена — 409', 409, r.status);
+
+  r = await asFirst('/me/bookings');
+  const entry = (r.body ?? []).find((item) => item.id === sessionId);
+  assert('в «Моих записях» запись отменена без списания', entry?.status === 'CANCELLED' && entry?.chargePercent === 0);
+  assert('и с причиной клуба', entry?.clubCancelReason === 'Тренер заболел');
+
+  r = await asSecond(`/clubs/yenisey/trainings/${sessionId}/booking`, { method: 'POST' });
+  check('на отменённое занятие не записаться', 400, r.status);
+
+  r = await call(`/clubs/yenisey/events/training/${sessionId}`);
+  check('окно отменённого занятия открывается', 200, r.status);
+  assert('окно говорит причину', r.body?.cancelReason === 'Тренер заболел');
+
+  r = await call(`/clubs/yenisey/events?${new URLSearchParams({ from: `${date}T00:00:00.000Z`, to: `${date}T23:59:00.000Z` })}`);
+  assert('из открытого списка занятие ушло', !(r.body ?? []).some((event) => event.id === sessionId));
+
+  r = await asAdmin(dayPath);
+  const kept = (r.body?.closures ?? []).find((closure) => closure.startMinute === 1020);
+  assert('окно занятия осталось закрытым как «Стол занят»', kept?.purpose === 'OTHER' && kept?.trainingSessionId === null);
+
+  r = await asAdmin('/clubs/yenisey/training-sessions');
+  const listed = (r.body ?? []).find((item) => item.id === sessionId);
+  assert('у клуба занятие — отменённым, с причиной', Boolean(listed?.cancelledAt) && listed?.cancelReason === 'Тренер заболел');
+
+  r = await asAdmin(`/clubs/yenisey/training-sessions/${sessionId}`, {
+    method: 'PATCH',
+    json: { trainingTypeId, coachId, startsAt: `${date}T10:00:00.000Z`, endsAt: `${date}T12:00:00.000Z`, capacity: 6 },
+  });
+  check('отменённое занятие не правится', 409, r.status);
+
+  // Действие клуба ночью ждёт 08:00 по поясу зала (раздел 37 и память о
+  // ночном смоуке): днём сообщение уходит сразу и проверяется.
+  const hour = Number(new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: 'Asia/Krasnoyarsk' }).format(new Date()));
+  const quiet = hour >= 22 || hour < 8;
+
+  if (maxOn && quiet) {
+    console.log('     тихие часы в Красноярске — сообщение об отмене встало на 08:00, проверка MAX пропущена');
+  }
+
+  if (maxOn && !quiet) {
+    await call('/dev/max/dispatch', { method: 'POST' });
+    const sent = (await call(`/dev/max/sent?maxUserId=${maxId}`)).body ?? [];
+    const text = sent.map((message) => message.text).find((item) => /^Клуб отменил занятие/.test(item)) ?? '';
+    assert('в MAX пришло «Клуб отменил занятие» с причиной', text.includes('Причина: Тренер заболел'));
+    assert('и без денег', text.includes('Платить за неё ничего не нужно'));
+  }
+
+  // --- Отмена турнира; столы освобождаются.
+  r = await asAdmin(`/clubs/yenisey/tournaments/${cupId}/cancel`, {
+    method: 'POST',
+    json: { reason: 'Зал закрыт на ремонт', freeTables: true },
+  });
+  check('турнир отменён', 200, r.status);
+  assert('отменена одна запись', r.body?.cancelledEntries === 1);
+
+  r = await asAdmin(dayPath);
+  assert('окна турнира сняты — столы свободны', !(r.body?.closures ?? []).some((closure) => closure.startMinute === 600));
+
+  r = await asFirst(`/clubs/yenisey/tournaments/${cupId}/registration`, { method: 'POST' });
+  check('на отменённый турнир не записаться', 400, r.status);
+
+  // Проведения без окон уберёт clean-probes вместе с пробными учётками.
 }

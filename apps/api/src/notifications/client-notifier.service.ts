@@ -15,6 +15,12 @@ type Db = Prisma.TransactionClient | PrismaService;
 /** Кто вызвал событие: сам клиент (или его родитель) — или клуб. */
 export type Origin = 'self' | 'club';
 
+/**
+ * Почему запись отменил клуб: подписка клуба на КНТ приостановлена — или клуб
+ * отменил само занятие либо турнир, и причину человек должен прочесть.
+ */
+export type ClubCancelNotice = 'CLUB_SUSPENDED' | { eventCancelled: string };
+
 /** Запись в том объёме, в каком её читают сообщения. */
 export interface EntryFacts {
   kind: EntryKind;
@@ -61,14 +67,21 @@ export class ClientNotifier {
     });
   }
 
-  /** Запись отменена — клиентом или клубом. Процент уже записан в строку. */
+  /**
+   * Запись отменена — клиентом или клубом. Процент уже записан в строку.
+   *
+   * `notice` — почему отменил клуб: подписка клуба приостановлена или клуб
+   * отменил само занятие либо турнир (с причиной). Об отменённом проведении
+   * сообщение не ждёт утра, если к утру опоздает: занятие в 07:00, отменённое
+   * ночью, иначе дошло бы в 08:00.
+   */
   async entryCancelled(
     db: Db,
     tenantId: string,
     kind: EntryKind,
     entryId: string,
     origin: Origin,
-    reason: 'CLUB_SUSPENDED' | null = null,
+    notice: ClubCancelNotice | null = null,
   ): Promise<void> {
     const facts = await loadEntry(db, tenantId, kind, entryId);
 
@@ -76,12 +89,25 @@ export class ClientNotifier {
       return;
     }
 
-    await this.toClient(db, facts, 'BOOKING_CANCELLED', `cancelled:${kind}:${entryId}`, origin, {
-      byClub: origin === 'club',
-      charge: chargeOf({ status: 'CANCELLED', price: facts.price, chargeRatio: facts.chargeRatio, prepaid: facts.prepaid }),
-      chargePercent: facts.chargeRatio,
-      ...(reason === 'CLUB_SUSPENDED' ? { clubSuspended: true } : {}),
-    });
+    const eventCancelled = notice !== null && notice !== 'CLUB_SUSPENDED' ? notice.eventCancelled : null;
+
+    await this.toClient(
+      db,
+      facts,
+      'BOOKING_CANCELLED',
+      `cancelled:${kind}:${entryId}`,
+      origin,
+      {
+        byClub: origin === 'club',
+        charge: chargeOf({ status: 'CANCELLED', price: facts.price, chargeRatio: facts.chargeRatio, prepaid: facts.prepaid }),
+        chargePercent: facts.chargeRatio,
+        ...(notice === 'CLUB_SUSPENDED' ? { clubSuspended: true } : {}),
+        ...(eventCancelled !== null ? { eventCancelled: { reason: eventCancelled } } : {}),
+      },
+      new Date(),
+      true,
+      eventCancelled !== null ? facts.startsAt : undefined,
+    );
   }
 
   /**
@@ -270,6 +296,8 @@ export class ClientNotifier {
     extra: Partial<EntryPayload>,
     now = new Date(),
     respectQuiet = true,
+    /** Позже этого момента сообщение бесполезно — тихие часы его не держат. */
+    deadline?: Date,
   ): Promise<number> {
     if (!facts.clientId) {
       return 0;
@@ -295,7 +323,7 @@ export class ClientNotifier {
       type,
       payload: { ...base, person: recipient.person } as unknown as Prisma.InputJsonValue,
       dedupeKey,
-      sendAfter: respectQuiet ? sendAfterFor(now, clock, origin === 'self') : undefined,
+      sendAfter: respectQuiet ? sendAfterFor(now, clock, origin === 'self', deadline) : undefined,
     }));
 
     return this.notifications.enqueue(db, drafts);

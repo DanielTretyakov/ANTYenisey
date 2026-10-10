@@ -193,6 +193,11 @@ export interface BookingEntry {
    * у той, что уже нельзя отменить.
    */
   cancelOutcome: 'REFUND' | 'BURN' | null;
+  /**
+   * Клуб отменил само занятие или турнир — причина (решение владельца от
+   * 10.10.2026). Пусто у отменённой самим человеком и у живой записи.
+   */
+  clubCancelReason: string | null;
 }
 
 /**
@@ -346,4 +351,10 @@ export interface EventDetail extends ClubEvent {
   /** Тренер занятия со ссылкой на публичную карточку. У турнира пусто. */
   coach: { id: string; name: string } | null;
   people: EventParticipant[];
+  /**
+   * Клуб отменил проведение — причина. Окно открывают и по ссылке из
+   * сообщения об отмене, поэтому отменённое отдаётся, а не 404; записаться
+   * на него нельзя.
+   */
+  cancelReason: string | null;
 }

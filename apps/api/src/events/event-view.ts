@@ -311,6 +311,7 @@ export const TOURNAMENT_DETAIL_SELECT = {
   },
   dayClosures: PLACE_SELECT,
   tenant: CLUB_REF_SELECT,
+  cancelReason: true,
 } as const;
 
 export const TRAINING_DETAIL_SELECT = {
@@ -325,6 +326,7 @@ export const TRAINING_DETAIL_SELECT = {
   },
   dayClosures: PLACE_SELECT,
   tenant: CLUB_REF_SELECT,
+  cancelReason: true,
 } as const;
 
 type DetailParticipant = {
@@ -348,7 +350,7 @@ type PlaceRow = {
   };
 };
 
-type DetailExtras = { dayClosures: PlaceRow[]; tenant: ClubRef };
+type DetailExtras = { dayClosures: PlaceRow[]; tenant: ClubRef; cancelReason: string | null };
 
 export function tournamentDetail(
   row: TournamentRow &
@@ -366,6 +368,7 @@ export function tournamentDetail(
     place: placeOf(row.dayClosures),
     coach: null,
     people: peopleOf(row.registrations, today),
+    cancelReason: row.cancelReason,
   };
 }
 
@@ -386,6 +389,7 @@ export function trainingDetail(
     place: placeOf(row.dayClosures),
     coach: { id: row.coach.userId, name: shortName(row.coach.membership.user.fullName) },
     people: peopleOf(row.bookings, today),
+    cancelReason: row.cancelReason,
   };
 }
 

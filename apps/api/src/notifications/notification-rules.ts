@@ -200,7 +200,7 @@ export function shiftDate(date: string, days: number): string {
  * отменил) тишину не соблюдает: он сам сейчас не спит, и «вы записаны»
  * утром выглядело бы сбоем.
  */
-export function sendAfterFor(now: Date, clock: LocalClock, ownAction: boolean): Date | undefined {
+export function sendAfterFor(now: Date, clock: LocalClock, ownAction: boolean, deadline?: Date): Date | undefined {
   if (ownAction) {
     return undefined;
   }
@@ -212,8 +212,16 @@ export function sendAfterFor(now: Date, clock: LocalClock, ownAction: boolean): 
   }
 
   const morning = local.minutes >= QUIET_FROM ? shiftDate(local.date, 1) : local.date;
+  const after = clock.instant(morning, QUIET_UNTIL);
 
-  return clock.instant(morning, QUIET_UNTIL);
+  // Сообщение, которое к утру опоздает (решение владельца от 10.10.2026):
+  // клуб ночью отменил занятие в 07:00 — в 08:00 человек узнал бы об этом уже
+  // у закрытой двери. Срочность важнее тишины.
+  if (deadline && deadline.getTime() <= after.getTime()) {
+    return undefined;
+  }
+
+  return after;
 }
 
 /** За сколько до начала напоминать. */
