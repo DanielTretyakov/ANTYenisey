@@ -7,7 +7,7 @@ import { ClubAbout } from '@/components/club/ClubAbout';
 import { ClubHero } from '@/components/club/ClubHero';
 import { ClubNewsColumn, NEWS_ANCHOR } from '@/components/club/ClubNewsColumn';
 import { ClubRatingColumn, RATING_ANCHOR } from '@/components/club/ClubRatingColumn';
-import { ABOUT_ANCHOR, ClubSectionNav } from '@/components/club/ClubSectionNav';
+import { ABOUT_ANCHOR, ClubSectionNav, useSectionNav } from '@/components/club/ClubSectionNav';
 import { ClubTabs, TABS_ANCHOR } from '@/components/club/ClubTabs';
 import { HallCards } from '@/components/club/HallCards';
 import {
@@ -234,12 +234,15 @@ export default function ClubPage() {
     document.getElementById(tab ? TABS_ANCHOR : anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
+  // Разделы страницы — одни на ленту (компьютер) и список строки клуба (телефон).
+  const sectionNav = useSectionNav(slug, SECTIONS);
+
   // Кто смотрит — одним правилом с окном мероприятия (`eventViewerOf`).
   const viewer = eventViewerOf(session, slug, forPerson, family.selfIsChild);
 
   return (
     <div className="flex min-h-dvh flex-col bg-surface" style={clubAccent(tenant?.accentColor)}>
-      <SiteHeader clubSlug={slug} />
+      <SiteHeader clubSlug={slug} clubPage={sectionNav} />
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-5 pb-20 sm:px-8">
         {/* Подписка клуба на КНТ приостановлена за неоплату (решение от
@@ -261,7 +264,7 @@ export default function ClubPage() {
           onSchedule={() => jump(UPCOMING_ANCHOR)}
         />
 
-        <ClubSectionNav slug={slug} items={SECTIONS} />
+        <ClubSectionNav nav={sectionNav} />
 
         {error && <Alert>{error}</Alert>}
 

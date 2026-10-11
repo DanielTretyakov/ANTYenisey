@@ -2,12 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import type { SectionNavState } from '@/components/club/ClubSectionNav';
 import type { PublicTenant, PublicUser, Role } from '@yenisey/types';
 import { ClubMark } from '@/components/club/ClubMark';
 import { CLUB_BAR_HEIGHT } from '@/components/layout/metrics';
 import { NavLink } from '@/components/layout/NavLink';
-import { NavSelect } from '@/components/ui/CompactSelect';
+import { CompactSelect, NavSelect } from '@/components/ui/CompactSelect';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { rolesInClub } from '@/lib/membership';
@@ -78,9 +80,10 @@ export function clubSections(user: PublicUser | null, slug: string): { href: str
  * тренера-руководителя рядом оказывалось восемь ссылок и три значка. На
  * телефоне разделы — выпадающим списком, а не лентой вбок.
  */
-export function ClubBar({ slug }: { slug: string }) {
+export function ClubBar({ slug, page }: { slug: string; page?: SectionNavState }) {
   const session = useSession();
   const pathname = usePathname();
+  const router = useRouter();
   const [club, setClub] = useState<Pick<PublicTenant, 'name' | 'accentColor' | 'logoFileId'> | null>(null);
 
   useEffect(() => {
@@ -119,7 +122,24 @@ export function ClubBar({ slug }: { slug: string }) {
                 </NavLink>
               ))}
             </nav>
-            {sections.length > 1 && (
+            {/* На странице клуба — один список на телефоне (решение владельца от
+                11.10.2026): разделы этой страницы и другие страницы клуба
+                группами. Раньше под ним липла вторая плашка «Раздел». */}
+            {page && (
+              <CompactSelect
+                label="Раздел"
+                value={page.currentId ? `#${page.currentId}` : `#${page.items[0]?.id ?? ''}`}
+                options={[
+                  ...page.items.map((item) => ({ value: `#${item.id}`, label: item.label, group: 'На этой странице' })),
+                  ...sections
+                    .filter((section) => section.href !== clubPath(slug))
+                    .map((section) => ({ value: section.href, label: section.label, group: 'Клуб' })),
+                ]}
+                onChange={(value) => (value.startsWith('#') ? page.go(value.slice(1)) : router.push(value))}
+                className="ml-auto w-[11.5rem] shrink-0 sm:hidden [&_label]:sr-only"
+              />
+            )}
+            {!page && sections.length > 1 && (
               <NavSelect
                 label="Раздел"
                 current={current?.href ?? sections[0]!.href}

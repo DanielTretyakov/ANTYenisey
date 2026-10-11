@@ -6,6 +6,7 @@ import { type ReactNode } from 'react';
 import { PlatformLogo } from '@/components/brand/PlatformLogo';
 import { AccountMenu } from '@/components/layout/AccountMenu';
 import { ClubBar } from '@/components/layout/ClubNav';
+import type { SectionNavState } from '@/components/club/ClubSectionNav';
 import { ClubNewsButton } from '@/components/layout/ClubNewsButton';
 import { HEADER_HEIGHT, HEADER_LOGO_HEIGHT } from '@/components/layout/metrics';
 import { NavLink } from '@/components/layout/NavLink';
@@ -41,8 +42,11 @@ export function SiteHeader({
    * Такой у нас один: сетка расписания, где столов бывает двенадцать.
    */
   wide = false,
+  /** Разделы страницы клуба — на телефоне уходят в список строки клуба. */
+  clubPage,
 }: {
   clubSlug?: string;
+  clubPage?: SectionNavState;
   actions?: ReactNode;
   sticky?: boolean;
   wide?: boolean;
@@ -123,7 +127,7 @@ export function SiteHeader({
         </div>
       </div>
 
-      {clubSlug && <ClubBar slug={clubSlug} />}
+      {clubSlug && <ClubBar slug={clubSlug} page={clubPage} />}
     </header>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { formatPhone } from '@/lib/phone';
 import {
   localWeekMinute,
   openState,
@@ -211,7 +212,7 @@ function HallContacts({ hall, tenant }: { hall: Hall; tenant: PublicTenant }) {
     <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.875rem]">
       {phone && (
         <a href={`tel:${phone}`} className="text-text-accent underline-offset-2 hover:underline">
-          {phone}
+          {formatPhone(phone)}
         </a>
       )}
       {email && (
