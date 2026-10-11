@@ -33,6 +33,7 @@ import type {
   TrainingSession,
   TrainingType,
 } from '@yenisey/types';
+import { canSetClubMoney } from '@yenisey/types';
 import { CatalogService } from './catalog.service';
 import { ClubService } from './club.service';
 import { ScheduleService } from './schedule.service';
@@ -189,6 +190,8 @@ export class ClubController {
     return this.club.listHalls(club.tenantId);
   }
 
+  /** Новый зал заводит руководитель (решение от 11.10.2026); сервис проверяет то же. */
+  @Roles('OWNER')
   @Post('halls')
   createHall(
     @CurrentClub() club: ClubContext,
@@ -299,6 +302,8 @@ export class ClubController {
     return this.catalog.listTrainingTypes(club.tenantId);
   }
 
+  /** Новый вид — это и его цена: заводит руководство (решение от 11.10.2026). */
+  @Roles('MANAGER', 'OWNER')
   @Post('training-types')
   createTrainingType(
     @CurrentClub() club: ClubContext,
@@ -313,7 +318,7 @@ export class ClubController {
     @Param('id') id: string,
     @Body() dto: TrainingTypeDto,
   ): Promise<TrainingType> {
-    return this.catalog.updateTrainingType(club.tenantId, id, dto);
+    return this.catalog.updateTrainingType(club.tenantId, id, dto, canSetClubMoney(club));
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -332,6 +337,7 @@ export class ClubController {
     return this.catalog.listTournamentTypes(club.tenantId);
   }
 
+  @Roles('MANAGER', 'OWNER')
   @Post('tournament-types')
   createTournamentType(
     @CurrentClub() club: ClubContext,
@@ -346,7 +352,7 @@ export class ClubController {
     @Param('id') id: string,
     @Body() dto: TournamentTypeDto,
   ): Promise<TournamentType> {
-    return this.catalog.updateTournamentType(club.tenantId, id, dto);
+    return this.catalog.updateTournamentType(club.tenantId, id, dto, canSetClubMoney(club));
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -432,11 +438,14 @@ export class ClubController {
   }
 
   @Put('halls/:hallId/template')
-  replaceTemplate(
+  async replaceTemplate(
     @CurrentClub() club: ClubContext,
     @Param('hallId') hallId: string,
     @Body() dto: ReplaceTemplateDto,
   ): Promise<ClosureRule[]> {
+    // Управляющий правит расписание только своих залов (решение от 11.10.2026).
+    await this.club.assertHallEditable(club.tenantId, club, hallId);
+
     return this.schedule.replaceTemplate(club.tenantId, hallId, dto.rules);
   }
 
@@ -459,22 +468,26 @@ export class ClubController {
   }
 
   @Put('halls/:hallId/days/:date')
-  replaceDay(
+  async replaceDay(
     @CurrentClub() club: ClubContext,
     @Param('hallId') hallId: string,
     @Param('date') date: string,
     @Body() dto: ReplaceDayDto,
   ): Promise<DaySchedule> {
+    await this.club.assertHallEditable(club.tenantId, club, hallId);
+
     return this.schedule.replaceDay(club.tenantId, hallId, date, dto.closures);
   }
 
   /** Возврат даты к шаблону. */
   @Delete('halls/:hallId/days/:date')
-  resetDay(
+  async resetDay(
     @CurrentClub() club: ClubContext,
     @Param('hallId') hallId: string,
     @Param('date') date: string,
   ): Promise<DaySchedule> {
+    await this.club.assertHallEditable(club.tenantId, club, hallId);
+
     return this.schedule.resetDay(club.tenantId, hallId, date);
   }
 
@@ -487,11 +500,13 @@ export class ClubController {
    */
   @Post('halls/:hallId/days/:date/detach')
   @HttpCode(200)
-  detachDay(
+  async detachDay(
     @CurrentClub() club: ClubContext,
     @Param('hallId') hallId: string,
     @Param('date') date: string,
   ): Promise<DaySchedule> {
+    await this.club.assertHallEditable(club.tenantId, club, hallId);
+
     return this.schedule.detachDay(club.tenantId, hallId, date);
   }
 }

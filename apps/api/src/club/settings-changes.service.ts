@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   ConflictException,
+  ForbiddenException,
   HttpException,
   Injectable,
   Logger,
@@ -8,7 +9,10 @@ import {
 } from '@nestjs/common';
 import { Prisma, type SettingsChangeKind } from '@yenisey/database';
 import {
+  CLUB_MONEY_FIELDS,
+  HALL_MONEY_FIELDS,
   IMMEDIATE_CLUB_FIELDS,
+  moneyTouched,
   shortName,
   type ClubSettings,
   type ClubTable,
@@ -35,6 +39,7 @@ import {
   hallCreatedLines,
   nextDate,
 } from './settings-diff';
+import { changeRight, rightProblem, type SettingsRight } from './settings-rights';
 
 type Tx = Prisma.TransactionClient;
 
@@ -88,7 +93,15 @@ export class SettingsChangesService {
    * в очередь. Ответ — настройки такими, какими они станут.
    */
   async updateSettings(club: ClubContext, patch: UpdateClubSettingsRequest): Promise<ClubSettings> {
+    // Право — до разбора правки: отказ не должен зависеть от того, верна ли она.
+    const before = await this.club.findSettings(club.tenantId);
+
+    if (moneyTouched(CLUB_MONEY_FIELDS, before as unknown as Record<string, unknown>, patch).length > 0) {
+      await this.assertRight(club, 'clubMoney', null);
+    }
+
     const { current, next } = await this.club.prepareSettings(club.tenantId, patch);
+
     const now: Record<string, unknown> = {};
 
     for (const field of IMMEDIATE_CLUB_FIELDS) {
@@ -118,6 +131,7 @@ export class SettingsChangesService {
   }
 
   async createHall(club: ClubContext, dto: CreateHallRequest): Promise<Hall> {
+    await this.assertRight(club, 'createHall', null);
     const data = await this.club.prepareHallCreate(dto);
     const queue = await this.queue(club.tenantId);
     const names = await this.hallNames(club.tenantId, queue);
@@ -141,6 +155,12 @@ export class SettingsChangesService {
   }
 
   async updateHall(club: ClubContext, hallId: string, patch: UpdateHallRequest): Promise<Hall> {
+    await this.assertRight(club, 'hall', hallId);
+
+    if (moneyTouched(HALL_MONEY_FIELDS, (await this.club.findHall(club.tenantId, hallId)) as unknown as Record<string, unknown>, patch).length > 0) {
+      await this.assertRight(club, 'hallMoney', hallId);
+    }
+
     const { current, next } = await this.club.prepareHallUpdate(club.tenantId, hallId, patch);
     const queue = await this.queue(club.tenantId);
 
@@ -182,6 +202,7 @@ export class SettingsChangesService {
    * он уйдёт первым.
    */
   async deleteHall(club: ClubContext, hallId: string): Promise<void> {
+    await this.assertRight(club, 'hallMoney', hallId);
     const [hall, tables, halls, queue] = await Promise.all([
       this.prisma.hall.findFirst({ where: { id: hallId, tenantId: club.tenantId }, select: { name: true, timezone: true } }),
       this.prisma.table.findMany({ where: { hallId, tenantId: club.tenantId }, select: { id: true } }),
@@ -229,6 +250,7 @@ export class SettingsChangesService {
     // Зал проверяется отдельно: составной внешний ключ не дал бы записать
     // чужой зал и сам, но отдал бы это ошибкой базы — и только в полночь.
     const hall = await this.club.findHall(club.tenantId, hallId);
+    await this.assertRight(club, 'hall', hallId);
     const queue = await this.queue(club.tenantId);
 
     if (queue.some((item) => item.kind === 'HALL_DELETE' && item.targetId === hallId)) {
@@ -256,6 +278,7 @@ export class SettingsChangesService {
 
   async renameTable(club: ClubContext, tableId: string, label: string): Promise<ClubTable> {
     const table = await this.table(club.tenantId, tableId);
+    await this.assertRight(club, 'hall', table.hallId);
     const current: ClubTable = {
       id: table.id,
       hallId: table.hallId,
@@ -294,6 +317,7 @@ export class SettingsChangesService {
    */
   async deleteTable(club: ClubContext, tableId: string): Promise<void> {
     const table = await this.table(club.tenantId, tableId);
+    await this.assertRight(club, 'hallMoney', table.hallId);
 
     if (table._count.bookings > 0) {
       throw new ConflictException('У стола есть брони, поэтому удалить его нельзя — за бронями стоят платежи');
@@ -400,6 +424,15 @@ export class SettingsChangesService {
    */
   async cancel(club: ClubContext, id: string): Promise<SettingsChange[]> {
     const now = new Date();
+    const target = await this.prisma.settingsChange.findFirst({
+      where: { id, tenantId: club.tenantId },
+      select: { kind: true, targetId: true, payload: true },
+    });
+
+    if (target) {
+      const need = changeRight(target.kind, target.targetId, target.payload);
+      await this.assertRight(club, need.right, need.hallId);
+    }
 
     await this.prisma.$transaction(async (tx) => {
       const cancelled = await tx.settingsChange.updateMany({
@@ -747,6 +780,22 @@ export class SettingsChangesService {
     }
 
     return labels;
+  }
+
+  /**
+   * Право на правку (решения владельца от 11.10.2026): деньги и удаление —
+   * руководству, управляющий — только в своих залах. До проверки содержимого:
+   * отказ по праву не должен зависеть от того, верна ли сама правка.
+   */
+  private async assertRight(club: ClubContext, right: SettingsRight, hallId: string | null): Promise<void> {
+    const hall = hallId
+      ? await this.prisma.hall.findFirst({ where: { id: hallId, tenantId: club.tenantId }, select: { managerId: true } })
+      : null;
+    const problem = rightProblem(club, right, hall);
+
+    if (problem) {
+      throw new ForbiddenException(problem);
+    }
   }
 
   private async table(tenantId: string, tableId: string) {

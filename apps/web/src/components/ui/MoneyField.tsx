@@ -17,6 +17,7 @@ export function MoneyField({
   value,
   onChange,
   invalid = false,
+  disabled = false,
   className,
 }: {
   /**
@@ -31,6 +32,8 @@ export function MoneyField({
   onChange: (value: string) => void;
   /** Введено не число — поле подсвечивается, но введённое не стирается. */
   invalid?: boolean;
+  /** Цену человек видит, но не меняет: права нет (решение от 11.10.2026). */
+  disabled?: boolean;
   className?: string;
 }) {
   const fieldId = useId();
@@ -57,6 +60,7 @@ export function MoneyField({
           aria-invalid={invalid || undefined}
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
           className={cn(inputClassName, 'rounded-r-none', invalid && 'border-danger-border')}
         />
         <span

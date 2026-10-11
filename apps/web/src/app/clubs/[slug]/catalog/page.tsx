@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { hasAnyRole, MANAGING_ROLES, type EventPageQuery, type Hall, type SubscriptionPlan, type Tournament, type TournamentType, type TrainingSession, type TrainingType } from '@yenisey/types';
+import { canSetClubMoney, hasAnyRole, MANAGING_ROLES, type EventPageQuery, type Hall, type SubscriptionPlan, type Tournament, type TournamentType, type TrainingSession, type TrainingType } from '@yenisey/types';
 import { SparringTypesCard } from './SparringTypesCard';
 import { SubscriptionPlansCard } from './SubscriptionPlansCard';
 import { CancelEventDialog } from '@/components/events/CancelEventDialog';
@@ -52,6 +52,9 @@ export default function CatalogPage() {
   const slug = useClubSlug();
   const roles = session.status === 'ready' ? rolesInClub(session.user, slug) : [];
   const allowed = hasAnyRole(roles, MANAGING_ROLES);
+  // Цены — у руководства (решение от 11.10.2026): администратор правит виды,
+  // но новые не заводит и цену не меняет. Запрет — на сервере.
+  const money = canSetClubMoney({ userId: session.status === 'ready' ? session.user.id : '', roles });
 
   useEffect(() => {
     if (session.status === 'anonymous') {
@@ -133,12 +136,14 @@ export default function CatalogPage() {
                 <TrainingTypesCard
                   types={trainingTypes}
                   halls={halls}
+                  money={money}
                   onChange={setTrainingTypes}
                   onError={setError}
                 />
                 <TournamentTypesCard
                   types={tournamentTypes}
                   halls={halls}
+                  money={money}
                   onChange={setTournamentTypes}
                   onError={setError}
                 />
@@ -150,11 +155,12 @@ export default function CatalogPage() {
                 plans={plans}
                 trainingTypes={trainingTypes}
                 tournamentTypes={tournamentTypes}
+                money={money}
                 onChange={setPlans}
               />
             )}
 
-            {tab === 'sparring' && <SparringTypesCard />}
+            {tab === 'sparring' && <SparringTypesCard money={money} />}
 
             {tab === 'events' && (
               <>
@@ -193,14 +199,19 @@ const TAB_HINTS: Record<CatalogTab, string> = {
 };
 
 /** Типы тренировок: «Общая групповая», «Первая подача». */
+/** Почему администратору нечем завести вид (решение от 11.10.2026). */
+const NEW_TYPES_NOTE = 'Новые виды и цены заводят руководитель и управляющий клуба.';
+
 function TrainingTypesCard({
   types,
   halls,
+  money,
   onChange,
   onError,
 }: {
   types: TrainingType[];
   halls: Hall[];
+  money: boolean;
   onChange: (types: TrainingType[]) => void;
   onError: (message: string | null) => void;
 }) {
@@ -260,6 +271,7 @@ function TrainingTypesCard({
                   <TypeEditor
                     initial={type}
                     halls={halls}
+                    money={money}
                     pending={pending}
                     onError={onError}
                     onCancel={() => setEditingId(null)}
@@ -346,6 +358,9 @@ function TrainingTypesCard({
           </ul>
         )}
 
+        {!money && <p className="text-[0.875rem] text-text-muted">{NEW_TYPES_NOTE}</p>}
+
+        {money && (
         <form onSubmit={handleAdd} className="flex flex-wrap items-stretch gap-3">
           <input
             aria-label="Название типа тренировки"
@@ -360,6 +375,7 @@ function TrainingTypesCard({
             Добавить
           </Button>
         </form>
+        )}
       </CardBody>
     </Card>
   );
@@ -369,11 +385,13 @@ function TrainingTypesCard({
 function TournamentTypesCard({
   types,
   halls,
+  money,
   onChange,
   onError,
 }: {
   types: TournamentType[];
   halls: Hall[];
+  money: boolean;
   onChange: (types: TournamentType[]) => void;
   onError: (message: string | null) => void;
 }) {
@@ -431,6 +449,7 @@ function TournamentTypesCard({
                   <TypeEditor
                     initial={type}
                     halls={halls}
+                    money={money}
                     withRating
                     pending={pending}
                     onError={onError}
@@ -506,6 +525,9 @@ function TournamentTypesCard({
           </ul>
         )}
 
+        {!money && <p className="text-[0.875rem] text-text-muted">{NEW_TYPES_NOTE}</p>}
+
+        {money && (
         <form onSubmit={handleAdd} className="flex flex-wrap items-stretch gap-3">
           <input
             aria-label="Название типа турнира"
@@ -528,6 +550,7 @@ function TournamentTypesCard({
             Добавить
           </Button>
         </form>
+        )}
       </CardBody>
     </Card>
   );
@@ -946,6 +969,7 @@ function DescriptionHint({ text }: { text: string | null }) {
 function TypeEditor({
   initial,
   halls,
+  money,
   withRating = false,
   pending,
   onSave,
@@ -954,6 +978,8 @@ function TypeEditor({
 }: {
   initial: { name: string; ratingLabel?: string | null; price: number; description: string | null; hallIds: string[] };
   halls: Hall[];
+  /** Цена — у руководства (решение от 11.10.2026): без права поле только показывает её. */
+  money: boolean;
   withRating?: boolean;
   pending: boolean;
   onSave: (values: {
@@ -1014,7 +1040,7 @@ function TypeEditor({
         />
       )}
 
-      <MoneyField className="w-32" value={price} onChange={setPrice} />
+      <MoneyField className="w-32" value={price} onChange={setPrice} disabled={!money} />
 
       <textarea
         aria-label="Описание"

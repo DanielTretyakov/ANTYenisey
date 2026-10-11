@@ -37,3 +37,66 @@ export function normalizeRoles(roles: readonly Role[]): Role[] {
 
   return staff.length > 0 ? staff : ['CLIENT'];
 }
+
+/**
+ * Права на устройство клуба (решения владельца от 11.10.2026).
+ *
+ * Деньги — цены, процент неявки и правило визита абонемента — и удаление
+ * залов и столов: только руководство. Управляющий правит только свои залы
+ * (`Hall.managerId`) — в «Настройках» и в «Расписании залов»; администратор
+ * правит любой зал, но без денег и удаления. Новый зал заводит руководитель:
+ * у нового зала ещё нет управляющего, а без цен зал не заводится.
+ */
+export interface ClubActor {
+  userId: string;
+  roles: readonly Role[];
+}
+
+/** Деньги клуба целиком: процент неявки, цены видов, тарифы абонементов. */
+export function canSetClubMoney(actor: ClubActor): boolean {
+  return hasAnyRole(actor.roles, LEADERSHIP_ROLES);
+}
+
+/** Зал «вообще»: название, адрес, часы, столы, расписание. */
+export function canEditHall(actor: ClubActor, hall: { managerId: string | null }): boolean {
+  return (
+    hasAnyRole(actor.roles, ['OWNER', 'ADMIN']) ||
+    (actor.roles.includes('MANAGER') && hall.managerId === actor.userId)
+  );
+}
+
+/** Цены зала, удаление зала и его столов. */
+export function canSetHallMoney(actor: ClubActor, hall: { managerId: string | null }): boolean {
+  return actor.roles.includes('OWNER') || (actor.roles.includes('MANAGER') && hall.managerId === actor.userId);
+}
+
+/** Новый зал. */
+export function canCreateHall(actor: ClubActor): boolean {
+  return actor.roles.includes('OWNER');
+}
+
+/** Поля зала, за которыми деньги. */
+export const HALL_MONEY_FIELDS = [
+  'tableHourPrice',
+  'tableExtra30MinPrice',
+  'hasRobotOption',
+  'robot30MinPrice',
+  'robot60MinPrice',
+  'robotExtra30MinPrice',
+] as const;
+
+/** Поля настроек клуба, за которыми деньги. */
+export const CLUB_MONEY_FIELDS = ['noShowChargePercent', 'subscriptionBurnsOnNoShowOnly'] as const;
+
+/**
+ * Какие из денежных полей правка действительно меняет: присланное, но равное
+ * текущему, — не правка (веб шлёт только изменённое, но API этого не обязан
+ * знать).
+ */
+export function moneyTouched(
+  fields: readonly string[],
+  current: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): string[] {
+  return fields.filter((field) => patch[field] !== undefined && patch[field] !== (current[field] ?? null));
+}

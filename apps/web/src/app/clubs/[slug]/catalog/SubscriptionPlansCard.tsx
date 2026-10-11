@@ -74,11 +74,14 @@ export function SubscriptionPlansCard({
   plans,
   trainingTypes,
   tournamentTypes,
+  money,
   onChange,
 }: {
   plans: SubscriptionPlan[];
   trainingTypes: TrainingType[];
   tournamentTypes: TournamentType[];
+  /** Тариф — это цена: заводит и меняет руководство (решение от 11.10.2026). */
+  money: boolean;
   onChange: (plans: SubscriptionPlan[]) => void;
 }) {
   const club = useClubApi();
@@ -217,9 +220,11 @@ export function SubscriptionPlansCard({
                       действует: {plan.activeSubscriptions}
                     </span>
                   )}
-                  <Button size="sm" variant="ghost" disabled={pending} onClick={() => open(plan.id, draftOf(plan))}>
-                    Изменить
-                  </Button>
+                  {money && (
+                    <>
+                      <Button size="sm" variant="ghost" disabled={pending} onClick={() => open(plan.id, draftOf(plan))}>
+                        Изменить
+                      </Button>
                   <Button
                     size="sm"
                     variant="ghost"
@@ -231,13 +236,19 @@ export function SubscriptionPlansCard({
                   <Button size="sm" variant="ghost" disabled={pending} onClick={() => void toggleActive(plan)}>
                     {plan.isActive ? 'Снять с продажи' : 'Вернуть'}
                   </Button>
+                    </>
+                  )}
                 </li>
               ))}
             </ul>
           </section>
         ))}
 
-        {editing === null ? (
+        {!money ? (
+          <p className="text-[0.875rem] text-text-muted">
+            Тарифы заводят и меняют руководитель и управляющий клуба; продавать абонементы можно на смене.
+          </p>
+        ) : editing === null ? (
           <Button variant="secondary" onClick={() => open('new', EMPTY)}>
             Новый тариф
           </Button>

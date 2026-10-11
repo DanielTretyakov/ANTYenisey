@@ -1,8 +1,9 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@yenisey/database';
 import type { SparringStudent, SparringType, SparringTypeRequest } from '@yenisey/types';
 import { fullYears } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
+import { PRICE_CHANGE_DENIED } from '../club/settings-rights';
 import { parseSparringType } from './sparring-rules';
 
 const TYPE_SELECT = {
@@ -45,8 +46,17 @@ export class SparringService {
     );
   }
 
-  async update(tenantId: string, id: string, dto: SparringTypeRequest): Promise<SparringType> {
+  async update(tenantId: string, id: string, dto: SparringTypeRequest, canSetPrice = true): Promise<SparringType> {
     const value = parsed(dto);
+
+    // Цена — у руководства (решение владельца от 11.10.2026).
+    if (!canSetPrice) {
+      const current = await this.prisma.sparringType.findFirst({ where: { id, tenantId }, select: { hourPrice: true } });
+
+      if (current && current.hourPrice !== value.hourPrice) {
+        throw new ForbiddenException(PRICE_CHANGE_DENIED);
+      }
+    }
     const { count } = await this.unique(() =>
       this.prisma.sparringType.updateMany({ where: { id, tenantId }, data: value }),
     );

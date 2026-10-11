@@ -2557,6 +2557,7 @@ async function main() {
   await eventCancellation();
   await clubEntries();
   await clubSetup();
+  await settingsRights();
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
@@ -7263,4 +7264,186 @@ async function clubSetup() {
   check('клуб снова черновик', 200, r.status);
   r = await call(`/clubs/${slug}`);
   check('и снова скрыт от посторонних', 404, r.status);
+}
+
+/**
+ * Права на устройство клуба (решения владельца от 11.10.2026): цены, процент
+ * неявки, тарифы и удаление залов и столов — только руководство; управляющий
+ * правит только свои залы — и в настройках, и в «Расписании залов».
+ *
+ * На черновике `probe-draft` из раздела 54: его настройки применяются сразу,
+ * а залы и типы — постоянные (клубы и залы с историей не удаляются). Чистые
+ * администратор и управляющий — пробные учётки: учётка смоука — руководитель
+ * и администратор сразу, и отказ ей не проверить.
+ */
+async function settingsRights() {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('\n=== 55. Права на устройство клуба — ПРОПУЩЕНО (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 55. Права на устройство клуба');
+
+  const slug = 'probe-draft';
+  const club = `/clubs/${slug}`;
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+
+  let r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const asOwner = as(r.body?.accessToken ?? '');
+
+  r = await asOwner(`${club}/halls`);
+
+  if (r.status !== 200) {
+    assert('черновик probe-draft из раздела 54 на месте', false);
+    return;
+  }
+
+  // Второй зал — «чужой» для управляющего. Заводится один раз.
+  let own = (r.body ?? []).find((hall) => hall.name === 'Зал черновика');
+  let other = (r.body ?? []).find((hall) => hall.name === 'Зал проверки прав');
+
+  if (own && !other) {
+    r = await asOwner(`${club}/halls`, {
+      method: 'POST',
+      deferred: true,
+      json: {
+        name: 'Зал проверки прав',
+        timezone: own.timezone,
+        cityId: own.cityId,
+        addressFiasId: own.addressFiasId,
+        bookingStep: 'HOUR_1',
+        tableHourPrice: 30000,
+        tableExtra30MinPrice: 15000,
+        hasRobotOption: false,
+        robot30MinPrice: null,
+        robot60MinPrice: null,
+        robotExtra30MinPrice: null,
+        tableCount: 1,
+      },
+    });
+    check('второй зал заведён руководителем', 201, r.status);
+    r = await asOwner(`${club}/halls`);
+    other = (r.body ?? []).find((hall) => hall.name === 'Зал проверки прав');
+  }
+
+  if (!own || !other) {
+    assert('у черновика два зала для проверки', false);
+    return;
+  }
+
+  // Вид занятия — для цены вида. Тоже постоянный.
+  r = await asOwner(`${club}/training-types`);
+  let type = (r.body ?? []).find((item) => item.name === 'Вид проверки прав');
+
+  if (!type) {
+    r = await asOwner(`${club}/training-types`, { method: 'POST', json: { name: 'Вид проверки прав', price: 50000 } });
+    check('руководитель заводит вид с ценой', 201, r.status);
+    type = r.body;
+  }
+
+  r = await asOwner(`${club}/tables`);
+  const otherTable = (r.body ?? []).find((table) => table.hallId === other.id);
+
+  r = await asOwner(`${club}/settings`);
+  const settings = r.body ?? {};
+  const someDay = dateIn(own.timezone, 40);
+
+  // --- Пробные администратор и управляющий черновика.
+  r = await post('/auth/register', registration({ lastName: 'Черновиков', tenantSlug: slug }));
+  check('регистрация в черновик клуба не проходит — его как будто нет', 409, r.status);
+
+  const people = [];
+
+  for (const lastName of ['Администраторов', 'Управляющий']) {
+    r = await post('/auth/register', registration({ lastName, tenantSlug: undefined }));
+    const person = { id: r.body?.user?.id, token: r.body?.accessToken ?? '' };
+    r = await asOwner(`${club}/people/${person.id}/attach`, { method: 'POST' });
+    check(`«${lastName}» привязан к черновику`, 200, r.status);
+    people.push(person);
+  }
+
+  const [admin, manager] = people;
+
+  r = await asOwner(`${club}/people/${admin.id}/roles`, { method: 'PUT', json: { roles: ['ADMIN'] } });
+  check('назначен чистый администратор', 200, r.status);
+  r = await asOwner(`${club}/people/${manager.id}/roles`, { method: 'PUT', json: { roles: ['MANAGER'] } });
+  check('назначен чистый управляющий', 200, r.status);
+  r = await asOwner(`${club}/halls/${own.id}/manager`, { method: 'PUT', json: { managerId: manager.id } });
+  check('управляющий поставлен на «Зал черновика»', 200, r.status);
+
+  const asAdminProbe = as(admin.token);
+  const asManager = as(manager.token);
+
+  try {
+    // --- Администратор: всё, кроме денег и удаления.
+    r = await asAdminProbe(`${club}/settings`, { method: 'PATCH', json: { noShowChargePercent: settings.noShowChargePercent === 100 ? 90 : 100 } });
+    check('администратор процент неявки не меняет', 403, r.status);
+    r = await asAdminProbe(`${club}/settings`, { method: 'PATCH', json: { subscriptionBurnsOnNoShowOnly: !settings.subscriptionBurnsOnNoShowOnly } });
+    check('и правило визита абонемента — тоже', 403, r.status);
+    r = await asAdminProbe(`${club}/settings`, { method: 'PATCH', json: { noShowChargePercent: settings.noShowChargePercent, phone: settings.phone } });
+    check('прежний процент рядом с другой правкой — не отказ', 200, r.status);
+
+    r = await asAdminProbe(`${club}/halls/${other.id}`, { method: 'PATCH', json: { tableHourPrice: other.tableHourPrice + 100 } });
+    check('администратор цену зала не меняет', 403, r.status);
+    r = await asAdminProbe(`${club}/halls/${other.id}`, { method: 'PATCH', json: { hasRobotOption: !other.hasRobotOption } });
+    check('и аренду с роботом не включает', 403, r.status);
+    r = await asAdminProbe(`${club}/halls/${other.id}`, { method: 'PATCH', json: { name: other.name, tableHourPrice: other.tableHourPrice } });
+    check('правку зала без новых цен администратор делает', 200, r.status);
+    r = await asAdminProbe(`${club}/halls`, { method: 'POST', json: {} });
+    check('новый зал администратор не заводит', 403, r.status);
+    r = await asAdminProbe(`${club}/halls/${other.id}`, { method: 'DELETE' });
+    check('и зал не удаляет', 403, r.status);
+    r = await asAdminProbe(`${club}/tables/${otherTable?.id}`, { method: 'DELETE' });
+    check('и стол не удаляет', 403, r.status);
+
+    r = await asAdminProbe(`${club}/training-types`, { method: 'POST', json: { name: 'Вид проверки прав 2', price: 100 } });
+    check('новый вид (это и цена) администратор не заводит', 403, r.status);
+    r = await asAdminProbe(`${club}/training-types/${type?.id}`, { method: 'PATCH', json: { name: type?.name, price: (type?.price ?? 0) + 100, hallIds: [] } });
+    check('цену вида администратор не меняет', 403, r.status);
+    r = await asAdminProbe(`${club}/training-types/${type?.id}`, { method: 'PATCH', json: { name: type?.name, price: type?.price, hallIds: [] } });
+    check('вид с прежней ценой правит', 200, r.status);
+    r = await asAdminProbe(`${club}/subscription-plans`, { method: 'POST', json: {} });
+    check('тариф абонемента администратор не заводит', 403, r.status);
+    r = await asAdminProbe(`${club}/sparring-types`, { method: 'POST', json: {} });
+    check('и тип спарринга — тоже', 403, r.status);
+
+    r = await asAdminProbe(`${club}/halls/${other.id}/days/${someDay}`, { method: 'DELETE' });
+    check('расписание любого зала администратор правит', 200, r.status);
+
+    // --- Управляющий: деньги — да, но только в своём зале.
+    r = await asManager(`${club}/halls/${own.id}`, { method: 'PATCH', json: { tableHourPrice: own.tableHourPrice + 100 } });
+    check('управляющий меняет цену своего зала', 200, r.status);
+    r = await asManager(`${club}/halls/${own.id}`, { method: 'PATCH', json: { tableHourPrice: own.tableHourPrice } });
+    check('и возвращает её', 200, r.status);
+    r = await asManager(`${club}/halls/${other.id}`, { method: 'PATCH', json: { name: other.name } });
+    check('чужой зал управляющий не правит', 403, r.status);
+    r = await asManager(`${club}/tables`, { method: 'POST', json: { hallId: other.id, label: 'Стол проверки прав' } });
+    check('и столы в чужом зале не заводит', 403, r.status);
+    r = await asManager(`${club}/tables/${otherTable?.id}`, { method: 'DELETE' });
+    check('и не удаляет', 403, r.status);
+    r = await asManager(`${club}/halls/${other.id}/template`, { method: 'PUT', json: { rules: [] } });
+    check('шаблон недели чужого зала управляющему закрыт', 403, r.status);
+    r = await asManager(`${club}/halls/${other.id}/days/${someDay}`, { method: 'PUT', json: { closures: [] } });
+    check('и день чужого зала — тоже', 403, r.status);
+    r = await asManager(`${club}/halls/${own.id}/days/${someDay}`, { method: 'DELETE' });
+    check('расписание своего зала правит', 200, r.status);
+    r = await asManager(`${club}/halls`, { method: 'POST', json: {} });
+    check('новый зал управляющий не заводит', 403, r.status);
+
+    r = await asManager(`${club}/settings`, { method: 'PATCH', json: { noShowChargePercent: settings.noShowChargePercent === 100 ? 90 : 100 } });
+    check('процент неявки управляющий меняет', 200, r.status);
+    r = await asManager(`${club}/settings`, { method: 'PATCH', json: { noShowChargePercent: settings.noShowChargePercent } });
+    check('и возвращает', 200, r.status);
+    r = await asManager(`${club}/training-types/${type?.id}`, { method: 'PATCH', json: { name: type?.name, price: type?.price, hallIds: [] } });
+    check('вид клуба управляющий правит', 200, r.status);
+  } finally {
+    // Пробные учётки уберёт clean-probes, а управляющего зала — нет:
+    // зал ссылается на привязку.
+    r = await asOwner(`${club}/halls/${own.id}/manager`, { method: 'PUT', json: { managerId: null } });
+    check('управляющий снят с зала', 200, r.status);
+  }
 }

@@ -71,9 +71,12 @@ function toWholeNumber(value: string): number | null {
 
 export function SettingsForm({
   initial,
+  money,
   onSaved,
 }: {
   initial: ClubSettings;
+  /** Процент неявки и правило абонемента — у руководства (решение от 11.10.2026). */
+  money: boolean;
   /** Название и оформление нужны шапке страницы — сообщаем наверх об изменении. */
   onSaved: (settings: ClubSettings) => void;
 }) {
@@ -293,6 +296,8 @@ export function SettingsForm({
           <div className="grid gap-x-6 sm:grid-cols-3">
             <Field
               label="Списать при неявке, %"
+              hint={money ? undefined : 'Меняют руководитель и управляющий'}
+              disabled={!money}
               inputMode="numeric"
               value={form.noShowChargePercent}
               onChange={(event) => set('noShowChargePercent', event.target.value)}
@@ -322,6 +327,8 @@ export function SettingsForm({
           <Toggle
             label="Мягкое правило: визит сгорает только при неявке"
             checked={form.subscriptionBurnsOnNoShowOnly}
+            disabled={!money}
+            hint={money ? undefined : 'Меняют руководитель и управляющий клуба'}
             onChange={(event) => set('subscriptionBurnsOnNoShowOnly', event.target.checked)}
           />
 

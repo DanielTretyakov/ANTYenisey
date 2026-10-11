@@ -39,11 +39,15 @@ export class SubscriptionPlansController {
     return this.subscriptions.listPlans(club.tenantId);
   }
 
+  // Тариф — это цена: заводит и меняет руководство (решение от 11.10.2026);
+  // продаёт абонементы по-прежнему администратор.
+  @Roles('MANAGER', 'OWNER')
   @Post()
   create(@CurrentClub() club: ClubContext, @Body() dto: SubscriptionPlanDto): Promise<SubscriptionPlan> {
     return this.subscriptions.createPlan(club.tenantId, dto);
   }
 
+  @Roles('MANAGER', 'OWNER')
   @Patch(':id')
   update(
     @CurrentClub() club: ClubContext,

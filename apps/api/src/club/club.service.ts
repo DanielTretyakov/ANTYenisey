@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -21,7 +22,7 @@ import type {
   UpdateHallRequest,
   WorkingHours,
 } from '@yenisey/types';
-import { parseWorkingHours, readWorkingHours } from '@yenisey/types';
+import { canEditHall, parseWorkingHours, readWorkingHours, type ClubActor } from '@yenisey/types';
 import { FileIntake } from '../files/file-intake.service';
 import { FileStorage } from '../files/file-storage';
 import { PrismaService } from '../prisma/prisma.service';
@@ -483,6 +484,22 @@ export class ClubService {
       latitude: check.address.latitude,
       longitude: check.address.longitude,
     };
+  }
+
+  /**
+   * «Расписание залов» и столы: управляющий правит только свои залы
+   * (решение владельца от 11.10.2026), администратор и руководитель — любой.
+   */
+  async assertHallEditable(tenantId: string, actor: ClubActor, hallId: string): Promise<void> {
+    const hall = await this.prisma.hall.findFirst({ where: { id: hallId, tenantId }, select: { managerId: true } });
+
+    if (!hall) {
+      throw new NotFoundException('Зал не найден');
+    }
+
+    if (!canEditHall(actor, hall)) {
+      throw new ForbiddenException('Управляющий правит только свои залы');
+    }
   }
 
   async findHall(tenantId: string, hallId: string): Promise<Hall> {

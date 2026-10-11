@@ -29,9 +29,12 @@ export function TablesCard({
   hallId,
   tables,
   changes,
+  canDelete,
   onQueued,
 }: {
   hallId: string;
+  /** Удаляет столы руководство зала (решение от 11.10.2026). */
+  canDelete: boolean;
   /** Столы всего клуба; здесь показываются только столы этого зала. */
   tables: ClubTable[];
   /** Запланированные правки клуба — отсюда пометки столов. */
@@ -194,6 +197,7 @@ export function TablesCard({
                       Переименовать
                     </Button>
 
+                    {canDelete && (
                     <Button
                       type="button"
                       variant="danger"
@@ -210,6 +214,7 @@ export function TablesCard({
                     >
                       Удалить
                     </Button>
+                    )}
                   </>
                 )}
               </li>

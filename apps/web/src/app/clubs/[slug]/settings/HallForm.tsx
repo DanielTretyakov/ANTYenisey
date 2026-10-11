@@ -83,12 +83,18 @@ function toForm(hall: Hall): FormState {
 export function HallForm({
   hall,
   canDelete,
+  money,
   onSaved,
   onDeleted,
 }: {
   hall: Hall;
-  /** Единственный зал клуба удалить нельзя: без зала не завести ни стол, ни цену. */
+  /**
+   * Единственный зал клуба удалить нельзя: без зала не завести ни стол, ни
+   * цену. И удаляет только руководство (решение от 11.10.2026).
+   */
   canDelete: boolean;
+  /** Цены зала меняют руководитель и управляющий этого зала (11.10.2026). */
+  money: boolean;
   onSaved: (hall: Hall) => void;
   onDeleted: (hallId: string) => void;
 }) {
@@ -322,14 +328,22 @@ export function HallForm({
 
           <WorkingHoursField value={form.workingHours} onChange={(value) => set('workingHours', value)} />
 
+          {!money && (
+            <p className="mb-3 text-[0.8125rem] text-text-subtle">
+              Цены зала меняют руководитель клуба и управляющий этого зала.
+            </p>
+          )}
+
           <div className="grid gap-x-6 sm:grid-cols-2">
             <MoneyField
+              disabled={!money}
               label="Первый час"
               value={form.tableHourPrice}
               onChange={(value) => set('tableHourPrice', value)}
               invalid={moneyInvalid(form.tableHourPrice)}
             />
             <MoneyField
+              disabled={!money}
               label="Каждые следующие 30 минут"
               value={form.tableExtra30MinPrice}
               onChange={(value) => set('tableExtra30MinPrice', value)}
@@ -341,24 +355,28 @@ export function HallForm({
             label="В зале есть аренда «стол + робот»"
             hint="Отдельная услуга со своей сеткой цен, а не наценка поверх обычной аренды."
             checked={form.hasRobotOption}
+            disabled={!money}
             onChange={(event) => set('hasRobotOption', event.target.checked)}
           />
 
           {form.hasRobotOption && (
             <div className="grid gap-x-6 sm:grid-cols-3">
               <MoneyField
+                disabled={!money}
                 label="30 минут"
                 value={form.robot30MinPrice}
                 onChange={(value) => set('robot30MinPrice', value)}
                 invalid={moneyInvalid(form.robot30MinPrice)}
               />
               <MoneyField
+                disabled={!money}
                 label="60 минут"
                 value={form.robot60MinPrice}
                 onChange={(value) => set('robot60MinPrice', value)}
                 invalid={moneyInvalid(form.robot60MinPrice)}
               />
               <MoneyField
+                disabled={!money}
                 label="Следующие 30 минут"
                 value={form.robotExtra30MinPrice}
                 onChange={(value) => set('robotExtra30MinPrice', value)}

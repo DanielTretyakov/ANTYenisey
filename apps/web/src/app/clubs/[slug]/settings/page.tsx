@@ -11,6 +11,10 @@ import {
   type ClubTable,
   type Hall,
   type SettingsChange,
+  canCreateHall,
+  canEditHall,
+  canSetClubMoney,
+  canSetHallMoney,
 } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { clubPath } from '@/components/layout/ClubNav';
@@ -89,6 +93,10 @@ export default function ClubPage() {
   const slug = useClubSlug();
   const roles = session.status === 'ready' ? rolesInClub(session.user, slug) : [];
   const allowed = hasAnyRole(roles, MANAGING_ROLES);
+  // Права на устройство клуба (решения от 11.10.2026): деньги и удаление —
+  // руководству, управляющий видит и правит только свои залы. Запрет — на
+  // сервере, здесь — чтобы не предлагать недоступное.
+  const actor = { userId: session.status === 'ready' ? session.user.id : '', roles };
 
   useEffect(() => {
     if (session.status === 'anonymous') {
@@ -112,7 +120,7 @@ export default function ClubPage() {
         if (cancelled) return;
 
         setData({ settings, halls, tables, changes });
-        setHallId((previous) => previous ?? halls[0]?.id ?? null);
+        setHallId((previous) => previous ?? halls.find((item) => canEditHall(actor, item))?.id ?? null);
       })
       .catch((cause: unknown) => {
         if (!cancelled) {
@@ -133,6 +141,7 @@ export default function ClubPage() {
   }, [slug]);
 
   const hall = data?.halls.find((item) => item.id === hallId) ?? null;
+  const myHalls = data?.halls.filter((item) => canEditHall(actor, item)) ?? [];
 
   /**
    * Перечитать запланированное после любой правки: что именно ушло в
@@ -282,6 +291,7 @@ export default function ClubPage() {
           <SettingsForm
             key={formVersion}
             initial={data.settings}
+            money={canSetClubMoney(actor)}
             onSaved={(settings) => {
               setData({ ...data, settings });
               refreshChanges();
@@ -301,13 +311,15 @@ export default function ClubPage() {
                 <CompactSelect
                   label="Зал"
                   value={hallId ?? ''}
-                  options={data.halls.map((item) => ({ value: item.id, label: item.name }))}
+                  options={myHalls.map((item) => ({ value: item.id, label: item.name }))}
                   onChange={setHallId}
                   className="grow"
                 />
-                <Button type="button" variant="ghost" size="sm" onClick={startHall}>
-                  + Зал
-                </Button>
+                {canCreateHall(actor) && (
+                  <Button type="button" variant="ghost" size="sm" onClick={startHall}>
+                    + Зал
+                  </Button>
+                )}
               </div>
               {data.changes
                 .filter((change) => change.status === 'PENDING' && change.kind === 'HALL_CREATE')
@@ -323,7 +335,7 @@ export default function ClubPage() {
                 Залы
               </span>
 
-              {data.halls.map((item) => (
+              {myHalls.map((item) => (
                 <Tab key={item.id} active={item.id === hallId} onClick={() => setHallId(item.id)}>
                   {item.name}
                 </Tab>
@@ -341,14 +353,11 @@ export default function ClubPage() {
                   </span>
                 ))}
 
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={startHall}
-              >
-                + Зал
-              </Button>
+              {canCreateHall(actor) && (
+                <Button type="button" variant="ghost" size="sm" onClick={startHall}>
+                  + Зал
+                </Button>
+              )}
             </div>
 
             {newHall && (
@@ -402,12 +411,17 @@ export default function ClubPage() {
               </Dialog>
             )}
 
+            {myHalls.length === 0 && (
+              <Alert tone="info">За вами пока нет залов — управляющего зала назначает руководитель клуба.</Alert>
+            )}
+
             {hall && (
               <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
                 <HallForm
                   key={`${hall.id}:${formVersion}`}
                   hall={hall}
-                  canDelete={data.halls.length > 1}
+                  canDelete={data.halls.length > 1 && canSetHallMoney(actor, hall)}
+                  money={canSetHallMoney(actor, hall)}
                   onSaved={(updated) => {
                     setData({
                       ...data,
@@ -419,7 +433,13 @@ export default function ClubPage() {
                   onDeleted={() => refreshChanges()}
                 />
 
-                <TablesCard hallId={hall.id} tables={data.tables} changes={data.changes} onQueued={refreshChanges} />
+                <TablesCard
+                  hallId={hall.id}
+                  tables={data.tables}
+                  changes={data.changes}
+                  canDelete={canSetHallMoney(actor, hall)}
+                  onQueued={refreshChanges}
+                />
 
                 <p className="text-[0.875rem] text-text-muted">
                   Расписание зала — шаблон недели и правки на даты — теперь в разделе{' '}

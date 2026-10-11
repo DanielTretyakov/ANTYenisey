@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -18,6 +19,8 @@ import type {
   TrainingTypeRequest,
 } from '@yenisey/types';
 import { PrismaService } from '../prisma/prisma.service';
+
+import { PRICE_CHANGE_DENIED } from './settings-rights';
 
 /**
  * Справочники клуба: типы тренировок, типы турниров и сами турниры.
@@ -94,8 +97,19 @@ export class CatalogService {
     tenantId: string,
     id: string,
     dto: TrainingTypeRequest,
+    canSetPrice = true,
   ): Promise<TrainingType> {
     const name = dto.name.trim();
+
+    // Цены — у руководства (решение владельца от 11.10.2026): администратор
+    // правит вид, но цену присылает прежней.
+    if (!canSetPrice) {
+      const current = await this.prisma.trainingType.findFirst({ where: { id, tenantId }, select: { price: true } });
+
+      if (current && current.price !== dto.price) {
+        throw new ForbiddenException(PRICE_CHANGE_DENIED);
+      }
+    }
 
     if (name === '') {
       throw new BadRequestException('У типа тренировки должно быть название');
@@ -284,8 +298,17 @@ export class CatalogService {
     tenantId: string,
     id: string,
     dto: TournamentTypeRequest,
+    canSetPrice = true,
   ): Promise<TournamentType> {
     const name = dto.name.trim();
+
+    if (!canSetPrice) {
+      const current = await this.prisma.tournamentType.findFirst({ where: { id, tenantId }, select: { price: true } });
+
+      if (current && current.price !== dto.price) {
+        throw new ForbiddenException(PRICE_CHANGE_DENIED);
+      }
+    }
 
     if (name === '') {
       throw new BadRequestException('У типа турнира должно быть название');

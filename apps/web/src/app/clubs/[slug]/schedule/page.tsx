@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { hasAnyRole, MANAGING_ROLES, type ClubCoach, type ClubTable, type Hall, type TournamentType, type TrainingType } from '@yenisey/types';
+import { canEditHall, hasAnyRole, MANAGING_ROLES, type ClubCoach, type ClubTable, type Hall, type TournamentType, type TrainingType } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { CompactSelect } from '@/components/ui/CompactSelect';
@@ -78,7 +78,10 @@ export default function SchedulePage() {
       .then(([halls, tables, coaches, trainingTypes, tournamentTypes]) => {
         if (cancelled) return;
 
-        setData({ halls, tables, coaches, trainingTypes, tournamentTypes });
+        // Управляющий правит расписание только своих залов (решение от
+        // 11.10.2026) — чужих в списке нет; запрет стоит на сервере.
+        const actor = { userId: session.status === 'ready' ? session.user.id : '', roles };
+        setData({ halls: halls.filter((item) => canEditHall(actor, item)), tables, coaches, trainingTypes, tournamentTypes });
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(messageOf(cause));
@@ -152,6 +155,9 @@ export default function SchedulePage() {
       )}
 
       {error && <Alert>{error}</Alert>}
+      {data && data.halls.length === 0 && (
+        <Alert tone="info">За вами пока нет залов — управляющего зала назначает руководитель клуба.</Alert>
+      )}
 
       {allowed && !data && !error && (
         <div className="h-[32rem] animate-pulse rounded-card border border-border bg-surface-raised" />

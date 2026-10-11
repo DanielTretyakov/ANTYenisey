@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import type { SparringStudent, SparringType } from '@yenisey/types';
+import { canSetClubMoney, type SparringStudent, type SparringType } from '@yenisey/types';
 import type { ClubContext } from '../auth/club-context';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -20,7 +20,8 @@ export class SparringTypesController {
     return this.sparring.list(club.tenantId);
   }
 
-  @Roles('ADMIN', 'MANAGER', 'OWNER')
+  /** Новый тип — это и его цена: заводит руководство (решение от 11.10.2026). */
+  @Roles('MANAGER', 'OWNER')
   @Post()
   create(@CurrentClub() club: ClubContext, @Body() dto: SparringTypeDto): Promise<SparringType> {
     return this.sparring.create(club.tenantId, dto);
@@ -33,7 +34,7 @@ export class SparringTypesController {
     @Param('id') id: string,
     @Body() dto: SparringTypeDto,
   ): Promise<SparringType> {
-    return this.sparring.update(club.tenantId, id, dto);
+    return this.sparring.update(club.tenantId, id, dto, canSetClubMoney(club));
   }
 }
 

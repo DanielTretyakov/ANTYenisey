@@ -65,14 +65,15 @@ export class AuthService {
    */
   async register(dto: RegisterRequest, context: SessionContext): Promise<IssuedSession> {
     const tenant = dto.tenantSlug
-      ? await this.prisma.tenant.findUnique({
-          where: { slug: dto.tenantSlug },
+      ? await this.prisma.tenant.findFirst({
+          where: { slug: dto.tenantSlug, publishedAt: { not: null } },
           select: { id: true },
         })
       : null;
 
     // Несуществующий клуб и занятый email отдают одну и ту же ошибку:
-    // перечислять клубы платформы и её клиентов посторонним незачем.
+    // перечислять клубы платформы и её клиентов посторонним незачем. Черновик
+    // клуба (11.10.2026) для регистрации — тоже несуществующий.
     if (dto.tenantSlug && !tenant) {
       throw new ConflictException('Регистрация невозможна: проверьте клуб и адрес почты');
     }

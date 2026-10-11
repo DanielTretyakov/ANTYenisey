@@ -51,7 +51,7 @@ export function ageLabel(type: Pick<SparringType, 'minAge' | 'maxAge'>): string 
  * Правка действует сразу, как у видов занятий: цена у брони снимается копией,
  * и уже заведённые спарринги она не трогает.
  */
-export function SparringTypesCard() {
+export function SparringTypesCard({ money }: { money: boolean }) {
   const club = useClubApi();
   const [types, setTypes] = useState<SparringType[] | null>(null);
   const [editing, setEditing] = useState<string | 'new' | null>(null);
@@ -182,16 +182,20 @@ export function SparringTypesCard() {
         )}
 
         {editing === null ? (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setError(null);
-              setEditing('new');
-              setDraft(EMPTY);
-            }}
-          >
-            Новый тип
-          </Button>
+          money ? (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setError(null);
+                setEditing('new');
+                setDraft(EMPTY);
+              }}
+            >
+              Новый тип
+            </Button>
+          ) : (
+            <p className="text-[0.875rem] text-text-muted">Новые типы и цены заводят руководитель и управляющий клуба.</p>
+          )
         ) : (
           <form onSubmit={(event) => void save(event)} className="rounded-control border border-border p-4">
             <h3 className="mb-4 text-[0.9375rem] font-medium">
@@ -209,6 +213,8 @@ export function SparringTypesCard() {
 
             <MoneyField
               label="Цена часа"
+              hint={money ? undefined : 'Цену меняют руководитель и управляющий клуба'}
+              disabled={!money}
               value={draft.price}
               onChange={(price) => setDraft({ ...draft, price })}
               className="max-w-48"
