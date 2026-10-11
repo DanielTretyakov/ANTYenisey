@@ -64,11 +64,17 @@ export function ClubRatingColumn() {
         <PeriodTabs value={period} onChange={setPeriod} />
       </header>
 
-      {/* Пьедестал всегда на виду (решение от 01.10.2026): свободное место —
-          заглушкой, а не пустотой, — пьедестал и есть то, ради чего блок. */}
+      {/* Пьедестал с заглушками «место свободно» — когда кто-то уже пришёл
+          (решение от 01.10.2026). Пустой период — одной строкой (решение от
+          11.10.2026): пять «мест свободно» у нового клуба читались как
+          заброшенный клуб. */}
       <div className="flex-1">
         {error ? (
           <p className="px-5 py-4 text-[0.9375rem] text-danger">{error}</p>
+        ) : rating !== null && rating.rows.length === 0 ? (
+          <p className="px-5 py-6 text-[0.9375rem] text-text-muted">
+            За этот период отмеченных посещений пока нет — рейтинг появится после первых визитов.
+          </p>
         ) : (
           <>
             <Podium rows={rows.slice(0, 3)} me={rating?.me ?? null} loading={rating === null} />

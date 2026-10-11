@@ -239,6 +239,7 @@ function CatalogTab({
   onShowSchedule: (item: ClubCatalogItem) => void;
 }) {
   const [kind, setKind] = useState<CatalogKind>('ALL');
+  const [showIdle, setShowIdle] = useState(false);
 
   if (!catalog) {
     return <CardsSkeleton />;
@@ -246,7 +247,13 @@ function CatalogTab({
 
   const count = (value: CatalogKind): number =>
     value === 'ALL' ? catalog.length : catalog.filter((item) => item.kind === value).length;
-  const shown = kind === 'ALL' ? catalog : catalog.filter((item) => item.kind === kind);
+  const ofKind = kind === 'ALL' ? catalog : catalog.filter((item) => item.kind === kind);
+  // Виды без проведений впереди — свёрнуты (решение владельца от 11.10.2026):
+  // половина карточек «сейчас в расписании нет» прятала живые. Если живых нет
+  // вовсе — показываем, что есть, иначе вкладка была бы пустой.
+  const scheduled = ofKind.filter((item) => item.nextStartsAt !== null);
+  const idle = ofKind.filter((item) => item.nextStartsAt === null);
+  const shown = scheduled.length === 0 || showIdle ? ofKind : scheduled;
 
   return (
     <div>
@@ -304,6 +311,16 @@ function CatalogTab({
             </li>
           ))}
         </ul>
+      )}
+
+      {scheduled.length > 0 && idle.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowIdle((value) => !value)}
+          className="mt-4 text-[0.875rem] text-text-accent underline-offset-2 hover:underline"
+        >
+          {showIdle ? 'Скрыть виды без расписания' : `Ещё ${idle.length} без расписания`}
+        </button>
       )}
     </div>
   );

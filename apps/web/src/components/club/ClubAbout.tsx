@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { formatPhone } from '@/lib/phone';
 import type { PublicTenant } from '@yenisey/types';
 import { cn } from '@/lib/cn';
 import { SectionHeading } from './SectionHeading';
@@ -58,7 +59,7 @@ export function ClubContacts({ tenant }: { tenant: PublicTenant }) {
     <ul className="flex flex-wrap gap-2" aria-label="Контакты клуба">
       <Contact
         href={tenant.phone ? `tel:${tenant.phone}` : null}
-        label={tenant.phone ?? 'не указан'}
+        label={tenant.phone ? formatPhone(tenant.phone) : 'не указан'}
         name="Телефон"
         icon={
           <RoundIcon>
@@ -109,8 +110,11 @@ function Contact({
   icon: ReactNode;
   external?: boolean;
 }) {
+  // На телефоне — только значок (решение владельца от 11.10.2026): четыре
+  // пилюли столбиком занимали полэкрана обложки. Подпись остаётся для диктора
+  // и в подсказке, с `sm` — и на виду.
   const className =
-    'flex min-w-0 items-center gap-2.5 rounded-full border py-1.5 pr-4 pl-1.5 text-[0.875rem] backdrop-blur-sm';
+    'flex min-w-0 items-center gap-2.5 rounded-full border p-1.5 text-[0.875rem] backdrop-blur-sm sm:pr-4';
 
   if (!href) {
     return (
@@ -121,7 +125,7 @@ function Contact({
           aria-label={`${name}: не указан`}
         >
           <span className="opacity-50 grayscale">{icon}</span>
-          <span className="truncate">{label}</span>
+          <span className="hidden truncate sm:inline">{label}</span>
         </span>
       </li>
     );
@@ -132,11 +136,12 @@ function Contact({
       <a
         href={href}
         {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-        aria-label={external ? `${name} клуба` : undefined}
+        aria-label={external ? `${name} клуба` : `${name}: ${label}`}
+        title={external ? `${name} клуба` : `${name}: ${label}`}
         className={cn(className, 'border-white/30 bg-black/25 text-white transition-colors hover:bg-black/40')}
       >
         {icon}
-        <span className="truncate">{label}</span>
+        <span className="hidden truncate sm:inline">{label}</span>
       </a>
     </li>
   );

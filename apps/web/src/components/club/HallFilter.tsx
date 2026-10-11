@@ -90,7 +90,9 @@ export function HallPicker({
   children?: ReactNode;
 }) {
   if (halls.length < 2) {
-    return (
+    // У клуба с одним залом выбирать нечего (решение от 11.10.2026): выбор
+    // стоит над расписанием, и пустой блок там только отодвигал бы его.
+    return children ? (
       <section id={HALL_PICKER_ANCHOR} className="mb-12 scroll-mt-48">
         <SectionHeading
           title={halls.length === 1 ? 'Зал клуба' : 'Залы'}
@@ -98,7 +100,7 @@ export function HallPicker({
         />
         {children}
       </section>
-    );
+    ) : null;
   }
 
   const cities = [...new Set(halls.map(cityOf))];
@@ -106,10 +108,14 @@ export function HallPicker({
   const inCity = oneCity ? halls : value.city ? halls.filter((hall) => cityOf(hall) === value.city) : [];
 
   return (
-    <section id={HALL_PICKER_ANCHOR} className="mb-12 scroll-mt-48">
+    <section id={HALL_PICKER_ANCHOR} className={cn('scroll-mt-48', children ? 'mb-12' : 'mb-8')}>
       <SectionHeading
         title="Выберите зал"
-        description="Под выбором — карточка зала: где он, когда открыт и почём стол. От зала зависит и всё ниже — мероприятия, тренеры, абонементы и расписание. Выбор запоминается в этом браузере."
+        description={
+          children
+            ? 'Под выбором — карточка зала: где он, когда открыт и почём стол. От зала зависит и всё ниже — мероприятия, тренеры, абонементы и расписание. Выбор запоминается в этом браузере.'
+            : 'От зала зависит всё ниже: расписание, мероприятия, тренеры, абонементы и карточки залов. Выбор запоминается в этом браузере.'
+        }
       />
 
       <div className="grid gap-2 sm:hidden">

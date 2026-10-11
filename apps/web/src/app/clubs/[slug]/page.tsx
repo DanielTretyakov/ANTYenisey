@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { BookingEntry, ClubCatalogItem, PublicPlan, PublicTenant } from '@yenisey/types';
 import { ClubAbout } from '@/components/club/ClubAbout';
-import { ClubGlance } from '@/components/club/ClubGlance';
 import { ClubHero } from '@/components/club/ClubHero';
 import { ClubNewsColumn, NEWS_ANCHOR } from '@/components/club/ClubNewsColumn';
 import { ClubRatingColumn, RATING_ANCHOR } from '@/components/club/ClubRatingColumn';
@@ -40,36 +39,39 @@ import { useSession } from '@/lib/useSession';
  * Страница клуба.
  *
  * Вид — «витрина-журнал» (решение владельца от 30.09.2026, вариант Д):
- * обложка с фактами и главными действиями (`ClubHero`), липкое меню разделов,
- * мозаика из новостей, рейтинга и «коротко». Меняется только вид: блоки,
- * якоря и действия — прежние.
+ * обложка с фактами и главными действиями (`ClubHero`), липкое меню разделов.
  *
- * Сверху вниз (решения владельца от 24, 25 и 27.09.2026): обложка с названием
- * и сердечком «мой клуб», «О клубе» — описание, ценности, контакты, — кнопка
- * аренды и «Мои мероприятия». Дальше общее для всех залов — новости и рейтинг
- * в две колонки. Под ними — выбор зала, крупно: от него зависит всё ниже, —
- * вкладки зала «Зал · Мероприятия · Тренеры · Абонементы» и «Предстоящие» в
- * этом зале — неделей или календарём месяца, с фильтром по виду мероприятия.
+ * Порядок — сперва действие, потом витрина (решение владельца от
+ * 11.10.2026): человек, открывший клуб, хочет понять, когда прийти, куда и
+ * почём. Раньше «Предстоящие» стояли последними — на телефоне на десятом
+ * экране, под описанием, ценностями, новостями, рейтингом и карточками залов.
+ * Сверху вниз: обложка; «Мои мероприятия» (только если есть); выбор зала — от
+ * него зависит всё ниже; «Предстоящие» неделей или месяцем; вкладки
+ * «Мероприятия · Тренеры · Абонементы»; карточки залов (адрес, часы, цены,
+ * бронь); новости и рейтинг двумя колонками; «О клубе». Плитки «коротко» сняты:
+ * они повторяли карточки залов, «Мои мероприятия» и вкладку тренеров.
  *
- * «Мои мероприятия» — выше «Предстоящих», как требует ТЗ, и выше всего
- * общего: на страницу клуба заходят чаще всего чтобы посмотреть, куда уже
- * записан и когда идти, а не чтобы выбрать новое.
+ * «Мои мероприятия» — выше «Предстоящих», как требует ТЗ: на страницу клуба
+ * заходят чаще всего посмотреть, куда уже записан и когда идти.
  *
  * Оформление берётся у клуба: `clubAccent` подменяет акцентные переменные на
  * обёртке страницы, и все компоненты внутри перекрашиваются сами — они
  * называют роль («цвет действия»), а не краску. Клуб без своего цвета
  * остаётся в изумруде платформы.
  */
+/** Карточки залов — свой блок ниже вкладок; `#zaly` ведёт сюда. */
+const HALLS_ANCHOR = 'zaly';
+
 /** Пункты липкого меню — якоря блоков, порядок — как на странице. */
 const SECTIONS = [
-  { id: ABOUT_ANCHOR, label: 'О клубе' },
-  { id: NEWS_ANCHOR, label: 'Новости' },
-  { id: RATING_ANCHOR, label: 'Рейтинг' },
-  { id: HALL_PICKER_ANCHOR, label: 'Залы' },
+  { id: UPCOMING_ANCHOR, label: 'Расписание' },
   { id: 'meropriyatiya', label: 'Мероприятия', scrollTo: TABS_ANCHOR },
   { id: 'trenery', label: 'Тренеры', scrollTo: TABS_ANCHOR },
   { id: PLANS_ANCHOR, label: 'Абонементы', scrollTo: TABS_ANCHOR },
-  { id: UPCOMING_ANCHOR, label: 'Расписание' },
+  { id: HALLS_ANCHOR, label: 'Залы' },
+  { id: NEWS_ANCHOR, label: 'Новости' },
+  { id: RATING_ANCHOR, label: 'Рейтинг' },
+  { id: ABOUT_ANCHOR, label: 'О клубе' },
 ];
 
 const TAB_IDS = ['meropriyatiya', 'trenery', PLANS_ANCHOR];
@@ -146,10 +148,10 @@ export default function ClubPage() {
     const scroll = (): void => {
       const hash = window.location.hash.slice(1);
 
-      // `#zaly` — прежняя вкладка залов: зал теперь у выбора зала.
-      const target = hash === 'zaly' ? HALL_PICKER_ANCHOR : hash;
+      const target = hash;
 
-      if (target === NEWS_ANCHOR || target === RATING_ANCHOR || target === HALL_PICKER_ANCHOR) {
+      // Блоки, а не вкладки: к ним — прокруткой, когда страница приехала.
+      if ([NEWS_ANCHOR, RATING_ANCHOR, HALL_PICKER_ANCHOR, HALLS_ANCHOR, ABOUT_ANCHOR, UPCOMING_ANCHOR].includes(target)) {
         requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView({ block: 'start' }));
       }
     };
@@ -263,10 +265,6 @@ export default function ClubPage() {
 
         {error && <Alert>{error}</Alert>}
 
-        <div id={ABOUT_ANCHOR} className="scroll-mt-48">
-          <ClubAbout tenant={tenant} />
-        </div>
-
         <PersonSwitch
           people={family.children}
           selected={family.selected}
@@ -282,33 +280,8 @@ export default function ClubPage() {
           readOnly={family.selfIsChild}
         />
 
-        {/* Общее для всех залов — до выбора зала (решение от 27.09.2026),
-            мозаикой (решение от 30.09.2026, вариант Д): новости и рейтинг
-            крупно, под ними — «коротко» о залах, записи и тренерах. */}
-        <div className="mb-4 grid gap-10 lg:grid-cols-2 lg:gap-4">
-          <ClubNewsColumn />
-          <ClubRatingColumn />
-        </div>
-
-        <ClubGlance tenant={tenant} mine={mine} anonymous={session.status === 'anonymous'} onJump={jump} />
-
-        {tenant && (
-          <HallPicker halls={tenant.halls} value={effectiveHalls} onChange={chooseHalls}>
-            <HallCards
-              slug={slug}
-              tenant={{ ...tenant, halls: hallIds ? tenant.halls.filter((hall) => hallIds.includes(hall.id)) : tenant.halls }}
-              viewer={viewer}
-            />
-          </HallPicker>
-        )}
-
-        <ClubTabs
-          tenant={tenant}
-          catalog={catalog}
-          plans={plans}
-          hallIds={hallIds}
-          onShowSchedule={showSchedule}
-        />
+        {/* Выбор зала — над расписанием: от него зависит всё ниже. */}
+        {tenant && <HallPicker halls={tenant.halls} value={effectiveHalls} onChange={chooseHalls} />}
 
         <UpcomingEvents
           slug={slug}
@@ -323,6 +296,39 @@ export default function ClubPage() {
           hallIds={hallIds}
           hallNames={hallNames}
         />
+
+        <ClubTabs
+          tenant={tenant}
+          catalog={catalog}
+          plans={plans}
+          hallIds={hallIds}
+          onShowSchedule={showSchedule}
+        />
+
+        {tenant && (
+          <section id={HALLS_ANCHOR} className="mb-14 scroll-mt-48">
+            <SectionHeading
+              title={tenant.halls.length === 1 ? 'Зал клуба' : 'Залы'}
+              description="Где играют, когда открыто и почём стол — бронь прямо из карточки."
+            />
+            <HallCards
+              slug={slug}
+              tenant={{ ...tenant, halls: hallIds ? tenant.halls.filter((hall) => hallIds.includes(hall.id)) : tenant.halls }}
+              viewer={viewer}
+            />
+          </section>
+        )}
+
+        {/* Общее для всех залов — новости и рейтинг двумя колонками одной
+            высоты (решения от 30.09 и 01.10.2026), ниже действия. */}
+        <div className="mb-14 grid gap-10 lg:grid-cols-2 lg:gap-4">
+          <ClubNewsColumn />
+          <ClubRatingColumn />
+        </div>
+
+        <div id={ABOUT_ANCHOR} className="scroll-mt-48">
+          <ClubAbout tenant={tenant} />
+        </div>
       </main>
 
       <SiteFooter />
