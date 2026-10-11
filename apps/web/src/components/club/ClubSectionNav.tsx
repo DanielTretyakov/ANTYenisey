@@ -1,9 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { SECTION_ACTIVE_OFFSET_CLUB, STICKY_BELOW_CLUB_HEADER } from '@/components/layout/metrics';
+import { SECTION_ACTIVE_OFFSET_CLUB } from '@/components/layout/metrics';
 import { useClubPostsUnread } from '@/lib/clubPostsUnread';
-import { cn } from '@/lib/cn';
 
 /** Пункт меню: якорь блока и, для вкладок, — что прокручивать. */
 export interface NavItem {
@@ -25,10 +24,15 @@ export interface SectionNavState {
 }
 
 /**
- * Разделы страницы клуба — подсветка по прокрутке и переход к блоку. Хуком,
- * а не внутри меню (решение владельца от 11.10.2026): на телефоне разделы
- * страницы живут в списке строки клуба (`ClubBar`), на компьютере — в липкой
- * ленте `ClubSectionNav`, и считать «где я» обоим надо одинаково.
+ * Разделы страницы клуба — подсветка по прокрутке и переход к блоку
+ * (меню разделов — решение владельца от 30.09.2026, вариант Д). Пункты —
+ * якоря тех же блоков (`#novosti`, `#reiting`, вкладки `#meropriyatiya`…),
+ * поэтому старые ссылки работают как прежде; вкладки открываются сменой
+ * якоря — `ClubTabs` сам слушает `hashchange`.
+ *
+ * Меню живёт в строке клуба (`ClubBar`, решение от 11.10.2026): на
+ * компьютере — разделами в самой строке, на телефоне — группой её списка.
+ * Отдельная липкая плашка под строкой снята — две полосы склеивались.
  */
 export function useSectionNav(slug: string, items: NavItem[]): SectionNavState {
   const unread = useClubPostsUnread();
@@ -94,65 +98,6 @@ export function useSectionNav(slug: string, items: NavItem[]): SectionNavState {
     currentId: current?.id ?? null,
     go,
   };
-}
-
-/**
- * Липкое меню разделов страницы клуба (решение владельца от 30.09.2026,
- * вариант Д): вместо долгой прокрутки наугад — переход к блоку. Пункты —
- * якоря тех же блоков, что и раньше (`#novosti`, `#reiting`, вкладки
- * `#meropriyatiya`…), поэтому старые ссылки работают как прежде.
- *
- * Только с `sm` (решение от 11.10.2026): на телефоне второй список «Раздел»
- * под списком строки клуба склеивался с ним — разделы страницы ушли в тот же
- * список строки клуба отдельной группой.
- *
- * Вкладки открываются сменой якоря — `ClubTabs` сам слушает `hashchange`.
- */
-export function ClubSectionNav({ nav }: { nav: SectionNavState }) {
-  return (
-    <nav
-      aria-label="Разделы страницы клуба"
-      className={cn(
-        // Под шапкой со строкой клуба (шапка, вариант А, 03.10.2026).
-        'sticky z-10 mb-10 -mx-1 hidden rounded-card border border-border bg-surface-raised/90 p-1.5 backdrop-blur sm:block',
-        STICKY_BELOW_CLUB_HEADER,
-      )}
-    >
-      <ul className="flex max-w-full gap-1 overflow-x-auto [scrollbar-width:none]">
-        {nav.items.map((item) => {
-          const current = nav.currentId === item.id;
-          const [label, badge] = item.label.split(' · ');
-          const count = badge ? Number.parseInt(badge, 10) : 0;
-
-          return (
-            <li key={item.id}>
-              <button
-                type="button"
-                onClick={() => nav.go(item.id)}
-                aria-current={current ? 'true' : undefined}
-                className={cn(
-                  'inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[0.875rem] whitespace-nowrap transition-colors',
-                  current ? 'bg-accent text-accent-text' : 'text-text-muted hover:bg-surface-sunken hover:text-text',
-                )}
-              >
-                {label}
-                {count > 0 && (
-                  <span
-                    className={cn(
-                      'grid h-[1.125rem] min-w-[1.125rem] place-items-center rounded-full px-1 text-[0.6875rem] font-semibold',
-                      current ? 'bg-accent-text text-accent' : 'bg-accent text-accent-text',
-                    )}
-                  >
-                    {count}
-                  </span>
-                )}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </nav>
-  );
 }
 
 /** Пункт-вкладка горит, только если открыта именно она. */

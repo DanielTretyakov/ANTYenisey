@@ -109,19 +109,59 @@ export function ClubBar({ slug, page }: { slug: string; page?: SectionNavState }
       <div className="mx-auto flex h-full w-full max-w-6xl items-center gap-3 px-5 sm:px-8">
         <Link href={clubPath(slug)} className="flex min-w-0 shrink items-center gap-2.5">
           {club ? <ClubMark club={club} size="sm" className="h-7 w-7" /> : <span className="h-7 w-7 shrink-0 rounded-control bg-border/50" />}
-          <span className="truncate text-[0.875rem] font-semibold text-text">{club?.name ?? ''}</span>
+          {/* Рядом с разделами страницы на узком компьютере название не
+              помещается — там знака хватает (на телефоне разделов в строке нет). */}
+          <span className={cn('truncate text-[0.875rem] font-semibold text-text', page && 'sm:hidden xl:inline')}>
+            {club?.name ?? ''}
+          </span>
         </Link>
 
         {session.status !== 'loading' && (
           <>
             <span aria-hidden="true" className="hidden h-5 w-px shrink-0 bg-border sm:block" />
-            <nav aria-label="Разделы клуба" className="hidden min-w-0 items-center gap-1 sm:flex">
-              {sections.map((section) => (
-                <NavLink key={section.href} href={section.href} active={current?.href === section.href}>
-                  {section.label}
-                </NavLink>
-              ))}
-            </nav>
+            {page ? (
+              // На странице клуба — одна полоса (решение владельца от
+              // 11.10.2026): разделы страницы прямо в строке клуба, другие
+              // страницы клуба — справа. Раньше под строкой висела вторая,
+              // плавающая плашка разделов, и они «склеивались».
+              <>
+                <nav
+                  aria-label="Разделы страницы клуба"
+                  className="hidden min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] sm:flex"
+                >
+                  {page.items.map((item) => (
+                    <PageSection key={item.id} label={item.label} current={page.currentId === item.id} onClick={() => page.go(item.id)} />
+                  ))}
+                </nav>
+                <nav aria-label="Разделы клуба" className="hidden shrink-0 items-center gap-1 sm:flex">
+                  {sections
+                    .filter((section) => section.href !== clubPath(slug))
+                    .map((section) =>
+                      section.label === 'Забронировать стол' ? (
+                        <Link
+                          key={section.href}
+                          href={section.href}
+                          className="inline-flex h-8 items-center rounded-control bg-accent px-3 text-[0.8125rem] font-medium whitespace-nowrap text-accent-text transition-colors hover:bg-accent-hover"
+                        >
+                          {section.label}
+                        </Link>
+                      ) : (
+                        <NavLink key={section.href} href={section.href} active={false}>
+                          {section.label}
+                        </NavLink>
+                      ),
+                    )}
+                </nav>
+              </>
+            ) : (
+              <nav aria-label="Разделы клуба" className="hidden min-w-0 items-center gap-1 sm:flex">
+                {sections.map((section) => (
+                  <NavLink key={section.href} href={section.href} active={current?.href === section.href}>
+                    {section.label}
+                  </NavLink>
+                ))}
+              </nav>
+            )}
             {/* На странице клуба — один список на телефоне (решение владельца от
                 11.10.2026): разделы этой страницы и другие страницы клуба
                 группами. Раньше под ним липла вторая плашка «Раздел». */}
@@ -151,5 +191,33 @@ export function ClubBar({ slug, page }: { slug: string; page?: SectionNavState }
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Раздел страницы клуба в строке клуба. Новые новости — числом-кружком:
+ * подпись приходит как «Новости · 3 новых» (та же, что в списке на телефоне).
+ */
+function PageSection({ label, current, onClick }: { label: string; current: boolean; onClick: () => void }) {
+  const [name, extra] = label.split(' · ');
+  const count = extra ? Number.parseInt(extra, 10) : 0;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-current={current ? 'true' : undefined}
+      className={cn(
+        'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control px-2.5 text-[0.8125rem] whitespace-nowrap transition-colors',
+        current ? 'bg-surface-accent-soft text-text-accent' : 'text-text-muted hover:bg-surface-sunken hover:text-text',
+      )}
+    >
+      {name}
+      {count > 0 && (
+        <span className="grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[0.625rem] font-semibold text-accent-text">
+          {count}
+        </span>
+      )}
+    </button>
   );
 }

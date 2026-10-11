@@ -7,7 +7,7 @@ import { ClubAbout } from '@/components/club/ClubAbout';
 import { ClubHero } from '@/components/club/ClubHero';
 import { ClubNewsColumn, NEWS_ANCHOR } from '@/components/club/ClubNewsColumn';
 import { ClubRatingColumn, RATING_ANCHOR } from '@/components/club/ClubRatingColumn';
-import { ABOUT_ANCHOR, ClubSectionNav, useSectionNav } from '@/components/club/ClubSectionNav';
+import { ABOUT_ANCHOR, useSectionNav } from '@/components/club/ClubSectionNav';
 import { ClubTabs, TABS_ANCHOR } from '@/components/club/ClubTabs';
 import { HallCards } from '@/components/club/HallCards';
 import {
@@ -234,7 +234,7 @@ export default function ClubPage() {
     document.getElementById(tab ? TABS_ANCHOR : anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
-  // Разделы страницы — одни на ленту (компьютер) и список строки клуба (телефон).
+  // Разделы страницы — в строке клуба: лентой на компьютере, списком на телефоне.
   const sectionNav = useSectionNav(slug, SECTIONS);
 
   // Кто смотрит — одним правилом с окном мероприятия (`eventViewerOf`).
@@ -264,7 +264,10 @@ export default function ClubPage() {
           onSchedule={() => jump(UPCOMING_ANCHOR)}
         />
 
-        <ClubSectionNav nav={sectionNav} />
+        {/* Отступ под обложкой — прежде его давала плашка разделов, снятая
+            11.10.2026 (разделы теперь в строке клуба). */}
+        <div className="mb-10" aria-hidden="true" />
+
 
         {error && <Alert>{error}</Alert>}
 
