@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import {
   CLUB_APPLICATION_STATUS_LABELS,
@@ -33,9 +34,12 @@ function when(iso: string): string {
 export function ApplicationsTab({
   items,
   onChange,
+  onCreateClub,
 }: {
   items: ClubApplicationView[];
   onChange: (item: ClubApplicationView) => void;
+  /** «Завести клуб» по заявке — окно на странице. */
+  onCreateClub: (item: ClubApplicationView) => void;
 }) {
   if (items.length === 0) {
     return (
@@ -49,14 +53,22 @@ export function ApplicationsTab({
     <ul className="grid gap-3">
       {items.map((item) => (
         <li key={item.id}>
-          <ApplicationCard item={item} onChange={onChange} />
+          <ApplicationCard item={item} onChange={onChange} onCreateClub={() => onCreateClub(item)} />
         </li>
       ))}
     </ul>
   );
 }
 
-function ApplicationCard({ item, onChange }: { item: ClubApplicationView; onChange: (item: ClubApplicationView) => void }) {
+function ApplicationCard({
+  item,
+  onChange,
+  onCreateClub,
+}: {
+  item: ClubApplicationView;
+  onChange: (item: ClubApplicationView) => void;
+  onCreateClub: () => void;
+}) {
   const [status, setStatus] = useState<ClubApplicationStatus>(item.status);
   const [note, setNote] = useState(item.note ?? '');
   const [pending, setPending] = useState(false);
@@ -89,6 +101,18 @@ function ApplicationCard({ item, onChange }: { item: ClubApplicationView; onChan
           <span className={cn('rounded-full px-2.5 py-0.5 text-[0.75rem] font-semibold', TONE[item.status])}>
             {CLUB_APPLICATION_STATUS_LABELS[item.status]}
           </span>
+          {/* Клуб по заявке (11.10.2026): заведён — ссылкой, нет — кнопкой. */}
+          {item.club ? (
+            <Link href={`/clubs/${item.club.slug}`} className="text-[0.8125rem] text-text-accent underline-offset-2 hover:underline">
+              клуб «{item.club.name}» →
+            </Link>
+          ) : (
+            item.status !== 'DECLINED' && (
+              <Button size="sm" variant="secondary" onClick={onCreateClub}>
+                Завести клуб
+              </Button>
+            )
+          )}
         </div>
         <p className="text-[0.875rem] text-text-muted">
           {[item.city ?? 'город не указан', ...size].join(' · ')} · {when(item.createdAt)}

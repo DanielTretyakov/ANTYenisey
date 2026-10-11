@@ -30,6 +30,8 @@ export async function upcomingCoachSessions(
       coachId: { in: coachIds },
       startsAt: { gte: new Date() },
       cancelledAt: null,
+      // Занятия клуба-черновика наружу не уходят (11.10.2026).
+      tenant: { publishedAt: { not: null } },
       coach: { membership: { deactivatedAt: null } },
     },
     select: { ...TRAINING_EVENT_SELECT, coachId: true, tenant: CLUB_SELECT },

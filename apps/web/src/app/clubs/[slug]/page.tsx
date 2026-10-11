@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { BookingEntry, ClubCatalogItem, PublicPlan, PublicTenant } from '@yenisey/types';
+import NotFound from '@/app/not-found';
 import { ClubAbout } from '@/components/club/ClubAbout';
 import { ClubHero } from '@/components/club/ClubHero';
 import { ClubNewsColumn, NEWS_ANCHOR } from '@/components/club/ClubNewsColumn';
@@ -90,6 +91,10 @@ export default function ClubPage() {
   const [mine, setMine] = useState<BookingEntry[] | null>(null);
   const [favourite, setFavourite] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Клуба нет — или он черновик, а смотрит посторонний (11.10.2026): сервер
+  // отвечает одинаково 404, и страница — общая «Такой страницы нет», а не
+  // обложка-заглушка с ошибкой под ней.
+  const [missing, setMissing] = useState(false);
   const [catalog, setCatalog] = useState<ClubCatalogItem[] | null>(null);
   const [plans, setPlans] = useState<PublicPlan[] | null>(null);
   const [filter, setFilter] = useState<KindFilter | null>(null);
@@ -166,9 +171,14 @@ export default function ClubPage() {
     api
       .tenant(slug)
       .then(setTenant)
-      .catch((cause: unknown) =>
-        setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен'),
-      );
+      .catch((cause: unknown) => {
+        if (cause instanceof ApiError && cause.status === 404) {
+          setMissing(true);
+          return;
+        }
+
+        setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
+      });
   }, [slug]);
 
   // Виды мероприятий нужны двоим — вкладке «Мероприятия клуба» и чипам
@@ -240,6 +250,10 @@ export default function ClubPage() {
   // Кто смотрит — одним правилом с окном мероприятия (`eventViewerOf`).
   const viewer = eventViewerOf(session, slug, forPerson, family.selfIsChild);
 
+  if (missing) {
+    return <NotFound />;
+  }
+
   return (
     <div className="flex min-h-dvh flex-col bg-surface" style={clubAccent(tenant?.accentColor)}>
       <SiteHeader clubSlug={slug} clubPage={sectionNav} />
@@ -247,6 +261,15 @@ export default function ClubPage() {
       <main className="mx-auto w-full max-w-6xl flex-1 px-5 pb-20 sm:px-8">
         {/* Подписка клуба на КНТ приостановлена за неоплату (решение от
             02.10.2026): страница открыта, но записаться и забронировать нельзя. */}
+        {/* Черновик (11.10.2026): сюда доходят только свои — посторонним 404. */}
+        {tenant?.draft && (
+          <div className="mt-6">
+            <Alert tone="warning">
+              Клуб ещё не открыт: его нет в поиске, страницу видят только сотрудники клуба. Руководитель открывает его в
+              «Настройках», когда готов хотя бы один зал с адресом и столами.
+            </Alert>
+          </div>
+        )}
         {tenant?.suspended && (
           <div className="mt-6">
             <Alert tone="warning">

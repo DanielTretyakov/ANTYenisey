@@ -44,6 +44,8 @@ export interface ClubApplicationView {
   clubName: string;
   /** «Красноярск, Красноярский край». */
   city: string | null;
+  /** Город из справочника — его подставляет форма заведения клуба. */
+  cityId: string | null;
   phone: string | null;
   email: string | null;
   halls: number | null;
@@ -51,9 +53,38 @@ export interface ClubApplicationView {
   comment: string | null;
   status: ClubApplicationStatus;
   note: string | null;
+  /** Клуб, заведённый по заявке (11.10.2026); пусто — ещё не заведён. */
+  club: { slug: string; name: string } | null;
 }
 
 export interface ClubApplicationUpdate {
   status: ClubApplicationStatus;
   note: string | null;
+}
+
+/**
+ * Владелец платформы заводит клуб (решения владельца от 11.10.2026): клуб
+ * появляется черновиком, руководитель — уже зарегистрированная учётка по
+ * почте (учёток за людей мы не заводим). Из заявки — с её ссылкой.
+ */
+export interface ClubCreateRequest {
+  name: string;
+  /** Код клуба для адреса: строчная латиница и цифры через дефис, 3–40 знаков. */
+  slug: string;
+  cityId: string;
+  ownerEmail: string;
+  applicationId?: string;
+}
+
+/** Код клуба — то же правило, что у CHECK `Tenant_slug_format`. */
+export const CLUB_SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+/**
+ * Открытие клуба: открыт ли, и что ещё нужно, чтобы открыть. Открывает
+ * руководитель клуба (или владелец платформы), когда список пуст.
+ */
+export interface ClubOpening {
+  publishedAt: string | null;
+  /** Чего не хватает: «Заведите зал», «У зала «Пироги» нет адреса»… */
+  problems: string[];
 }

@@ -24,7 +24,8 @@ import { Button } from '@/components/ui/Button';
 import { Tab } from '@/components/ui/Tab';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { rolesInClub } from '@/lib/membership';
-import { ApiError } from '@/lib/api';
+import { OpeningCard } from '@/components/club/OpeningCard';
+import { api, ApiError } from '@/lib/api';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { useSession } from '@/lib/useSession';
 import { ClubPageCard } from './ClubPageCard';
@@ -74,6 +75,10 @@ export default function ClubPage() {
   // Отмена правки возвращает формам прежние значения: они показывали
   // «каким станет», и без пересборки отменённое осталось бы на экране.
   const [formVersion, setFormVersion] = useState(0);
+  // Черновик клуба (11.10.2026): правки применяются сразу, а не в полночь, —
+  // после каждой страница перечитывает залы и столы, и открытие тоже.
+  const [draft, setDraft] = useState(false);
+  const [openingVersion, setOpeningVersion] = useState(0);
 
   // Роль берётся из привязки к КЛУБУ ИЗ АДРЕСА, а не из профиля: аккаунт один
   // на платформу, и в разных клубах она разная. Раньше клуб здесь не
@@ -120,6 +125,13 @@ export default function ClubPage() {
     };
   }, [allowed]);
 
+  useEffect(() => {
+    api
+      .tenant(slug)
+      .then((tenant) => setDraft(tenant.draft))
+      .catch(() => undefined);
+  }, [slug]);
+
   const hall = data?.halls.find((item) => item.id === hallId) ?? null;
 
   /**
@@ -138,6 +150,16 @@ export default function ClubPage() {
   }
 
   function refreshChanges(): void {
+    if (draft) {
+      // В черновике правка уже применена — перечитать то, что она поменяла.
+      club
+        .settingsChanges()
+        .then((changes) => reloadAfterCancel(changes))
+        .catch(() => undefined);
+      setOpeningVersion((value) => value + 1);
+      return;
+    }
+
     club
       .settingsChanges()
       .then((changes) => setData((previous) => (previous ? { ...previous, changes } : previous)))
@@ -208,7 +230,12 @@ export default function ClubPage() {
       // Зал появится в полночь (решение владельца от 26.09.2026) — в список
       // он не встаёт, а ждёт в «Запланированных изменениях».
       setNewHall(null);
-      setNotice(`Зал «${created.name}» появится в ближайшие 00:00 — вместе со столами. Передумали — отмените ниже.`);
+      setNotice(
+        draft
+          ? `Зал «${created.name}» заведён вместе со столами.`
+          : `Зал «${created.name}» появится в ближайшие 00:00 — вместе со столами. Передумали — отмените ниже.`,
+      );
+      if (draft) setHallId(created.id);
       refreshChanges();
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
@@ -221,10 +248,22 @@ export default function ClubPage() {
     <AdminShell>
       <h1 className="mb-2 text-[1.75rem]">Настройки клуба</h1>
       <p className="mb-7 max-w-2xl text-[0.9375rem] text-text-muted">
-        Всё на этой странице клуб меняет сам, без участия разработчика. Правки вступают в силу в ближайшие
-        00:00 по времени зала, а не посреди рабочего дня, — сразу меняется только оформление страницы клуба.
-        Уже созданные брони хранят свою копию цены, и правка прайса не переписывает историю задним числом.
+        {draft ? (
+          <>
+            Всё на этой странице клуб меняет сам. Пока клуб не открыт, правки применяются сразу; после открытия они
+            будут вступать в силу в ближайшие 00:00 по времени зала, а не посреди рабочего дня.
+          </>
+        ) : (
+          <>
+            Всё на этой странице клуб меняет сам, без участия разработчика. Правки вступают в силу в ближайшие
+            00:00 по времени зала, а не посреди рабочего дня, — сразу меняется только оформление страницы клуба.
+            Уже созданные брони хранят свою копию цены, и правка прайса не переписывает историю задним числом.
+          </>
+        )}
       </p>
+
+      {/* Черновик клуба (11.10.2026) — руководителю: что осталось и «Открыть клуб». */}
+      {roles.includes('OWNER') && <OpeningCard key={openingVersion} onOpened={() => setDraft(false)} />}
 
       {session.status === 'ready' && !allowed && (
         <Alert>Раздел доступен только администратору и руководству клуба.</Alert>
@@ -238,7 +277,7 @@ export default function ClubPage() {
         <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
           {notice && <Alert tone="info">{notice}</Alert>}
 
-          <PendingChanges changes={data.changes} onChange={reloadAfterCancel} />
+          {!draft && <PendingChanges changes={data.changes} onChange={reloadAfterCancel} />}
 
           <SettingsForm
             key={formVersion}
@@ -346,7 +385,7 @@ export default function ClubPage() {
                   />
                   <Field
                     label="Сколько столов"
-                    hint="«Стол 1», «Стол 2»… — переименовать можно потом. Зал со столами появится в ближайшие 00:00."
+                    hint="«Стол 1», «Стол 2»… — переименовать можно потом. Зал со столами появится в ближайшие 00:00 (в черновике клуба — сразу)."
                     inputMode="numeric"
                     value={newHall.tableCount}
                     onChange={(event) => setNewHall({ ...newHall, tableCount: event.target.value })}

@@ -1897,3 +1897,23 @@ DO $$ BEGIN
   INSERT INTO "StaffShiftDay" ("tenantId","hallId",date,"setById") VALUES ('t1','h1',DATE '2026-10-12','c1');
   RAISE NOTICE 'GI. Шаблон недели и ручной день............... OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'GI. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- ---------------------------------------------------------------------------
+-- 46. Заведение клуба
+-- ---------------------------------------------------------------------------
+
+-- GJ. Код клуба с заглавной и пробелом — сломал бы адрес /clubs/:slug.
+SELECT pg_temp.expect('GJ',
+  $q$INSERT INTO "Tenant" (id,name,slug,"createdAt","updatedAt") VALUES ('t_slug','Клуб','Новый Клуб',now(),now())$q$,
+  '23514', 'Tenant_slug_format');
+
+-- GK. Код из двух букв — слишком короткий.
+SELECT pg_temp.expect('GK',
+  $q$INSERT INTO "Tenant" (id,name,slug,"createdAt","updatedAt") VALUES ('t_slug','Клуб','ab',now(),now())$q$,
+  '23514', 'Tenant_slug_format');
+
+-- GL. Черновик с нормальным кодом — законно.
+DO $$ BEGIN
+  INSERT INTO "Tenant" (id,name,slug,"createdAt","updatedAt") VALUES ('t_draft','Черновик','novyi-klub-2',now(),now());
+  RAISE NOTICE 'GL. Клуб-черновик с кодом через дефис......... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'GL. ПРОВАЛ: %', SQLERRM; END $$;

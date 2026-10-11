@@ -358,9 +358,9 @@ async function main() {
     typeof r.body?.name === 'string' && r.body.name.length > 0,
   );
   assert(
-    'наружу отдана карточка клуба: код, название, города, оформление, контакты и соцсети, залы, описание, ценности и тренеры',
+    'наружу отдана карточка клуба: код, название, черновик, города, оформление, контакты и соцсети, залы, описание, ценности и тренеры',
     Object.keys(r.body ?? {}).sort().join(',') ===
-      'accentColor,city,coaches,description,email,halls,logoFileId,maxUrl,name,otherCities,phone,slug,suspended,values,vkUrl',
+      'accentColor,city,coaches,description,draft,email,halls,logoFileId,maxUrl,name,otherCities,phone,slug,suspended,values,vkUrl',
   );
   assert(
     'часового пояса в карточке клуба больше НЕТ — он свойство зала',
@@ -2556,6 +2556,7 @@ async function main() {
   await clubApplications();
   await eventCancellation();
   await clubEntries();
+  await clubSetup();
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
@@ -7138,4 +7139,128 @@ async function clubEntries() {
 
   r = await enroll({ kind: 'TRAINING', eventId: startedId, clientId: secondId });
   check('на отменённое клуб не записывает', 400, r.status);
+}
+
+/**
+ * Заведение клуба и черновик (решения владельца от 11.10.2026).
+ *
+ * Клубы не удаляются (Restrict везде), поэтому клуб один и постоянный —
+ * `probe-draft`, как `probe-billing` у подписки: первый прогон его заводит,
+ * следующие получают 409 и работают с ним. Руководитель — учётка смоука (она
+ * же владелец платформы). В конце клуб снова черновик — следующий прогон
+ * проверит то же самое.
+ */
+async function clubSetup() {
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('\n=== 54. Заведение клуба — ПРОПУЩЕНО (нет учётки администратора)');
+    return;
+  }
+
+  console.log('\n=== 54. Заведение клуба и черновик');
+
+  const as = (token) => (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) } });
+
+  let r = await post('/auth/login', { email: adminEmail, password: adminPassword });
+  const asOwner = as(r.body?.accessToken ?? '');
+
+  if (r.body?.user?.platformOwner !== true) {
+    console.log('     Заведение клуба — ПРОПУЩЕНО (SMOKE_ADMIN не владелец платформы: pnpm db:grant-platform)');
+    return;
+  }
+
+  const slug = 'probe-draft';
+  const city = (await call(`/cities?${new URLSearchParams({ query: 'Красноярск' })}`)).body?.[0];
+
+  r = await post('/auth/register', registration({ lastName: 'Посторонний', tenantSlug: undefined }));
+  const asStranger = as(r.body?.accessToken ?? '');
+
+  r = await asStranger('/platform/club-setup', { method: 'POST', json: { name: 'Клуб проверки черновика', slug, cityId: city?.id, ownerEmail: adminEmail } });
+  check('клуб заводит только владелец платформы', 403, r.status);
+
+  r = await asOwner('/platform/club-setup', { method: 'POST', json: { name: 'Клуб проверки черновика', slug: 'Probe Draft', cityId: city?.id, ownerEmail: adminEmail } });
+  check('код клуба с заглавными и пробелом отклонён', 400, r.status);
+
+  r = await asOwner('/platform/club-setup', { method: 'POST', json: { name: 'Клуб проверки черновика', slug: 'probe-draft-x', cityId: city?.id, ownerEmail: 'net-takoy-uchetki@example.com' } });
+  check('руководитель — только существующая учётка', 400, r.status);
+
+  r = await asOwner('/platform/club-setup', { method: 'POST', json: { name: 'Клуб проверки черновика', slug, cityId: city?.id, ownerEmail: adminEmail } });
+  assert('клуб-черновик заведён или уже был', r.status === 201 || r.status === 409);
+
+  // Прошлый прогон мог упасть с открытым клубом — сначала в черновик.
+  r = await asOwner(`/platform/club-setup/${slug}/published`, { method: 'PUT', json: { published: false } });
+  check('владелец платформы возвращает клуб в черновик', 200, r.status);
+
+  // --- Черновик видят только свои.
+  r = await call(`/clubs/${slug}`);
+  check('посторонний без входа черновика не находит', 404, r.status);
+  r = await asStranger(`/clubs/${slug}`);
+  check('и вошедший посторонний — тоже', 404, r.status);
+  r = await call(`/clubs?${new URLSearchParams({ query: 'проверки черновика' })}`);
+  assert('в поиске черновика нет', !(r.body ?? []).some((club) => club.slug === slug));
+  r = await asOwner(`/clubs/${slug}`);
+  check('руководитель черновик видит', 200, r.status);
+  assert('и знает, что это черновик', r.body?.draft === true);
+
+  // --- Настройки черновика — сразу, без полуночи.
+  r = await asOwner(`/clubs/${slug}/address-suggestions?${new URLSearchParams({ query: 'Партизана Железняка 25' })}`);
+  const address = r.body?.[0] ?? null;
+  r = await asOwner(`/clubs/${slug}/halls`);
+  let hall = (r.body ?? [])[0];
+
+  if (!hall) {
+    r = await asOwner(`/clubs/${slug}/halls`, {
+      method: 'POST',
+      deferred: true,
+      json: {
+        name: 'Зал черновика',
+        timezone: 'Asia/Krasnoyarsk',
+        cityId: null,
+        addressFiasId: address?.fiasId,
+        bookingStep: 'HOUR_1',
+        tableHourPrice: 30000,
+        tableExtra30MinPrice: 15000,
+        hasRobotOption: false,
+        robot30MinPrice: null,
+        robot60MinPrice: null,
+        robotExtra30MinPrice: null,
+        tableCount: 2,
+      },
+    });
+    check('зал черновика сохранён', 201, r.status);
+    r = await asOwner(`/clubs/${slug}/halls`);
+    hall = (r.body ?? [])[0];
+    assert('и появился сразу, без полуночи', Boolean(hall));
+  }
+
+  r = await asOwner(`/clubs/${slug}/opening`);
+  check('открытие клуба читается', 200, r.status);
+  assert('с залом и столами открывать можно', r.body?.publishedAt === null && (r.body?.problems ?? []).length === 0);
+
+  r = await asStranger(`/clubs/${slug}/opening`, { method: 'POST' });
+  check('посторонний клуб не откроет', 404, r.status);
+
+  r = await asOwner(`/clubs/${slug}/opening`, { method: 'POST' });
+  check('руководитель открыл клуб', 200, r.status);
+  assert('момент открытия записан', typeof r.body?.publishedAt === 'string');
+
+  r = await asOwner(`/clubs/${slug}/opening`, { method: 'POST' });
+  check('открыть второй раз — 409', 409, r.status);
+
+  r = await call(`/clubs/${slug}`);
+  check('открытый клуб виден всем', 200, r.status);
+  assert('уже не черновик', r.body?.draft === false);
+
+  r = await asOwner('/platform/clubs');
+  const row = (r.body ?? []).find((club) => club.slug === slug);
+  assert('пробный период пошёл с открытия', row?.published === true && row?.status === 'TRIAL' && Date.parse(row?.trialEndsAt ?? '') > Date.now() + 6 * 86_400_000);
+
+  // --- Обратно в черновик — следующий прогон начнёт с того же.
+  r = await asOwner(`/platform/club-setup/${slug}/published`, { method: 'PUT', json: { published: false } });
+  check('клуб снова черновик', 200, r.status);
+  r = await call(`/clubs/${slug}`);
+  check('и снова скрыт от посторонних', 404, r.status);
 }

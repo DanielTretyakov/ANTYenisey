@@ -17,6 +17,8 @@ const VIEW_SELECT = {
   contactName: true,
   clubName: true,
   city: { select: { name: true, region: true } },
+  cityId: true,
+  tenant: { select: { slug: true, name: true } },
   phone: true,
   email: true,
   halls: true,
@@ -159,6 +161,7 @@ function toView(row: Row): ClubApplicationView {
     contactName: row.contactName,
     clubName: row.clubName,
     city: row.city ? [row.city.name, row.city.region].filter(Boolean).join(', ') : null,
+    cityId: row.cityId,
     phone: row.phone,
     email: row.email,
     halls: row.halls,
@@ -166,5 +169,6 @@ function toView(row: Row): ClubApplicationView {
     comment: row.comment,
     status: row.status,
     note: row.note,
+    club: row.tenant ? { slug: row.tenant.slug, name: row.tenant.name } : null,
   };
 }

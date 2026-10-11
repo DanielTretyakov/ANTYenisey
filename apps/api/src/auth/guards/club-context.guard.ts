@@ -46,7 +46,7 @@ export class ClubContextGuard implements CanActivate {
 
     const tenant = await this.prisma.tenant.findUnique({
       where: { slug },
-      select: { id: true, platformSubscription: { select: { status: true } } },
+      select: { id: true, publishedAt: true, platformSubscription: { select: { status: true } } },
     });
 
     if (!tenant) {
@@ -69,7 +69,16 @@ export class ClubContextGuard implements CanActivate {
 
     // Открытые маршруты клуба (карточка, расписание) доступны и без входа:
     // человек выбирает клуб до того, как заводит учётку.
+    // Черновик (решения владельца от 11.10.2026) — только своим: сотрудникам
+    // клуба и владельцу платформы. Посторонний получает «не найден», а не
+    // «нет доступа»: о недонастроенном клубе снаружи не должно быть известно.
+    const draft = tenant.publishedAt === null;
+
     if (!userId) {
+      if (draft) {
+        throw new NotFoundException('Клуб не найден');
+      }
+
       request.club = {
         userId: '',
         tenantId: tenant.id,
@@ -90,6 +99,14 @@ export class ClubContextGuard implements CanActivate {
     // «заводится первым действием».
     if (membership?.deactivatedAt) {
       throw new ForbiddenException('Доступ в этот клуб закрыт');
+    }
+
+    if (draft && !membership?.roles.some((role) => role !== Role.CLIENT)) {
+      const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { platformRole: true } });
+
+      if (user?.platformRole !== 'OWNER') {
+        throw new NotFoundException('Клуб не найден');
+      }
     }
 
     request.club = {

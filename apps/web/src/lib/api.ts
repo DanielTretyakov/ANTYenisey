@@ -1,5 +1,7 @@
 import type {
   BillingView,
+  ClubCreateRequest,
+  ClubOpening,
   ClubEnrollRequest,
   ClubEntryCancelRequest,
   EventCancelRequest,
@@ -343,7 +345,9 @@ const form = (method: string, fields: Record<string, string>, file?: File | null
  */
 export const api = {
   /** Карточка клуба по его коду. Открыто без авторизации. */
-  tenant: (slug: string): Promise<PublicTenant> => request(`/clubs/${slug}`),
+  // С токеном, если он есть: черновик клуба (11.10.2026) видят только свои,
+  // анониму сервер отвечает 404.
+  tenant: (slug: string): Promise<PublicTenant> => optionallyAuthorized(`/clubs/${slug}`),
 
   register: (payload: RegisterRequest): Promise<AuthResponse> =>
     request('/auth/register', json('POST', payload)),
@@ -588,6 +592,12 @@ export const api = {
 
   // --- Клубы и подписки — владельцу платформы.
   platformClubs: (): Promise<PlatformClubRow[]> => authorized('/platform/clubs'),
+  /** Владелец платформы заводит клуб-черновик (11.10.2026). */
+  createClub: (payload: ClubCreateRequest): Promise<{ slug: string }> =>
+    authorized('/platform/club-setup', json('POST', payload)),
+  /** Владелец платформы открывает клуб или возвращает в черновик. */
+  setClubPublished: (slug: string, published: boolean): Promise<ClubOpening> =>
+    authorized(`/platform/club-setup/${slug}/published`, json('PUT', { published })),
   clubApplications: (): Promise<ClubApplicationView[]> => authorized('/platform/club-applications'),
   updateClubApplication: (id: string, payload: ClubApplicationUpdate): Promise<ClubApplicationView> =>
     authorized(`/platform/club-applications/${encodeURIComponent(id)}`, json('PATCH', payload)),
@@ -1086,6 +1096,11 @@ export function clubApi(slug: string = TENANT_SLUG) {
      * Клуб записывает человека на занятие или турнир (решения владельца от
      * 10.10.2026) — тем, кто на смене. На начавшееся — сразу «пришёл».
      */
+    /** Открыт ли клуб и чего не хватает, чтобы открыть (руководитель). */
+    opening: (): Promise<ClubOpening> => authorized(`${club}/opening`),
+    /** Открыть клуб — руководитель; с этой минуты идут пробные 7 дней. */
+    publishClub: (): Promise<ClubOpening> => authorized(`${club}/opening`, { method: 'POST' }),
+
     enrollClient: (payload: ClubEnrollRequest): Promise<BookingEntry> =>
       authorized(`${club}/desk/event-entries`, json('POST', payload)),
 

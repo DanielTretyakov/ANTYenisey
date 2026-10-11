@@ -111,6 +111,8 @@ export class TenantsService {
 
     const tenants = await this.prisma.tenant.findMany({
       where: {
+        // Черновик в поиске не показывается (решение владельца от 11.10.2026).
+        publishedAt: { not: null },
         ...(name
           ? // insensitive, а не lower() руками: клуб ищут по обрывку названия,
             // и «енисей» обязано находить «АНТ «Енисей»».
@@ -158,6 +160,7 @@ export class TenantsService {
         values: true,
         vkUrl: true,
         maxUrl: true,
+        publishedAt: true,
         platformSubscription: { select: { status: true } },
         // Состав — все действующие тренеры, кроме скрытых администратором
         // (решение владельца от 25.09.2026): новый тренер появляется на
@@ -220,6 +223,9 @@ export class TenantsService {
     return {
       slug: card.slug,
       name: card.name,
+      // Черновик сюда доходит только для своих — постороннего не пускает
+      // `ClubContextGuard` (404).
+      draft: tenant.publishedAt === null,
       city: card.city,
       otherCities: card.otherCities,
       logoFileId: card.logoFileId,

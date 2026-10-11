@@ -63,6 +63,8 @@ async function main(): Promise<void> {
     create: {
       name: 'АНТ «Енисей»',
       slug: 'yenisey',
+      // Открыт сразу: клуб без момента открытия — черновик, и в поиске его нет.
+      publishedAt: new Date(),
       // Часового пояса у клуба больше нет: он у каждого зала свой.
       cityId: cities.get('Красноярск')!,
       // Логотипа сид не заводит: с 02.10.2026 это загруженный в настройках
@@ -250,6 +252,7 @@ async function seedNeighbour(cities: Map<string, string>): Promise<void> {
     create: {
       name: 'КНТ «Саяны»',
       slug: 'sayany',
+      publishedAt: new Date(),
       cityId: cities.get('Абакан')!,
       accentColor: '#b5541f',
       noShowChargePercent: 100,

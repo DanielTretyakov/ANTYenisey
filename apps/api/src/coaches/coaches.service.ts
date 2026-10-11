@@ -211,7 +211,8 @@ export class CoachesService {
         gender: true,
         coachCard: { select: CARD_SELECT },
         memberships: {
-          where: { roles: { has: 'COACH' }, deactivatedAt: null, coachProfile: { isNot: null } },
+          // Клуб-черновик (11.10.2026) на открытой странице тренера не называется.
+          where: { roles: { has: 'COACH' }, deactivatedAt: null, coachProfile: { isNot: null }, tenant: { publishedAt: { not: null } } },
           select: {
             tenant: { select: { name: true, slug: true } },
             coachProfile: { select: PRICES_SELECT },

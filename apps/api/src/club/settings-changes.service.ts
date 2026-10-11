@@ -645,8 +645,14 @@ export class SettingsChangesService {
   ): Promise<void> {
     const now = new Date();
     const date = nextDate(localParts(now, change.timezone).date);
+    // Черновик (решение владельца от 11.10.2026): у закрытого клуба рабочего
+    // дня нет, и полночь только тормозила бы настройку — зал ждал бы ночи, а
+    // столы в нём следующей. Правка идёт той же очередью (те же проверки и
+    // запись), но со сроком «сейчас» и без сообщения: клиентов ещё нет.
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: club.tenantId }, select: { publishedAt: true } });
+    const draft = tenant.publishedAt === null;
 
-    await this.prisma.$transaction(async (tx) => {
+    const id = await this.prisma.$transaction(async (tx) => {
       const row = await tx.settingsChange.create({
         data: {
           tenantId: club.tenantId,
@@ -655,20 +661,28 @@ export class SettingsChangesService {
           payload: change.payload as Prisma.InputJsonObject,
           summary: change.summary,
           authorId: club.userId,
-          effectiveAt: instantAt(date, 0, change.timezone),
+          effectiveAt: draft ? now : instantAt(date, 0, change.timezone),
         },
         select: { id: true },
       });
 
-      await this.notifier.settingsChanged(
-        tx,
-        club.tenantId,
-        { ...(await this.heading(tx, club)), changes: change.summary, effective: effectiveLabel(date) },
-        `settings:${row.id}`,
-        now,
-        [club.userId],
-      );
+      if (!draft) {
+        await this.notifier.settingsChanged(
+          tx,
+          club.tenantId,
+          { ...(await this.heading(tx, club)), changes: change.summary, effective: effectiveLabel(date) },
+          `settings:${row.id}`,
+          now,
+          [club.userId],
+        );
+      }
+
+      return row.id;
     });
+
+    if (draft) {
+      await this.applyOne(id);
+    }
   }
 
   /** Клуб и автор — шапка сообщения. */

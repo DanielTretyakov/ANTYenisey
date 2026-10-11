@@ -320,6 +320,7 @@ export class BillingService {
           select: {
             name: true,
             slug: true,
+            publishedAt: true,
             platformPayments: {
               where: { method: 'INVOICE', status: 'PENDING' },
               select: { id: true, invoiceNumber: true, amount: true },
@@ -348,6 +349,7 @@ export class BillingService {
           invoice && invoice.invoiceNumber !== null
             ? { paymentId: invoice.id, number: invoice.invoiceNumber, amount: invoice.amount }
             : null,
+        published: row.tenant.publishedAt !== null,
       };
     });
   }
@@ -422,7 +424,12 @@ export class BillingService {
   /** Один проход по всем подпискам (или по одному клубу — для смоука). */
   async runOnce(now = new Date(), onlyTenantId: string | null = null): Promise<{ steps: Record<string, number> }> {
     const subs = await this.prisma.tenantSubscription.findMany({
-      where: { status: { notIn: ['EXEMPT', 'SUSPENDED'] }, ...(onlyTenantId ? { tenantId: onlyTenantId } : {}) },
+      where: {
+        status: { notIn: ['EXEMPT', 'SUSPENDED'] },
+        // Черновик (11.10.2026): пробный срок ещё не идёт — его начнёт открытие.
+        tenant: { publishedAt: { not: null } },
+        ...(onlyTenantId ? { tenantId: onlyTenantId } : {}),
+      },
       select: SUBSCRIPTION_SELECT,
     });
     const steps: Record<string, number> = {};
@@ -704,6 +711,23 @@ export class BillingService {
   // --- Вспомогательное ---------------------------------------------------------
 
   /** Подписка клуба; нет строки — заводится пробная (клуб создан без неё). */
+  /**
+   * Клуб открыт (решение владельца от 11.10.2026): пробные 7 дней — с этой
+   * минуты, а не с заведения. Подписку могла завести раньше страница оплаты
+   * или список владельца платформы — пробный срок тогда переставляется; у
+   * оплаченной и «без оплаты» не трогается ничего.
+   */
+  async startTrial(tenantId: string, now: Date): Promise<void> {
+    const sub = await this.ensure(tenantId);
+
+    if (sub.status === 'TRIAL') {
+      await this.prisma.tenantSubscription.update({
+        where: { tenantId },
+        data: { trialEndsAt: new Date(now.getTime() + TRIAL_DAYS * DAY_MS) },
+      });
+    }
+  }
+
   async ensure(tenantId: string): Promise<SubscriptionRow> {
     const found = await this.prisma.tenantSubscription.findUnique({ where: { tenantId }, select: SUBSCRIPTION_SELECT });
 

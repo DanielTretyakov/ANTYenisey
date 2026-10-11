@@ -363,6 +363,15 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Когда клуб открыт (решения владельца от 11.10.2026). Пусто — черновик:
+  /// заведён владельцем платформы и настраивается, но в поиске его нет, а
+  /// страницу видят только сотрудники клуба и владелец платформы. Открывает
+  /// руководитель клуба, когда готов хотя бы один зал с адресом и столами;
+  /// с открытия идут 7 пробных дней подписки.
+  publishedAt DateTime?        @db.Timestamptz(3)
+  /// Заявка, из которой клуб заведён.
+  application ClubApplication?
+
   // ЧАСОВОГО ПОЯСА ЗДЕСЬ НЕТ. Он живёт на зале (Hall.timezone): залы одной
   // организации бывают в разных регионах, и общий на клуб пояс сдвинул бы в
   // одном из них и границы операционного дня, и порог «за час до начала», от
@@ -709,6 +718,9 @@ model ClubApplication {
   status      ClubApplicationStatus @default(NEW)
   /// Заметка владельца платформы: «созвонились, ждут договор».
   note        String?
+  /// Клуб, заведённый по этой заявке (11.10.2026). Одна заявка — один клуб.
+  tenantId    String?               @unique
+  tenant      Tenant?               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   createdAt   DateTime              @default(now())
   updatedAt   DateTime              @updatedAt
 

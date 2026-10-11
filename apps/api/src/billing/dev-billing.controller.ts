@@ -73,7 +73,9 @@ export class DevBillingController {
     const tenant = await this.prisma.tenant.upsert({
       where: { slug: PROBE_SLUG },
       update: {},
-      create: { name: 'Клуб проверки подписки', slug: PROBE_SLUG, cityId: city?.id ?? null },
+      // Открыт: смоук смотрит его открытую карточку без входа, а черновик
+      // посторонним — «не найден».
+      create: { name: 'Клуб проверки подписки', slug: PROBE_SLUG, cityId: city?.id ?? null, publishedAt: new Date() },
       select: { id: true },
     });
     const hall = await this.prisma.hall.upsert({

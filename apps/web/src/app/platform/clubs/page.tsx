@@ -14,6 +14,7 @@ import { formatKopecks } from '@/lib/money';
 import { plural } from '@/lib/plural';
 import { useSession } from '@/lib/useSession';
 import { ApplicationsTab } from './ApplicationsTab';
+import { CreateClubDialog } from './CreateClubDialog';
 
 /** Вкладка «Заявки» — в адресе: на неё ведёт ссылка из сообщения в MAX. */
 const APPLICATIONS_HASH = 'zayavki';
@@ -45,6 +46,9 @@ export default function PlatformClubsPage() {
   const [pending, setPending] = useState<string | null>(null);
   const [applications, setApplications] = useState<ClubApplicationView[] | null>(null);
   const [tab, setTab] = useState<'clubs' | 'applications'>('clubs');
+  // Окно «Завести клуб»: `null` — закрыто, `'new'` — руками, заявка — из неё.
+  const [creating, setCreating] = useState<ClubApplicationView | 'new' | null>(null);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (session.status === 'anonymous') router.replace('/login?next=/platform/clubs');
@@ -65,7 +69,7 @@ export default function PlatformClubsPage() {
       .clubApplications()
       .then(setApplications)
       .catch((cause: unknown) => setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен'));
-  }, [owner]);
+  }, [owner, reload]);
 
   function choose(next: 'clubs' | 'applications'): void {
     setTab(next);
@@ -109,10 +113,25 @@ export default function PlatformClubsPage() {
         </div>
       )}
 
+      {owner && tab === 'clubs' && (
+        <div className="mb-4">
+          <Button onClick={() => setCreating('new')}>Завести клуб</Button>
+        </div>
+      )}
+
+      {creating && (
+        <CreateClubDialog
+          application={creating === 'new' ? null : creating}
+          onClose={() => setCreating(null)}
+          onCreated={() => setReload((value) => value + 1)}
+        />
+      )}
+
       {tab === 'applications' && applications && (
         <ApplicationsTab
           items={applications}
           onChange={(changed) => setApplications((list) => list?.map((item) => (item.id === changed.id ? changed : item)) ?? null)}
+          onCreateClub={setCreating}
         />
       )}
 
@@ -149,11 +168,18 @@ export default function PlatformClubsPage() {
                       {row.planName && <span className="block text-[0.8125rem] text-text-muted">тариф «{row.planName}»</span>}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={cn('inline-flex rounded-full px-2.5 py-0.5 text-[0.75rem] font-semibold', status.tone)}>
-                        {status.label}
-                      </span>
+                      {/* Черновик (11.10.2026): пробный срок ещё не идёт. */}
+                      {row.published ? (
+                        <span className={cn('inline-flex rounded-full px-2.5 py-0.5 text-[0.75rem] font-semibold', status.tone)}>
+                          {status.label}
+                        </span>
+                      ) : (
+                        <span className="inline-flex rounded-full border border-dashed border-border-strong px-2.5 py-0.5 text-[0.75rem] font-semibold text-text-muted">
+                          черновик
+                        </span>
+                      )}
                     </td>
-                    <td className="px-4 py-3 tabular-nums">{until}</td>
+                    <td className="px-4 py-3 tabular-nums">{row.published ? until : 'с открытия'}</td>
                     <td className="px-4 py-3">
                       {row.pendingInvoice
                         ? `счёт № ${row.pendingInvoice.number} на ${formatKopecks(row.pendingInvoice.amount)}`
@@ -161,6 +187,20 @@ export default function PlatformClubsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1.5">
+                        <Button
+                          size="sm"
+                          variant={row.published ? 'ghost' : 'secondary'}
+                          pending={pending === `publish:${row.slug}`}
+                          disabled={pending !== null}
+                          onClick={() =>
+                            void run(`publish:${row.slug}`, async () => {
+                              await api.setClubPublished(row.slug, !row.published);
+                              return api.platformClubs();
+                            })
+                          }
+                        >
+                          {row.published ? 'В черновик' : 'Открыть клуб'}
+                        </Button>
                         {row.pendingInvoice && (
                           <Button
                             size="sm"
@@ -171,7 +211,7 @@ export default function PlatformClubsPage() {
                             Счёт оплачен
                           </Button>
                         )}
-                        {row.status !== 'EXEMPT' && (
+                        {row.published && row.status !== 'EXEMPT' && (
                           <Button
                             size="sm"
                             variant="secondary"

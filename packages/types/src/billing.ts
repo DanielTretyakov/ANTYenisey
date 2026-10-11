@@ -122,6 +122,8 @@ export interface PlatformClubRow {
   paymentMethodTitle: string | null;
   /** Выставленный и ещё не оплаченный счёт — его владелец отмечает оплаченным. */
   pendingInvoice: { paymentId: string; number: number; amount: number } | null;
+  /** Клуб открыт; нет — черновик, пробный период ещё не идёт (11.10.2026). */
+  published: boolean;
 }
 
 /** Помесячная цена и выгода тарифа — одна на страницу и на сервер. */
