@@ -24,11 +24,20 @@ import { clockIn, dateIn, momentIn } from './time';
  * бы казаться просроченной, когда джоба ещё на неё не смотрит.
  */
 export function PendingBlock({ day, onChanged }: { day: DeskDay; onChanged: () => void }) {
-  const { bookings, events } = day.pending;
+  const groups = pendingDays(day);
+  const [opened, setOpened] = useState<Set<string>>(new Set());
+  const [full, setFull] = useState<Set<string>>(new Set());
 
-  if (bookings.length === 0 && events.length === 0) {
+  if (groups.length === 0) {
     return null;
   }
+
+  const toggle = (set: Set<string>, key: string): Set<string> => {
+    const next = new Set(set);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    return next;
+  };
 
   return (
     <Card className="border-warning-border">
@@ -37,21 +46,135 @@ export function PendingBlock({ day, onChanged }: { day: DeskDay; onChanged: () =
         description="Началось, а пришёл человек или нет — не записано. Здесь всё неотмеченное клуба, а не только этого зала и дня. Что не отметить, система через сутки после окончания закроет неявкой со списанием."
       />
 
+      {/* По дням (решение владельца от 11.10.2026): сегодня раскрыт, прошлые
+          дни свёрнуты строкой со счётчиком и сроком — раньше всё неотмеченное
+          шло одной лентой без дат, сперва все аренды, потом все занятия, и
+          выталкивало «Сейчас» и ленту дня на несколько экранов вниз. */}
       <ul className="divide-y divide-border">
-        {bookings.map((booking) => (
-          <li key={`booking-${booking.id}`} className="px-6 py-3.5">
-            <BookingItem booking={booking} day={day} onChanged={onChanged} />
-          </li>
-        ))}
+        {groups.map((group) => {
+          const open = group.date === day.date || opened.has(group.date);
+          const shown = open && !full.has(group.date) ? group.items.slice(0, ROWS_SHOWN) : group.items;
+          const hidden = group.items.length - shown.length;
 
-        {events.map((event) => (
-          <li key={`event-${event.id}`} className="px-6 py-3.5">
-            <EventItem event={event} day={day} onChanged={onChanged} />
-          </li>
-        ))}
+          return (
+            <li key={group.date}>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-surface-sunken/50 px-6 py-2.5 text-[0.8125rem]">
+                <span className="font-medium text-text">{group.label}</span>
+                <span className="text-text-muted">
+                  ждут отметки: {group.waiting}
+                </span>
+                {group.overdue && (
+                  <span className="rounded-full border border-warning-border bg-warning-soft px-2 py-px text-[0.75rem] text-warning">
+                    просрочено
+                  </span>
+                )}
+                {group.date !== day.date && (
+                  <button
+                    type="button"
+                    onClick={() => setOpened((set) => toggle(set, group.date))}
+                    className="ml-auto text-text-accent underline-offset-2 hover:underline"
+                    aria-expanded={open}
+                  >
+                    {open ? 'Свернуть' : 'Показать'}
+                  </button>
+                )}
+              </div>
+
+              {open && (
+                <ul className="divide-y divide-border">
+                  {shown.map((item) => (
+                    <li key={item.key} className="px-6 py-3.5">
+                      {item.booking ? (
+                        <BookingItem booking={item.booking} day={day} onChanged={onChanged} />
+                      ) : (
+                        <EventItem event={item.event!} day={day} onChanged={onChanged} />
+                      )}
+                    </li>
+                  ))}
+                  {hidden > 0 && (
+                    <li className="px-6 py-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setFull((set) => toggle(set, group.date))}
+                        className="text-[0.8125rem] text-text-accent underline-offset-2 hover:underline"
+                      >
+                        Ещё {hidden}
+                      </button>
+                    </li>
+                  )}
+                </ul>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </Card>
   );
+}
+
+/** Строк в раскрытом дне, остальное — под «Ещё N». */
+const ROWS_SHOWN = 6;
+
+interface PendingItem {
+  key: string;
+  at: string;
+  booking?: DeskBooking;
+  event?: DeskEvent;
+}
+
+interface PendingDay {
+  /** Местная дата зала смены. */
+  date: string;
+  label: string;
+  items: PendingItem[];
+  /** Сколько записей ждут отметки — люди, а не строки: у занятия их много. */
+  waiting: number;
+  overdue: boolean;
+}
+
+/**
+ * Неотмеченное по дням: сегодня первым, дальше — от свежего к старому;
+ * внутри дня — по времени, аренды и занятия вперемешку.
+ */
+function pendingDays(day: DeskDay): PendingDay[] {
+  const items: PendingItem[] = [
+    ...day.pending.bookings.map((booking) => ({ key: `booking-${booking.id}`, at: booking.startsAt, booking })),
+    ...day.pending.events.map((event) => ({ key: `event-${event.kind}-${event.id}`, at: event.startsAt, event })),
+  ];
+  const byDate = new Map<string, PendingItem[]>();
+
+  for (const item of items) {
+    const date = dateIn(item.at, day.timezone);
+    byDate.set(date, [...(byDate.get(date) ?? []), item]);
+  }
+
+  return [...byDate.entries()]
+    .sort(([a], [b]) => (a === day.date ? -1 : b === day.date ? 1 : b.localeCompare(a)))
+    .map(([date, list]) => {
+      const sorted = list.sort((a, b) => a.at.localeCompare(b.at));
+
+      return {
+        date,
+        label: dayLabel(date, day.date),
+        items: sorted,
+        waiting: sorted.reduce(
+          (sum, item) =>
+            sum + (item.booking ? 1 : item.event!.participants.filter((entry) => entry.status === 'BOOKED').length),
+          0,
+        ),
+        overdue: sorted.some((item) => (item.booking ?? item.event)!.phase === 'OVERDUE'),
+      };
+    });
+}
+
+/** «Сегодня» · «Вчера, 10 окт.» · «пт, 9 окт.» — дата зала. */
+function dayLabel(date: string, today: string): string {
+  const short = new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).format(
+    new Date(`${date}T00:00:00Z`),
+  );
+  const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+
+  return date === today ? 'Сегодня' : date === yesterday ? `Вчера, ${short}` : short;
 }
 
 function BookingItem({
@@ -254,7 +377,11 @@ function Phase({
 
       {autoNoShowAt && (
         <span className="text-[0.75rem] text-text-subtle">
-          неявку система поставит {momentIn(autoNoShowAt, day.timezone, day.date)}
+          {/* Срок в прошлом — «поставит 25.09» читалось бы как ошибка: значит,
+              система вот-вот закроет запись сама. */}
+          {new Date(autoNoShowAt).getTime() <= Date.now()
+            ? 'срок прошёл — неявку система поставит при ближайшей проверке'
+            : `неявку система поставит ${momentIn(autoNoShowAt, day.timezone, day.date)}`}
         </span>
       )}
     </>
