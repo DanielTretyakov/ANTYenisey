@@ -8,6 +8,7 @@ import { inputClassName } from '@/components/ui/Field';
 import { Tab } from '@/components/ui/Tab';
 import type { EventsFilter } from '@/lib/api';
 import { cn } from '@/lib/cn';
+import { useDisclosure } from '@/lib/useDisclosure';
 import type { EventViewer } from '@/lib/eventViewer';
 import { dayKey, monthEnd, monthLabel, monthStart } from '@/lib/month';
 import { tintMark } from '@/lib/personColor';
@@ -19,11 +20,21 @@ import { SectionHeading } from './SectionHeading';
 import { dayIn } from '@/lib/zonedTime';
 import { ViewerTime } from '@/components/events/FeedEventCard';
 
-/** Выбранный вид мероприятия — «только детские тренировки». */
+/**
+ * Фильтр «Предстоящих» (решение владельца от 11.10.2026): вид целиком —
+ * «только турниры» (`typeId` пуст) — или конкретное мероприятие этого вида —
+ * «только детские тренировки».
+ */
 export interface KindFilter {
   kind: EventKind;
-  typeId: string;
+  typeId: string | null;
 }
+
+/** Кнопки фильтра — по виду, в этом порядке. */
+const KIND_MENUS: { kind: EventKind; label: string; all: string }[] = [
+  { kind: 'TRAINING', label: 'Тренировки', all: 'Все тренировки' },
+  { kind: 'TOURNAMENT', label: 'Турниры', all: 'Все турниры' },
+];
 
 /** Якорь блока — к нему прокручивает «Показать расписание» из вкладки. */
 export const UPCOMING_ANCHOR = 'raspisanie';
@@ -131,9 +142,10 @@ export function UpcomingEvents({
     };
   }, [club, forPerson, view, week, month, searching, query, version, halls]);
 
-  // Ближайшие проведения выбранного вида — по всем датам, не по окну.
+  // Ближайшие проведения выбранного мероприятия — по всем датам, не по окну.
+  // У вида целиком «Ближайшего» нет: список ниже и так только из него.
   useEffect(() => {
-    if (!filter) {
+    if (!filter?.typeId) {
       setNearest(null);
       return;
     }
@@ -157,7 +169,7 @@ export function UpcomingEvents({
 
   const needle = query.trim().toLowerCase();
   const ofKind = (event: ClubEvent): boolean =>
-    !filter || (event.kind === filter.kind && event.typeId === filter.typeId);
+    !filter || (event.kind === filter.kind && (filter.typeId === null || event.typeId === filter.typeId));
   const inWindow = loaded === null ? null : loaded.filter(ofKind);
 
   const listed =
@@ -178,7 +190,9 @@ export function UpcomingEvents({
   const chips = (catalog ?? []).filter(
     (item) => item.upcomingCount > 0 && (!hallIds || availableInAny(item.hallIds, hallIds)),
   );
-  const chosen = filter ? (catalog ?? []).find((item) => item.kind === filter.kind && item.typeId === filter.typeId) : null;
+  const chosen = filter?.typeId
+    ? (catalog ?? []).find((item) => item.kind === filter.kind && item.typeId === filter.typeId)
+    : null;
   const today = new Date();
 
   const row = (event: ClubEvent) => (
@@ -202,8 +216,8 @@ export function UpcomingEvents({
           title="Предстоящие мероприятия"
           description={
             <>
-              Тренировки и турниры по дням — неделей или календарём месяца; запись — прямо в строке. Отобрать по
-              виду можно чипами ниже. Залы:{' '}
+              Тренировки и турниры по дням — неделей или календарём месяца; запись — прямо в строке. «Тренировки»
+              и «Турниры» ниже оставляют только их, в списке кнопки — конкретное мероприятие. Залы:{' '}
               <span className="text-text">{hallNames ? hallNames.join(', ') : 'все залы клуба'}</span>
             </>
           }
@@ -226,50 +240,34 @@ export function UpcomingEvents({
         </div>
       </div>
 
-      {/* Фильтр по виду: «Детская тренировка» — и остальное не мешает. */}
-      {/* На телефоне — списком: видов бывает десяток, лента уходила за край
-          (решение владельца от 03.10.2026). */}
-      {chips.length > 1 && (
-        <CompactSelect
-          label="Вид"
-          value={filter ? `${filter.kind}:${filter.typeId}` : ''}
-          options={[
-            { value: '', label: 'Все виды' },
-            ...chips.map((item) => ({ value: `${item.kind}:${item.typeId}`, label: item.name })),
-          ]}
-          onChange={(value) => {
-            const item = chips.find((chip) => `${chip.kind}:${chip.typeId}` === value);
-            onFilter(item ? { kind: item.kind, typeId: item.typeId } : null);
-          }}
-          className="mb-5 sm:hidden"
-        />
-      )}
+      {/* «Все · Тренировки ▾ · Турниры ▾» (решение владельца от 11.10.2026):
+          кнопка оставляет только свой вид, её список — конкретное мероприятие
+          этого вида из тех, что идут в выбранных залах. Раньше здесь была
+          лента всех видов подряд — на телефоне она уходила за край. */}
+      {chips.length > 0 && (
+        <div className="mb-5 flex flex-wrap items-center gap-1.5" role="group" aria-label="Что показать">
+          <Tab active={filter === null} onClick={() => onFilter(null)}>
+            Все
+          </Tab>
+          {KIND_MENUS.map((menu) => {
+            const types = chips.filter((item) => item.kind === menu.kind);
 
-      {chips.length > 1 && (
-        <div className="-mx-1 mb-5 hidden overflow-x-auto px-1 pb-1 [scrollbar-width:none] sm:block">
-          <div className="flex w-max gap-1.5" role="group" aria-label="Вид мероприятия">
-            <Tab active={filter === null} onClick={() => onFilter(null)}>
-              Все
-            </Tab>
-            {chips.map((item) => (
-              <Tab
-                key={`${item.kind}-${item.typeId}`}
-                active={filter?.kind === item.kind && filter.typeId === item.typeId}
-                onClick={() => onFilter({ kind: item.kind, typeId: item.typeId })}
-              >
-                <span
-                  aria-hidden="true"
-                  className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle"
-                  style={{ background: tintMark(KIND_PAINT[item.kind]) }}
-                />
-                {item.name}
-              </Tab>
-            ))}
-          </div>
+            return types.length === 0 ? null : (
+              <KindMenu
+                key={menu.kind}
+                kind={menu.kind}
+                label={menu.label}
+                allLabel={menu.all}
+                types={types}
+                filter={filter?.kind === menu.kind ? filter : null}
+                onFilter={onFilter}
+              />
+            );
+          })}
         </div>
       )}
 
-      {filter && (
+      {filter?.typeId && (
         <Nearest
           name={chosen?.name ?? 'Этот вид'}
           kind={filter.kind}
@@ -391,9 +389,11 @@ export function UpcomingEvents({
             : view === 'month'
               ? 'В этот день мероприятий нет.'
               : day === null
-                ? filter
+                ? filter?.typeId
                   ? 'На этой неделе такого нет — ближайшие даты выше.'
-                  : 'На этой неделе мероприятий нет — загляните на следующую.'
+                  : filter
+                    ? `На этой неделе ${filter.kind === 'TOURNAMENT' ? 'турниров' : 'тренировок'} нет — загляните на следующую.`
+                    : 'На этой неделе мероприятий нет — загляните на следующую.'
                 : 'В этот день мероприятий нет.'}
         </p>
       )}
@@ -540,6 +540,96 @@ function Stepper({
       <button type="button" aria-label={labels[1]} disabled={disabledForward} onClick={onForward} className={button}>
         ›
       </button>
+    </div>
+  );
+}
+
+/**
+ * Кнопка вида со списком: «Тренировки ▾». Выбор в списке — «Все тренировки»
+ * или конкретное мероприятие; на кнопке тогда его название. Раскрытие — общим
+ * `useDisclosure` (щелчок снаружи, Escape), как у остальных выпадающих меню.
+ */
+function KindMenu({
+  kind,
+  label,
+  allLabel,
+  types,
+  filter,
+  onFilter,
+}: {
+  kind: EventKind;
+  label: string;
+  allLabel: string;
+  types: ClubCatalogItem[];
+  /** Фильтр, если он про этот вид; иначе пусто. */
+  filter: KindFilter | null;
+  onFilter: (filter: KindFilter | null) => void;
+}) {
+  const menu = useDisclosure();
+  const active = filter !== null;
+  const chosen = filter?.typeId ? types.find((item) => item.typeId === filter.typeId) : null;
+
+  const choose = (typeId: string | null): void => {
+    onFilter({ kind, typeId });
+    menu.close();
+  };
+
+  return (
+    <div ref={menu.root} className="relative">
+      <button
+        type="button"
+        {...menu.buttonProps}
+        aria-haspopup="listbox"
+        // Нажатие сразу оставляет только этот вид и раскрывает список —
+        // уточнить мероприятие; повторное — сворачивает список.
+        onClick={() => {
+          if (!active) onFilter({ kind, typeId: null });
+          menu.toggle();
+        }}
+        className={cn(
+          'flex max-w-[16rem] items-center gap-1.5 rounded-control border px-3.5 py-1.5 text-[0.875rem] whitespace-nowrap transition-colors',
+          active
+            ? 'border-border-accent bg-surface-accent-soft text-text-accent'
+            : 'border-border text-text-muted hover:bg-surface-sunken',
+        )}
+      >
+        <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full" style={{ background: tintMark(KIND_PAINT[kind]) }} />
+        <span className="truncate">{chosen ? chosen.name : label}</span>
+        <svg aria-hidden="true" viewBox="0 0 12 12" className={cn('h-3 w-3 shrink-0 transition-transform', menu.open && 'rotate-180')}>
+          <path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </button>
+
+      {menu.open && (
+        <ul
+          id={menu.panelId}
+          role="listbox"
+          aria-label={label}
+          className="absolute top-full left-0 z-20 mt-1.5 max-h-80 w-max max-w-[min(20rem,calc(100vw-2.5rem))] min-w-[12rem] overflow-y-auto rounded-card border border-border bg-surface-raised p-1 shadow-lg"
+        >
+          {[{ typeId: null, name: allLabel }, ...types.map((item) => ({ typeId: item.typeId, name: item.name }))].map(
+            (option) => {
+              const selected = active && (filter?.typeId ?? null) === option.typeId;
+
+              return (
+                <li key={option.typeId ?? 'all'} role="option" aria-selected={selected}>
+                  <button
+                    type="button"
+                    onClick={() => choose(option.typeId)}
+                    className={cn(
+                      'flex w-full items-center rounded-control px-3 py-2 text-left text-[0.875rem] transition-colors',
+                      selected ? 'bg-surface-accent-soft text-text-accent' : 'text-text hover:bg-surface-sunken',
+                      option.typeId === null && 'font-medium',
+                    )}
+                  >
+                    {option.name}
+                  </button>
+                </li>
+              );
+            },
+          )}
+        </ul>
+      )}
     </div>
   );
 }
