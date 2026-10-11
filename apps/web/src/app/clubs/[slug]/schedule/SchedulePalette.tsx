@@ -158,9 +158,17 @@ export function SchedulePalette({
   const currentTournament = tournamentTypes.find((type) => type.id === tournamentTypeId);
   const attachedId = attachment === 'coach' ? coachId : null;
   const attachedColor = attachedId ? colors.get(attachedId) : undefined;
+  const hint =
+    seating && client
+      ? `Посадите ${shortName(client.fullName)}: щёлкните по клетке начала или протяните по нужным часам — рядом появится бронь с ценой. Щелчок ниже на том же столе продлит её.`
+      : `Закрашиваете: ${PURPOSE_LABEL.get(brush as ClosurePurpose)?.toLowerCase() ?? ''}` +
+        (brush === 'TOURNAMENT' && currentTournament ? ` «${currentTournament.name}»` : '') +
+        (attachment === 'coach' && currentCoach ? `, ${shortName(currentCoach.fullName)}` : '') +
+        (seating ? ' без клиента — окно просто закроет стол' : '') +
+        ` — ${consequence(brush, day)}`;
 
   return (
-    <div className="mb-3 grid gap-2.5">
+    <div className="mb-3 grid gap-2">
       {/* Две строки, а не одна текучая (решение владельца от 24.09.2026):
           кисти — первой, всё, что уточняет кисть, — второй. В одну строку
           тренер и тип занятия то стояли рядом с кистями, то съезжали вниз
@@ -286,8 +294,11 @@ export function SchedulePalette({
         </div>
       )}
 
+      {/* Подсказка — одной строкой (решение владельца от 11.10.2026): целиком
+          она занимала две-три строки над сеткой; что не влезло — в подсказке
+          по наведению. Главное — что закрашивается — стоит в начале. */}
       {brush !== ERASER && (
-        <p className="flex w-full items-center gap-2 text-[0.8125rem] text-text-subtle">
+        <p className="flex w-full min-w-0 items-center gap-2 text-[0.8125rem] text-text-subtle" title={hint}>
           {attachedColor && (
             <span
               className="h-3 w-3 shrink-0 rounded-sm"
@@ -295,21 +306,7 @@ export function SchedulePalette({
               aria-hidden="true"
             />
           )}
-          <span>
-            {seating && client ? (
-              <>
-                Посадите {shortName(client.fullName)}: щёлкните по клетке начала или протяните по
-                нужным часам — рядом появится бронь с ценой. Щелчок ниже на том же столе продлит её.
-              </>
-            ) : (
-              <>
-                Закрашиваете: {PURPOSE_LABEL.get(brush as ClosurePurpose)?.toLowerCase()}
-                {brush === 'TOURNAMENT' && currentTournament ? ` «${currentTournament.name}»` : ''}
-                {attachment === 'coach' && currentCoach ? `, ${shortName(currentCoach.fullName)}` : ''}
-                {seating ? ' без клиента — окно просто закроет стол' : ''} — {consequence(brush, day)}
-              </>
-            )}
-          </span>
+          <span className="truncate">{hint}</span>
         </p>
       )}
     </div>

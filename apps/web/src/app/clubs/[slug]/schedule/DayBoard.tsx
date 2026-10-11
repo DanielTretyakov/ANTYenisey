@@ -15,7 +15,7 @@ import { shortName } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { inputClassName } from '@/components/ui/Field';
-import { formatDate, formatMinute, todayIn } from '@/lib/bookingGrid';
+import { formatMinute, todayIn } from '@/lib/bookingGrid';
 import {
   cellsToSlots,
   GRID_END_MINUTE,
@@ -602,14 +602,19 @@ function DayStrip({
   // Лента держится вокруг сегодняшнего дня, пока выбранная дата в неё
   // помещается, и уезжает вслед за выбором, когда нет: иначе, листая стрелкой
   // вперёд, администратор ушёл бы за край ленты и перестал видеть, где он.
+  // Четырнадцать дней — вчера и две недели вперёд без одного дня: столько
+  // помещается в строку рядом с датой на ноутбуке (11.10.2026), дальше —
+  // стрелками и выбором даты.
   const start =
-    date >= shiftDate(today, -1) && date <= shiftDate(today, 14) ? shiftDate(today, -1) : shiftDate(date, -1);
-  const days = Array.from({ length: 16 }, (_, index) => shiftDate(start, index));
+    date >= shiftDate(today, -1) && date <= shiftDate(today, 12) ? shiftDate(today, -1) : shiftDate(date, -1);
+  const days = Array.from({ length: 14 }, (_, index) => shiftDate(start, index));
   const customisedSet = new Set(customisedDates);
 
   return (
-    <div className="mb-4">
-      <div className="flex flex-wrap items-center gap-2">
+    // Одной строкой (решение владельца от 11.10.2026): стрелки и день, лента,
+    // выбор даты. На узком экране лента уходит на свою строку и листается вбок.
+    <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+      <div className="flex items-center gap-1.5">
         <Button
           type="button"
           variant="secondary"
@@ -621,9 +626,9 @@ function DayStrip({
           ←
         </Button>
 
-        <p className="min-w-[14rem] text-[1rem] font-medium">
-          {formatDate(date)}
-          {date === today && <span className="ml-2 text-[0.8125rem] text-text-accent">сегодня</span>}
+        <p className="min-w-[8.5rem] text-center text-[0.9375rem] font-medium">
+          {shortDay(date)}
+          {date === today && <span className="ml-1.5 text-[0.75rem] text-text-accent">сегодня</span>}
         </p>
 
         <Button
@@ -642,20 +647,16 @@ function DayStrip({
             Сегодня
           </Button>
         )}
-
-        <label className="ml-auto">
-          <span className="sr-only">Другая дата</span>
-          <input
-            type="date"
-            value={date}
-            disabled={disabled}
-            onChange={(event) => event.target.value && onDate(event.target.value)}
-            className={cn(inputClassName, 'w-auto py-1.5 text-[0.875rem]')}
-          />
-        </label>
       </div>
 
-      <div className="mt-3 flex gap-1 overflow-x-auto pb-1" role="tablist" aria-label="Дата">
+      <div
+        className="order-last flex w-full min-w-0 gap-1 overflow-x-auto pb-0.5 [scrollbar-width:thin] xl:order-none xl:w-auto xl:flex-1"
+        role="tablist"
+        aria-label="Дата"
+        // Подпись «точкой отмечены отвязанные дни» жила отдельной строкой —
+        // теперь она в подсказке у ленты и у каждого отмеченного дня.
+        title="Точкой отмечены дни, отвязанные от шаблона"
+      >
         {days.map((day) => {
           const active = day === date;
           const weekday = new Intl.DateTimeFormat('ru-RU', { weekday: 'short', timeZone: 'UTC' }).format(
@@ -672,7 +673,7 @@ function DayStrip({
               onClick={() => onDate(day)}
               title={customisedSet.has(day) ? 'День отвязан от шаблона' : undefined}
               className={cn(
-                'relative flex w-12 shrink-0 flex-col items-center rounded-control border py-1.5 transition-colors',
+                'relative flex w-10 shrink-0 flex-col items-center rounded-control border py-1 transition-colors',
                 active
                   ? 'border-border-accent bg-surface-accent-soft text-text-accent'
                   : 'border-border text-text-muted hover:bg-surface-sunken',
@@ -681,10 +682,10 @@ function DayStrip({
                 (weekdayOf(day) === 6 || weekdayOf(day) === 7) && !active && 'bg-surface-sunken/60',
               )}
             >
-              <span className="text-[0.6875rem] uppercase">{weekday}</span>
+              <span className="text-[0.625rem] leading-none uppercase">{weekday}</span>
               <span
                 className={cn(
-                  'font-display text-[1rem] leading-tight tabular-nums',
+                  'font-display text-[0.9375rem] leading-tight tabular-nums',
                   day === today && 'underline decoration-accent decoration-2 underline-offset-4',
                 )}
               >
@@ -692,20 +693,31 @@ function DayStrip({
               </span>
               <span
                 aria-hidden="true"
-                className={cn(
-                  'mt-0.5 h-1 w-1 rounded-full',
-                  customisedSet.has(day) ? 'bg-accent' : 'bg-transparent',
-                )}
+                className={cn('h-1 w-1 rounded-full', customisedSet.has(day) ? 'bg-accent' : 'bg-transparent')}
               />
             </button>
           );
         })}
       </div>
 
-      <p className="mt-1 text-[0.75rem] text-text-subtle">
-        Точкой отмечены дни, отвязанные от шаблона.
-      </p>
+      <label className="ml-auto xl:ml-0">
+        <span className="sr-only">Другая дата</span>
+        <input
+          type="date"
+          value={date}
+          disabled={disabled}
+          onChange={(event) => event.target.value && onDate(event.target.value)}
+          className={cn(inputClassName, 'w-auto py-1.5 text-[0.875rem]')}
+        />
+      </label>
     </div>
+  );
+}
+
+/** «вс, 11 окт.» — дата зала коротко: полная не помещалась в строку с лентой. */
+function shortDay(date: string): string {
+  return new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).format(
+    new Date(`${date}T00:00:00Z`),
   );
 }
 

@@ -101,14 +101,50 @@ export default function SchedulePage() {
 
   return (
     <AdminShell wide>
-      <header className="mb-5 max-w-2xl">
-        {/* Название — как в меню (решение от 26.09.2026): раздел переименован
-            в «Расписание залов», а заголовок страницы оставался прежним. */}
-        <h1 className="text-[1.75rem]">Расписание залов</h1>
-        <p className="mt-1.5 text-[0.9375rem] text-text-muted">
-          Закрашенное время клиент не увидит в сетке брони и занять не сможет. Администратор —
-          сможет: жизнь в зале всегда сложнее расписания.
-        </p>
+      {/* Шапка — одной строкой (решение владельца от 11.10.2026, вариант А):
+          название, зал и режим рядом, пояснение — в справке («Как это
+          работает?» в колонке разделов). Раньше над сеткой стояло шесть строк
+          управления, и на ноутбуке от сетки оставалось две-три строки. */}
+      <header className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-3">
+        {/* Название — как в меню (решение от 26.09.2026). */}
+        <h1 className="text-[1.5rem] leading-tight">Расписание залов</h1>
+
+        {data && hall && (
+          <>
+            {/* Зал — списком на любом экране (решение от 05.10.2026): залов у
+                организации бывает много. Приоритетный — первым, звезда
+                «Открывать первым» — кнопкой рядом. */}
+            {data.halls.length > 1 && (
+              <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                <CompactSelect
+                  label="Зал"
+                  value={hallId}
+                  options={withPreferredFirst(data.halls, preferred.preferredHallId).map((item) => ({
+                    value: item.id,
+                    label: item.name,
+                  }))}
+                  onChange={(next) => leave.guard(() => setHallId(next))}
+                  className="min-w-[13rem] grow sm:w-[16rem] sm:grow-0"
+                />
+                <PreferredHallButton
+                  hallId={hallId}
+                  preferredHallId={preferred.preferredHallId}
+                  pending={preferred.pending}
+                  onToggle={(id) => void preferred.toggle(id)}
+                />
+              </div>
+            )}
+
+            <div className="flex gap-1.5" role="tablist" aria-label="Режим расписания">
+              <Tab inTablist active={mode === 'day'} onClick={() => leave.guard(() => setMode('day'))}>
+                День
+              </Tab>
+              <Tab inTablist active={mode === 'template'} onClick={() => leave.guard(() => setMode('template'))}>
+                Шаблон недели
+              </Tab>
+            </div>
+          </>
+        )}
       </header>
 
       {session.status === 'ready' && !allowed && (
@@ -129,42 +165,7 @@ export default function SchedulePage() {
 
       {data && hall && (
         <>
-          <div className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-3">
-            {/* Зал — списком на любом экране (решение от 05.10.2026): залов у
-                организации бывает много. Приоритетный — первым, звезда
-                «Открывать первым» — кнопкой рядом. */}
-            {data.halls.length > 1 && (
-              <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-                <CompactSelect
-                  label="Зал"
-                  value={hallId}
-                  options={withPreferredFirst(data.halls, preferred.preferredHallId).map((item) => ({
-                    value: item.id,
-                    label: item.name,
-                  }))}
-                  onChange={(next) => leave.guard(() => setHallId(next))}
-                  className="min-w-[13rem] grow sm:w-[18rem] sm:grow-0"
-                />
-                <PreferredHallButton
-                  hallId={hallId}
-                  preferredHallId={preferred.preferredHallId}
-                  pending={preferred.pending}
-                  onToggle={(id) => void preferred.toggle(id)}
-                />
-              </div>
-            )}
-
-            <div className="flex gap-1.5" role="tablist" aria-label="Режим расписания">
-              <Tab inTablist active={mode === 'day'} onClick={() => leave.guard(() => setMode('day'))}>
-                День
-              </Tab>
-              <Tab inTablist active={mode === 'template'} onClick={() => leave.guard(() => setMode('template'))}>
-                Шаблон недели
-              </Tab>
-            </div>
-          </div>
-
-          <section className="rounded-card border border-border bg-surface-raised px-4 py-5 shadow-sm sm:px-6">
+          <section className="rounded-card border border-border bg-surface-raised px-4 py-4 shadow-sm sm:px-5">
             {mode === 'day' ? (
               <DayBoard
                 // Смена зала пересоздаёт сетку целиком: состояние прошлого зала,

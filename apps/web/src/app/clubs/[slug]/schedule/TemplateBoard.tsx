@@ -139,11 +139,6 @@ export function TemplateBoard({
 
   return (
     <>
-      <p className="mb-4 max-w-2xl text-[0.875rem] text-text-muted">
-        Как зал живёт обычно. Правка шаблона действует на все дни, которые не отвязаны от него
-        в режиме «День».
-      </p>
-
       {grid.error && <Alert>{grid.error}</Alert>}
 
       {/* На телефоне — список дней (решение от 03.10.2026); число закрашенных
@@ -159,10 +154,12 @@ export function TemplateBoard({
           const day = WEEKDAYS.find((item) => String(item.value) === value);
           if (day) setWeekday(day.value);
         }}
-        className="mb-4 sm:hidden"
+        className="mb-3 sm:hidden"
       />
 
-      <div className="mb-4 hidden flex-wrap gap-1.5 sm:flex" role="tablist" aria-label="День недели">
+      {/* Дни недели и пояснение — одной строкой (решение владельца от
+          11.10.2026): над сеткой шаблона стояло два лишних ряда. */}
+      <div className="mb-3 hidden flex-wrap items-center gap-1.5 sm:flex" role="tablist" aria-label="День недели">
         {WEEKDAYS.map((day) => {
           const count = countOnLane(grid.cells, String(day.value));
 
@@ -181,6 +178,9 @@ export function TemplateBoard({
             </Tab>
           );
         })}
+        <span className="ml-2 text-[0.8125rem] text-text-subtle">
+          Как зал живёт обычно — для всех дней, не отвязанных в режиме «День».
+        </span>
       </div>
 
       <ScheduleCanvas grid={grid} lane={lane} nightCount={night.length} />

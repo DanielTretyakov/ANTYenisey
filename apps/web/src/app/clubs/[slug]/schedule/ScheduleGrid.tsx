@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { ClubTable } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
 import { formatMinute } from '@/lib/bookingGrid';
@@ -294,6 +294,8 @@ export function ScheduleGrid({
     scrolled.current = true;
   }, [lineTop]);
 
+  const fitHeight = useFitHeight(scroller);
+
   return (
     <div
       ref={scroller}
@@ -301,7 +303,8 @@ export function ScheduleGrid({
       // закраску протяжкой — на планшете за стойкой она важнее. По горизонтали
       // прокручивают колесом и полосой. «Починить» на touch-auto значит
       // потерять закраску пальцем.
-      className="max-h-[calc(100dvh-19rem)] min-h-[24rem] touch-pan-y overflow-auto rounded-control border border-border bg-surface-raised"
+      className="min-h-[16rem] touch-pan-y overflow-auto rounded-control border border-border bg-surface-raised"
+      style={{ maxHeight: fitHeight ?? 'calc(100dvh - 19rem)' }}
     >
       <div
         ref={wrapper}
@@ -820,4 +823,47 @@ function plural(count: number, one: string, few: string, many: string): string {
   if (mod10 >= 2 && mod10 <= 4) return few;
 
   return many;
+}
+
+/** Высота прилипшей панели «Сохранить» с отступом над ней. */
+const ACTION_BAR_SPACE = 84;
+
+/**
+ * Сетка — до панели «Сохранить», без прокрутки страницы (решение владельца
+ * от 11.10.2026). Прежняя постоянная `100dvh − 19rem` угадывала высоту
+ * шапки, а шапка у дня, шаблона и разных кистей разная: сетка то уходила под
+ * панель, то оставляла над ней пустоту, и работать приходилось двумя
+ * прокрутками — страницы и сетки. Здесь — от того, где сетка начинается на
+ * странице, до низа окна; меньше 16rem не бывает (`min-h`), тогда страница
+ * прокручивается, как раньше. Пересчёт — при смене размера окна и высоты
+ * того, что над сеткой (вторая строка кисти появляется и исчезает).
+ */
+function useFitHeight(ref: RefObject<HTMLDivElement | null>): number | null {
+  const [height, setHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    const element = ref.current;
+    const section = element?.closest('section');
+
+    if (!element) return;
+
+    const measure = (): void => {
+      const top = element.getBoundingClientRect().top + window.scrollY;
+      setHeight(Math.round(window.innerHeight - top - ACTION_BAR_SPACE));
+    };
+
+    measure();
+    window.addEventListener('resize', measure);
+
+    // Над сеткой меняется высота — у секции меняется и своя.
+    const observer = new ResizeObserver(measure);
+    if (section) observer.observe(section);
+
+    return () => {
+      window.removeEventListener('resize', measure);
+      observer.disconnect();
+    };
+  }, [ref]);
+
+  return height;
 }
