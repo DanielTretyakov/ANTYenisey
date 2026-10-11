@@ -8,9 +8,12 @@ import { clubTimezone, zoneClock } from './clock';
 import { morningDue } from './notification-rules';
 import type { CoachDayPayload, EntryKind, EscalationPayload } from './render';
 import { StaffNotifier } from './staff-notifier.service';
+import { effectiveShifts } from '../staff/shift-reader';
+import { addDays, isoWeekday, shiftGap } from '../staff/shift-rules';
+import type { ShiftMissingPayload } from './render';
 
 /** Часть прохода планировщика: клиентам, эскалации, планы тренеров, сводки. */
-export type SchedulePart = 'clients' | 'escalations' | 'coachPlans' | 'digests';
+export type SchedulePart = 'clients' | 'escalations' | 'coachPlans' | 'digests' | 'shiftGaps';
 
 /** Одна неотмеченная группа: занятие, турнир или бронь стола. */
 interface PendingGroup {
@@ -42,15 +45,20 @@ export class StaffSchedule {
     private readonly staff: StaffNotifier,
   ) {}
 
-  async runOnce(now: Date, parts: ReadonlySet<SchedulePart>): Promise<{ escalations: number; coachPlans: number }> {
+  async runOnce(
+    now: Date,
+    parts: ReadonlySet<SchedulePart>,
+  ): Promise<{ escalations: number; coachPlans: number; shiftGaps: number }> {
+    const shiftGaps = parts.has('shiftGaps') ? await this.shiftGaps(now) : 0;
+
     if (!parts.has('escalations') && !parts.has('coachPlans')) {
-      return { escalations: 0, coachPlans: 0 };
+      return { escalations: 0, coachPlans: 0, shiftGaps };
     }
 
     const linked = await reachableUserIds(this.prisma);
 
     if (linked.length === 0) {
-      return { escalations: 0, coachPlans: 0 };
+      return { escalations: 0, coachPlans: 0, shiftGaps };
     }
 
     const roles = await this.prisma.tenantMembership.findMany({
@@ -80,7 +88,7 @@ export class StaffSchedule {
       coachPlans += await this.coachPlan(coach.tenantId, coach.userId, now);
     }
 
-    return { escalations, coachPlans };
+    return { escalations, coachPlans, shiftGaps };
   }
 
   /**
@@ -265,6 +273,69 @@ export class StaffSchedule {
     }
 
     return [...groups.values()];
+  }
+
+  /**
+   * На завтра в зале никого — утром (с 08:00 по часам зала) управляющему зала
+   * и руководителю (решение владельца от 10.10.2026): без смены «Смену» в этот
+   * день откроет только руководство, и отмечать пришедших будет некому. Кто
+   * на смене — та же `effectiveShifts`, что у «Смены»; выходной по часам зала
+   * — не дыра (`shiftGap`). Одно сообщение на зал и день — ключом.
+   */
+  private async shiftGaps(now: Date): Promise<number> {
+    const halls = await this.prisma.hall.findMany({
+      select: {
+        id: true,
+        tenantId: true,
+        name: true,
+        timezone: true,
+        workingHours: true,
+        managerId: true,
+        tenant: { select: { name: true, slug: true } },
+      },
+    });
+
+    const due = halls
+      .map((hall) => {
+        const today = morningDue(now, zoneClock(hall.timezone));
+        return today ? { hall, date: addDays(today, 1) } : null;
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null);
+
+    let sent = 0;
+
+    for (const tenantId of new Set(due.map((row) => row.hall.tenantId))) {
+      const rows = due.filter((row) => row.hall.tenantId === tenantId);
+      const shifts = await effectiveShifts(
+        this.prisma,
+        tenantId,
+        rows.map((row) => ({ hallId: row.hall.id, date: row.date })),
+      );
+
+      for (const { hall, date } of rows) {
+        const adminIds = shifts.get(`${hall.id}:${date}`)?.adminIds ?? [];
+        const workingHours = Array.isArray(hall.workingHours) ? hall.workingHours : null;
+
+        if (!shiftGap({ adminIds, workingHours, weekday: isoWeekday(date) })) continue;
+
+        const payload: ShiftMissingPayload = { club: hall.tenant.name, slug: hall.tenant.slug, hall: hall.name, date };
+        const key = `shift-missing:${hall.id}:${date}`;
+
+        sent += await this.staff.toOwners(this.prisma, tenantId, 'STAFF_SHIFT_MISSING', payload, key, now);
+
+        if (hall.managerId) {
+          sent += await this.staff.notify(this.prisma, {
+            userId: hall.managerId,
+            tenantId,
+            type: 'STAFF_SHIFT_MISSING',
+            payload,
+            dedupeKey: key,
+          });
+        }
+      }
+    }
+
+    return sent;
   }
 
   /** Тренеру в 08:00 — его занятия на сегодня в этом клубе. Нет занятий — нет сообщения. */

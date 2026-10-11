@@ -13,7 +13,7 @@ import { reminderAt, reminderDue } from './notification-rules';
 import type { EntryKind } from './render';
 import { StaffSchedule, type SchedulePart } from './staff-schedule';
 
-const ALL_PARTS: ReadonlySet<SchedulePart> = new Set(['clients', 'escalations', 'coachPlans', 'digests']);
+const ALL_PARTS: ReadonlySet<SchedulePart> = new Set(['clients', 'escalations', 'coachPlans', 'digests', 'shiftGaps']);
 
 /** Раз в минуту: напоминание не должно опаздывать больше, чем на минуту. */
 const INTERVAL_MS = 60_000;
@@ -112,6 +112,7 @@ export class NotificationScheduler implements OnApplicationBootstrap, OnModuleDe
     subscriptions: number;
     escalations: number;
     coachPlans: number;
+    shiftGaps: number;
     clubDigests: number;
     platformDigests: number;
   }> {

@@ -792,6 +792,12 @@ export function clubApi(slug: string = TENANT_SLUG) {
       authorized(`${club}/staff-schedule/${hallId}${from ? `?from=${from}` : ''}`),
     setStaffDay: (hallId: string, date: string, adminIds: string[]): Promise<StaffSchedule> =>
       authorized(`${club}/staff-schedule/${hallId}/${date}`, json('PUT', { adminIds })),
+    /** Вернуть день к шаблону недели: ручное назначение снимается. */
+    resetStaffDay: (hallId: string, date: string): Promise<StaffSchedule> =>
+      authorized(`${club}/staff-schedule/${hallId}/${date}`, { method: 'DELETE' }),
+    /** Шаблон недели зала: кто обычно на смене по этому дню недели (1 — понедельник). */
+    setStaffTemplate: (hallId: string, weekday: number, adminIds: string[]): Promise<StaffSchedule> =>
+      authorized(`${club}/staff-schedule/${hallId}/template/${weekday}`, json('PUT', { adminIds })),
     /** Можно ли сегодня открыть «Смену» в этом зале и кто на ней. */
     deskAccess: (hallId: string): Promise<DeskAccess> =>
       authorized(`${club}/desk-access?${new URLSearchParams({ hallId })}`),

@@ -21,10 +21,11 @@ function messageOf(cause: unknown): string {
 }
 
 /**
- * «Расписание персонала» (решение владельца от 26.09.2026): управляющий
- * назначает на каждый день своего зала одного или нескольких
- * администраторов, руководитель — в любом зале и ставит управляющих. Только
- * назначенным в этот день откроется «Смена», им же уходит сообщение в MAX.
+ * «Расписание персонала» (решения владельца от 26.09 и 10.10.2026):
+ * управляющий ставит администраторов своего зала, руководитель — в любом зале
+ * и ставит управляющих. Обычная неделя — шаблоном («по понедельникам —
+ * Иванова»), замены — днём поверх шаблона. Только тем, кто на смене в этот
+ * день, откроется «Смена», им же уходит сообщение в MAX.
  *
  * Сохраняется день целиком по нажатию на имя: смены правят по одной, и
  * отдельная кнопка «Сохранить» на три недели вперёд только копила бы правки,
@@ -105,6 +106,36 @@ export default function StaffSchedulePage() {
     }
   }
 
+  /** Шаблон недели: человек встаёт в день недели или снимается с него. */
+  async function toggleTemplate(weekday: number, adminId: string): Promise<void> {
+    if (!schedule || !hallId) return;
+
+    const current = schedule.template.find((row) => row.weekday === weekday)?.adminIds ?? [];
+    const next = current.includes(adminId) ? current.filter((id) => id !== adminId) : [...current, adminId];
+
+    await save(`w${weekday}`, () => club.setStaffTemplate(hallId, weekday, next));
+  }
+
+  /** День — снова по шаблону: ручное назначение снимается. */
+  async function reset(date: string): Promise<void> {
+    if (!hallId) return;
+
+    await save(date, () => club.resetStaffDay(hallId, date));
+  }
+
+  async function save(key: string, action: () => Promise<StaffSchedule>): Promise<void> {
+    setPendingDate(key);
+    setError(null);
+
+    try {
+      setSchedule(await action());
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setPendingDate(null);
+    }
+  }
+
   async function setManager(id: string, managerId: string | null): Promise<void> {
     setError(null);
 
@@ -122,8 +153,10 @@ export default function StaffSchedulePage() {
     <AdminShell>
       <h1 className="mb-2 text-[1.75rem]">Расписание персонала</h1>
       <p className="mb-6 max-w-2xl text-[0.9375rem] text-text-muted">
-        Кто из администраторов работает в зале в какой день. «Смена» откроется только назначенным — чтобы никто другой
-        случайно ничего не внёс; им же придёт сообщение в MAX. Руководство работает на смене всегда.
+        Кто из администраторов работает в зале в какой день. Обычную неделю задаёт шаблон, замену — день поверх
+        шаблона. «Смена» откроется только тем, кто на ней, — чтобы никто другой случайно ничего не внёс; им же придёт
+        сообщение в MAX. Руководство работает на смене всегда. Если на завтра в зале никого, управляющему и
+        руководителю утром придёт напоминание.
       </p>
 
       {session.status === 'ready' && !allowed && (
@@ -205,8 +238,43 @@ export default function StaffSchedulePage() {
           )}
 
           {hall?.canPlan && schedule && schedule.candidates.length > 0 && (
+            <Card className="mb-6">
+              <CardHeader
+                title="Шаблон недели"
+                description="Кто обычно работает по этому дню недели. Дни ниже без ручного назначения берут смену отсюда — назначать каждый день не нужно."
+              />
+              <CardBody>
+                <ul className="divide-y divide-border">
+                  {schedule.template.map((row) => (
+                    <li key={row.weekday} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-2.5">
+                      <span className="w-52 shrink-0 text-[0.9375rem]">{WEEKDAY_NAMES[row.weekday - 1]}</span>
+                      <span className="flex min-w-0 flex-1 flex-wrap gap-1.5" role="group" aria-label={`Шаблон: ${WEEKDAY_NAMES[row.weekday - 1]}`}>
+                        {schedule.candidates.map((person) => (
+                          <Tab
+                            key={person.id}
+                            active={row.adminIds.includes(person.id)}
+                            onClick={() => void toggleTemplate(row.weekday, person.id)}
+                          >
+                            {shortName(person.fullName)}
+                          </Tab>
+                        ))}
+                      </span>
+                      <span className="w-28 text-right text-[0.8125rem] text-text-subtle">
+                        {pendingDate === `w${row.weekday}` ? 'Сохраняю…' : row.adminIds.length === 0 ? 'никого' : ''}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </CardBody>
+            </Card>
+          )}
+
+          {hall?.canPlan && schedule && schedule.candidates.length > 0 && (
             <Card>
-              <CardHeader title="Смены на три недели" description="Нажмите на имя — человек встанет на смену или снимется с неё." />
+              <CardHeader
+                title="Смены на три недели"
+                description="Нажмите на имя — день станет назначенным вручную, и шаблон его больше не трогает (замена, больничный). «Вернуть к шаблону» снимает ручное назначение."
+              />
               <CardBody>
                 <ul className="divide-y divide-border">
                   {schedule.days.map((day) => (
@@ -228,12 +296,26 @@ export default function StaffSchedulePage() {
                           </Tab>
                         ))}
                       </span>
-                      <span className="w-28 text-right text-[0.8125rem] text-text-subtle">
-                        {pendingDate === day.date
-                          ? 'Сохраняю…'
-                          : day.adminIds.length === 0
-                            ? 'никого'
-                            : `${day.adminIds.length} ${plural(day.adminIds.length, 'человек', 'человека', 'человек')}`}
+                      <span className="flex w-44 flex-col items-end text-right text-[0.8125rem] text-text-subtle">
+                        <span className={cn(day.adminIds.length === 0 && 'text-danger')}>
+                          {pendingDate === day.date
+                            ? 'Сохраняю…'
+                            : day.adminIds.length === 0
+                              ? 'никого'
+                              : `${day.adminIds.length} ${plural(day.adminIds.length, 'человек', 'человека', 'человек')}`}
+                        </span>
+                        {day.source === 'TEMPLATE' ? (
+                          <span>по шаблону</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void reset(day.date)}
+                            className="underline underline-offset-2 hover:text-text"
+                            title="Снять ручное назначение — день снова по шаблону недели"
+                          >
+                            вручную · вернуть к шаблону
+                          </button>
+                        )}
                       </span>
                     </li>
                   ))}
@@ -246,6 +328,8 @@ export default function StaffSchedulePage() {
     </AdminShell>
   );
 }
+
+const WEEKDAY_NAMES = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
 
 /** «2026-09-27» → «вс, 27 сентября» — дата зала, без часового пояса. */
 function dayLabel(date: string): string {

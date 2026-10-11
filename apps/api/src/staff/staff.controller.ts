@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Put, Query } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import type { DeskAccess, StaffCandidate, StaffDayRequest, StaffHall, StaffSchedule } from '@yenisey/types';
@@ -58,6 +58,30 @@ export class StaffController {
     @Query() query: StaffScheduleQueryDto,
   ): Promise<StaffSchedule> {
     return this.staff.schedule(club, hallId, query.from);
+  }
+
+  /**
+   * Шаблон недели — список дня недели целиком (решение владельца от
+   * 10.10.2026). Три участка пути — с `:hallId/:date` не спутать.
+   */
+  @Put(':hallId/template/:weekday')
+  setTemplate(
+    @CurrentClub() club: ClubContext,
+    @Param('hallId') hallId: string,
+    @Param('weekday', ParseIntPipe) weekday: number,
+    @Body() dto: StaffDayDto,
+  ): Promise<StaffSchedule> {
+    return this.staff.setTemplate(club, hallId, weekday, dto.adminIds);
+  }
+
+  /** Вернуть день к шаблону недели: ручное назначение снимается. */
+  @Delete(':hallId/:date')
+  resetDay(
+    @CurrentClub() club: ClubContext,
+    @Param('hallId') hallId: string,
+    @Param('date') date: string,
+  ): Promise<StaffSchedule> {
+    return this.staff.resetDay(club, hallId, date);
   }
 
   @Put(':hallId/:date')

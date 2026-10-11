@@ -10,6 +10,9 @@ import { DIGEST_MINUTE, morningDue, shiftDate, type LocalClock } from './notific
 import { NotificationsService, reachableUserIds } from './notifications.service';
 import type { ClubDigestPayload, PlatformDigestPayload } from './render';
 import { clubStaff } from './staff-notifier.service';
+import { localParts } from '../club/closures';
+import { effectiveShifts } from '../staff/shift-reader';
+import { addDays, isoWeekday, shiftGap } from '../staff/shift-rules';
 
 /** За сколько дней до конца срока показывать абонемент в сводке. */
 const EXPIRY_NOTICE_DAYS = 3;
@@ -168,6 +171,7 @@ export class DigestSchedule {
       slug: tenant.slug,
       timezone,
       date: yesterday.date,
+      shiftGaps: await this.shiftGaps(db, tenantId, now),
       favourites: {
         count: favourites.length,
         total: favouritesTotal,
@@ -204,6 +208,30 @@ export class DigestSchedule {
         })),
       },
     };
+  }
+
+  /**
+   * Залы, где на завтра нет смены (решение владельца от 10.10.2026) — то же
+   * правило, что у отдельного сообщения управляющему (`shiftGap`).
+   */
+  private async shiftGaps(db: PrismaService, tenantId: string, now: Date): Promise<string[]> {
+    const halls = await db.hall.findMany({
+      where: { tenantId },
+      select: { id: true, name: true, timezone: true, workingHours: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    const slots = halls.map((hall) => ({ hall, date: addDays(localParts(now, hall.timezone).date, 1) }));
+    const shifts = await effectiveShifts(db, tenantId, slots.map(({ hall, date }) => ({ hallId: hall.id, date })));
+
+    return slots
+      .filter(({ hall, date }) =>
+        shiftGap({
+          adminIds: shifts.get(`${hall.id}:${date}`)?.adminIds ?? [],
+          workingHours: Array.isArray(hall.workingHours) ? hall.workingHours : null,
+          weekday: isoWeekday(date),
+        }),
+      )
+      .map(({ hall }) => hall.name);
   }
 
   /** Прошедшие записи без отметки — из учётного окна клуба. */

@@ -1466,3 +1466,12 @@ ALTER TABLE "Tournament"
     AND ("cancelReason" IS NULL
       OR ("cancelReason" = btrim("cancelReason") AND char_length("cancelReason") BETWEEN 3 AND 300))
   );
+
+-- ---------------------------------------------------------------------------
+-- Шаблон смен недели (решение владельца от 10.10.2026)
+-- ---------------------------------------------------------------------------
+
+-- День недели — ISO: 1 — понедельник, 7 — воскресенье. Восьмой день шаблона
+-- не наступит никогда, и смена в нём — молча потерянная.
+ALTER TABLE "StaffShiftTemplate"
+  ADD CONSTRAINT "StaffShiftTemplate_weekday_range" CHECK ("weekday" BETWEEN 1 AND 7);

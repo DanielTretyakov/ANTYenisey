@@ -1876,3 +1876,24 @@ DO $$ BEGIN
   UPDATE "Tournament" SET "cancelledAt" = now(), "cancelReason" = 'Зал закрыт на ремонт' WHERE id = 'tn_cn';
   RAISE NOTICE 'GF. Отмена занятия и турнира с причиной....... OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'GF. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- ---------------------------------------------------------------------------
+-- 45. Шаблон смен недели
+-- ---------------------------------------------------------------------------
+
+-- GG. Восьмой день недели — смена, которая не наступит никогда.
+SELECT pg_temp.expect('GG',
+  $q$INSERT INTO "StaffShiftTemplate" ("tenantId","hallId",weekday,"userId","assignedById") VALUES ('t1','h1',8,'c1','c1')$q$,
+  '23514', 'StaffShiftTemplate_weekday_range');
+
+-- GH. Человек другого клуба в шаблоне зала — ключ по клубу его не примет.
+SELECT pg_temp.expect('GH',
+  $q$INSERT INTO "StaffShiftTemplate" ("tenantId","hallId",weekday,"userId","assignedById") VALUES ('t1','h1',1,'u2','c1')$q$,
+  '23503', 'StaffShiftTemplate_userId_tenantId_fkey');
+
+-- GI. Понедельник в шаблоне и день, назначенный вручную, — законно.
+DO $$ BEGIN
+  INSERT INTO "StaffShiftTemplate" ("tenantId","hallId",weekday,"userId","assignedById") VALUES ('t1','h1',1,'c1','c1');
+  INSERT INTO "StaffShiftDay" ("tenantId","hallId",date,"setById") VALUES ('t1','h1',DATE '2026-10-12','c1');
+  RAISE NOTICE 'GI. Шаблон недели и ручной день............... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'GI. ПРОВАЛ: %', SQLERRM; END $$;

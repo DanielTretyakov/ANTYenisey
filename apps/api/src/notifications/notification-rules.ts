@@ -28,6 +28,7 @@ export type NotificationKind =
   | 'SUBSCRIPTION_SUSPENDED'
   | 'SUBSCRIPTION_PAID'
   | 'STAFF_SHIFT_ASSIGNED'
+  | 'STAFF_SHIFT_MISSING'
   | 'CLUB_SETTINGS_CHANGED'
   | 'CLUB_POST'
   | 'CLUB_APPLICATION';
@@ -79,6 +80,9 @@ export const CATEGORY_OF: Record<NotificationKind, Category> = {
   // Назначение на смену — служебное: пропустить его, выключив категорию,
   // значит не выйти на работу (решение владельца от 26.09.2026).
   STAFF_SHIFT_ASSIGNED: 'SERVICE',
+  // На завтра в зале нет смены — служебное, по той же причине: выключив
+  // категорию, руководство узнало бы о дыре от неотмеченных записей.
+  STAFF_SHIFT_MISSING: 'SERVICE',
   // Правка настроек уходит всем сотрудникам, и тренерам тоже, — у тренера
   // нет категории «дела клуба», а не знать о новых ценах и столах ему нельзя.
   CLUB_SETTINGS_CHANGED: 'SERVICE',

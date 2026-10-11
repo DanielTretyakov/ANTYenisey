@@ -1205,6 +1205,37 @@ async function main() {
     r = await asStaffProbe(`/clubs/yenisey/desk/halls/${hallId}/days/${today}`);
     check('снятому — снова закрыто', 403, r.status);
 
+    // --- Шаблон недели (решение от 10.10.2026): день без ручного назначения —
+    // по шаблону, ручной день (даже пустой) его перекрывает.
+    const weekday = ((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7) + 1;
+    const templatePath = `/clubs/yenisey/staff-schedule/${hallId}/template/${weekday}`;
+
+    r = await asAdmin(templatePath, { method: 'PUT', json: { adminIds: [probe.id] } });
+    check('администратор поставлен в шаблон недели', 200, r.status);
+    assert('шаблон дня недели — с ним', (r.body?.template ?? []).find((row) => row.weekday === weekday)?.adminIds?.includes(probe.id) === true);
+    const manualToday = (r.body?.days ?? []).find((day) => day.date === today);
+    assert('сегодня — ручной пустой день, шаблон его не трогает', manualToday?.source === 'DAY' && manualToday?.adminIds?.length === 0);
+    r = await asStaffProbe(`/clubs/yenisey/desk/halls/${hallId}/days/${today}`);
+    check('ручной «никого» перекрывает шаблон', 403, r.status);
+
+    r = await asAdmin(`/clubs/yenisey/staff-schedule/${hallId}/${today}`, { method: 'DELETE' });
+    check('день возвращён к шаблону', 200, r.status);
+    const templateToday = (r.body?.days ?? []).find((day) => day.date === today);
+    assert('теперь сегодня — по шаблону, с ним', templateToday?.source === 'TEMPLATE' && templateToday?.adminIds?.includes(probe.id));
+    r = await asStaffProbe(`/clubs/yenisey/desk/halls/${hallId}/days/${today}`);
+    check('по шаблону «Смена» открыта', 200, r.status);
+    r = await asStaffProbe(`/clubs/yenisey/desk-access?${new URLSearchParams({ hallId })}`);
+    assert('и он назван среди работающих сегодня', r.body?.allowed === true && (r.body?.onShift ?? []).length === 1);
+
+    r = await asAdmin(`/clubs/yenisey/staff-schedule/${hallId}/template/8`, { method: 'PUT', json: { adminIds: [] } });
+    check('восьмого дня недели нет', 400, r.status);
+    r = await asAdmin(templatePath, { method: 'PUT', json: { adminIds: [bystanderId] } });
+    check('в шаблон — только администратор', 400, r.status);
+
+    // Сегодня снова «никого» вручную — дальше сценарии ждут закрытую смену.
+    r = await asAdmin(`/clubs/yenisey/staff-schedule/${hallId}/${today}`, { method: 'PUT', json: { adminIds: [] } });
+    check('сегодня снова назначено вручную: никого', 200, r.status);
+
     // --- Запись сотрудника на мероприятие: администратору в день смены — нет.
     r = await call('/clubs/yenisey/events');
     const joinable = (r.body ?? []).find(
@@ -1240,6 +1271,11 @@ async function main() {
 
     r = await asAdmin(`/clubs/yenisey/people/${probe.id}/roles`, { method: 'PUT', json: { roles: ['CLIENT'] } });
     check('роли сняты — снова клиент', 200, r.status);
+    r = await asAdmin(`/clubs/yenisey/staff-schedule/${hallId}`);
+    assert(
+      'снятый администратор ушёл и из шаблона недели',
+      (r.body?.template ?? []).every((row) => !(row.adminIds ?? []).includes(probe.id)),
+    );
 
     // Стол СОСЕДНЕГО зала в расписание этого зала попасть не должен: составной
     // внешний ключ проверяет клуб, но не зал.

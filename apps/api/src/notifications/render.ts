@@ -158,10 +158,21 @@ export interface ShiftAssignedPayload {
   club: string;
   slug: string;
   hall: string;
-  /** «2026-09-27» — местная дата зала. */
-  date: string;
+  /** «2026-09-27» — местная дата зала. Пусто у смены по шаблону недели. */
+  date?: string;
+  /** День недели шаблона, ISO (1 — понедельник): «вы на смене по понедельникам». */
+  weekday?: number;
   /** Кто назначил — «Фамилия И.». */
   by: string;
+}
+
+/** Управляющему и руководителю: на завтра в зале смена не назначена. */
+export interface ShiftMissingPayload {
+  club: string;
+  slug: string;
+  hall: string;
+  /** «2026-10-12» — местная дата зала. */
+  date: string;
 }
 
 /**
@@ -220,6 +231,8 @@ export interface ClubDigestPayload {
   timezone: string;
   /** Местная дата, за которую сводка: «вчера». */
   date: string;
+  /** Залы без смены на завтра (10.10.2026). Нет у сводок, поставленных до этого. */
+  shiftGaps?: string[];
   favourites: { count: number; total: number; people: string[] };
   newClients: { count: number; people: string[] };
   yesterday: {
@@ -434,14 +447,41 @@ export function renderNotification(type: string, payload: unknown, context: Rend
     case 'STAFF_SHIFT_ASSIGNED': {
       const p = payload as ShiftAssignedPayload;
 
+      // Шаблон недели (10.10.2026): одно сообщение «по понедельникам» вместо
+      // сообщения о каждом понедельнике.
+      if (p.weekday !== undefined) {
+        return {
+          text: lines(
+            `Вы на смене ${WEEKDAYS_ON[p.weekday - 1] ?? 'по расписанию'}`,
+            `Администратор в зале «${p.hall}», клуб «${p.club}».`,
+            p.by ? `Назначил: ${p.by}` : null,
+            'Экран смены откроется в эти дни. Заменят день — придёт отдельное сообщение.',
+          ),
+          link: { label: 'Экран смены', url: `${context.webOrigin}/clubs/${p.slug}/desk` },
+        };
+      }
+
       return {
         text: lines(
-          `Вы на смене · ${dayLabel(p.date)}`,
+          `Вы на смене · ${dayLabel(p.date ?? '')}`,
           `Администратор в зале «${p.hall}», клуб «${p.club}».`,
           p.by ? `Назначил: ${p.by}` : null,
           'Экран смены откроется в этот день.',
         ),
         link: { label: 'Экран смены', url: `${context.webOrigin}/clubs/${p.slug}/desk` },
+      };
+    }
+
+    case 'STAFF_SHIFT_MISSING': {
+      const p = payload as ShiftMissingPayload;
+
+      return {
+        text: lines(
+          `Смена не назначена · ${dayLabel(p.date)}`,
+          `В зале «${p.hall}» клуба «${p.club}» на этот день нет ни одного администратора — ни по шаблону, ни вручную.`,
+          'Без смены «Смену» открывает только руководство: отметить пришедших будет некому.',
+        ),
+        link: { label: 'Расписание персонала', url: `${context.webOrigin}/clubs/${p.slug}/staff` },
       };
     }
 
@@ -583,6 +623,9 @@ export function renderNotification(type: string, payload: unknown, context: Rend
           `Пришли: ${y.attended}, не пришли: ${y.noShows}, отмен: ${y.cancelled}`,
           `Итог дня: ${rubles(y.money)}${sales}`,
           p.unmarked > 0 ? `Без отметки: ${p.unmarked} — отметьте на экране смены` : null,
+          p.shiftGaps && p.shiftGaps.length > 0
+            ? `Завтра без смены: ${p.shiftGaps.map((hall) => `«${hall}»`).join(', ')} — назначьте в «Расписании персонала»`
+            : null,
           '',
           `Сегодня: занятий ${p.today.trainings} (записано ${p.today.booked} из ${p.today.capacity}), турниров ${p.today.tournaments}, аренд ${p.today.tables}`,
           expiring.length > 0 ? '' : null,
@@ -656,6 +699,9 @@ function cancelMoney(p: EntryPayload): string {
 
 /** Строки через перевод строки; null пропускается, '' — намеренный отступ между блоками. */
 /** «2026-09-27» → «сб, 27 сентября». Дата — местная, без часового пояса. */
+/** «по понедельникам»… — день недели шаблона смен, ISO с понедельника. */
+const WEEKDAYS_ON = ['по понедельникам', 'по вторникам', 'по средам', 'по четвергам', 'по пятницам', 'по субботам', 'по воскресеньям'];
+
 function dayLabel(date: string): string {
   return new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'long' }).format(
     new Date(`${date}T00:00:00Z`),

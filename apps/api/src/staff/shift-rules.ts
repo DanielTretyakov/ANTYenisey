@@ -99,3 +99,48 @@ export function staffJoinProblem(input: {
 
   return null;
 }
+
+/** День недели даты зала — ISO: 1 — понедельник, 7 — воскресенье. */
+export function isoWeekday(date: string): number {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+
+  return day === 0 ? 7 : day;
+}
+
+/** Откуда смена дня: назначена руками на этот день или взята из шаблона недели. */
+export type ShiftSource = 'DAY' | 'TEMPLATE';
+
+/**
+ * Кто на смене в зале в этот день (решение владельца от 10.10.2026): день,
+ * назначенный вручную, — его список, даже пустой («в этот день никого»);
+ * иначе — шаблон недели зала. Одно правило на «Смену», запрет записи
+ * администратору со сменой и «Расписание персонала».
+ */
+export function effectiveShift(input: {
+  manual: boolean;
+  dayAdminIds: readonly string[];
+  templateAdminIds: readonly string[];
+}): { adminIds: string[]; source: ShiftSource } {
+  return input.manual
+    ? { adminIds: [...input.dayAdminIds], source: 'DAY' }
+    : { adminIds: [...input.templateAdminIds], source: 'TEMPLATE' };
+}
+
+/**
+ * Предупредить ли руководство, что на день в зале смены нет: никого — и зал
+ * в этот день работает. Часы не указаны — считаем, что работает: молчание
+ * обошлось бы неотмеченными записями и неявками от джобы, а лишнее
+ * сообщение — одной строкой в MAX. Выходной по часам зала — не дыра.
+ */
+export function shiftGap(input: {
+  adminIds: readonly string[];
+  /** `Hall.workingHours`: семь дней с понедельника, `null` — выходной; пусто — не указаны. */
+  workingHours: readonly unknown[] | null;
+  weekday: number;
+}): boolean {
+  if (input.adminIds.length > 0) {
+    return false;
+  }
+
+  return input.workingHours === null || input.workingHours[input.weekday - 1] !== null;
+}

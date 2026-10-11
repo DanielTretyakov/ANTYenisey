@@ -766,6 +766,12 @@ export class ClubService {
         await tx.hall.updateMany({ where: { tenantId, managerId: userId }, data: { managerId: null } });
       }
 
+      // Перестав быть администратором — уходит и из шаблона смен недели: иначе
+      // строка шаблона ждала бы, когда роль вернут, и вернула бы смены сама.
+      if (removed.includes(Role.ADMIN)) {
+        await tx.staffShiftTemplate.deleteMany({ where: { tenantId, userId } });
+      }
+
       if (coach) {
         await tx.coachProfile.upsert({
           where: { userId_tenantId: { userId, tenantId } },

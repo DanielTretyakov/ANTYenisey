@@ -389,6 +389,27 @@ describe('смены и настройки клуба', () => {
     assert.equal(link?.url, 'https://ant-yenisey.ru/clubs/yenisey/desk');
   });
 
+  it('шаблон недели — «по понедельникам», а не дата', () => {
+    const { text } = renderNotification(
+      'STAFF_SHIFT_ASSIGNED',
+      { club: 'Енисей', slug: 'yenisey', hall: 'Баки', weekday: 1, by: 'Иванов И.' },
+      context,
+    );
+    assert.match(text, /^Вы на смене по понедельникам/);
+    assert.match(text, /«Баки»/);
+  });
+
+  it('смена не назначена — зал, день и куда идти', () => {
+    const { text, link } = renderNotification(
+      'STAFF_SHIFT_MISSING',
+      { club: 'Енисей', slug: 'yenisey', hall: 'Баки', date: '2026-10-12' },
+      context,
+    );
+    assert.match(text, /^Смена не назначена · пн, 12 октября/);
+    assert.match(text, /«Баки»/);
+    assert.equal(link?.url, 'https://ant-yenisey.ru/clubs/yenisey/staff');
+  });
+
   it('изменение настроек — кто, что было и стало, когда вступит', () => {
     const { text } = renderNotification(
       'CLUB_SETTINGS_CHANGED',

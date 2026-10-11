@@ -230,6 +230,7 @@ enum NotificationType {
   SUBSCRIPTION_SUSPENDED // руководителю: доступ клуба приостановлен, записи отменены с возвратом
   SUBSCRIPTION_PAID // руководителю: подписка оплачена, до какого числа
   STAFF_SHIFT_ASSIGNED // администратору: его назначили на смену в зале
+  STAFF_SHIFT_MISSING // управляющему зала и руководителю: на завтра в зале смена не назначена
   CLUB_SETTINGS_CHANGED // сотрудникам: кто и что поменял в настройках клуба, когда вступит в силу
   CLUB_POST // клиентам клуба: новая публикация в ленте клуба — акция, объявление
   CLUB_APPLICATION // владельцу платформы: заявка на подключение клуба со страницы «Подключить свой клуб»
@@ -489,6 +490,8 @@ model Tenant {
   sparringTypes           SparringType[]
   clubPosts               ClubPost[]
   staffShifts             StaffShift[]
+  staffShiftTemplates     StaffShiftTemplate[]
+  staffShiftDays          StaffShiftDay[]
   settingsChanges         SettingsChange[]
   subscriptions           Subscription[]
   subscriptionLedger      SubscriptionLedger[]
@@ -1239,9 +1242,13 @@ model TenantMembership {
   managedHalls Hall[] @relation("HallManager")
 
   /// Смены администратора и смены, которые назначил этот человек.
-  shifts          StaffShift[]     @relation("ShiftAdmin")
-  shiftsAssigned  StaffShift[]     @relation("ShiftAssigner")
-  settingsChanges SettingsChange[] @relation("SettingsChangeAuthor")
+  shifts            StaffShift[]         @relation("ShiftAdmin")
+  shiftsAssigned    StaffShift[]         @relation("ShiftAssigner")
+  /// Шаблон недели: в какие дни человек обычно на смене — и кто это настроил.
+  shiftTemplates    StaffShiftTemplate[] @relation("ShiftTemplateAdmin")
+  shiftTemplatesSet StaffShiftTemplate[] @relation("ShiftTemplateAssigner")
+  shiftDaysSet      StaffShiftDay[]      @relation("ShiftDaySetter")
+  settingsChanges   SettingsChange[]     @relation("SettingsChangeAuthor")
 
   /// Публикации ленты клуба, написанные этим сотрудником.
   clubPosts ClubPost[] @relation("ClubPostAuthor")
@@ -1402,7 +1409,7 @@ model TrainingSession {
   startsAt DateTime @db.Timestamptz(3)
   endsAt   DateTime @db.Timestamptz(3)
 
-  capacity  Int // лимит мест в группе
+  capacity Int // лимит мест в группе
 
   /// Клуб отменил занятие (решение владельца от 10.10.2026): тренер заболел,
   /// зал закрыт. Строка не удаляется — за записями на неё стоит история денег;
@@ -1692,7 +1699,10 @@ model Hall {
   coachLinks          CoachHall[]
 
   /// Кто из администраторов работает в зале в какой день.
-  shifts StaffShift[]
+  shifts         StaffShift[]
+  /// Шаблон смен недели и дни, назначенные вручную поверх него.
+  shiftTemplates StaffShiftTemplate[]
+  shiftDays      StaffShiftDay[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, name])
@@ -2667,6 +2677,47 @@ model StaffShift {
   @@id([hallId, date, userId])
   @@index([tenantId, date])
   @@index([userId, date])
+}
+
+/// Шаблон смен недели (решение владельца от 10.10.2026): кто из
+/// администраторов обычно работает в зале по этому дню недели. Как шаблон
+/// расписания зала: день без ручного назначения (`StaffShiftDay`) берёт смену
+/// отсюда, и назначать каждый день руками больше не нужно. День недели — ISO:
+/// 1 — понедельник, 7 — воскресенье (CHECK `StaffShiftTemplate_weekday_range`).
+model StaffShiftTemplate {
+  tenantId     String
+  hallId       String
+  weekday      Int
+  userId       String
+  assignedById String
+  createdAt    DateTime @default(now())
+
+  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  hall       Hall             @relation(fields: [hallId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  admin      TenantMembership @relation("ShiftTemplateAdmin", fields: [userId, tenantId], references: [userId, tenantId], onDelete: Cascade)
+  assignedBy TenantMembership @relation("ShiftTemplateAssigner", fields: [assignedById, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
+  @@id([hallId, weekday, userId])
+  @@index([tenantId, userId])
+}
+
+/// День зала, назначенный вручную поверх шаблона недели: замена, больничный,
+/// «в этот день никого». Есть строка — смена дня целиком в `StaffShift`
+/// (и может быть пустой); нет — действует шаблон. Возврат к шаблону удаляет
+/// строку вместе со сменами дня.
+model StaffShiftDay {
+  tenantId String
+  hallId   String
+  date     DateTime @db.Date
+  setById  String
+  setAt    DateTime @default(now())
+
+  tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  hall   Hall             @relation(fields: [hallId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  setBy  TenantMembership @relation("ShiftDaySetter", fields: [setById, tenantId], references: [userId, tenantId], onDelete: Restrict)
+
+  @@id([hallId, date])
+  @@index([tenantId, date])
 }
 
 /// Что меняет отложенная правка настроек.

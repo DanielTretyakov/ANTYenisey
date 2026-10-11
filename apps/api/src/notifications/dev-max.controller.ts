@@ -5,7 +5,7 @@ import { MaxBotService } from './max-bot.service';
 import { NotificationScheduler } from './scheduler.job';
 import type { SchedulePart } from './staff-schedule';
 
-const PARTS: readonly SchedulePart[] = ['clients', 'escalations', 'coachPlans', 'digests'];
+const PARTS: readonly SchedulePart[] = ['clients', 'escalations', 'coachPlans', 'digests', 'shiftGaps'];
 import { FakeMaxTransport, MaxTransport, type FakeSentMessage } from './max.transport';
 
 /**

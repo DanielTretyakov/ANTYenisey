@@ -33,7 +33,16 @@ export interface StaffSchedule {
   until: string;
   /** Администраторы клуба — те, кого можно поставить на смену. */
   candidates: StaffCandidate[];
-  days: { date: string; adminIds: string[] }[];
+  /**
+   * Шаблон недели (решение владельца от 10.10.2026): кто обычно на смене по
+   * этому дню недели. Семь строк, `weekday` — ISO: 1 — понедельник.
+   */
+  template: { weekday: number; adminIds: string[] }[];
+  /**
+   * Смены по дням. `source` — откуда: `TEMPLATE` — из шаблона недели, `DAY` —
+   * день назначен вручную и шаблон его больше не трогает (даже пустой день).
+   */
+  days: { date: string; adminIds: string[]; source: 'DAY' | 'TEMPLATE' }[];
 }
 
 /** Кто работает в зале в этот день — список целиком. */
