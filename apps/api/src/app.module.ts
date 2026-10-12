@@ -22,6 +22,7 @@ import { NewsModule } from './news/news.module';
 import { BillingModule } from './billing/billing.module';
 import { ClubApplicationsModule } from './club-applications/club-applications.module';
 import { ClubSetupModule } from './club-setup/club-setup.module';
+import { MailModule } from './mail/mail.module';
 import { RatingModule } from './rating/rating.module';
 import { SparringModule } from './sparring/sparring.module';
 import { StaffModule } from './staff/staff.module';
@@ -89,6 +90,7 @@ import { validateEnv, type Env } from './config/env';
     BillingModule,
     ClubApplicationsModule,
     ClubSetupModule,
+    MailModule,
     EntriesModule,
     EventsModule,
     MeModule,

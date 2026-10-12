@@ -87,6 +87,20 @@ const envSchema = z
     VAPID_PRIVATE_KEY: optional(z.string().regex(/^[A-Za-z0-9_-]{40,50}$/, 'Закрытый ключ VAPID в base64url')),
     // Контакт отправителя для служб push: mailto: или https-адрес.
     VAPID_SUBJECT: optional(z.string().regex(/^(mailto:[^@\s]+@[^@\s]+|https:\/\/\S+)$/, 'mailto:почта или https-адрес')),
+    // Почта (решения владельца от 12.10.2026). Провайдер — любой с SMTP
+    // (Unisender Go, Yandex Postbox, почта домена): smtps://логин:пароль@хост:465.
+    // Без него вне production письма копит поддельный транспорт
+    // (/api/dev/mail/*), в production почта выключена и письма не ставятся.
+    SMTP_URL: optional(z.string().regex(/^smtps?:\/\/\S+$/, 'Ожидается smtp://… или smtps://…')),
+    // Отправитель: «Имя <адрес>». В перспективе — домен КНТ.
+    MAIL_FROM: z.string().min(3).default('КНТ <noreply@ant-yenisey.ru>'),
+    MAIL_JOB: optional(z.enum(['on', 'off'])),
+    MAIL_JOB_INTERVAL: z
+      .string()
+      .default('30s')
+      .refine(isDuration, 'Ожидается длительность вида 30s, 5m, 1h'),
+    // Сколько писем в минуту — у провайдеров свои лимиты на старте.
+    MAIL_RATE_PER_MINUTE: z.coerce.number().int().min(1).max(6000).default(60),
     // Пояс утренней сводки платформы: у платформы нет зала, а сводка «за
     // вчера» должна знать, где кончились сутки.
     PLATFORM_TIMEZONE: z.string().default('Asia/Krasnoyarsk').refine(isTimeZone, 'Ожидается пояс IANA, например Asia/Krasnoyarsk'),
@@ -164,6 +178,11 @@ export function attendanceJobEnabled(env: Pick<Env, 'ATTENDANCE_JOB' | 'NODE_ENV
 /** Работают ли отправщик уведомлений и приём событий бота при этом окружении. */
 export function notificationsJobEnabled(env: Pick<Env, 'NOTIFICATIONS_JOB' | 'NODE_ENV'>): boolean {
   return (env.NOTIFICATIONS_JOB ?? (env.NODE_ENV === 'production' ? 'on' : 'off')) === 'on';
+}
+
+/** Работает ли отправщик почты: по умолчанию — как уведомления. */
+export function mailJobEnabled(env: Pick<Env, 'MAIL_JOB' | 'NODE_ENV'>): boolean {
+  return (env.MAIL_JOB ?? (env.NODE_ENV === 'production' ? 'on' : 'off')) === 'on';
 }
 
 /** Адрес сайта для ссылок в сообщениях, без косой черты в конце. */

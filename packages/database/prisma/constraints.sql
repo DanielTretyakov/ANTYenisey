@@ -1486,3 +1486,27 @@ ALTER TABLE "StaffShiftTemplate"
 ALTER TABLE "Tenant"
   ADD CONSTRAINT "Tenant_slug_format"
   CHECK ("slug" ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND char_length("slug") BETWEEN 3 AND 40);
+
+-- ---------------------------------------------------------------------------
+-- Почта (решения владельца от 12.10.2026)
+-- ---------------------------------------------------------------------------
+
+-- Адрес — строчными и без пробелов по краям: отписка и «не доставляется»
+-- ищутся по адресу, и «Ivan@Mail.ru» с «ivan@mail.ru» были бы двумя людьми.
+ALTER TABLE "EmailMessage"
+  ADD CONSTRAINT "EmailMessage_to_shape"
+  CHECK ("to" = lower(btrim("to")) AND "to" LIKE '_%@_%' AND char_length("to") <= 254);
+
+ALTER TABLE "EmailSuppression"
+  ADD CONSTRAINT "EmailSuppression_email_shape"
+  CHECK ("email" = lower(btrim("email")) AND "email" LIKE '_%@_%' AND char_length("email") <= 254);
+
+-- Отправленное письмо знает, когда ушло, а неотправленное — нет.
+ALTER TABLE "EmailMessage"
+  ADD CONSTRAINT "EmailMessage_sent_shape"
+  CHECK (("status" = 'SENT') = ("sentAt" IS NOT NULL) AND "attempts" >= 0);
+
+-- Ссылка из письма живёт после выдачи, а не до неё.
+ALTER TABLE "EmailToken"
+  ADD CONSTRAINT "EmailToken_expiry"
+  CHECK ("expiresAt" > "createdAt" AND "email" = lower(btrim("email")));

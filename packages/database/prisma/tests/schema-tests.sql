@@ -1937,3 +1937,29 @@ DO $$ BEGIN
   INSERT INTO "AdminHall" ("userId","hallId","tenantId") VALUES ('c1','h1','t1');
   RAISE NOTICE 'GO. Администратор в зале своего клуба........... OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'GO. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- ---------------------------------------------------------------------------
+-- 48. Почта
+-- ---------------------------------------------------------------------------
+
+-- GP. Адрес с заглавными — отписка его бы не нашла.
+SELECT pg_temp.expect('GP',
+  $q$INSERT INTO "EmailMessage" (id,"to",template,"dedupeKey") VALUES ('em1','Ivan@Mail.ru','verify','k1')$q$,
+  '23514', 'EmailMessage_to_shape');
+
+-- GQ. «Отправлено» без момента отправки.
+SELECT pg_temp.expect('GQ',
+  $q$INSERT INTO "EmailMessage" (id,"to",template,"dedupeKey",status) VALUES ('em2','ivan@mail.ru','verify','k2','SENT')$q$,
+  '23514', 'EmailMessage_sent_shape');
+
+-- GR. Ссылка, истёкшая до выдачи.
+SELECT pg_temp.expect('GR',
+  $q$INSERT INTO "EmailToken" (id,"userId",purpose,email,"tokenHash","expiresAt","createdAt") VALUES ('et1','c1','RESET','a@a.ru','h1',now() - interval '1 hour',now())$q$,
+  '23514', 'EmailToken_expiry');
+
+-- GS. Письмо в очереди и отписка по адресу — законно.
+DO $$ BEGIN
+  INSERT INTO "EmailMessage" (id,"to",template,"dedupeKey") VALUES ('em3','ivan@mail.ru','verify','k3');
+  INSERT INTO "EmailSuppression" (email,scope,reason) VALUES ('ivan@mail.ru','NEWS','UNSUBSCRIBE');
+  RAISE NOTICE 'GS. Письмо в очереди и отписка................ OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'GS. ПРОВАЛ: %', SQLERRM; END $$;

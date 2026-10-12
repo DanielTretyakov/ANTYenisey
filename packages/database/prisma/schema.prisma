@@ -705,25 +705,28 @@ model ClubRequisites {
 /// `ClubApplication_contact_present`). Строка не удаляется: это история
 /// подключений, и отказ — статус, а не удаление.
 model ClubApplication {
-  id          String                @id @default(cuid())
-  contactName String
-  clubName    String
-  cityId      String?
-  city        City?                 @relation(fields: [cityId], references: [id], onDelete: Restrict)
-  phone       String?
-  email       String?
+  id            String                @id @default(cuid())
+  contactName   String
+  clubName      String
+  cityId        String?
+  city          City?                 @relation(fields: [cityId], references: [id], onDelete: Restrict)
+  phone         String?
+  email         String?
   /// Сколько залов и столов — для разговора о тарифе; необязательны.
-  halls       Int?
-  tables      Int?
-  comment     String?
-  status      ClubApplicationStatus @default(NEW)
+  halls         Int?
+  tables        Int?
+  comment       String?
+  status        ClubApplicationStatus @default(NEW)
   /// Заметка владельца платформы: «созвонились, ждут договор».
-  note        String?
+  note          String?
   /// Клуб, заведённый по этой заявке (11.10.2026). Одна заявка — один клуб.
-  tenantId    String?               @unique
-  tenant      Tenant?               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  createdAt   DateTime              @default(now())
-  updatedAt   DateTime              @updatedAt
+  tenantId      String?               @unique
+  tenant        Tenant?               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  /// Заявитель согласился получать новости КНТ для клубов на почту
+  /// (12.10.2026): письма клубам-кандидатам — только таким.
+  newsConsentAt DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
 
   @@index([status, createdAt])
 }
@@ -810,6 +813,15 @@ model User {
   /// 03.10.2026, пусто — их согласие не собиралось.
   personalDataConsentAt DateTime?
 
+  /// Почта подтверждена письмом (решение владельца от 12.10.2026, мягкое
+  /// подтверждение): учётка работает и без него, но письма, кроме служебных,
+  /// уходят только на подтверждённую почту. Смена почты снимает отметку.
+  emailVerifiedAt    DateTime?
+  /// Согласие на рассылку новостей КНТ на почту (38-ФЗ — реклама только с
+  /// предварительного согласия): отдельная неотмеченная галочка, пишет сервер.
+  /// Пусто — рассылок нет; отписка обнуляет.
+  newsEmailConsentAt DateTime?
+
   // --- Мягкое удаление и анонимизация (152-ФЗ).
   //
   // Физически удалять клиента нельзя: за ним висят платежи и визиты, которые
@@ -870,6 +882,8 @@ model User {
   settingsChangesCancelled SettingsChange[] @relation("SettingsChangeCanceller")
   newsWritten              PlatformNews[]
   clubPostsRead            ClubPostRead[]
+  emailTokens              EmailToken[]
+  emailMessages            EmailMessage[]
 }
 
 // ---------------------------------------------------------------------------
@@ -2834,6 +2848,8 @@ model PlatformNews {
   title       String
   body        String
   publishedAt DateTime?
+  /// Когда новость разослана письмом (12.10.2026) — один раз.
+  emailedAt   DateTime?
   authorId    String
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
@@ -2940,4 +2956,96 @@ model ClubPostRead {
 
   @@id([userId, postId])
   @@index([postId])
+}
+
+// ---------------------------------------------------------------------------
+// Почта (решения владельца от 12.10.2026)
+// ---------------------------------------------------------------------------
+
+/// Состояние письма в очереди — как у `Notification`.
+enum EmailStatus {
+  PENDING
+  SENT
+  /// Не отправлено и не будет: адрес отписан или не доставляется, согласие
+  /// снято, попытки кончились.
+  FAILED
+  SKIPPED
+}
+
+/// Исходящее письмо. Отдельная очередь, а не канал `Notification`: письмо
+/// бывает и не пользователю (заявитель клуба без учётки), отписка и «не
+/// доставляется» привязаны к адресу, а у письма есть тема и две версии
+/// текста. Текст собирается при отправке по `template` и `payload`.
+model EmailMessage {
+  id        String      @id @default(cuid())
+  to        String
+  /// Учётка адресата, если она есть, — чтобы перед отправкой сверить
+  /// подтверждение почты и согласие (их могли снять после постановки).
+  userId    String?
+  template  String
+  payload   Json        @default("{}")
+  /// Однозначно называет событие: повтор постановки письма второго не шлёт.
+  dedupeKey String
+  status    EmailStatus @default(PENDING)
+  attempts  Int         @default(0)
+  sendAfter DateTime    @default(now())
+  sentAt    DateTime?
+  error     String?
+  createdAt DateTime    @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([to, dedupeKey])
+  @@index([status, sendAfter])
+  @@index([userId])
+}
+
+/// Зачем одноразовый токен письма.
+enum EmailTokenPurpose {
+  VERIFY
+  RESET
+}
+
+/// Одноразовая ссылка из письма: подтверждение почты, восстановление пароля.
+/// Хранится только хеш (как у `MaxLinkToken`): утёкшая база не даёт войти.
+model EmailToken {
+  id        String            @id @default(cuid())
+  userId    String
+  purpose   EmailTokenPurpose
+  /// Почта, на которую ушла ссылка: сменили почту — старая ссылка не годится.
+  email     String
+  tokenHash String            @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime          @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+}
+
+/// Что именно адресат не хочет или не может получать.
+enum EmailSuppressionScope {
+  /// Никакой почты: адрес не существует или пожаловался на спам.
+  ALL
+  /// Только рассылки: отписался от новостей.
+  NEWS
+}
+
+enum EmailSuppressionReason {
+  UNSUBSCRIBE
+  BOUNCE
+  COMPLAINT
+}
+
+/// Адреса, которым не пишем, — по адресу, а не по учётке: заявитель клуба
+/// отписывается, не имея учётки. Новое согласие в кабинете снимает строку
+/// NEWS; строку ALL (возврат, жалоба) снимает только владелец платформы.
+model EmailSuppression {
+  email     String
+  scope     EmailSuppressionScope
+  reason    EmailSuppressionReason
+  createdAt DateTime               @default(now())
+
+  @@id([email, scope])
 }
