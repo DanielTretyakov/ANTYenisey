@@ -4,8 +4,8 @@
  *   pnpm --filter @yenisey/api mail:gallery
  *
  * Самостоятельная страница: открывается двойным щелчком, без запущенного API
- * и сайта. Каждое письмо — в светлой и тёмной теме рядом; знак «Стол»
- * встроен картинкой в сам файл, а не ссылкой на сайт. Рисует те же
+ * и сайта. Каждое письмо — в светлой и тёмной теме рядом; знак «Стол» и
+ * фон обложки встроены картинками в сам файл, а не ссылками на сайт. Рисует те же
  * шаблоны и пробные данные, что `/api/dev/mail/preview`.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -15,7 +15,9 @@ import { escapeHtml, renderLetter } from '../src/mail/letters.ts';
 
 const root = resolve(import.meta.dirname, '../../..');
 const origin = 'https://ant-yenisey.ru';
-const icon = `data:image/png;base64,${readFileSync(resolve(root, 'apps/web/public/icons/icon-192.png')).toString('base64')}`;
+const embed = (file: string): string => `data:image/png;base64,${readFileSync(resolve(root, file)).toString('base64')}`;
+const icon = embed('apps/web/public/icons/icon-192.png');
+const heroImage = embed('apps/web/public/mail/hero.png');
 
 /** Тёмная версия письма: медиазапрос темы срабатывает всегда. */
 function dark(html: string): string {
@@ -33,7 +35,7 @@ const letters = LETTER_SAMPLES.map((sample) => {
     operator: null,
     ...(sample.news ? { unsubscribeUrl: `${origin}/unsubscribe?t=proba` } : {}),
   });
-  const html = letter.html.replace(`${origin}/icons/icon-192.png`, icon);
+  const html = letter.html.replaceAll(`${origin}/icons/icon-192.png`, icon).replaceAll(`${origin}/mail/hero.png`, heroImage);
 
   return `<section>
   <h2>${escapeHtml(sample.title)}</h2>
@@ -64,7 +66,7 @@ const page = `<!doctype html>
   @media (max-width: 860px) { .pair { grid-template-columns: 1fr; } }
   figure { margin: 0; }
   figcaption { font-size: .8125rem; color: #858c88; margin: 0 0 6px; }
-  iframe { width: 100%; height: 760px; border: 1px solid #e3e1da; border-radius: 12px; background: #fff; }
+  iframe { width: 100%; height: 1080px; border: 1px solid #e3e1da; border-radius: 12px; background: #fff; }
   details { margin-top: 8px; }
   pre { white-space: pre-wrap; background: #fff; border: 1px solid #e3e1da; border-radius: 10px; padding: 12px 14px; font-size: .8125rem; }
 </style>
