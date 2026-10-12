@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import {
+  openStateLabel,
   START_PAGE_COACHES,
   type BookingEntry,
   type City,
@@ -14,6 +15,7 @@ import {
   type NewsItem,
 } from '@yenisey/types';
 import { RiverBackdrop } from '@/components/brand/RiverBackdrop';
+import { clubOpenState } from '@/components/club/ClubHero';
 import { ClubMark } from '@/components/club/ClubMark';
 import { WhenSpan } from '@/components/club/When';
 import { EventDialog } from '@/components/events/EventDialog';
@@ -44,6 +46,8 @@ import {
 import { useClubPostsUnread } from '@/lib/clubPostsUnread';
 import { readableOn } from '@/lib/clubTheme';
 import { cn } from '@/lib/cn';
+import { formatKopecks } from '@/lib/money';
+import { dateIn } from '@/lib/zonedTime';
 import { plural } from '@/lib/plural';
 import { entryPriceLabel } from '@/lib/subscriptions';
 import { useSession } from '@/lib/useSession';
@@ -458,12 +462,43 @@ function ClubTile({ club, unread }: { club: ClubCard; unread: number }) {
         <span className="mt-1 text-[0.875rem] text-text-muted">
           {places || 'Город не указан'} · {hallsLabel(club.hallCount)}
         </span>
+        {/* Ответы до перехода (решение от 12.10.2026): почём стол, открыто ли
+            и что ближайшее — время по часам зала, как везде. */}
+        <ClubTileFacts club={club} />
         <span className="mt-auto flex items-center justify-between gap-3 pt-4">
           {unread > 0 ? <UnreadPill count={unread} accent={club.accentColor} /> : <span />}
           <ArrowIcon />
         </span>
       </span>
     </Link>
+  );
+}
+
+/** Цена «от», «открыто сейчас» и ближайшее мероприятие в карточке клуба. */
+function ClubTileFacts({ club }: { club: ClubCard }) {
+  const open = clubOpenState(club.hours, new Date());
+
+  if (club.fromPrice === null && !open && !club.next) {
+    return null;
+  }
+
+  return (
+    <span className="mt-3 grid gap-1 text-[0.8125rem] text-text-muted">
+      {(club.fromPrice !== null || open) && (
+        <span>
+          {club.fromPrice !== null && `Стол от ${formatKopecks(club.fromPrice)}/час`}
+          {club.fromPrice !== null && open && ' · '}
+          {open && <span className={open.open ? 'text-text-accent' : undefined}>{openStateLabel(open)}</span>}
+        </span>
+      )}
+      {club.next && (
+        <span className="truncate">
+          {club.next.kind === 'TOURNAMENT' ? 'Турнир' : 'Ближайшее'}: {club.next.title},{' '}
+          {dateIn(club.next.startsAt, club.next.timezone, { weekday: 'short', day: 'numeric', month: 'short' })} в{' '}
+          {timeLabel(club.next.startsAt, club.next.timezone)}
+        </span>
+      )}
+    </span>
   );
 }
 

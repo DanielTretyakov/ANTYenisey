@@ -3,6 +3,7 @@ import { Role } from '@yenisey/database';
 import type { City, ClubCard, ClubSearchQuery, CitySearchQuery, PublicTenant } from '@yenisey/types';
 import { readWorkingHours, shortName } from '@yenisey/types';
 import { readClubValues } from '../club/settings-rules';
+import { CARD_SELECT, nextEvents, toCard } from './club-card';
 import { cityLimit, cityPatterns } from './city-search';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -11,25 +12,7 @@ import { PrismaService } from '../prisma/prisma.service';
  * залов: поиск находит клуб по совпадению любого из них, и выдача, где город
  * запроса нигде не показан, выглядела бы ошибкой.
  */
-const CARD_SELECT = {
-  slug: true,
-  name: true,
-  logoFileId: true,
-  accentColor: true,
-  city: { select: { name: true } },
-  halls: { select: { city: { select: { name: true } } } },
-} as const;
-
 const CITY_SELECT = { id: true, name: true, region: true } as const;
-
-type CardRow = {
-  slug: string;
-  name: string;
-  logoFileId: string | null;
-  accentColor: string | null;
-  city: { name: string } | null;
-  halls: { city: { name: string } | null }[];
-};
 
 @Injectable()
 export class TenantsService {
@@ -132,7 +115,9 @@ export class TenantsService {
       take: 60,
     });
 
-    return tenants.map(toCard);
+    const next = await nextEvents(this.prisma, tenants, new Date());
+
+    return tenants.map((row) => toCard(row, next.get(row.id) ?? null));
   }
 
   /**
@@ -288,24 +273,3 @@ const LEADS_HORIZON_MS = 30 * 24 * 3600_000;
  * Красноярск» в карточке клуба с двумя залами в одном городе читается как
  * ошибка вёрстки.
  */
-function toCard(row: CardRow): ClubCard {
-  const city = row.city?.name ?? null;
-
-  const otherCities = [
-    ...new Set(
-      row.halls
-        .map((hall) => hall.city?.name)
-        .filter((name): name is string => name !== undefined && name !== null && name !== city),
-    ),
-  ].sort();
-
-  return {
-    slug: row.slug,
-    name: row.name,
-    logoFileId: row.logoFileId,
-    accentColor: row.accentColor,
-    city,
-    otherCities,
-    hallCount: row.halls.length,
-  };
-}

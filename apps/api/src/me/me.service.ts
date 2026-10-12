@@ -10,6 +10,7 @@ import {
 } from '../events/event-view';
 import { distinctNearest } from './feed-rules';
 import { PrismaService } from '../prisma/prisma.service';
+import { CARD_SELECT, nextEvents, toCard } from '../tenants/club-card';
 
 /**
  * Клуб мероприятия в ленте: минимум, которого хватает, чтобы его назвать,
@@ -17,16 +18,6 @@ import { PrismaService } from '../prisma/prisma.service';
  */
 const CLUB_SELECT = {
   select: { slug: true, name: true, accentColor: true },
-} as const;
-
-/** Поля клуба для карточки «моего клуба» — те же, что в поиске. */
-const CARD_SELECT = {
-  slug: true,
-  name: true,
-  logoFileId: true,
-  accentColor: true,
-  city: { select: { name: true } },
-  halls: { select: { city: { select: { name: true } } } },
 } as const;
 
 /**
@@ -47,7 +38,9 @@ export class MeService {
       orderBy: { slot: 'asc' },
     });
 
-    return rows.map((row) => ({ ...toCard(row.tenant), slot: row.slot }));
+    const next = await nextEvents(this.prisma, rows.map((row) => row.tenant), new Date());
+
+    return rows.map((row) => ({ ...toCard(row.tenant, next.get(row.tenant.id) ?? null), slot: row.slot }));
   }
 
   /**
@@ -208,29 +201,3 @@ function firstFreeSlot(taken: number[]): number | null {
 }
 
 /** Строка базы в карточку клуба. Города залов, совпадающие с основным, отбрасываются. */
-function toCard(row: {
-  slug: string;
-  name: string;
-  logoFileId: string | null;
-  accentColor: string | null;
-  city: { name: string } | null;
-  halls: { city: { name: string } | null }[];
-}) {
-  const city = row.city?.name ?? null;
-
-  return {
-    slug: row.slug,
-    name: row.name,
-    logoFileId: row.logoFileId,
-    accentColor: row.accentColor,
-    city,
-    otherCities: [
-      ...new Set(
-        row.halls
-          .map((hall) => hall.city?.name)
-          .filter((name): name is string => name != null && name !== city),
-      ),
-    ].sort(),
-    hallCount: row.halls.length,
-  };
-}

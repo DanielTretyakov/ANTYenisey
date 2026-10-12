@@ -176,7 +176,10 @@ function Facts({ tenant }: { tenant: PublicTenant }) {
  * Открыт ли клуб: хоть один зал открыт — «открыто до» самого позднего из
  * открытых; все закрыты — ближайшее открытие. Часов нет ни у одного — null.
  */
-export function clubOpenState(halls: PublicTenant['halls'], now: Date): OpenState | null {
+export function clubOpenState(
+  halls: readonly { workingHours: PublicTenant['halls'][number]['workingHours']; timezone: string }[],
+  now: Date,
+): OpenState | null {
   const states = halls
     .map((hall) => openState(hall.workingHours, now, hall.timezone))
     .filter((state): state is OpenState => state !== null);

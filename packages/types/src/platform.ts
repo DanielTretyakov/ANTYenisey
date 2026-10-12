@@ -9,6 +9,7 @@
 import type { BookingStatus } from './booking';
 import type { PaidBySubscription } from './subscription';
 import type { Gender } from './auth';
+import type { WorkingHours } from './working-hours';
 
 /**
  * Город из справочника платформы.
@@ -57,6 +58,24 @@ export interface ClubCard extends ClubRef {
   otherCities: string[];
   /** Сколько залов у клуба — грубая мера размера, без похода за списком. */
   hallCount: number;
+  /**
+   * Самый дешёвый первый час стола по залам, копейки («стол от …»); залов
+   * нет — пусто. Те же поля зала, что считает бронь (решение от 12.10.2026).
+   */
+  fromPrice: number | null;
+  /** Часы и пояса залов — «Открыто до 23:00 / Закрыто» считает веб на месте. */
+  hours: { workingHours: WorkingHours | null; timezone: string }[];
+  /** Ближайшее занятие или турнир клуба в ближайшие две недели. */
+  next: ClubCardEvent | null;
+}
+
+/** Ближайшее мероприятие в карточке клуба: что и когда — по часам зала. */
+export interface ClubCardEvent {
+  kind: 'TRAINING' | 'TOURNAMENT';
+  /** Вид: «Детская тренировка», «Клуб 100». */
+  title: string;
+  startsAt: string;
+  timezone: string;
 }
 
 /** Что спрашивает стартовая страница у поиска клубов. */

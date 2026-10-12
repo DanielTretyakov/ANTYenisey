@@ -362,6 +362,14 @@ async function main() {
     Object.keys(r.body ?? {}).sort().join(',') ===
       'accentColor,city,coaches,description,draft,email,halls,logoFileId,maxUrl,name,otherCities,phone,slug,suspended,values,vkUrl',
   );
+  // Карточка в выдаче поиска отвечает до перехода (решение от 12.10.2026).
+  {
+    const found = (await call('/clubs?query=Енисей')).body?.find?.((club) => club.slug === 'yenisey');
+    assert(
+      'в выдаче поиска — стол «от», часы залов и ближайшее',
+      typeof found?.fromPrice === 'number' && Array.isArray(found?.hours) && 'next' in (found ?? {}),
+    );
+  }
   assert(
     'часового пояса в карточке клуба больше НЕТ — он свойство зала',
     !('timezone' in (r.body ?? {})),
