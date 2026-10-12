@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
-import { openState, openStateLabel, parseWorkingHours, workingHoursLines } from '@yenisey/types';
+import { describe, it, test } from 'node:test';
+import {
+  bookableWindow,
+  openState,
+  openStateLabel,
+  outsideHoursProblem,
+  parseWorkingHours,
+  workingHoursLines,
+} from '@yenisey/types';
 
 const day = (open: string, close: string) => ({ open, close });
 const weekdays = [0, 1, 2, 3, 4].map(() => day('08:00', '23:00'));
@@ -95,4 +102,27 @@ describe('openState', () => {
   it('часы не указаны — null', () => {
     assert.equal(openState(null, new Date(), tz), null);
   });
+});
+
+test('окно брони клиента — часы зала внутри сетки и по шагу', () => {
+  const grid = { openMinute: 6 * 60, closeMinute: 24 * 60, stepMinutes: 30 };
+  const workday = { open: '08:15', close: '22:50' };
+  // 2026-10-12 — понедельник, 2026-10-18 — воскресенье.
+  const hours = [workday, workday, workday, workday, workday, { open: '05:00', close: '24:00' }, null];
+
+  assert.deepEqual(bookableWindow(null, '2026-10-12', grid), { openMinute: 360, closeMinute: 1440, closedDay: false });
+  assert.deepEqual(bookableWindow(hours, '2026-10-12', grid), { openMinute: 510, closeMinute: 1350, closedDay: false });
+  // Раньше сетки зал открыт — сетка всё равно с 06:00.
+  assert.deepEqual(bookableWindow(hours, '2026-10-17', grid), { openMinute: 360, closeMinute: 1440, closedDay: false });
+  assert.equal(bookableWindow(hours, '2026-10-18', grid).closedDay, true);
+});
+
+test('бронь вне часов работы — понятный отказ', () => {
+  const window = { openMinute: 510, closeMinute: 1350, closedDay: false };
+
+  assert.equal(outsideHoursProblem(window, 510, 60), null);
+  assert.equal(outsideHoursProblem(window, 1290, 60), null);
+  assert.match(outsideHoursProblem(window, 480, 60) ?? '', /с 08:30 до 22:30/);
+  assert.match(outsideHoursProblem(window, 1320, 60) ?? '', /с 08:30 до 22:30/);
+  assert.match(outsideHoursProblem({ ...window, closedDay: true }, 600, 60) ?? '', /не работает/);
 });

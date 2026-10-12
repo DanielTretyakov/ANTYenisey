@@ -106,6 +106,55 @@ export function workingHoursLines(hours: WorkingHours | null): string[] {
   return lines.length === 1 && lines[0]!.startsWith('Пн–Вс ') ? [`Ежедневно ${lines[0]!.slice(6)}`] : lines;
 }
 
+/**
+ * Окно брони клиента на дату (решение владельца от 12.10.2026): часы работы
+ * зала, внутри общей сетки и по шагу брони — «08:15» при шаге в полчаса
+ * начинается с 08:30. Часы не указаны — вся сетка; выходной — `closedDay`.
+ * Администратор (смена, расписание) этим окном не ограничен.
+ */
+export interface BookableWindow {
+  openMinute: number;
+  closeMinute: number;
+  closedDay: boolean;
+}
+
+export function bookableWindow(
+  hours: WorkingHours | null,
+  date: string,
+  grid: { openMinute: number; closeMinute: number; stepMinutes: number },
+): BookableWindow {
+  if (!hours) {
+    return { openMinute: grid.openMinute, closeMinute: grid.closeMinute, closedDay: false };
+  }
+
+  const day = hours[weekdayIndex(date)] ?? null;
+  const step = grid.stepMinutes;
+
+  if (!day) {
+    return { openMinute: grid.openMinute, closeMinute: grid.openMinute, closedDay: true };
+  }
+
+  const open = Math.max(grid.openMinute, Math.ceil(timeToMinutes(day.open)! / step) * step);
+  const close = Math.min(grid.closeMinute, Math.floor(timeToMinutes(day.close)! / step) * step);
+
+  return open < close
+    ? { openMinute: open, closeMinute: close, closedDay: false }
+    : { openMinute: grid.openMinute, closeMinute: grid.openMinute, closedDay: true };
+}
+
+/** Почему бронь вне часов работы — словами, или `null`, если в окне. */
+export function outsideHoursProblem(window: BookableWindow, startMinute: number, durationMinutes: number): string | null {
+  if (window.closedDay) {
+    return 'В этот день зал не работает';
+  }
+
+  if (startMinute < window.openMinute || startMinute + durationMinutes > window.closeMinute) {
+    return `Зал работает с ${minutesToTime(window.openMinute)} до ${minutesToTime(window.closeMinute)} — выберите время в часах работы`;
+  }
+
+  return null;
+}
+
 /** День недели понедельником-нулём по календарной дате «2026-09-27». */
 export function weekdayIndex(date: string): number {
   return (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7;

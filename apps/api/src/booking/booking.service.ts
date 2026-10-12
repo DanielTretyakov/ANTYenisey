@@ -7,6 +7,10 @@ import {
 import { BookingStatus, Prisma } from '@yenisey/database';
 import {
   BOOKING_HORIZON_DAYS,
+  bookableWindow,
+  outsideHoursProblem,
+  readWorkingHours,
+  type BookableWindow,
   type BookingDay,
   type BookingQuote,
   type ClientBooking,
@@ -57,6 +61,8 @@ export const HALL_PRICING = {
   robot30MinPrice: true,
   robot60MinPrice: true,
   robotExtra30MinPrice: true,
+  // Часы работы ограничивают бронь клиента (решение от 12.10.2026).
+  workingHours: true,
 } as const;
 
 const BOOKING_SELECT = {
@@ -155,13 +161,17 @@ export class BookingService {
       tables.map((table) => table.id),
     );
 
+    const window = hallWindow(hall, date);
+
     return {
       hallId,
       date,
       bookingStep: hall.bookingStep,
       stepMinutes: STEP_MINUTES[hall.bookingStep],
-      openMinute: OPEN_MINUTE,
-      closeMinute: CLOSE_MINUTE,
+      // Сетка клиента — в часах работы зала (решение от 12.10.2026).
+      openMinute: window.openMinute,
+      closeMinute: window.closeMinute,
+      closedDay: window.closedDay,
       earliestMinute: earliestMinute(date, timezone),
       hasRobotOption: hall.hasRobotOption,
       tables: tables.map((table) => ({
@@ -321,6 +331,14 @@ export class BookingService {
 
     if (violation) {
       throw new BadRequestException(violation);
+    }
+
+    // Клиент и тренер бронируют только в часах работы зала (решение
+    // владельца от 12.10.2026); смена и расписание идут своими путями.
+    const outside = outsideHoursProblem(hallWindow(table.hall, start.date), start.minutes, dto.durationMinutes);
+
+    if (outside) {
+      throw new BadRequestException(outside);
     }
 
     const endsAt = new Date(startsAt.getTime() + dto.durationMinutes * 60_000);
@@ -743,4 +761,16 @@ function cancelRatioOf(
   return booking.subscriptionId
     ? subscriptionCancelRatio(booking.tenant.subscriptionBurnsOnNoShowOnly, percent)
     : percent;
+}
+
+/** Окно брони клиента на дату: часы работы зала внутри общей сетки. */
+function hallWindow(
+  hall: { workingHours: Prisma.JsonValue; bookingStep: keyof typeof STEP_MINUTES },
+  date: string,
+): BookableWindow {
+  return bookableWindow(readWorkingHours(hall.workingHours), date, {
+    openMinute: OPEN_MINUTE,
+    closeMinute: CLOSE_MINUTE,
+    stepMinutes: STEP_MINUTES[hall.bookingStep],
+  });
 }

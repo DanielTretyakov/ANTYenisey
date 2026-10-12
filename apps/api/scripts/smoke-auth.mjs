@@ -6435,6 +6435,36 @@ async function hallHoursAndRatingGender() {
     r = await asAdmin(`/clubs/yenisey/halls/${hall.id}`, { method: 'PATCH', json: { workingHours: week } });
     check('часы работы сохранены', 200, r.status);
 
+    // Бронь клиента — только в часах работы (решение от 12.10.2026).
+    const days = [1, 2, 3, 4, 5, 6, 7].map((offset) => dateIn(hall.timezone, offset));
+    const weekdayOf = (date) => (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7;
+    const workday = days.find((date) => weekdayOf(date) < 5);
+    const sunday = days.find((date) => weekdayOf(date) === 6);
+
+    r = await call(`/clubs/yenisey/booking/halls/${hall.id}/days/${workday}/board`);
+    check('сетка брони открыта', 200, r.status);
+    assert('сетка клиента — с открытия зала до закрытия', r.body?.openMinute === 8 * 60 && r.body?.closeMinute === 23 * 60 && r.body?.closedDay === false);
+    r = await call(`/clubs/yenisey/booking/halls/${hall.id}/days/${sunday}/board`);
+    assert('в выходной сетки нет', r.body?.closedDay === true);
+
+    r = await post('/auth/register', registration({ lastName: 'Ранний' }));
+    const earlyToken = r.body?.accessToken ?? '';
+    const asEarly = (path, options = {}) =>
+      call(path, { ...options, headers: { Authorization: `Bearer ${earlyToken}`, ...(options.headers ?? {}) } });
+    const tableId = (await asEarly(`/clubs/yenisey/booking/halls/${hall.id}/days/${workday}`)).body?.tables?.[0]?.tableId;
+
+    r = await asEarly('/clubs/yenisey/booking/bookings', {
+      method: 'POST',
+      json: { tableId, startsAt: instantAt(workday, 7 * 60, hall.timezone), durationMinutes: 60, withRobot: false },
+    });
+    check('бронь до открытия зала отклонена', 400, r.status);
+    assert('с часами работы в ответе', /08:00 до 23:00/.test(JSON.stringify(r.body ?? '')));
+    r = await asEarly('/clubs/yenisey/booking/bookings', {
+      method: 'POST',
+      json: { tableId, startsAt: instantAt(sunday, 12 * 60, hall.timezone), durationMinutes: 60, withRobot: false },
+    });
+    check('бронь в выходной отклонена', 400, r.status);
+
     r = await call('/clubs/yenisey');
     const shown = (r.body?.halls ?? []).find((item) => item.id === hall.id);
     assert('в открытой карточке зала — часы', JSON.stringify(shown?.workingHours) === JSON.stringify(week));

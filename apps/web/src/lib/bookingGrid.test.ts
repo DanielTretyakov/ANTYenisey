@@ -25,6 +25,7 @@ const day = (patch: Partial<BookingDay> = {}): BookingDay => ({
   stepMinutes: 30,
   openMinute: 6 * 60,
   closeMinute: 24 * 60,
+  closedDay: false,
   earliestMinute: 6 * 60,
   hasRobotOption: true,
   tables: [],
