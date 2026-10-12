@@ -15,6 +15,7 @@ import {
   type SparringStudent,
   type SparringType,
 } from '@yenisey/types';
+import { QuickPick } from './QuickPick';
 import { SparringStudentPicker } from './SparringStudent';
 import { EventDialog } from '@/components/events/EventDialog';
 import { WhenSpan } from '@/components/club/When';
@@ -354,6 +355,7 @@ export default function BookingPage() {
             <p className="text-[0.875rem] text-text-muted">В этот день зал не работает — выберите другую дату.</p>
           ) : day && day.tables.length > 0 ? (
             <>
+              <QuickPick day={day} onPick={setPick} />
               <Legend />
               <Grid
                 day={day}

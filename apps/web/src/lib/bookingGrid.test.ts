@@ -11,7 +11,10 @@ import {
   formatDate,
   formatDuration,
   formatMinute,
+  freeTablesAt,
   gridMinutes,
+  nearestFreeStart,
+  quickDurations,
   isBusy,
   pickAfterClick,
   pickPart,
@@ -322,5 +325,36 @@ describe('blockSpans', () => {
 
     assert.equal(spans.length, 1);
     assert.deepEqual([spans[0]!.lastTable, spans[0]!.block.endMinute, spans[0]!.rowEnd], [1, 1200, 4]);
+  });
+});
+
+describe('быстрая бронь', () => {
+  const busyAt = (from: number, to: number, label: string): BookingDayTable => ({
+    tableId: label,
+    label,
+    busy: [{ startMinute: from, endMinute: to }],
+  });
+  const evening = day({ tables: [busyAt(19 * 60, 20 * 60, 'Стол 1'), busyAt(18 * 60, 21 * 60, 'Стол 2'), busyAt(0, 0, 'Стол 3')] });
+
+  it('свободные столы на время — по тому же правилу, что сетка', () => {
+    assert.deepEqual(freeTablesAt(evening, 19 * 60, 60).map((table) => table.label), ['Стол 3']);
+    assert.deepEqual(freeTablesAt(evening, 20 * 60, 60).map((table) => table.label), ['Стол 1', 'Стол 3']);
+    // Конец за закрытием — нигде.
+    assert.deepEqual(freeTablesAt(evening, 23 * 60 + 30, 60), []);
+  });
+
+  it('ближайшее свободное начало — сначала позже, потом раньше', () => {
+    const full = day({ tables: [busyAt(18 * 60, 21 * 60, 'Стол 1')] });
+
+    // 17:00 и 21:00 одинаково далеко — позже лучше: человек хотел вечером.
+    assert.equal(nearestFreeStart(full, 19 * 60, 60), 21 * 60);
+    assert.equal(nearestFreeStart(full, 18 * 60, 60), 17 * 60);
+    assert.equal(nearestFreeStart(full, 20 * 60, 60), 21 * 60);
+    assert.equal(nearestFreeStart(day({ tables: [busyAt(6 * 60, 24 * 60, 'Стол 1')] }), 19 * 60, 60), null);
+  });
+
+  it('длительности — по шагу зала', () => {
+    assert.deepEqual(quickDurations(day()), [60, 90, 120, 150, 180]);
+    assert.deepEqual(quickDurations(day({ stepMinutes: 60 })), [60, 120, 180]);
   });
 });

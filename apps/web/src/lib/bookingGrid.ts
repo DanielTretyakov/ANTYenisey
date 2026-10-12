@@ -176,6 +176,33 @@ export function durationsFrom(
   return durations;
 }
 
+/**
+ * Быстрая бронь «хочу в 19:00 на час» (решение владельца от 12.10.2026):
+ * вместо поиска по сетке — время и длительность списком, свободные столы —
+ * кнопками. Правило свободы то же, что у сетки (`canBook`), — второго нет.
+ */
+export function freeTablesAt(day: BookingDay, startMinute: number, durationMinutes: number): BookingDayTable[] {
+  return day.tables.filter((table) => canBook(day, table, startMinute, durationMinutes));
+}
+
+/**
+ * Ближайшее к желаемому начало, когда свободен хоть один стол: сначала позже,
+ * потом раньше, по шагу брони. Нет нигде — `null`.
+ */
+export function nearestFreeStart(day: BookingDay, startMinute: number, durationMinutes: number): number | null {
+  const starts = bookableMinutes(day);
+  const ordered = [...starts].sort(
+    (a, b) => Math.abs(a - startMinute) - Math.abs(b - startMinute) || b - a,
+  );
+
+  return ordered.find((minute) => minute !== startMinute && freeTablesAt(day, minute, durationMinutes).length > 0) ?? null;
+}
+
+/** Длительности быстрой брони: от часа до трёх, по шагу зала. */
+export function quickDurations(day: BookingDay): number[] {
+  return [60, 90, 120, 150, 180].filter((minutes) => minutes % day.stepMinutes === 0);
+}
+
 /** Выбранный в сетке отрезок: стол, начало и длительность. */
 export interface GridPick {
   tableId: string;
