@@ -530,9 +530,11 @@ function GridCell({
   // так выглядит день, пришедший из шаблона. Администратор должен это видеть.
   const closedForBooking = day && value?.purpose === 'TRAINING' && value.trainingSessionId === null;
 
-  // Цвет человека, если он закреплён; иначе — назначения. Ставится стилем, а не
-  // классом: краска вычисляется из палитры и поверхности через color-mix.
-  const background = color ? color.cell : value ? PURPOSE_CELL.get(value.purpose) : undefined;
+  // Заливка — всегда назначение, человек — полоской своего цвета у буквы
+  // (решение от 12.10.2026): цвета людей делили оттенки с кистями, и
+  // тренировка четвёртого тренера выглядела фиолетовым «спаррингом». Ставится
+  // стилем, а не классом: краска вычисляется через color-mix.
+  const background = value ? PURPOSE_CELL.get(value.purpose) : undefined;
 
   return (
     <td
@@ -628,7 +630,10 @@ function GridCell({
           // человеком, и второй цвет рядом с ним местами сливается.
           <span
             className="absolute inset-y-0 left-0 flex w-5 items-center justify-center text-[0.75rem] font-medium"
-            style={{ background: 'color-mix(in oklab, var(--text) 14%, transparent)' }}
+            style={{
+              background: 'color-mix(in oklab, var(--text) 14%, transparent)',
+              borderLeft: color ? `3px solid ${color.dot}` : undefined,
+            }}
             aria-hidden="true"
           >
             {PURPOSE_MARK.get(value.purpose)}
@@ -716,7 +721,8 @@ function EventBlock({
         height: (block.to - block.from) * geometry.row - inset * 2,
         left: first.left + inset,
         width: last.left + last.width - first.left - inset * 2,
-        backgroundColor: color ? color.cell : PURPOSE_CELL.get(value.purpose),
+        // Заливка — назначение, полоса слева — тренер (как у клеток).
+        backgroundColor: PURPOSE_CELL.get(value.purpose),
         backgroundImage: closedForBooking ? NO_BOOKING_STRIPES : undefined,
         borderLeftColor: color ? color.dot : PURPOSE_CHIP.get(value.purpose),
       }}
@@ -744,7 +750,7 @@ function EventBlock({
   );
 }
 
-/** Кто занят в этой дорожке — с цветами, которыми они закрашены. */
+/** Кто занят в этой дорожке — с цветами их полосок в клетках. */
 export function ScheduleLegend({
   cells,
   lane,
@@ -791,7 +797,7 @@ export function ScheduleLegend({
         .map((person) => (
           <span key={person.id} className="flex items-center gap-1.5">
             <span
-              className="h-3 w-3 rounded-sm"
+              className="h-3 w-1 rounded-sm"
               style={{ background: colors.get(person.id)?.dot }}
               aria-hidden="true"
             />

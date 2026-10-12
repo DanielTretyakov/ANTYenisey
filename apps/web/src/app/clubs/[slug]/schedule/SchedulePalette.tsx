@@ -56,9 +56,9 @@ export const PURPOSE_LABEL = new Map<ClosurePurpose, string>([
 /**
  * Однобуквенная метка назначения для клетки.
  *
- * Цвет клетки занят человеком, и обозначать назначение вторым цветом нельзя:
- * янтарный «робот» на оранжевом арендаторе не виден вовсе. Буква же читается
- * на любом фоне и занимает четырнадцать пикселей.
+ * Заливка клетки — назначение, а человек — полоской своего цвета у буквы
+ * (решение от 12.10.2026). Буква остаётся: по ней назначение читается и без
+ * различения цветов.
  */
 export const PURPOSE_MARK = new Map<ClosurePurpose, string>([
   ['RENT', 'А'],
@@ -299,13 +299,15 @@ export function SchedulePalette({
           по наведению. Главное — что закрашивается — стоит в начале. */}
       {brush !== ERASER && (
         <p className="flex w-full min-w-0 items-center gap-2 text-[0.8125rem] text-text-subtle" title={hint}>
-          {attachedColor && (
-            <span
-              className="h-3 w-3 shrink-0 rounded-sm"
-              style={{ background: attachedColor.dot }}
-              aria-hidden="true"
-            />
-          )}
+          {/* Образец — как ляжет клетка: заливка назначения, полоска тренера. */}
+          <span
+            className="h-3 w-5 shrink-0 rounded-sm"
+            style={{
+              background: PURPOSE_CELL.get(brush as ClosurePurpose),
+              borderLeft: attachedColor ? `3px solid ${attachedColor.dot}` : undefined,
+            }}
+            aria-hidden="true"
+          />
           <span className="truncate">{hint}</span>
         </p>
       )}
