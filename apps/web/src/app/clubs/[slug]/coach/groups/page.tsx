@@ -2,14 +2,19 @@
 
 import { useEffect, useState } from 'react';
 import type { CoachGroup } from '@yenisey/types';
+import { Tab } from '@/components/ui/Tab';
 import { WhenSpan } from '@/components/club/When';
 import { CoachStatsPanel } from '@/components/coach/CoachStatsPanel';
 import { HelpHint } from '@/components/help/HelpHint';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
-import { ApiError } from '@/lib/api';
+import { ApiError, clubApi } from '@/lib/api';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
+import { useSession } from '@/lib/useSession';
+
+/** Группа с клубом: в ленте «все мои клубы» без него не понять, куда ехать. */
+type ClubGroup = CoachGroup & { club: { slug: string; name: string } | null };
 
 /**
  * «Мои группы» — занятия тренера вместе с составом.
@@ -23,12 +28,35 @@ import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 export default function CoachGroupsPage() {
   const club = useClubApi();
   const slug = useClubSlug();
-  const [groups, setGroups] = useState<CoachGroup[] | null>(null);
+  const session = useSession();
+  const [groups, setGroups] = useState<ClubGroup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Все клубы тренера одной лентой (решение владельца от 12.10.2026): тренер
+  // в двух клубах иначе собирал бы неделю из двух страниц.
+  const [scope, setScope] = useState<'club' | 'all'>('club');
+
+  const coachClubs =
+    session.status === 'ready'
+      ? session.user.memberships.filter((membership) => membership.roles.includes('COACH'))
+      : [];
+  const several = coachClubs.length > 1;
+  const clubsKey = coachClubs.map((membership) => membership.slug).join(',');
 
   useEffect(() => {
-    club
-      .coachGroups()
+    setGroups(null);
+
+    const load: Promise<ClubGroup[]> =
+      scope === 'all' && several
+        ? Promise.all(
+            coachClubs.map((membership) =>
+              clubApi(membership.slug)
+                .coachGroups()
+                .then((list) => list.map((group) => ({ ...group, club: { slug: membership.slug, name: membership.name } }))),
+            ),
+          ).then((lists) => lists.flat().sort((a, b) => a.startsAt.localeCompare(b.startsAt)))
+        : club.coachGroups().then((list) => list.map((group) => ({ ...group, club: null })));
+
+    load
       .then(setGroups)
       .catch((cause: unknown) =>
         setError(
@@ -39,7 +67,8 @@ export default function CoachGroupsPage() {
               : 'Не удалось связаться с сервером',
         ),
       );
-  }, [club]);
+    // Клубы тренера — по строке-ключу: массив из профиля пересобирается каждый раз.
+  }, [club, scope, clubsKey]);
 
   return (
     <AppShell footer="line" clubSlug={slug}>
@@ -60,6 +89,17 @@ export default function CoachGroupsPage() {
         </Card>
       )}
 
+      {several && (
+        <div className="mb-4 flex gap-1.5" role="tablist" aria-label="Чьи занятия">
+          <Tab inTablist active={scope === 'club'} onClick={() => setScope('club')}>
+            Этот клуб
+          </Tab>
+          <Tab inTablist active={scope === 'all'} onClick={() => setScope('all')}>
+            Все мои клубы
+          </Tab>
+        </div>
+      )}
+
       {groups?.length === 0 && (
         <Alert tone="info">Впереди занятий нет. Занятия ставит администратор в расписании зала.</Alert>
       )}
@@ -67,10 +107,10 @@ export default function CoachGroupsPage() {
       {groups && groups.length > 0 && (
         <div className="grid gap-5">
           {groups.map((group) => (
-            <Card key={group.id}>
+            <Card key={`${group.club?.slug ?? slug}:${group.id}`}>
               <CardHeader
                 title={group.title}
-                description={`Записались: ${group.participants.length} из ${group.capacity}`}
+                description={`${group.club ? `${group.club.name} · ` : ''}Записались: ${group.participants.length} из ${group.capacity}`}
               />
               <CardBody className="flex flex-wrap items-start gap-6">
                 <WhenSpan startsAt={group.startsAt} endsAt={group.endsAt} />
