@@ -7,7 +7,7 @@ import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { CompactSelect } from '@/components/ui/CompactSelect';
 import { Tab } from '@/components/ui/Tab';
-import { rolesInClub } from '@/lib/membership';
+import { actorInClub, rolesInClub } from '@/lib/membership';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { useSession } from '@/lib/useSession';
 import { DayBoard } from './DayBoard';
@@ -78,9 +78,10 @@ export default function SchedulePage() {
       .then(([halls, tables, coaches, trainingTypes, tournamentTypes]) => {
         if (cancelled) return;
 
-        // Управляющий правит расписание только своих залов (решение от
-        // 11.10.2026) — чужих в списке нет; запрет стоит на сервере.
-        const actor = { userId: session.status === 'ready' ? session.user.id : '', roles };
+        // Управляющий правит расписание только своих залов, администратор —
+        // отмеченных ему (решения от 11 и 12.10.2026); чужих в списке нет,
+        // запрет стоит на сервере.
+        const actor = session.status === 'ready' ? actorInClub(session.user, slug) : { userId: '', roles };
         setData({ halls: halls.filter((item) => canEditHall(actor, item)), tables, coaches, trainingTypes, tournamentTypes });
       })
       .catch((cause: unknown) => {
@@ -156,7 +157,7 @@ export default function SchedulePage() {
 
       {error && <Alert>{error}</Alert>}
       {data && data.halls.length === 0 && (
-        <Alert tone="info">За вами пока нет залов — управляющего зала назначает руководитель клуба.</Alert>
+        <Alert tone="info">За вами пока нет залов — их отмечает руководство клуба в «Составе клуба».</Alert>
       )}
 
       {allowed && !data && !error && (

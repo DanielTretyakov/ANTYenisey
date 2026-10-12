@@ -496,6 +496,7 @@ model Tenant {
   trainingTypeHalls       TrainingTypeHall[]
   tournamentTypeHalls     TournamentTypeHall[]
   coachHalls              CoachHall[]
+  adminHalls              AdminHall[]
   sparringTypes           SparringType[]
   clubPosts               ClubPost[]
   staffShifts             StaffShift[]
@@ -1251,7 +1252,9 @@ model TenantMembership {
 
   // Первичный ключ и одновременно мишень всех составных FK клубных таблиц.
   /// Залы, которыми этот человек управляет (роль MANAGER).
-  managedHalls Hall[] @relation("HallManager")
+  managedHalls Hall[]      @relation("HallManager")
+  /// Залы администратора (решение владельца от 12.10.2026).
+  adminHalls   AdminHall[]
 
   /// Смены администратора и смены, которые назначил этот человек.
   shifts            StaffShift[]         @relation("ShiftAdmin")
@@ -1709,6 +1712,7 @@ model Hall {
   trainingTypeLinks   TrainingTypeHall[]
   tournamentTypeLinks TournamentTypeHall[]
   coachLinks          CoachHall[]
+  adminLinks          AdminHall[]
 
   /// Кто из администраторов работает в зале в какой день.
   shifts         StaffShift[]
@@ -2640,6 +2644,25 @@ model TournamentTypeHall {
   hall           Hall           @relation(fields: [hallId, tenantId], references: [id, tenantId], onDelete: Cascade)
 
   @@id([tournamentTypeId, hallId])
+  @@index([hallId])
+  @@index([tenantId])
+}
+
+/// Залы администратора (решение владельца от 12.10.2026): в «Настройках» и
+/// «Расписании залов» администратор правит только их, как управляющий — свои.
+/// Отмечают руководитель и управляющий (тот — в своих залах). Висит на
+/// членстве: снятие роли ADMIN снимает привязки той же транзакцией, что
+/// роль, — что роль есть, держит сервис (CHECK не видит чужую таблицу).
+model AdminHall {
+  userId   String
+  hallId   String
+  tenantId String
+
+  tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  admin  TenantMembership @relation(fields: [userId, tenantId], references: [userId, tenantId], onDelete: Cascade)
+  hall   Hall             @relation(fields: [hallId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@id([userId, hallId])
   @@index([hallId])
   @@index([tenantId])
 }

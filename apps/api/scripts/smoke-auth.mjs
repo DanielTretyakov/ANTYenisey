@@ -7387,6 +7387,28 @@ async function settingsRights() {
     r = await asAdminProbe(`${club}/settings`, { method: 'PATCH', json: { noShowChargePercent: settings.noShowChargePercent, phone: settings.phone } });
     check('прежний процент рядом с другой правкой — не отказ', 200, r.status);
 
+    // --- Залы администратора (решение от 12.10.2026): без отметки — ни одного.
+    r = await asAdminProbe(`${club}/halls/${other.id}`, { method: 'PATCH', json: { name: other.name } });
+    check('администратор без отмеченных залов зал не правит', 403, r.status);
+    r = await asAdminProbe(`${club}/halls/${other.id}/days/${someDay}`, { method: 'DELETE' });
+    check('и его расписание — тоже', 403, r.status);
+    r = await asAdminProbe(`${club}/people/${admin.id}/halls`, { method: 'PUT', json: { hallIds: [other.id] } });
+    check('себе залы администратор не отмечает', 403, r.status);
+    r = await asOwner(`${club}/people/${admin.id}/halls`, { method: 'PUT', json: { hallIds: [other.id] } });
+    check('руководитель отмечает администратору зал', 200, r.status);
+    assert('у администратора — отмеченный зал', JSON.stringify(r.body?.adminHallIds) === JSON.stringify([other.id]));
+    r = await asOwner(`${club}/people/${manager.id}/halls`, { method: 'PUT', json: { hallIds: [own.id] } });
+    check('залы отмечают только администратору', 400, r.status);
+    r = await asOwner(`${club}/people/${admin.id}/halls`, { method: 'PUT', json: { hallIds: ['net-takogo-zala'] } });
+    check('чужой или выдуманный зал не отмечается', 400, r.status);
+
+    r = await asAdminProbe(`${club}/halls/${own.id}`, { method: 'PATCH', json: { name: own.name } });
+    check('неотмеченный зал администратор не правит', 403, r.status);
+    r = await asAdminProbe(`${club}/halls/${own.id}/days/${someDay}`, { method: 'DELETE' });
+    check('и его расписание — тоже', 403, r.status);
+    r = await asAdminProbe(`${club}/tables`, { method: 'POST', json: { hallId: own.id, label: 'Стол проверки прав' } });
+    check('и столы в нём не заводит', 403, r.status);
+
     r = await asAdminProbe(`${club}/halls/${other.id}`, { method: 'PATCH', json: { tableHourPrice: other.tableHourPrice + 100 } });
     check('администратор цену зала не меняет', 403, r.status);
     r = await asAdminProbe(`${club}/halls/${other.id}`, { method: 'PATCH', json: { hasRobotOption: !other.hasRobotOption } });
@@ -7412,7 +7434,7 @@ async function settingsRights() {
     check('и тип спарринга — тоже', 403, r.status);
 
     r = await asAdminProbe(`${club}/halls/${other.id}/days/${someDay}`, { method: 'DELETE' });
-    check('расписание любого зала администратор правит', 200, r.status);
+    check('расписание отмеченного зала администратор правит', 200, r.status);
 
     // --- Управляющий: деньги — да, но только в своём зале.
     r = await asManager(`${club}/halls/${own.id}`, { method: 'PATCH', json: { tableHourPrice: own.tableHourPrice + 100 } });
@@ -7440,6 +7462,19 @@ async function settingsRights() {
     check('и возвращает', 200, r.status);
     r = await asManager(`${club}/training-types/${type?.id}`, { method: 'PATCH', json: { name: type?.name, price: type?.price, hallIds: [] } });
     check('вид клуба управляющий правит', 200, r.status);
+
+    // --- Залы администратора отмечает и управляющий — только свои.
+    r = await asManager(`${club}/people/${admin.id}/halls`, { method: 'PUT', json: { hallIds: [other.id, own.id] } });
+    check('управляющий добавляет администратору свой зал', 200, r.status);
+    r = await asManager(`${club}/people/${admin.id}/halls`, { method: 'PUT', json: { hallIds: [own.id] } });
+    check('а чужой зал у администратора не снимает', 403, r.status);
+    r = await asAdminProbe(`${club}/halls/${own.id}/days/${someDay}`, { method: 'DELETE' });
+    check('теперь администратор правит и этот зал', 200, r.status);
+
+    // Снятая роль снимает и залы: вернувшись, администратор начнёт без них.
+    r = await asOwner(`${club}/people/${admin.id}/roles`, { method: 'PUT', json: { roles: ['CLIENT'] } });
+    check('роль администратора снята', 200, r.status);
+    assert('вместе с ролью сняты и залы', (r.body?.adminHallIds ?? ['?']).length === 0);
   } finally {
     // Пробные учётки уберёт clean-probes, а управляющего зала — нет:
     // зал ссылается на привязку.

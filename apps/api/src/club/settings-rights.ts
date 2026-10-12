@@ -61,9 +61,9 @@ export function changeRight(kind: string, targetId: string | null, payload: unkn
 export function rightProblem(
   actor: ClubActor,
   right: SettingsRight,
-  hall: { managerId: string | null } | null,
+  hall: { id: string; managerId: string | null } | null,
 ): string | null {
-  const target = hall ?? { managerId: null };
+  const target = hall ?? { id: '', managerId: null };
 
   switch (right) {
     case 'staff':
@@ -73,7 +73,7 @@ export function rightProblem(
     case 'createHall':
       return canCreateHall(actor) ? null : 'Новый зал заводит руководитель клуба';
     case 'hall':
-      return canEditHall(actor, target) ? null : 'Управляющий правит только свои залы';
+      return canEditHall(actor, target) ? null : hallDenied(actor);
     case 'hallMoney':
       if (canSetHallMoney(actor, target)) return null;
 
@@ -81,4 +81,11 @@ export function rightProblem(
         ? 'Управляющий правит только свои залы'
         : 'Цены зала и удаление залов и столов — у руководителя и управляющего этого зала';
   }
+}
+
+/** Отказ в чужом зале — тем словом, кем человек в клубе. */
+export function hallDenied(actor: ClubActor): string {
+  return actor.roles.includes('MANAGER')
+    ? 'Управляющий правит только свои залы'
+    : 'Администратор правит только отмеченные ему залы — их отмечает руководство в «Составе клуба»';
 }

@@ -789,9 +789,9 @@ export class SettingsChangesService {
    */
   private async assertRight(club: ClubContext, right: SettingsRight, hallId: string | null): Promise<void> {
     const hall = hallId
-      ? await this.prisma.hall.findFirst({ where: { id: hallId, tenantId: club.tenantId }, select: { managerId: true } })
+      ? await this.prisma.hall.findFirst({ where: { id: hallId, tenantId: club.tenantId }, select: { id: true, managerId: true } })
       : null;
-    const problem = rightProblem(club, right, hall);
+    const problem = rightProblem(await this.club.actorOf(club), right, hall);
 
     if (problem) {
       throw new ForbiddenException(problem);

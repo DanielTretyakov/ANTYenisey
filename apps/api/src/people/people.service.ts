@@ -206,6 +206,7 @@ export class PeopleService {
         createdAt: true,
         deactivatedAt: true,
         user: { select: { fullName: true, email: true, phone: true, birthDate: true } },
+        adminHalls: { select: { hallId: true } },
       },
     });
 
@@ -248,6 +249,7 @@ export class PeopleService {
         phone: membership.user.phone,
         birthDate: formatBirthDate(membership.user.birthDate),
         roles: membership.roles,
+        adminHallIds: membership.adminHalls.map((row) => row.hallId),
         createdAt: membership.createdAt.toISOString(),
         deactivated: membership.deactivatedAt !== null,
       },

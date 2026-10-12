@@ -52,7 +52,7 @@ import {
   TrainingSessionDto,
   TrainingTypeDto,
 } from './dto/catalog.dto';
-import { ChangeRolesDto, ClubPeopleQueryDto } from './dto/people.dto';
+import { AdminHallsDto, ChangeRolesDto, ClubPeopleQueryDto } from './dto/people.dto';
 import { ClubCoachListDto } from './dto/coach-list.dto';
 import { StaffPreferencesDto } from './dto/preferences.dto';
 import { UpdateClubSettingsDto } from './dto/update-settings.dto';
@@ -286,6 +286,17 @@ export class ClubController {
    * Кто именно меняет, важно: свою собственную роль изменить нельзя, иначе
    * единственный владелец мог бы запереть клуб.
    */
+  /** Залы администратора (решение от 12.10.2026) — руководитель и управляющий. */
+  @Roles('MANAGER', 'OWNER')
+  @Put('people/:id/halls')
+  setAdminHalls(
+    @CurrentClub() club: ClubContext,
+    @Param('id') userId: string,
+    @Body() dto: AdminHallsDto,
+  ): Promise<ClubPerson> {
+    return this.club.setAdminHalls(club, userId, dto.hallIds);
+  }
+
   @Put('people/:id/roles')
   changeRole(
     @CurrentClub() club: ClubContext,
@@ -444,7 +455,7 @@ export class ClubController {
     @Body() dto: ReplaceTemplateDto,
   ): Promise<ClosureRule[]> {
     // Управляющий правит расписание только своих залов (решение от 11.10.2026).
-    await this.club.assertHallEditable(club.tenantId, club, hallId);
+    await this.club.assertHallEditable(club, hallId);
 
     return this.schedule.replaceTemplate(club.tenantId, hallId, dto.rules);
   }
@@ -474,7 +485,7 @@ export class ClubController {
     @Param('date') date: string,
     @Body() dto: ReplaceDayDto,
   ): Promise<DaySchedule> {
-    await this.club.assertHallEditable(club.tenantId, club, hallId);
+    await this.club.assertHallEditable(club, hallId);
 
     return this.schedule.replaceDay(club.tenantId, hallId, date, dto.closures);
   }
@@ -486,7 +497,7 @@ export class ClubController {
     @Param('hallId') hallId: string,
     @Param('date') date: string,
   ): Promise<DaySchedule> {
-    await this.club.assertHallEditable(club.tenantId, club, hallId);
+    await this.club.assertHallEditable(club, hallId);
 
     return this.schedule.resetDay(club.tenantId, hallId, date);
   }
@@ -505,7 +516,7 @@ export class ClubController {
     @Param('hallId') hallId: string,
     @Param('date') date: string,
   ): Promise<DaySchedule> {
-    await this.club.assertHallEditable(club.tenantId, club, hallId);
+    await this.club.assertHallEditable(club, hallId);
 
     return this.schedule.detachDay(club.tenantId, hallId, date);
   }

@@ -440,6 +440,8 @@ export interface ClubPerson {
   birthDate: string;
   /** Роли в клубе, по старшинству; клиент — `['CLIENT']`. */
   roles: Role[];
+  /** Залы администратора (решение от 12.10.2026); не администратор — пусто. */
+  adminHallIds: string[];
   /** Когда учётка заведена — по ней список и сортируется по умолчанию. */
   createdAt: string;
   /**
@@ -465,6 +467,11 @@ export interface ClubPeoplePage {
  */
 export interface ChangeRolesRequest {
   roles: Role[];
+}
+
+/** Залы администратора целиком — `PUT people/:id/halls`. */
+export interface AdminHallsRequest {
+  hallIds: string[];
 }
 
 export interface ClubPeopleQuery {

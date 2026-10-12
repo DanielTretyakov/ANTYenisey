@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { moneyTouched, CLUB_MONEY_FIELDS, HALL_MONEY_FIELDS, type ClubActor, type Role } from '@yenisey/types';
+import { adminHallsProblem, moneyTouched, CLUB_MONEY_FIELDS, HALL_MONEY_FIELDS, type ClubActor, type Role } from '@yenisey/types';
 import { changeRight, rightProblem } from './settings-rights.ts';
 
 const as = (...roles: Role[]): ClubActor => ({ userId: 'me', roles });
-const mine = { managerId: 'me' };
-const theirs = { managerId: 'other' };
-const nobody = { managerId: null };
+const mine = { id: 'h-mine', managerId: 'me' };
+const theirs = { id: 'h-theirs', managerId: 'other' };
+const nobody = { id: 'h-nobody', managerId: null };
+const adminOf = (...hallIds: string[]): ClubActor => ({ userId: 'me', roles: ['ADMIN'], adminHallIds: hallIds });
 
 test('деньги клуба — руководство, администратору отказ', () => {
   assert.equal(rightProblem(as('OWNER'), 'clubMoney', null), null);
@@ -15,13 +16,31 @@ test('деньги клуба — руководство, администрат
   assert.equal(rightProblem(as('ADMIN'), 'staff', null), null);
 });
 
-test('зал: администратор — любой, управляющий — только свой', () => {
-  assert.equal(rightProblem(as('ADMIN'), 'hall', theirs), null);
+test('зал: администратор — отмеченные ему, управляющий — свои', () => {
+  assert.equal(rightProblem(adminOf('h-theirs'), 'hall', theirs), null);
+  assert.match(rightProblem(adminOf('h-theirs'), 'hall', nobody) ?? '', /отмеченные ему залы/);
+  assert.match(rightProblem(as('ADMIN'), 'hall', theirs) ?? '', /отмеченные ему залы/);
   assert.equal(rightProblem(as('MANAGER'), 'hall', mine), null);
   assert.match(rightProblem(as('MANAGER'), 'hall', theirs) ?? '', /только свои залы/);
   assert.match(rightProblem(as('MANAGER'), 'hall', nobody) ?? '', /только свои залы/);
-  // Управляющий и администратор сразу — чужой зал правит как администратор.
-  assert.equal(rightProblem(as('MANAGER', 'ADMIN'), 'hall', theirs), null);
+  // Управляющий и администратор сразу — чужой зал правит, если он отмечен ему.
+  assert.equal(rightProblem({ userId: 'me', roles: ['MANAGER', 'ADMIN'], adminHallIds: ['h-theirs'] }, 'hall', theirs), null);
+  assert.ok(rightProblem(as('MANAGER', 'ADMIN'), 'hall', theirs));
+  assert.equal(rightProblem(as('OWNER'), 'hall', nobody), null);
+});
+
+test('залы администратора отмечают руководитель и управляющий — свои', () => {
+  const halls = [mine, theirs, nobody];
+  const base = { targetRoles: ['ADMIN'] as Role[], halls, before: ['h-theirs'] };
+
+  assert.equal(adminHallsProblem({ ...base, actor: as('OWNER'), requested: ['h-nobody'] }), null);
+  assert.equal(adminHallsProblem({ ...base, actor: as('MANAGER'), requested: ['h-theirs', 'h-mine'] }), null);
+  // Снять чужой зал или добавить ничей управляющий не может.
+  assert.match(adminHallsProblem({ ...base, actor: as('MANAGER'), requested: [] }) ?? '', /только свои/);
+  assert.match(adminHallsProblem({ ...base, actor: as('MANAGER'), requested: ['h-theirs', 'h-nobody'] }) ?? '', /только свои/);
+  assert.match(adminHallsProblem({ ...base, actor: as('ADMIN'), requested: [] }) ?? '', /руководитель и управляющий/);
+  assert.match(adminHallsProblem({ ...base, actor: as('OWNER'), targetRoles: ['COACH'], requested: [] }) ?? '', /только администратору/);
+  assert.match(adminHallsProblem({ ...base, actor: as('OWNER'), requested: ['h-chuzhoi'] }) ?? '', /нет/);
 });
 
 test('цены зала и удаление: руководитель и управляющий этого зала', () => {

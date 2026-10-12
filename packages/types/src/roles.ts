@@ -44,12 +44,15 @@ export function normalizeRoles(roles: readonly Role[]): Role[] {
  * Деньги — цены, процент неявки и правило визита абонемента — и удаление
  * залов и столов: только руководство. Управляющий правит только свои залы
  * (`Hall.managerId`) — в «Настройках» и в «Расписании залов»; администратор
- * правит любой зал, но без денег и удаления. Новый зал заводит руководитель:
- * у нового зала ещё нет управляющего, а без цен зал не заводится.
+ * — только отмеченные ему залы (`AdminHall`, решение от 12.10.2026), и без
+ * денег и удаления. Новый зал заводит руководитель: у нового зала ещё нет ни
+ * управляющего, ни администраторов, а без цен зал не заводится.
  */
 export interface ClubActor {
   userId: string;
   roles: readonly Role[];
+  /** Залы, отмеченные человеку как администратору. */
+  adminHallIds?: readonly string[];
 }
 
 /** Деньги клуба целиком: процент неявки, цены видов, тарифы абонементов. */
@@ -58,11 +61,53 @@ export function canSetClubMoney(actor: ClubActor): boolean {
 }
 
 /** Зал «вообще»: название, адрес, часы, столы, расписание. */
-export function canEditHall(actor: ClubActor, hall: { managerId: string | null }): boolean {
+export function canEditHall(actor: ClubActor, hall: { id: string; managerId: string | null }): boolean {
   return (
-    hasAnyRole(actor.roles, ['OWNER', 'ADMIN']) ||
-    (actor.roles.includes('MANAGER') && hall.managerId === actor.userId)
+    actor.roles.includes('OWNER') ||
+    (actor.roles.includes('MANAGER') && hall.managerId === actor.userId) ||
+    (actor.roles.includes('ADMIN') && (actor.adminHallIds ?? []).includes(hall.id))
   );
+}
+
+/**
+ * Кому отмечать залы администратора: руководитель — любые, управляющий —
+ * только свои (добавить и снять можно лишь зал, которым он управляет).
+ * Отказ человеческими словами или `null`.
+ */
+export function adminHallsProblem(input: {
+  actor: ClubActor;
+  targetRoles: readonly Role[];
+  halls: readonly { id: string; managerId: string | null }[];
+  before: readonly string[];
+  requested: readonly string[];
+}): string | null {
+  const { actor, targetRoles, halls, before, requested } = input;
+
+  if (!targetRoles.includes('ADMIN')) {
+    return 'Залы отмечают только администратору';
+  }
+
+  const known = new Set(halls.map((hall) => hall.id));
+
+  if (requested.some((id) => !known.has(id))) {
+    return 'Такого зала в клубе нет';
+  }
+
+  if (actor.roles.includes('OWNER')) {
+    return null;
+  }
+
+  if (!actor.roles.includes('MANAGER')) {
+    return 'Залы администратора отмечают руководитель и управляющий';
+  }
+
+  const mine = new Set(halls.filter((hall) => hall.managerId === actor.userId).map((hall) => hall.id));
+  const changed = [
+    ...requested.filter((id) => !before.includes(id)),
+    ...before.filter((id) => !requested.includes(id)),
+  ];
+
+  return changed.every((id) => mine.has(id)) ? null : 'Управляющий отмечает администратору только свои залы';
 }
 
 /** Цены зала, удаление зала и его столов. */

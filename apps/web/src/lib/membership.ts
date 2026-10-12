@@ -1,4 +1,4 @@
-import type { PublicUser, Role } from '@yenisey/types';
+import type { ClubActor, PublicUser, Role } from '@yenisey/types';
 import { TENANT_SLUG } from './config';
 
 /**
@@ -16,4 +16,15 @@ import { TENANT_SLUG } from './config';
  */
 export function rolesInClub(user: PublicUser, slug: string = TENANT_SLUG): Role[] {
   return user.memberships.find((membership) => membership.slug === slug)?.roles ?? [];
+}
+
+/**
+ * Человек в клубе для правил залов (`canEditHall` и соседи в `@yenisey/types`):
+ * роли и залы администратора. Это удобство интерфейса — запрет стоит на
+ * сервере.
+ */
+export function actorInClub(user: PublicUser, slug: string = TENANT_SLUG): ClubActor {
+  const membership = user.memberships.find((item) => item.slug === slug);
+
+  return { userId: user.id, roles: membership?.roles ?? [], adminHallIds: membership?.adminHallIds ?? [] };
 }

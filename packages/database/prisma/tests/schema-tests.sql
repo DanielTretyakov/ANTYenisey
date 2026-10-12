@@ -1917,3 +1917,23 @@ DO $$ BEGIN
   INSERT INTO "Tenant" (id,name,slug,"createdAt","updatedAt") VALUES ('t_draft','Черновик','novyi-klub-2',now(),now());
   RAISE NOTICE 'GL. Клуб-черновик с кодом через дефис......... OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'GL. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- ---------------------------------------------------------------------------
+-- 47. Залы администратора
+-- ---------------------------------------------------------------------------
+
+-- GM. Человек другого клуба администратором зала — ключ по клубу не примет.
+SELECT pg_temp.expect('GM',
+  $q$INSERT INTO "AdminHall" ("userId","hallId","tenantId") VALUES ('u2','h1','t1')$q$,
+  '23503', 'AdminHall_userId_tenantId_fkey');
+
+-- GN. Зал чужого клуба — тоже.
+SELECT pg_temp.expect('GN',
+  $q$INSERT INTO "AdminHall" ("userId","hallId","tenantId") VALUES ('c1','h2','t1')$q$,
+  '23503', 'AdminHall_hallId_tenantId_fkey');
+
+-- GO. Свой человек и свой зал — законно.
+DO $$ BEGIN
+  INSERT INTO "AdminHall" ("userId","hallId","tenantId") VALUES ('c1','h1','t1');
+  RAISE NOTICE 'GO. Администратор в зале своего клуба........... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'GO. ПРОВАЛ: %', SQLERRM; END $$;

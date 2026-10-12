@@ -362,6 +362,8 @@ export class AuthService {
             roles: true,
             tenantId: true,
             tenant: { select: { slug: true, name: true } },
+            // Залы администратора — вебу, чтобы не предлагать чужие залы.
+            adminHalls: { select: { hallId: true } },
           },
           orderBy: { tenant: { name: 'asc' } },
         },
@@ -380,6 +382,7 @@ export class AuthService {
         slug: membership.tenant.slug,
         name: membership.tenant.name,
         roles: membership.roles,
+        adminHallIds: membership.adminHalls.map((row) => row.hallId),
       })),
       platformOwner: user.platformRole === 'OWNER',
       consentAt: user.personalDataConsentAt?.toISOString() ?? null,

@@ -795,6 +795,10 @@ export function clubApi(slug: string = TENANT_SLUG) {
     changeRoles: (userId: string, roles: Role[]): Promise<ClubPerson> =>
       authorized(`${club}/people/${userId}/roles`, json('PUT', { roles })),
 
+    /** Залы администратора целиком (решение владельца от 12.10.2026). */
+    setAdminHalls: (userId: string, hallIds: string[]): Promise<ClubPerson> =>
+      authorized(`${club}/people/${userId}/halls`, json('PUT', { hallIds })),
+
     // --- Смены администраторов (решение владельца от 26.09.2026).
     staffHalls: (): Promise<StaffHall[]> => authorized(`${club}/staff-schedule/halls`),
     staffManagers: (): Promise<StaffCandidate[]> => authorized(`${club}/staff-schedule/managers`),

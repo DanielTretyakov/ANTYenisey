@@ -10,7 +10,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import type { ChangeRolesRequest, ClubPeopleQuery, Role } from '@yenisey/types';
+import type { AdminHallsRequest, ChangeRolesRequest, ClubPeopleQuery, Role } from '@yenisey/types';
 
 const ROLES: Role[] = ['CLIENT', 'ADMIN', 'COACH', 'MANAGER', 'OWNER'];
 
@@ -91,4 +91,13 @@ export class ChangeRolesDto implements ChangeRolesRequest {
   @ArrayMaxSize(5)
   @IsIn(ROLES, { each: true, message: 'Неизвестная роль' })
   roles: Role[];
+}
+
+/** Залы администратора целиком (решение владельца от 12.10.2026). */
+export class AdminHallsDto implements AdminHallsRequest {
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  hallIds: string[];
 }

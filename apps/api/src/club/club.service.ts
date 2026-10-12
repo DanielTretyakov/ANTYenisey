@@ -22,9 +22,10 @@ import type {
   UpdateHallRequest,
   WorkingHours,
 } from '@yenisey/types';
-import { canEditHall, parseWorkingHours, readWorkingHours, type ClubActor } from '@yenisey/types';
+import { adminHallsProblem, canEditHall, parseWorkingHours, readWorkingHours, type ClubActor } from '@yenisey/types';
 import { FileIntake } from '../files/file-intake.service';
 import { FileStorage } from '../files/file-storage';
+import type { ClubContext } from '../auth/club-context';
 import { PrismaService } from '../prisma/prisma.service';
 import { formatBirthDate } from '../auth/birth-date';
 import { AddressProvider } from '../address/address.provider';
@@ -38,6 +39,7 @@ import {
   readClubValues,
 } from './settings-rules';
 import { BIRTH_PLACEHOLDER, bornRange, byBirthday, parseBirthSearch } from './people-filter';
+import { hallDenied } from './settings-rights';
 
 /**
  * Поля Tenant, составляющие профиль клуба. Выбираются явным списком, а не
@@ -487,19 +489,91 @@ export class ClubService {
   }
 
   /**
-   * «Расписание залов» и столы: управляющий правит только свои залы
-   * (решение владельца от 11.10.2026), администратор и руководитель — любой.
+   * Права человека на залы клуба: роли и залы администратора. Залы
+   * читаются только у администратора — остальным они не нужны.
    */
-  async assertHallEditable(tenantId: string, actor: ClubActor, hallId: string): Promise<void> {
-    const hall = await this.prisma.hall.findFirst({ where: { id: hallId, tenantId }, select: { managerId: true } });
+  async actorOf(club: ClubContext): Promise<ClubActor> {
+    if (!club.roles.includes(Role.ADMIN)) {
+      return { userId: club.userId, roles: club.roles };
+    }
+
+    const rows = await this.prisma.adminHall.findMany({
+      where: { tenantId: club.tenantId, userId: club.userId },
+      select: { hallId: true },
+    });
+
+    return { userId: club.userId, roles: club.roles, adminHallIds: rows.map((row) => row.hallId) };
+  }
+
+  /**
+   * «Расписание залов»: управляющий правит только свои залы, администратор —
+   * отмеченные ему (решения владельца от 11 и 12.10.2026), руководитель — любой.
+   */
+  async assertHallEditable(club: ClubContext, hallId: string): Promise<void> {
+    const hall = await this.prisma.hall.findFirst({
+      where: { id: hallId, tenantId: club.tenantId },
+      select: { id: true, managerId: true },
+    });
 
     if (!hall) {
       throw new NotFoundException('Зал не найден');
     }
 
+    const actor = await this.actorOf(club);
+
     if (!canEditHall(actor, hall)) {
-      throw new ForbiddenException('Управляющий правит только свои залы');
+      throw new ForbiddenException(hallDenied(actor));
     }
+  }
+
+  /**
+   * Залы администратора целиком (решение владельца от 12.10.2026): руководитель
+   * — любые, управляющий — добавляет и снимает только свои.
+   */
+  async setAdminHalls(club: ClubContext, userId: string, requested: string[]): Promise<ClubPerson> {
+    const [person, halls, before] = await Promise.all([
+      this.prisma.tenantMembership.findFirst({
+        where: { userId, tenantId: club.tenantId, user: { anonymizedAt: null } },
+        select: { roles: true },
+      }),
+      this.prisma.hall.findMany({ where: { tenantId: club.tenantId }, select: { id: true, managerId: true } }),
+      this.prisma.adminHall.findMany({ where: { tenantId: club.tenantId, userId }, select: { hallId: true } }),
+    ]);
+
+    if (!person) {
+      throw new NotFoundException('Человек не найден');
+    }
+
+    const wanted = [...new Set(requested)];
+    const problem = adminHallsProblem({
+      actor: club,
+      targetRoles: person.roles,
+      halls,
+      before: before.map((row) => row.hallId),
+      requested: wanted,
+    });
+
+    if (problem) {
+      // Чужой зал управляющего — запрет права, остальное — неверная правка.
+      throw problem.startsWith('Управляющий') ? new ForbiddenException(problem) : new BadRequestException(problem);
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.adminHall.deleteMany({ where: { tenantId: club.tenantId, userId, hallId: { notIn: wanted } } }),
+      this.prisma.adminHall.createMany({
+        data: wanted.map((hallId) => ({ tenantId: club.tenantId, userId, hallId })),
+        skipDuplicates: true,
+      }),
+    ]);
+
+    const updated = await this.listPeople(club.tenantId, { ids: [userId], limit: 1 });
+    const result = updated.items[0];
+
+    if (!result) {
+      throw new NotFoundException('Человек не найден');
+    }
+
+    return result;
   }
 
   async findHall(tenantId: string, hallId: string): Promise<Hall> {
@@ -787,6 +861,8 @@ export class ClubService {
       // строка шаблона ждала бы, когда роль вернут, и вернула бы смены сама.
       if (removed.includes(Role.ADMIN)) {
         await tx.staffShiftTemplate.deleteMany({ where: { tenantId, userId } });
+        // И залы администратора: вернувшись в роль, человек начинает без залов.
+        await tx.adminHall.deleteMany({ where: { tenantId, userId } });
       }
 
       if (coach) {
@@ -842,6 +918,7 @@ const PERSON_SELECT = {
   createdAt: true,
   deactivatedAt: true,
   user: { select: { fullName: true, email: true, phone: true, birthDate: true } },
+  adminHalls: { select: { hallId: true } },
 } as const satisfies Prisma.TenantMembershipSelect;
 
 function toClubPerson(
@@ -854,6 +931,7 @@ function toClubPerson(
     phone: person.user.phone,
     birthDate: formatBirthDate(person.user.birthDate),
     roles: person.roles,
+    adminHallIds: person.adminHalls.map((row) => row.hallId),
     createdAt: person.createdAt.toISOString(),
     deactivated: person.deactivatedAt !== null,
   };

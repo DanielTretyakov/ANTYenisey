@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { fullYears, hasAnyRole, MANAGING_ROLES, type ClubPeoplePage, type ClubPerson, type Role } from '@yenisey/types';
+import { fullYears, hasAnyRole, MANAGING_ROLES, type ClubActor, type ClubPeoplePage, type ClubPerson, type Hall, type Role } from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -123,6 +123,17 @@ export default function PeoplePage() {
     return () => clearTimeout(timer);
   }, [load]);
 
+  // Залы — для отметки залов администратора (решение от 12.10.2026).
+  const [halls, setHalls] = useState<Hall[]>([]);
+
+  useEffect(() => {
+    if (!allowed) return;
+    club
+      .halls()
+      .then(setHalls)
+      .catch(() => setHalls([]));
+  }, [allowed, club]);
+
   const items = page?.items ?? [];
   const total = page?.total ?? 0;
 
@@ -217,6 +228,8 @@ export default function PeoplePage() {
                         person={person}
                         self={session.status === 'ready' && session.user.id === person.id}
                         viewerRoles={roles}
+                        viewerId={session.status === 'ready' ? session.user.id : ''}
+                        halls={halls}
                         onChanged={(updated) =>
                           setPage((previous) =>
                             previous
@@ -280,6 +293,8 @@ function PersonRow({
   person,
   self,
   viewerRoles,
+  viewerId,
+  halls,
   onChanged,
   onError,
 }: {
@@ -288,6 +303,9 @@ function PersonRow({
   self: boolean;
   /** Роли смотрящего: руководство назначает только руководитель. */
   viewerRoles: Role[];
+  viewerId: string;
+  /** Залы клуба — для отметки залов администратора. */
+  halls: Hall[];
   onChanged: (person: ClubPerson) => void;
   onError: (message: string) => void;
 }) {
@@ -365,8 +383,94 @@ function PersonRow({
             })}
           </div>
         )}
+
+        {person.roles.includes('ADMIN') && halls.length > 0 && (
+          <AdminHallsPicker
+            person={person}
+            halls={halls}
+            viewer={{ userId: viewerId, roles: viewerRoles }}
+            onChanged={onChanged}
+            onError={onError}
+          />
+        )}
       </td>
     </tr>
+  );
+}
+
+/**
+ * Залы администратора (решение владельца от 12.10.2026): в «Настройках» и
+ * «Расписании залов» он правит только их. Руководитель отмечает любые,
+ * управляющий — свои; остальным список только виден.
+ */
+function AdminHallsPicker({
+  person,
+  halls,
+  viewer,
+  onChanged,
+  onError,
+}: {
+  person: ClubPerson;
+  halls: Hall[];
+  viewer: ClubActor;
+  onChanged: (person: ClubPerson) => void;
+  onError: (message: string) => void;
+}) {
+  const club = useClubApi();
+  const [pending, setPending] = useState(false);
+
+  function canToggle(hall: Hall): boolean {
+    return (
+      viewer.roles.includes('OWNER') || (viewer.roles.includes('MANAGER') && hall.managerId === viewer.userId)
+    );
+  }
+
+  async function toggle(hallId: string): Promise<void> {
+    const next = person.adminHallIds.includes(hallId)
+      ? person.adminHallIds.filter((id) => id !== hallId)
+      : [...person.adminHallIds, hallId];
+
+    setPending(true);
+
+    try {
+      onChanged(await club.setAdminHalls(person.id, next));
+    } catch (cause) {
+      onError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1" role="group" aria-label={`Залы администратора: ${person.fullName}`}>
+      <span className="mr-0.5 text-[0.75rem] text-text-subtle">Залы:</span>
+      {halls.map((hall) => {
+        const on = person.adminHallIds.includes(hall.id);
+        const locked = !canToggle(hall);
+
+        return (
+          <button
+            key={hall.id}
+            type="button"
+            aria-pressed={on}
+            disabled={pending || locked}
+            title={locked ? 'Отмечают руководитель и управляющий этого зала' : undefined}
+            onClick={() => void toggle(hall.id)}
+            className={cn(
+              'rounded-full border px-2.5 py-0.5 text-[0.75rem] transition-colors disabled:opacity-40',
+              on
+                ? 'border-border-accent bg-surface-accent-soft text-text-accent'
+                : 'border-dashed border-border text-text-muted hover:bg-surface-sunken',
+            )}
+          >
+            {hall.name}
+          </button>
+        );
+      })}
+      {person.adminHallIds.length === 0 && (
+        <span className="text-[0.75rem] text-warning">не отмечены — залы не правит</span>
+      )}
+    </div>
   );
 }
 

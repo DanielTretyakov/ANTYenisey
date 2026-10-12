@@ -27,7 +27,7 @@ import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Tab } from '@/components/ui/Tab';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
-import { rolesInClub } from '@/lib/membership';
+import { actorInClub, rolesInClub } from '@/lib/membership';
 import { OpeningCard } from '@/components/club/OpeningCard';
 import { api, ApiError } from '@/lib/api';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
@@ -93,10 +93,11 @@ export default function ClubPage() {
   const slug = useClubSlug();
   const roles = session.status === 'ready' ? rolesInClub(session.user, slug) : [];
   const allowed = hasAnyRole(roles, MANAGING_ROLES);
-  // Права на устройство клуба (решения от 11.10.2026): деньги и удаление —
-  // руководству, управляющий видит и правит только свои залы. Запрет — на
+  // Права на устройство клуба (решения от 11 и 12.10.2026): деньги и
+  // удаление — руководству, управляющий видит и правит только свои залы,
+  // администратор — отмеченные ему. Запрет — на
   // сервере, здесь — чтобы не предлагать недоступное.
-  const actor = { userId: session.status === 'ready' ? session.user.id : '', roles };
+  const actor = session.status === 'ready' ? actorInClub(session.user, slug) : { userId: '', roles };
 
   useEffect(() => {
     if (session.status === 'anonymous') {
@@ -412,7 +413,7 @@ export default function ClubPage() {
             )}
 
             {myHalls.length === 0 && (
-              <Alert tone="info">За вами пока нет залов — управляющего зала назначает руководитель клуба.</Alert>
+              <Alert tone="info">За вами пока нет залов — их отмечает руководство клуба в «Составе клуба».</Alert>
             )}
 
             {hall && (
