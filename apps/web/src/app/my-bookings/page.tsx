@@ -13,6 +13,7 @@ import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { api, ApiError, clubApi } from '@/lib/api';
 import { cn } from '@/lib/cn';
+import { icsFile } from '@/lib/ics';
 import { cancelButtonLabel, entryPriceLabel, visitFateLabel } from '@/lib/subscriptions';
 import { usePersonSwitch } from '@/lib/usePersonSwitch';
 import { useSession } from '@/lib/useSession';
@@ -305,6 +306,13 @@ function Row({
 
       <span className="text-[0.8125rem] whitespace-nowrap text-text-subtle">{statusOf(entry)}</span>
 
+      {/* В календарь — у предстоящей живой записи (решение от 12.10.2026). */}
+      {entry.status === 'BOOKED' && new Date(entry.startsAt).getTime() > Date.now() && (
+        <Button variant="ghost" size="sm" onClick={() => downloadIcs(entry)}>
+          В календарь
+        </Button>
+      )}
+
       {/* Можно ли отменить, решает сервер: его часы — часы клуба, а после
           начала запись не отменяется, а отмечается. */}
       {entry.cancellable && canCancel && (
@@ -314,6 +322,27 @@ function Row({
       )}
     </div>
   );
+}
+
+/**
+ * Файл .ics записи — календарь телефона или почты откроет его сам. Повторный
+ * импорт обновит событие, а не задвоит: идентификатор — строка записи.
+ */
+function downloadIcs(entry: BookingEntry): void {
+  const file = icsFile({
+    uid: `${entry.entryId}@knt`,
+    title: `${entry.title} · ${entry.club.name}`,
+    startsAt: entry.startsAt,
+    endsAt: entry.endsAt,
+    location: entry.subtitle,
+    url: `${window.location.origin}/my-bookings`,
+  });
+  const link = document.createElement('a');
+
+  link.href = URL.createObjectURL(new Blob([file], { type: 'text/calendar;charset=utf-8' }));
+  link.download = `${entry.title}.ics`.replace(/[\\/:*?"<>|]/g, '');
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
 function Skeleton() {

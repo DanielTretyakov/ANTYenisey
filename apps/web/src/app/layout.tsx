@@ -11,6 +11,10 @@ export const metadata: Metadata = {
   },
   description:
     'Найдите клуб настольного тенниса в своём городе: запись на занятия и турниры, аренда стола и робота',
+  // Значок iPhone для экрана «Домой» — во весь квадрат, углы скругляет система.
+  icons: { apple: '/icons/apple-touch-icon.png' },
+  // Открытый с экрана «Домой» — как приложение, без строки браузера.
+  appleWebApp: { capable: true, title: 'КНТ', statusBarStyle: 'default' },
 };
 
 export const viewport: Viewport = {
