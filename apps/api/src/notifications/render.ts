@@ -391,7 +391,7 @@ export function renderNotification(type: string, payload: unknown, context: Rend
             p.reason ? `Причина: ${p.reason}` : null,
             p.booked > 0 ? `Записавшимся (${p.booked}) — полный возврат и сообщение.` : 'Записавшихся не было.',
           ),
-          link: { label: 'Мои группы', url: `${context.webOrigin}/clubs/${p.slug}/coach` },
+          link: { label: 'Мои группы', url: `${context.webOrigin}/clubs/${p.slug}/coach/groups` },
         };
       }
 
@@ -399,7 +399,7 @@ export function renderNotification(type: string, payload: unknown, context: Rend
 
       return {
         text: lines(head, `Занятие «${p.title}»`, when(p.startsAt, p.timezone), `Записано ${p.booked} из ${p.capacity}.`),
-        link: { label: 'Мои группы', url: `${context.webOrigin}/clubs/${p.slug}/coach` },
+        link: { label: 'Мои группы', url: `${context.webOrigin}/clubs/${p.slug}/coach/groups` },
       };
     }
 
@@ -411,7 +411,7 @@ export function renderNotification(type: string, payload: unknown, context: Rend
 
       return {
         text: lines(`Сегодня у вас в клубе ${quoted(p.club)}:`, ...rows),
-        link: { label: 'Мои группы', url: `${context.webOrigin}/clubs/${p.slug}/coach` },
+        link: { label: 'Мои группы', url: `${context.webOrigin}/clubs/${p.slug}/coach/groups` },
       };
     }
 

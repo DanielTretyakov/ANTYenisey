@@ -249,7 +249,7 @@ describe('сообщения персоналу', () => {
 
     assert.match(text, /^Запись в группу · Иванов И\./);
     assert.match(text, /Записано 8 из 10\./);
-    assert.equal(link?.url, 'https://ant-yenisey.ru/clubs/yenisey/coach');
+    assert.equal(link?.url, 'https://ant-yenisey.ru/clubs/yenisey/coach/groups');
   });
 
   it('тренеру утром: занятия дня по местному времени', () => {
