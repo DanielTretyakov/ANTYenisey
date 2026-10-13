@@ -309,9 +309,16 @@ async function removeProbeRooms(): Promise<void> {
     where: { clubName: { startsWith: PROBE_APPLICATION_PREFIX } },
   });
 
+  // Письма смоука без учётки (заявителям) — по адресу: письма учёток ушли
+  // каскадом вместе с ними. Иначе очередь писем росла бы с каждым прогоном.
+  const letters = await prisma.emailMessage.deleteMany({
+    where: { userId: null, to: { in: ['zayavka@example.com', 'bot@example.com'] } },
+  });
+
   console.log(
     `Убрано залов смоука: ${halls.count}, столов: ${tables.count}, тарифов: ${plans.count}, новостей: ${news.count}, ` +
-      `публикаций клуба: ${posts.count}, типов спарринга: ${sparringTypes.count}, заявок клубов: ${applications.count}`,
+      `публикаций клуба: ${posts.count}, типов спарринга: ${sparringTypes.count}, заявок клубов: ${applications.count}, ` +
+      `писем заявителям: ${letters.count}`,
   );
 }
 

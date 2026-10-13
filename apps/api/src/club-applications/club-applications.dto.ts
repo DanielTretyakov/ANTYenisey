@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { Equals, IsEmail, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { Equals, IsBoolean, IsEmail, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 import {
   CLUB_APPLICATION_STATUSES,
   type ClubApplicationRequest,
@@ -72,6 +72,11 @@ export class ClubApplicationDto implements ClubApplicationRequest {
   /** Имя и телефон заявителя — персональные данные: без согласия не принимаем. */
   @Equals(true, { message: 'consent: нужно согласие на обработку персональных данных' })
   consent: true;
+
+  /** Новости КНТ для клубов на почту — необязательная галочка (12.10.2026). */
+  @IsOptional()
+  @IsBoolean()
+  newsConsent?: boolean;
 
   /** Ловушка для ботов — см. `isBotSubmission`. */
   @IsOptional()

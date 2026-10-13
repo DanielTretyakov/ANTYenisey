@@ -8,6 +8,7 @@ import { sendAfterFor } from '../notifications/notification-rules';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { ClubApplicationPayload } from '../notifications/render';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
 import { blankToNull, contactsProblem, isBotSubmission } from './application-rules';
 import type { ClubApplicationDto, ClubApplicationUpdateDto } from './club-applications.dto';
 
@@ -40,6 +41,7 @@ export class ClubApplicationsService {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
     private readonly config: ConfigService<Env, true>,
+    private readonly mail: MailService,
   ) {}
 
   /**
@@ -77,9 +79,25 @@ export class ClubApplicationsService {
           halls: dto.halls ?? null,
           tables: dto.tables ?? null,
           comment: blankToNull(dto.comment),
+          // Согласие на новости — момент ставит сервер, только с почтой.
+          newsConsentAt: dto.newsConsent && blankToNull(dto.email) ? now : null,
         },
         select: { id: true },
       });
+
+      // «Заявка получена» — заявителю на ту почту, что он вписал (12.10.2026).
+      const email = blankToNull(dto.email);
+
+      if (email) {
+        await this.mail.enqueue(tx, [
+          {
+            to: email,
+            template: 'APPLICATION_RECEIVED',
+            payload: { contactName: dto.contactName, clubName: dto.clubName },
+            dedupeKey: `application:${created.id}`,
+          },
+        ]);
+      }
 
       const owners = await tx.user.findMany({
         where: { platformRole: PlatformRole.OWNER, deactivatedAt: null },

@@ -6657,10 +6657,22 @@ async function platformBilling() {
   });
   check('реквизиты сохранены', 200, r.status);
 
+  // Письма о деньгах уходят только на подтверждённую почту (12.10.2026).
+  const mailOn = (await call('/auth/mail-status')).body?.enabled === true;
+  if (mailOn) await call('/dev/mail/verified', { method: 'POST', json: { email: process.env.SMOKE_ADMIN_EMAIL } });
+
   r = await asAdmin(`/clubs/${slug}/billing/invoice`, { method: 'POST', json: { planId: year?.id } });
   check('счёт выставлен', 201, r.status);
   const invoice = (r.body?.payments ?? []).find((payment) => payment.method === 'INVOICE' && payment.status === 'PENDING');
   assert('счёт с номером и суммой года', typeof invoice?.invoiceNumber === 'number' && invoice?.amount === 5000000);
+
+  if (mailOn) {
+    await call('/dev/mail/dispatch', { method: 'POST' });
+    const letters = (await call(`/dev/mail/sent?to=${encodeURIComponent(process.env.SMOKE_ADMIN_EMAIL)}`)).body ?? [];
+    const letter = letters.find((item) => item.subject.startsWith(`Счёт № ${invoice?.invoiceNumber} на подписку КНТ`));
+    assert('счёт пришёл руководителю письмом', Boolean(letter));
+    assert('со ссылкой на документ', (letter?.text ?? '').includes(`/billing/documents/INVOICE/${invoice?.id}`));
+  }
 
   r = await asAdmin(`/clubs/${slug}/billing/documents/INVOICE/${invoice?.id}`);
   check('счёт открывается для печати', 200, r.status);
@@ -6807,6 +6819,18 @@ async function clubApplications() {
 
   r = await post('/club-applications', form({ clubName: `${clubName} бот`, email: 'bot@example.com', website: 'https://spam.example' }));
   check('боту — тот же ответ, что человеку', 201, r.status);
+
+  // «Заявка получена» — заявителю на почту (12.10.2026); боту — ничего.
+  if ((await call('/auth/mail-status')).body?.enabled) {
+    await call('/dev/mail/dispatch', { method: 'POST' });
+    const toApplicant = (await call('/dev/mail/sent?to=zayavka@example.com')).body ?? [];
+    assert(
+      'заявителю пришло «заявка получена» (адрес — строчными)',
+      toApplicant.some((letter) => letter.subject === `Заявка клуба «${clubName}» получена`),
+    );
+    const toBot = (await call('/dev/mail/sent?to=bot@example.com')).body ?? [];
+    assert('боту письма нет', !toBot.some((letter) => letter.subject.includes(clubName)));
+  }
 
   r = await call('/platform/club-applications');
   check('список заявок без входа закрыт', 401, r.status);

@@ -24,6 +24,8 @@ import { ClientNotifier } from '../notifications/client-notifier.service';
 import { clubTimezone } from '../notifications/clock';
 import type { PlatformBillingPayload } from '../notifications/render';
 import { StaffNotifier } from '../notifications/staff-notifier.service';
+import type { LetterTemplate, SubscriptionLetterPayload } from '../mail/letters';
+import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { billingStep, graceUntil, monthlyActs, paidPeriod, TRIAL_DAYS, type BillingStep } from './billing-rules';
@@ -81,6 +83,14 @@ const PAYMENT_SELECT = {
  * исполнение: платежи, акты, сообщения руководителю и приостановка, которая
  * отменяет все будущие записи клуба с полным возвратом.
  */
+/** Какое письмо руководителям — рядом с каким сообщением о подписке. */
+const LETTER_VARIANT: Partial<Record<NotificationType, SubscriptionLetterPayload['variant']>> = {
+  SUBSCRIPTION_REMINDER: 'REMINDER',
+  SUBSCRIPTION_PAST_DUE: 'PAST_DUE',
+  SUBSCRIPTION_SUSPENDED: 'SUSPENDED',
+  SUBSCRIPTION_PAID: 'PAID',
+};
+
 @Injectable()
 export class BillingService {
   private readonly logger = new Logger(BillingService.name);
@@ -92,6 +102,7 @@ export class BillingService {
     private readonly clients: ClientNotifier,
     private readonly subscriptions: SubscriptionsService,
     private readonly config: ConfigService<Env, true>,
+    private readonly mail: MailService,
   ) {}
 
   // --- Страница руководителя ------------------------------------------------
@@ -237,7 +248,7 @@ export class BillingService {
           });
           const last = await tx.platformPayment.aggregate({ _max: { invoiceNumber: true } });
 
-          await tx.platformPayment.create({
+          const invoice = await tx.platformPayment.create({
             data: {
               tenantId,
               planId: plan.id,
@@ -245,7 +256,23 @@ export class BillingService {
               method: 'INVOICE',
               invoiceNumber: (last._max.invoiceNumber ?? 0) + 1,
             },
+            select: { id: true, invoiceNumber: true, amount: true },
           });
+
+          // Счёт — письмом руководителям (12.10.2026): бухгалтерии клуба
+          // нужен документ, а не экран.
+          await this.emailOwners(tx, tenantId, (club) => ({
+            template: 'BILLING_DOCUMENT',
+            payload: {
+              kind: 'INVOICE',
+              club: club.name,
+              slug: club.slug,
+              documentId: invoice.id,
+              number: String(invoice.invoiceNumber),
+              amount: invoice.amount,
+            },
+            dedupeKey: `invoice:${invoice.id}`,
+          }));
         });
 
         return this.view(tenantId);
@@ -433,6 +460,11 @@ export class BillingService {
       select: SUBSCRIPTION_SELECT,
     });
     const steps: Record<string, number> = {};
+
+    // Акты за закончившиеся месяцы — письмом руководителям (12.10.2026).
+    // Акты заводятся сразу на весь оплаченный срок, а письмо — когда месяц
+    // прошёл; повтор прохода второго письма не шлёт (ключ `act:<id>`).
+    await this.emailFinishedActs(now, onlyTenantId);
 
     for (const sub of subs) {
       const step = billingStep(
@@ -781,6 +813,71 @@ export class BillingService {
     };
 
     await this.staff.toOwners(this.prisma, sub.tenantId, type, payload, dedupeKey, now);
+
+    // То же письмом (12.10.2026): юрлицу о деньгах нужно и на почту.
+    const variant = LETTER_VARIANT[type];
+
+    if (variant) {
+      await this.emailOwners(this.prisma, sub.tenantId, () => ({
+        template: 'SUBSCRIPTION',
+        payload: { variant, ...(payload as unknown as Record<string, unknown>) } as Prisma.InputJsonValue,
+        dedupeKey: `email:${dedupeKey}`,
+      }));
+    }
+  }
+
+  /**
+   * Письмо руководителям клуба — каждому на его почту. Подтверждённость
+   * проверяет отправщик: письма о деньгах уходят только на подтверждённую.
+   */
+  private async emailOwners(
+    db: PrismaService | Prisma.TransactionClient,
+    tenantId: string,
+    letter: (club: { name: string; slug: string }) => { template: LetterTemplate; payload: Prisma.InputJsonValue; dedupeKey: string },
+  ): Promise<void> {
+    const club = await db.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { name: true, slug: true } });
+    const owners = await db.tenantMembership.findMany({
+      where: { tenantId, roles: { has: 'OWNER' }, deactivatedAt: null, user: { deactivatedAt: null, anonymizedAt: null } },
+      select: { user: { select: { id: true, email: true } } },
+    });
+    const { template, payload, dedupeKey } = letter(club);
+
+    await this.mail.enqueue(
+      db,
+      owners.map((owner) => ({ to: owner.user.email, userId: owner.user.id, template, payload, dedupeKey })),
+    );
+  }
+
+  /** Акты, чей месяц кончился за последнюю неделю, — письмом руководителям. */
+  private async emailFinishedActs(now: Date, onlyTenantId: string | null): Promise<void> {
+    const acts = await this.prisma.platformAct.findMany({
+      where: {
+        periodTo: { lte: now, gt: new Date(now.getTime() - 7 * 24 * 60 * 60_000) },
+        ...(onlyTenantId ? { tenantId: onlyTenantId } : {}),
+      },
+      select: { id: true, tenantId: true, number: true, amount: true, periodFrom: true },
+    });
+
+    for (const act of acts) {
+      const zone = await clubTimezone(this.prisma, act.tenantId);
+      const period = new Intl.DateTimeFormat('ru-RU', { timeZone: zone, month: 'long', year: 'numeric' })
+        .format(act.periodFrom)
+        .replace(/\s*г\.$/, '');
+
+      await this.emailOwners(this.prisma, act.tenantId, (club) => ({
+        template: 'BILLING_DOCUMENT',
+        payload: {
+          kind: 'ACT',
+          club: club.name,
+          slug: club.slug,
+          documentId: act.id,
+          number: String(act.number),
+          amount: act.amount,
+          period,
+        },
+        dedupeKey: `act:${act.id}`,
+      }));
+    }
   }
 
   private seller(): PlatformSeller | null {

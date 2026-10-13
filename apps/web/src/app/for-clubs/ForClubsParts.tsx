@@ -6,6 +6,7 @@ import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { CityCombobox } from '@/components/ui/CityCombobox';
 import { ConsentCheckbox } from '@/components/ui/ConsentCheckbox';
+import { Toggle } from '@/components/ui/Toggle';
 import { Field, inputClassName } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
@@ -78,6 +79,8 @@ function count(value: FormDataEntryValue | null): number | null {
 export function ApplicationForm() {
   const [city, setCity] = useState<City | null>(null);
   const [consent, setConsent] = useState(false);
+  // Новости КНТ для клубов — отдельная неотмеченная галочка (12.10.2026, 38-ФЗ).
+  const [newsConsent, setNewsConsent] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
@@ -107,6 +110,7 @@ export function ApplicationForm() {
         tables: count(form.get('tables')),
         comment: String(form.get('comment') ?? '').trim() || null,
         consent: true,
+        newsConsent,
         website: String(form.get('website') ?? ''),
       });
       setSent(true);
@@ -190,6 +194,13 @@ export function ApplicationForm() {
       </div>
 
       <ConsentCheckbox checked={consent} onChange={setConsent} by="application" />
+
+      <Toggle
+        label="Присылать новости КНТ для клубов на почту"
+        hint="Новые возможности и тарифы — не чаще пары писем в месяц. Отписаться можно в каждом письме."
+        checked={newsConsent}
+        onChange={(event) => setNewsConsent(event.target.checked)}
+      />
 
       <Button type="submit" pending={pending} disabled={!consent} size="lg">
         {pending ? 'Отправляю…' : 'Отправить заявку'}

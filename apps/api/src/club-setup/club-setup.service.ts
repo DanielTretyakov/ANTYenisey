@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { Prisma, Role } from '@yenisey/database';
 import type { ClubCreateRequest, ClubOpening } from '@yenisey/types';
 import { BillingService } from '../billing/billing.service';
+import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { openingProblems, slugProblem } from './opening-rules';
 
@@ -26,6 +27,7 @@ export class ClubSetupService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly billing: BillingService,
+    private readonly mail: MailService,
   ) {}
 
   /** Владелец платформы заводит клуб-черновик. */
@@ -46,7 +48,7 @@ export class ClubSetupService {
       this.prisma.city.findUnique({ where: { id: dto.cityId }, select: { id: true } }),
       this.prisma.user.findFirst({
         where: { email: dto.ownerEmail.trim().toLowerCase(), deactivatedAt: null, anonymizedAt: null },
-        select: { id: true },
+        select: { id: true, email: true, fullName: true },
       }),
       dto.applicationId
         ? this.prisma.clubApplication.findUnique({ where: { id: dto.applicationId }, select: { id: true, tenantId: true } })
@@ -91,6 +93,17 @@ export class ClubSetupService {
             data: { tenantId: tenant.id, status: 'CONNECTED' },
           });
         }
+
+        // «Клуб заведён — как открыть» руководителю (12.10.2026).
+        await this.mail.enqueue(tx, [
+          {
+            to: owner.email,
+            userId: owner.id,
+            template: 'CLUB_CREATED',
+            payload: { name: owner.fullName, clubName: name, slug: tenant.slug },
+            dedupeKey: `club-created:${tenant.id}`,
+          },
+        ]);
 
         return { slug: tenant.slug };
       });

@@ -1,7 +1,8 @@
-import { Controller, Get, Header, NotFoundException, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Header, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Public } from '../auth/decorators/public.decorator';
 import { webOrigin, type Env } from '../config/env';
+import { PrismaService } from '../prisma/prisma.service';
 import { escapeHtml, renderLetter } from './letters';
 import { LETTER_SAMPLES as SAMPLES } from './letter-samples';
 import { normalizeEmail } from './mail-rules';
@@ -20,6 +21,7 @@ export class DevMailController {
     private readonly transport: MailTransport,
     private readonly dispatcher: MailDispatcher,
     private readonly config: ConfigService<Env, true>,
+    private readonly prisma: PrismaService,
   ) {}
 
   /** Что ушло на этот адрес, по порядку. */
@@ -49,6 +51,22 @@ export class DevMailController {
     }
 
     return total;
+  }
+
+  /**
+   * Отметить почту учётки подтверждённой — смоуку: письма о подписке уходят
+   * только на подтверждённую, а учётке смоука ссылку из письма не открыть.
+   */
+  @Post('verified')
+  async verified(@Body() body: { email?: string }): Promise<{ updated: number }> {
+    this.fake();
+
+    const { count } = await this.prisma.user.updateMany({
+      where: { email: { equals: normalizeEmail(body.email ?? ''), mode: 'insensitive' }, emailVerifiedAt: null },
+      data: { emailVerifiedAt: new Date() },
+    });
+
+    return { updated: count };
   }
 
   /** Все письма на пробных данных — для владельца и для глаз. */
