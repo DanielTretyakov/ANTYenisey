@@ -24,6 +24,8 @@ import type {
   UpdateProfileRequest,
 } from '@yenisey/types';
 import { CHILD_UNTIL_AGE, fullYears } from '@yenisey/types';
+import { MailService } from '../mail/mail.service';
+import { MailTokensService } from '../mail/mail-tokens.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AttemptLimiter, attemptKey } from './attempt-limiter';
 import { formatBirthDate, parseBirthDate } from './birth-date';
@@ -53,6 +55,8 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService<Env, true>,
     private readonly attempts: AttemptLimiter,
+    private readonly mail: MailService,
+    private readonly mailTokens: MailTokensService,
   ) {}
 
   /**
@@ -115,6 +119,10 @@ export class AuthService {
             data: { userId: created.id, tenantId: tenant.id },
           });
         }
+
+        // Письмо подтверждения — оно же приветствие (12.10.2026). Той же
+        // транзакцией: не завелась учётка — нет и письма.
+        await this.mailTokens.sendVerification(tx, created);
 
         return created;
       });
@@ -253,15 +261,144 @@ export class AuthService {
 
     const passwordHash = await hashPassword(dto.newPassword);
 
-    await this.prisma.$transaction([
-      this.prisma.user.update({ where: { id: userId }, data: { passwordHash } }),
-      this.prisma.refreshToken.updateMany({
-        where: { userId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      }),
-    ]);
+    await this.prisma.$transaction(async (tx) => {
+      const changed = await tx.user.update({
+        where: { id: userId },
+        data: { passwordHash },
+        select: { id: true, email: true, fullName: true },
+      });
+      await tx.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+      await this.passwordChangedLetter(tx, changed);
+    });
 
     return this.issueSession(await this.publicUser(userId), context);
+  }
+
+  /** Работает ли почта — веб по нему решает, предлагать ли «Забыли пароль?». */
+  mailStatus(): { enabled: boolean } {
+    return { enabled: this.mail.enabled };
+  }
+
+  /**
+   * Подтверждение почты по ссылке из письма. Открыто без входа: письмо
+   * открывают и на телефоне, где человек не вошёл. Ссылка годится одна и
+   * только для той почты, на которую ушла.
+   */
+  async verifyEmail(token: string): Promise<void> {
+    const confirmed = await this.prisma.$transaction(async (tx) => {
+      const consumed = await this.mailTokens.consume(tx, token, 'VERIFY');
+
+      if (!consumed) return false;
+
+      await tx.user.updateMany({
+        where: { id: consumed.userId, emailVerifiedAt: null },
+        data: { emailVerifiedAt: new Date() },
+      });
+
+      return true;
+    });
+
+    if (!confirmed) {
+      throw new BadRequestException('Ссылка устарела или уже использована — отправьте письмо ещё раз из кабинета');
+    }
+  }
+
+  /** Письмо подтверждения ещё раз — из кабинета. */
+  async resendVerification(userId: string): Promise<{ sent: boolean }> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deactivatedAt: null, anonymizedAt: null },
+      select: { id: true, email: true, fullName: true, emailVerifiedAt: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Сессия недействительна, войдите заново');
+    }
+
+    if (user.emailVerifiedAt) {
+      throw new ConflictException('Почта уже подтверждена');
+    }
+
+    if (!this.mail.enabled) {
+      throw new ConflictException('Почта сервиса пока не подключена — подтвердить адрес сейчас нельзя');
+    }
+
+    return { sent: await this.mailTokens.sendVerification(this.prisma, user) };
+  }
+
+  /**
+   * «Забыли пароль?». Ответ ОДИНАКОВЫЙ при любом исходе — есть учётка или
+   * нет, отправили письмо или минута ещё не прошла: иначе форма стала бы
+   * способом узнать, кто зарегистрирован на платформе (как заявка родителя).
+   */
+  async forgotPassword(email: string): Promise<void> {
+    const user = await this.prisma.user.findFirst({
+      where: { email: { equals: email.trim(), mode: 'insensitive' }, deactivatedAt: null, anonymizedAt: null },
+      select: { id: true, email: true, fullName: true },
+    });
+
+    if (user) {
+      await this.mailTokens.sendPasswordReset(this.prisma, user);
+    }
+  }
+
+  /**
+   * Новый пароль по ссылке из письма — одной транзакцией: ссылка погашена,
+   * пароль сменён, все прежние сессии погашены, почта считается
+   * подтверждённой (ссылку получил её владелец). Человек сразу входит.
+   */
+  async resetPassword(token: string, password: string, context: SessionContext): Promise<IssuedSession> {
+    const passwordHash = await hashPassword(password);
+    const now = new Date();
+
+    const userId = await this.prisma.$transaction(async (tx) => {
+      const consumed = await this.mailTokens.consume(tx, token, 'RESET', now);
+
+      if (!consumed) return null;
+
+      const user = await tx.user.update({
+        where: { id: consumed.userId },
+        data: { passwordHash },
+        select: { id: true, email: true, fullName: true, emailVerifiedAt: true },
+      });
+
+      if (!user.emailVerifiedAt) {
+        await tx.user.update({ where: { id: user.id }, data: { emailVerifiedAt: now } });
+      }
+
+      await tx.refreshToken.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: now } });
+      await this.passwordChangedLetter(tx, user, now);
+
+      return user.id;
+    });
+
+    if (!userId) {
+      throw new BadRequestException('Ссылка устарела или уже использована — запросите новую');
+    }
+
+    this.attempts.reset(attemptKey(`password:${userId}`));
+
+    return this.issueSession(await this.publicUser(userId), context);
+  }
+
+  /** «Пароль изменён» — если это были не вы, восстановите пароль. */
+  private async passwordChangedLetter(
+    tx: Prisma.TransactionClient,
+    user: { id: string; email: string; fullName: string },
+    now = new Date(),
+  ): Promise<void> {
+    await this.mail.enqueue(tx, [
+      {
+        to: user.email,
+        userId: user.id,
+        template: 'PASSWORD_CHANGED',
+        payload: {
+          name: user.fullName,
+          at: now.toISOString(),
+          timezone: this.config.get('PLATFORM_TIMEZONE', { infer: true }),
+        },
+        dedupeKey: `password-changed:${now.getTime()}`,
+      },
+    ]);
   }
 
   /**
@@ -354,6 +491,7 @@ export class AuthService {
         birthDate: true,
         platformRole: true,
         personalDataConsentAt: true,
+        emailVerifiedAt: true,
         memberships: {
           // Отключённые в клубе не показываются: человек этим клубом больше
           // не пользуется, и держать его в шапке незачем.
@@ -386,6 +524,7 @@ export class AuthService {
       })),
       platformOwner: user.platformRole === 'OWNER',
       consentAt: user.personalDataConsentAt?.toISOString() ?? null,
+      emailVerified: user.emailVerifiedAt !== null,
     };
   }
 

@@ -2566,6 +2566,7 @@ async function main() {
   await clubEntries();
   await clubSetup();
   await settingsRights();
+  await serviceMail();
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
@@ -7519,4 +7520,88 @@ async function settingsRights() {
     r = await asOwner(`${club}/halls/${own.id}/manager`, { method: 'PUT', json: { managerId: null } });
     check('управляющий снят с зала', 200, r.status);
   }
+}
+
+/**
+ * Служебные письма (решения владельца от 12.10.2026): подтверждение почты,
+ * «забыли пароль», новый пароль по ссылке, «пароль изменён». Через
+ * поддельную почту `/dev/mail/*`: в разработке без провайдера письма копятся
+ * в памяти API, ключ ссылки достаётся из текста письма.
+ */
+async function serviceMail() {
+  console.log('\n=== 56. Служебные письма');
+
+  const status = await call('/auth/mail-status');
+  check('состояние почты открыто', 200, status.status);
+
+  if (status.body?.enabled !== true) {
+    console.log('     почта выключена (production без SMTP_URL) — раздел пропущен');
+    return;
+  }
+
+  const dispatch = () => call('/dev/mail/dispatch', { method: 'POST' });
+  const lettersTo = async (email) => (await call(`/dev/mail/sent?to=${encodeURIComponent(email)}`)).body ?? [];
+  const tokenFrom = (letter, page) => new RegExp(`/${page}[?]token=([A-Za-z0-9_-]+)`).exec(letter?.text ?? '')?.[1] ?? null;
+
+  // --- Регистрация → письмо подтверждения.
+  const account = registration({ lastName: 'Почтовый' });
+  let r = await post('/auth/register', account);
+  check('регистрация', 201, r.status);
+  const access = r.body?.accessToken ?? '';
+  const asUser = (path, options = {}) =>
+    call(path, { ...options, headers: { Authorization: `Bearer ${access}`, ...(options.headers ?? {}) } });
+  const firstRefresh = r.body?.refreshToken;
+  assert('сразу после регистрации почта не подтверждена', r.body?.user?.emailVerified === false);
+
+  await dispatch();
+  let letters = await lettersTo(account.email);
+  const welcome = letters.find((letter) => letter.subject === 'Подтвердите почту в КНТ');
+  assert('пришло письмо подтверждения', Boolean(welcome));
+  assert('у письма есть HTML и текстовая версия', /<table/.test(welcome?.html ?? '') && /Подтвердить почту: http/.test(welcome?.text ?? ''));
+  const verifyToken = tokenFrom(welcome, 'verify-email');
+
+  r = await post('/auth/email/verify', { token: 'net-takoy-ssylki' });
+  check('чужая ссылка подтверждения — отказ', 400, r.status);
+  r = await post('/auth/email/verify', { token: verifyToken });
+  check('почта подтверждена по ссылке', 204, r.status);
+  r = await post('/auth/email/verify', { token: verifyToken });
+  check('та же ссылка второй раз — отказ', 400, r.status);
+  r = await asUser('/auth/me');
+  assert('в профиле почта подтверждена', r.body?.emailVerified === true);
+  r = await asUser('/auth/email/resend', { method: 'POST' });
+  check('подтверждённой почте письмо ещё раз не шлётся', 409, r.status);
+
+  // --- «Забыли пароль?» — ответ одинаковый.
+  const unknown = await post('/auth/password/forgot', { email: `net-takogo-${RUN}@example.com` });
+  r = await post('/auth/password/forgot', { email: account.email.toUpperCase() });
+  check('«забыли пароль» отвечает 202', 202, r.status);
+  assert('и одинаково для чужой и своей почты', unknown.status === r.status && JSON.stringify(unknown.body) === JSON.stringify(r.body));
+  r = await post('/auth/password/forgot', { email: account.email });
+  check('повтор через секунду — тот же ответ', 202, r.status);
+
+  await dispatch();
+  letters = await lettersTo(account.email);
+  const resets = letters.filter((letter) => letter.subject === 'Восстановление пароля в КНТ');
+  assert('пришло одно письмо со ссылкой — не чаще раза в минуту', resets.length === 1);
+  const resetToken = tokenFrom(resets[0], 'reset-password');
+
+  r = await post('/auth/password/reset', { token: resetToken, password: 'korotk' });
+  check('короткий новый пароль отклонён', 400, r.status);
+  const newPassword = `${PASSWORD}-novyi`;
+  r = await post('/auth/password/reset', { token: resetToken, password: newPassword });
+  check('новый пароль по ссылке — и сразу вход', 200, r.status);
+  assert('выдана новая сессия', typeof r.body?.accessToken === 'string');
+
+  r = await post('/auth/refresh', { refreshToken: firstRefresh });
+  check('прежняя сессия погашена', 401, r.status);
+  r = await post('/auth/login', { email: account.email, password: PASSWORD });
+  check('старый пароль больше не подходит', 401, r.status);
+  r = await post('/auth/login', { email: account.email, password: newPassword });
+  check('новый подходит', 200, r.status);
+  r = await post('/auth/password/reset', { token: resetToken, password: `${newPassword}-2` });
+  check('ссылка восстановления второй раз — отказ', 400, r.status);
+
+  await dispatch();
+  letters = await lettersTo(account.email);
+  assert('пришло «пароль изменён»', letters.some((letter) => letter.subject === 'Пароль в КНТ изменён'));
 }

@@ -12,7 +12,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
-import type { AccessTokenPayload, AuthResponse, PublicUser } from '@yenisey/types';
+import { Throttle } from '@nestjs/throttler';
+import type { AccessTokenPayload, AuthResponse, MailStatus, PublicUser } from '@yenisey/types';
 import { AuthService, type IssuedSession, type SessionContext } from './auth.service';
 import {
   clearedCookieOptions,
@@ -22,7 +23,7 @@ import {
   wantsBodyTransport,
 } from './cookies';
 import { LoginDto } from './dto/login.dto';
-import { ChangePasswordDto, UpdateProfileDto } from './dto/profile.dto';
+import { ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto, UpdateProfileDto, VerifyEmailDto } from './dto/profile.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { RegisterDto } from './dto/register.dto';
 import { parseDuration } from './tokens';
@@ -130,6 +131,55 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthResponse> {
     const session = await this.auth.changePassword(user.sub, dto, sessionContext(request));
+    return this.deliver(session, request, response);
+  }
+
+  /** Работает ли почта: без неё веб не предлагает «Забыли пароль?». */
+  @Public()
+  @Get('mail-status')
+  mailStatus(): MailStatus {
+    return this.auth.mailStatus();
+  }
+
+  /** Подтверждение почты по ссылке из письма — без входа. */
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post('email/verify')
+  async verifyEmail(@Body() dto: VerifyEmailDto): Promise<void> {
+    await this.auth.verifyEmail(dto.token);
+  }
+
+  /** Письмо подтверждения ещё раз. */
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('email/resend')
+  resendVerification(@CurrentUser() user: AccessTokenPayload): Promise<{ sent: boolean }> {
+    return this.auth.resendVerification(user.sub);
+  }
+
+  /** «Забыли пароль?» — 202 при любом исходе. */
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Post('password/forgot')
+  async forgotPassword(@Body() dto: ForgotPasswordDto): Promise<{ ok: true }> {
+    await this.auth.forgotPassword(dto.email);
+
+    return { ok: true };
+  }
+
+  /** Новый пароль по ссылке из письма — и сразу вход. */
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('password/reset')
+  async resetPassword(
+    @Body() dto: ResetPasswordDto,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<AuthResponse> {
+    const session = await this.auth.resetPassword(dto.token, dto.password, sessionContext(request));
     return this.deliver(session, request, response);
   }
 

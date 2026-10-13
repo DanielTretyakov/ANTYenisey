@@ -4,6 +4,7 @@ import type { Env } from '../config/env';
 import { DevMailController } from './dev-mail.controller';
 import { MailDispatcher } from './mail-dispatcher.job';
 import { MailService } from './mail.service';
+import { MailTokensService } from './mail-tokens.service';
 import { DisabledMailTransport, FakeMailTransport, LiveSmtpTransport, MailTransport } from './mail.transport';
 
 /**
@@ -34,8 +35,9 @@ import { DisabledMailTransport, FakeMailTransport, LiveSmtpTransport, MailTransp
       },
     },
     MailService,
+    MailTokensService,
     MailDispatcher,
   ],
-  exports: [MailService],
+  exports: [MailService, MailTokensService],
 })
 export class MailModule {}

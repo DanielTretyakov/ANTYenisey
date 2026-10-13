@@ -8,6 +8,7 @@ import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Field } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
+import { useMailEnabled } from '@/lib/mailStatus';
 import { registerHref, safeNext } from '@/lib/next';
 import { saveSession } from '@/lib/session';
 
@@ -19,6 +20,8 @@ export default function LoginPage() {
   // сюда анонима и ждут его обратно. Из адреса в эффекте, а не через
   // `useSearchParams`: тому нужна граница Suspense на всю страницу.
   const [next, setNext] = useState<string | null>(null);
+  // «Забыли пароль?» — только когда почта сервиса работает (12.10.2026).
+  const mailEnabled = useMailEnabled();
 
   useEffect(() => {
     setNext(safeNext(new URLSearchParams(window.location.search).get('next')));
@@ -71,6 +74,14 @@ export default function LoginPage() {
           autoComplete="current-password"
           required
         />
+
+        {mailEnabled && (
+          <p className="-mt-2 mb-3 text-right text-[0.875rem]">
+            <Link href="/forgot-password" className="text-text-accent hover:underline">
+              Забыли пароль?
+            </Link>
+          </p>
+        )}
 
         <Button type="submit" pending={pending} fullWidth size="lg" className="mt-2">
           {pending ? 'Проверяю…' : 'Войти'}

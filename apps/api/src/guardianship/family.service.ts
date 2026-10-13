@@ -20,6 +20,7 @@ import { formatBirthDate, parseBirthDate } from '../auth/birth-date';
 import { joinFullName } from '../auth/full-name';
 import { hashPassword } from '../auth/password';
 import type { AccountDto } from '../auth/dto/register.dto';
+import { MailTokensService } from '../mail/mail-tokens.service';
 import { ClientNotifier } from '../notifications/client-notifier.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -74,6 +75,7 @@ export class FamilyService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifier: ClientNotifier,
+    private readonly mailTokens: MailTokensService,
   ) {}
 
   /** Дети, которых человек ведёт прямо сейчас. Шестнадцатилетние из списка уходят сами. */
@@ -149,6 +151,10 @@ export class FamilyService {
           },
           select: { id: true, fullName: true, email: true, birthDate: true },
         });
+
+        // Подтверждение почты ребёнка — письмом на ту почту, что вписал
+        // родитель (12.10.2026): часто это почта самого родителя.
+        await this.mailTokens.sendVerification(tx, created);
 
         const guardianship = await tx.guardianship.create({
           data: {

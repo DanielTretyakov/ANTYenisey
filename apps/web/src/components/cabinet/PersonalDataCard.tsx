@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import type { PublicUser } from '@yenisey/types';
 import { PhoneField } from '@/components/PhoneField';
+import { EmailVerifyNotice } from '@/components/auth/EmailVerifyNotice';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -158,9 +159,11 @@ function ReadOnlyData({ user }: { user: PublicUser }) {
  */
 function FixedFacts({ user }: { user: PublicUser }) {
   return (
+    <>
+    <EmailVerifyNotice user={user} className="mt-2" />
     <div className="mt-2 mb-4 rounded-control border border-border bg-surface-sunken px-4 py-3.5">
       <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
-        <Fact label="Электронная почта" value={user.email} />
+        <Fact label="Электронная почта" value={user.emailVerified ? `${user.email} · подтверждена` : user.email} />
         <Fact label="Дата рождения" value={formatBirthDate(user.birthDate)} />
         <Fact
           label="Согласие на обработку данных"
@@ -175,6 +178,7 @@ function FixedFacts({ user }: { user: PublicUser }) {
         Почта — ваш логин, дата рождения решает правила до 14 лет. Их меняет администратор клуба.
       </p>
     </div>
+    </>
   );
 }
 

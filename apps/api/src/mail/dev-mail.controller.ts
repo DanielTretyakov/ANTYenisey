@@ -30,12 +30,25 @@ export class DevMailController {
     return this.fake().sent.filter((email) => email.to === address);
   }
 
-  /** Отправить очередь сейчас, не дожидаясь прохода. */
+  /**
+   * Отправить очередь сейчас — целиком, пачка за пачкой: смоук до своего
+   * письма успевает поставить сотни приветственных.
+   */
   @Post('dispatch')
-  dispatch(): Promise<{ claimed: number; sent: number }> {
+  async dispatch(): Promise<{ claimed: number; sent: number }> {
     this.fake();
 
-    return this.dispatcher.runOnce();
+    const total = { claimed: 0, sent: 0 };
+
+    for (let round = 0; round < 200; round += 1) {
+      const result = await this.dispatcher.runOnce();
+      total.claimed += result.claimed;
+      total.sent += result.sent;
+
+      if (result.claimed === 0) break;
+    }
+
+    return total;
   }
 
   /** Все письма на пробных данных — для владельца и для глаз. */

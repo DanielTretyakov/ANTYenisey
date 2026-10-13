@@ -117,6 +117,27 @@ export interface ChangePasswordRequest {
   newPassword: string;
 }
 
+/** Ссылка из письма подтверждения почты (12.10.2026). */
+export interface VerifyEmailRequest {
+  token: string;
+}
+
+/** «Забыли пароль?» — ответ одинаковый при любом исходе. */
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+/** Новый пароль по ссылке из письма. */
+export interface ResetPasswordRequest {
+  token: string;
+  password: string;
+}
+
+/** Работает ли почта: без неё «Забыли пароль?» и подтверждение не предлагаются. */
+export interface MailStatus {
+  enabled: boolean;
+}
+
 export interface PublicUser {
   id: string;
   email: string;
@@ -146,6 +167,11 @@ export interface PublicUser {
    * учёток, заведённых до 03.10.2026: тогда согласие не собиралось.
    */
   consentAt: string | null;
+  /**
+   * Почта подтверждена письмом (решение владельца от 12.10.2026, мягкое
+   * подтверждение): без этого уходят только письма о самой учётке.
+   */
+  emailVerified: boolean;
 }
 
 export interface AuthTokens {

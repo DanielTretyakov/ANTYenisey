@@ -95,3 +95,15 @@ export function verifyUnsubscribe(token: string, key: string): { email: string; 
 function signature(body: string, key: string): string {
   return createHmac('sha256', key).update(`unsubscribe:${body}`).digest('base64url').slice(0, 32);
 }
+
+/**
+ * Срок одноразовой ссылки из письма: подтверждение почты — двое суток (письмо
+ * открывают не сразу), новый пароль — час (ссылка даёт войти без пароля).
+ */
+export const EMAIL_TOKEN_TTL_MS = {
+  VERIFY: 48 * 60 * 60_000,
+  RESET: 60 * 60_000,
+} as const;
+
+/** Не чаще одного письма-ссылки в минуту на учётку: форма «забыли пароль» открыта. */
+export const EMAIL_TOKEN_COOLDOWN_MS = 60_000;

@@ -1,4 +1,5 @@
 import type {
+  MailStatus,
   BillingView,
   ClubCreateRequest,
   ClubOpening,
@@ -370,6 +371,24 @@ export const api = {
    */
   changePassword: (payload: ChangePasswordRequest): Promise<AuthResponse> =>
     authorized('/auth/password', json('POST', payload)),
+
+  // --- Почта (12.10.2026): подтверждение и восстановление пароля.
+  /** Работает ли почта сервиса — без неё «Забыли пароль?» не предлагается. */
+  mailStatus: (): Promise<MailStatus> => request('/auth/mail-status'),
+
+  /** Подтверждение почты по ссылке из письма — без входа. */
+  verifyEmail: (token: string): Promise<void> => request('/auth/email/verify', json('POST', { token })),
+
+  /** Письмо подтверждения ещё раз. */
+  resendVerification: (): Promise<{ sent: boolean }> => authorized('/auth/email/resend', { method: 'POST' }),
+
+  /** «Забыли пароль?» — ответ одинаковый при любом исходе. */
+  forgotPassword: (email: string): Promise<{ ok: true }> =>
+    request('/auth/password/forgot', json('POST', { email })),
+
+  /** Новый пароль по ссылке из письма — и сразу вход. */
+  resetPassword: (token: string, password: string): Promise<AuthResponse> =>
+    request('/auth/password/reset', json('POST', { token, password })),
 
   // --- Стартовая страница: поиск клубов. Открыто без входа.
   /** Справочник городов для выпадающего списка. */
