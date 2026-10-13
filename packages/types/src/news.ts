@@ -28,6 +28,14 @@ export interface NewsItem {
   /** Пусто — черновик: его видит только владелец платформы. */
   publishedAt: string | null;
   updatedAt: string;
+  /** Когда разослана письмом (12.10.2026) — один раз. */
+  emailedAt: string | null;
+}
+
+/** Рассылка новости письмом — сколько получат и разослана ли уже. */
+export interface NewsEmailInfo {
+  recipients: number;
+  emailedAt: string | null;
 }
 
 /** Лента: новости и разделы, которые смотрящему видны. */

@@ -107,3 +107,36 @@ export const EMAIL_TOKEN_TTL_MS = {
 
 /** Не чаще одного письма-ссылки в минуту на учётку: форма «забыли пароль» открыта. */
 export const EMAIL_TOKEN_COOLDOWN_MS = 60_000;
+
+/** Кто получит новость письмом. */
+export interface NewsRecipient {
+  to: string;
+  userId: string | null;
+}
+
+/**
+ * Получатели рассылки новости (решения владельца от 12.10.2026): учётки с
+ * согласием и подтверждённой почтой, а в разделе «Для клубов» — ещё
+ * заявители с галочкой «новости для клубов». Один адрес — одно письмо (учётка
+ * важнее заявки: у неё есть кому сверять согласие при отправке); отписанные
+ * от новостей и «не доставляется» — мимо.
+ */
+export function newsRecipients(input: {
+  users: readonly { id: string; email: string }[];
+  applicants: readonly { email: string }[];
+  suppressed: ReadonlySet<string>;
+}): NewsRecipient[] {
+  const byEmail = new Map<string, NewsRecipient>();
+
+  for (const user of input.users) {
+    const to = normalizeEmail(user.email);
+    if (!input.suppressed.has(to)) byEmail.set(to, { to, userId: user.id });
+  }
+
+  for (const applicant of input.applicants) {
+    const to = normalizeEmail(applicant.email);
+    if (!input.suppressed.has(to) && !byEmail.has(to)) byEmail.set(to, { to, userId: null });
+  }
+
+  return [...byEmail.values()].sort((a, b) => a.to.localeCompare(b.to));
+}

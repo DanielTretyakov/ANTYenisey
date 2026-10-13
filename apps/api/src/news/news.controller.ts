@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req } from '@nestjs/common';
-import type { AccessTokenPayload, NewsFeed, NewsItem } from '@yenisey/types';
+import type { AccessTokenPayload, NewsEmailInfo, NewsFeed, NewsItem } from '@yenisey/types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
@@ -52,6 +52,19 @@ export class PlatformNewsController {
   @Patch(':id')
   update(@CurrentUser() user: AccessTokenPayload, @Param('id') id: string, @Body() dto: NewsDraftDto): Promise<NewsItem> {
     return this.news.update(user.sub, id, dto);
+  }
+
+  /** Сколько получат новость письмом и разослана ли уже (12.10.2026). */
+  @Get(':id/email')
+  emailInfo(@CurrentUser() user: AccessTokenPayload, @Param('id') id: string): Promise<NewsEmailInfo> {
+    return this.news.emailInfo(user.sub, id);
+  }
+
+  /** Разослать опубликованную новость письмом — один раз. */
+  @HttpCode(HttpStatus.OK)
+  @Post(':id/email')
+  email(@CurrentUser() user: AccessTokenPayload, @Param('id') id: string): Promise<NewsEmailInfo> {
+    return this.news.email(user.sub, id);
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)

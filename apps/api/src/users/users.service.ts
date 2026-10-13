@@ -28,6 +28,7 @@ export class UsersService {
         platformRole: true,
         personalDataConsentAt: true,
         emailVerifiedAt: true,
+        newsEmailConsentAt: true,
         memberships: {
           where: { deactivatedAt: null },
           select: {
@@ -62,6 +63,7 @@ export class UsersService {
       platformOwner: user.platformRole === 'OWNER',
       consentAt: user.personalDataConsentAt?.toISOString() ?? null,
       emailVerified: user.emailVerifiedAt !== null,
+      newsEmail: user.newsEmailConsentAt !== null,
     };
   }
 }

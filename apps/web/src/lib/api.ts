@@ -1,5 +1,6 @@
 import type {
   MailStatus,
+  NewsEmailInfo,
   BillingView,
   ClubCreateRequest,
   ClubOpening,
@@ -386,6 +387,14 @@ export const api = {
   forgotPassword: (email: string): Promise<{ ok: true }> =>
     request('/auth/password/forgot', json('POST', { email })),
 
+  /** Новости КНТ на почту — согласие переключателем в кабинете. */
+  setEmailNews: (enabled: boolean): Promise<void> =>
+    authorized('/me/notifications/email-news', json('PUT', { enabled })),
+
+  /** Отписка от рассылки по подписанной ссылке из письма — без входа. */
+  unsubscribe: (token: string): Promise<{ email: string }> =>
+    request(`/mail/unsubscribe?t=${encodeURIComponent(token)}`, { method: 'POST' }),
+
   /** Новый пароль по ссылке из письма — и сразу вход. */
   resetPassword: (token: string, password: string): Promise<AuthResponse> =>
     request('/auth/password/reset', json('POST', { token, password })),
@@ -631,6 +640,10 @@ export const api = {
   devDecidePayment: (providerPaymentId: string, succeed: boolean): Promise<{ ok: true }> =>
     request(`/dev/payments/${providerPaymentId}/${succeed ? 'succeed' : 'fail'}`, { method: 'POST' }),
   createNews: (draft: NewsDraft): Promise<NewsItem> => authorized('/platform/news', json('POST', draft)),
+
+  /** Рассылка новости письмом: сколько получат — и отправить, один раз. */
+  newsEmailInfo: (id: string): Promise<NewsEmailInfo> => authorized(`/platform/news/${id}/email`),
+  emailNews: (id: string): Promise<NewsEmailInfo> => authorized(`/platform/news/${id}/email`, { method: 'POST' }),
   updateNews: (id: string, draft: NewsDraft): Promise<NewsItem> =>
     authorized(`/platform/news/${id}`, json('PATCH', draft)),
   deleteNews: (id: string): Promise<void> => authorized(`/platform/news/${id}`, { method: 'DELETE' }),

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { normalizeEmail, sendProblem, signUnsubscribe, verifyUnsubscribe, type Recipient } from './mail-rules.ts';
+import { newsRecipients, normalizeEmail, sendProblem, signUnsubscribe, verifyUnsubscribe, type Recipient } from './mail-rules.ts';
 
 const user = (patch: Partial<NonNullable<Recipient['user']>> = {}): NonNullable<Recipient['user']> => ({
   email: 'ivan@mail.ru',
@@ -57,5 +57,23 @@ describe('ссылка отписки', () => {
     assert.equal(verifyUnsubscribe(forged, key), null);
     assert.equal(verifyUnsubscribe(token, 'x'.repeat(40)), null);
     assert.equal(verifyUnsubscribe('мусор', key), null);
+  });
+});
+
+describe('получатели рассылки', () => {
+  it('один адрес — одно письмо, учётка важнее заявки, отписанные — мимо', () => {
+    const recipients = newsRecipients({
+      users: [
+        { id: 'u1', email: 'Ivan@Mail.ru' },
+        { id: 'u2', email: 'off@mail.ru' },
+      ],
+      applicants: [{ email: 'ivan@mail.ru' }, { email: 'club@mail.ru' }, { email: 'CLUB@mail.ru' }],
+      suppressed: new Set(['off@mail.ru']),
+    });
+
+    assert.deepEqual(recipients, [
+      { to: 'club@mail.ru', userId: null },
+      { to: 'ivan@mail.ru', userId: 'u1' },
+    ]);
   });
 });

@@ -1,4 +1,4 @@
-import { Equals, IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { Equals, IsBoolean, IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import type { Gender, RegisterRequest } from '@yenisey/types';
 
@@ -125,4 +125,9 @@ export class RegisterDto extends AccountDto implements RegisterRequest {
     message: 'tenantSlug: только строчные латинские буквы, цифры и дефис',
   })
   tenantSlug?: string;
+
+  /** Новости КНТ на почту — отдельная неотмеченная галочка (12.10.2026). */
+  @IsOptional()
+  @IsBoolean()
+  newsConsent?: boolean;
 }

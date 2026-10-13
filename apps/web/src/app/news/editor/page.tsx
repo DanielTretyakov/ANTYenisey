@@ -13,6 +13,7 @@ import {
 } from '@yenisey/types';
 import { AppShell } from '@/components/layout/AppShell';
 import { MarkupEditor } from '@/components/news/MarkupEditor';
+import { NewsEmailButton } from '@/components/news/NewsEmailButton';
 import { NewsBody, newsDate, SectionBadge } from '@/components/news/NewsParts';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -220,6 +221,13 @@ export default function NewsEditorPage() {
                   )}
                 </div>
               </form>
+
+              {/* Рассылка письмом — у сохранённой опубликованной новости (12.10.2026). */}
+              {editing && items?.find((item) => item.id === editing) && (
+                <div className="mt-5 border-t border-border pt-4">
+                  <NewsEmailButton item={items.find((item) => item.id === editing)!} />
+                </div>
+              )}
 
               {preview && draft.body.trim() && (
                 <div className="mt-6 border-t border-border pt-5">

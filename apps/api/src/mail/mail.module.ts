@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../config/env';
 import { DevMailController } from './dev-mail.controller';
+import { UnsubscribeController } from './unsubscribe.controller';
 import { MailDispatcher } from './mail-dispatcher.job';
 import { MailService } from './mail.service';
 import { MailTokensService } from './mail-tokens.service';
@@ -19,7 +20,7 @@ import { DisabledMailTransport, FakeMailTransport, LiveSmtpTransport, MailTransp
  */
 @Global()
 @Module({
-  controllers: [DevMailController],
+  controllers: [DevMailController, UnsubscribeController],
   providers: [
     {
       provide: MailTransport,

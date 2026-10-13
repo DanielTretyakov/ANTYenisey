@@ -9,6 +9,7 @@ import { AuthLayout } from '@/components/layout/AuthLayout';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { ConsentCheckbox } from '@/components/ui/ConsentCheckbox';
+import { Toggle } from '@/components/ui/Toggle';
 import { Field } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
 import { isChildBirthDate } from '@/lib/family';
@@ -56,6 +57,8 @@ function RegisterForm({ clubSlug, next }: { clubSlug: string | null; next: strin
   const [pending, setPending] = useState(false);
   const [birthDate, setBirthDate] = useState('');
   const [consent, setConsent] = useState(false);
+  // Новости КНТ на почту — отдельная неотмеченная галочка (12.10.2026, 38-ФЗ).
+  const [newsConsent, setNewsConsent] = useState(false);
 
   // Младше 16 регистрироваться можно — учётка ребёнку нужна, чтобы видеть свои
   // записи, — но записывать его будет родитель. Сказать это надо до отправки,
@@ -103,6 +106,7 @@ function RegisterForm({ clubSlug, next }: { clubSlug: string | null; next: strin
         birthDate: String(form.get('birthDate')),
         gender,
         consent: true,
+        newsConsent,
       });
 
       saveSession(auth);
@@ -170,6 +174,13 @@ function RegisterForm({ clubSlug, next }: { clubSlug: string | null; next: strin
         />
 
         <ConsentCheckbox checked={consent} onChange={setConsent} />
+
+        <Toggle
+          label="Присылать новости КНТ на почту"
+          hint="Новые возможности и клубы — не чаще пары писем в месяц. Отписаться можно в каждом письме."
+          checked={newsConsent}
+          onChange={(event) => setNewsConsent(event.target.checked)}
+        />
 
         <Button type="submit" pending={pending} disabled={!consent} fullWidth size="lg" className="mt-2">
           {pending ? 'Отправляю…' : 'Зарегистрироваться'}

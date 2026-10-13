@@ -107,6 +107,8 @@ export class AuthService {
             birthDate,
             // Доказательство согласия: момент ставит сервер, а не форма.
             personalDataConsentAt: new Date(),
+            // Новости на почту — отдельной неотмеченной галочкой (38-ФЗ).
+            newsEmailConsentAt: dto.newsConsent ? new Date() : null,
           },
         });
 
@@ -492,6 +494,7 @@ export class AuthService {
         platformRole: true,
         personalDataConsentAt: true,
         emailVerifiedAt: true,
+        newsEmailConsentAt: true,
         memberships: {
           // Отключённые в клубе не показываются: человек этим клубом больше
           // не пользуется, и держать его в шапке незачем.
@@ -525,6 +528,7 @@ export class AuthService {
       platformOwner: user.platformRole === 'OWNER',
       consentAt: user.personalDataConsentAt?.toISOString() ?? null,
       emailVerified: user.emailVerifiedAt !== null,
+      newsEmail: user.newsEmailConsentAt !== null,
     };
   }
 

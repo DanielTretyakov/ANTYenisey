@@ -2567,6 +2567,7 @@ async function main() {
   await clubSetup();
   await settingsRights();
   await serviceMail();
+  await newsletters();
 
   console.log(`\nИТОГО: успешно ${passed}, провалов ${failed}`);
   process.exitCode = failed === 0 ? 0 : 1;
@@ -7628,4 +7629,109 @@ async function serviceMail() {
   await dispatch();
   letters = await lettersTo(account.email);
   assert('пришло «пароль изменён»', letters.some((letter) => letter.subject === 'Пароль в КНТ изменён'));
+}
+
+/**
+ * Рассылки (решения владельца от 12.10.2026): согласие при регистрации и в
+ * кабинете, новость письмом — один раз и только согласившимся с
+ * подтверждённой почтой, «Для клубов» — сотрудникам и заявителям с галочкой,
+ * отписка в одно нажатие по подписанной ссылке. Новости — с префиксом уборки
+ * «Новость проверки ».
+ */
+async function newsletters() {
+  console.log('\n=== 57. Рассылки');
+
+  if ((await call('/auth/mail-status')).body?.enabled !== true) {
+    console.log('     почта выключена — раздел пропущен');
+    return;
+  }
+
+  const asOwner = await adminSession();
+  const me = asOwner ? (await asOwner('/auth/me')).body : null;
+
+  if (!asOwner || me?.platformOwner !== true) {
+    console.log('     ПРОПУЩЕНО (SMOKE_ADMIN не владелец платформы)');
+    return;
+  }
+
+  const dispatch = () => call('/dev/mail/dispatch', { method: 'POST' });
+  const lettersTo = async (email) => (await call(`/dev/mail/sent?to=${encodeURIComponent(email)}`)).body ?? [];
+  const markVerified = (email) => call('/dev/mail/verified', { method: 'POST', json: { email } });
+
+  // --- Трое: согласие и подтверждённая почта; согласие без подтверждения; без согласия.
+  const fan = registration({ lastName: 'Рассылкин', newsConsent: true });
+  let r = await post('/auth/register', fan);
+  check('регистрация с галочкой новостей', 201, r.status);
+  assert('согласие на новости записано', r.body?.user?.newsEmail === true);
+  const asFan = withToken(r.body?.accessToken ?? '');
+  await markVerified(fan.email);
+
+  const unverified = registration({ lastName: 'Неподтверждённый', newsConsent: true });
+  await post('/auth/register', unverified);
+
+  const silent = registration({ lastName: 'Молчаливый' });
+  r = await post('/auth/register', silent);
+  assert('без галочки согласия нет', r.body?.user?.newsEmail === false);
+  await markVerified(silent.email);
+
+  // --- Новость письмом.
+  const title = `Новость проверки письмом ${RUN}`;
+  r = await asOwner('/platform/news', { method: 'POST', json: { section: 'GENERAL', title, body: '**Новое** в КНТ', published: true } });
+  check('новость опубликована', 201, r.status);
+  const newsId = r.body?.id;
+
+  r = await asFan(`/platform/news/${newsId}/email`, { method: 'POST' });
+  check('рассылать может только владелец платформы', 403, r.status);
+  r = await asOwner(`/platform/news/${newsId}/email`);
+  assert('число получателей видно до отправки', typeof r.body?.recipients === 'number' && r.body.recipients >= 1 && r.body.emailedAt === null);
+  r = await asOwner(`/platform/news/${newsId}/email`, { method: 'POST' });
+  check('новость разослана', 200, r.status);
+  r = await asOwner(`/platform/news/${newsId}/email`, { method: 'POST' });
+  check('второй раз — нельзя', 409, r.status);
+
+  await dispatch();
+  const fanLetter = (await lettersTo(fan.email)).find((letter) => letter.subject === title);
+  assert('согласившемуся с подтверждённой почтой — письмо', Boolean(fanLetter));
+  assert('с кнопкой отписки почтовика', /\/api\/mail\/unsubscribe\?t=/.test(fanLetter?.headers?.['List-Unsubscribe'] ?? ''));
+  assert('неподтверждённой почте — нет', !(await lettersTo(unverified.email)).some((letter) => letter.subject === title));
+  assert('без согласия — нет', !(await lettersTo(silent.email)).some((letter) => letter.subject === title));
+
+  // --- Отписка в одно нажатие.
+  const token = /\/unsubscribe\?t=([A-Za-z0-9_.-]+)/.exec(fanLetter?.text ?? '')?.[1] ?? '';
+  r = await call('/mail/unsubscribe?t=poddelka.xxx', { method: 'POST' });
+  check('поддельная ссылка отписки — отказ', 400, r.status);
+  r = await call(`/mail/unsubscribe?t=${token}`, { method: 'POST' });
+  check('отписка по ссылке без входа', 200, r.status);
+  assert('отписан именно этот адрес', r.body?.email === fan.email.toLowerCase());
+  r = await asFan('/auth/me');
+  assert('согласие снято', r.body?.newsEmail === false);
+
+  const second = `Новость проверки письмом вторая ${RUN}`;
+  r = await asOwner('/platform/news', { method: 'POST', json: { section: 'GENERAL', title: second, body: 'Ещё', published: true } });
+  await asOwner(`/platform/news/${r.body?.id}/email`, { method: 'POST' });
+  await dispatch();
+  assert('отписавшемуся следующая новость не приходит', !(await lettersTo(fan.email)).some((letter) => letter.subject === second));
+
+  r = await asFan('/me/notifications/email-news', { method: 'PUT', json: { enabled: true } });
+  check('согласие снова включено в кабинете', 204, r.status);
+  r = await asFan('/auth/me');
+  assert('и записано', r.body?.newsEmail === true);
+
+  // --- «Для клубов»: сотрудникам и заявителям с галочкой.
+  const applicant = 'zayavka-news@example.com';
+  r = await post('/club-applications', {
+    contactName: 'Новостной Пётр',
+    clubName: `Клуб проверки заявки новости ${RUN}`,
+    email: applicant,
+    consent: true,
+    newsConsent: true,
+  });
+  check('заявка с галочкой новостей', 201, r.status);
+
+  const forClubs = `Новость проверки для клубов ${RUN}`;
+  r = await asOwner('/platform/news', { method: 'POST', json: { section: 'CLUBS', title: forClubs, body: 'Клубам', published: true } });
+  await asOwner(`/platform/news/${r.body?.id}/email`, { method: 'POST' });
+  await dispatch();
+  assert('заявителю с галочкой — письмо «для клубов»', (await lettersTo(applicant)).some((letter) => letter.subject === forClubs));
+  assert('клиенту без роли сотрудника — нет', !(await lettersTo(fan.email)).some((letter) => letter.subject === forClubs));
 }

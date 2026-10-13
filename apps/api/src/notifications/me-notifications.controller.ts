@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Headers, Param, Post, Put } fr
 import { Throttle } from '@nestjs/throttler';
 import type { AccessTokenPayload, MaxLinkResponse, NotificationSettingsView } from '@yenisey/types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { MailService } from '../mail/mail.service';
 import { PushSubscriptionDto, PushUnsubscribeDto } from './dto/push-subscription.dto';
 import { SetCategoryDto } from './dto/set-category.dto';
 import { MaxLinkService } from './max-link.service';
@@ -21,6 +22,7 @@ export class MeNotificationsController {
   constructor(
     private readonly notifications: NotificationsService,
     private readonly links: MaxLinkService,
+    private readonly mail: MailService,
   ) {}
 
   @Get()
@@ -66,6 +68,16 @@ export class MeNotificationsController {
     @Body() dto: SetCategoryDto,
   ): Promise<NotificationSettingsView> {
     return this.notifications.setCategory(user.sub, category, dto.enabled);
+  }
+
+  /**
+   * Новости КНТ на почту (12.10.2026): согласие на рассылку — переключателем.
+   * Включение снимает прежнюю отписку адреса.
+   */
+  @HttpCode(204)
+  @Put('email-news')
+  async setEmailNews(@CurrentUser() user: AccessTokenPayload, @Body() dto: SetCategoryDto): Promise<void> {
+    await this.mail.setNewsConsent(user.sub, dto.enabled);
   }
 
   @Post('test')

@@ -8,6 +8,7 @@ import { MyCoachesCard } from '@/components/cabinet/MyCoachesCard';
 import { PersonalDataCard } from '@/components/cabinet/PersonalDataCard';
 import { FIRST_SECTION, isSection } from '@/components/cabinet/sections';
 import { ChildFamilyCard, ParentFamilyCard } from '@/components/family/FamilyCards';
+import { EmailNewsCard } from '@/components/notifications/EmailNewsCard';
 import { NotificationsCard } from '@/components/notifications/NotificationsCard';
 import { PlayerEditor } from '@/components/player/PlayerEditor';
 import { MySubscriptions } from '@/components/subscriptions/MySubscriptions';
@@ -79,7 +80,12 @@ export default function CabinetSectionPage() {
 
       {/* Уведомления — свои у каждого, в том числе у ребёнка: это его учётка
           и его сообщения. Переключатель «за ребёнка» их поэтому не меняет. */}
-      {section === 'notifications' && <NotificationsCard />}
+      {section === 'notifications' && (
+        <>
+          <NotificationsCard />
+          <EmailNewsCard />
+        </>
+      )}
     </div>
   );
 }

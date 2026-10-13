@@ -312,8 +312,11 @@ async function removeProbeRooms(): Promise<void> {
   // Письма смоука без учётки (заявителям) — по адресу: письма учёток ушли
   // каскадом вместе с ними. Иначе очередь писем росла бы с каждым прогоном.
   const letters = await prisma.emailMessage.deleteMany({
-    where: { userId: null, to: { in: ['zayavka@example.com', 'bot@example.com'] } },
+    where: { userId: null, to: { in: ['zayavka@example.com', 'bot@example.com', 'zayavka-news@example.com'] } },
   });
+
+  // Отписки пробных учёток — по адресу, каскада у них нет.
+  await prisma.emailSuppression.deleteMany({ where: { email: { startsWith: 'probe-', endsWith: '@example.com' } } });
 
   console.log(
     `Убрано залов смоука: ${halls.count}, столов: ${tables.count}, тарифов: ${plans.count}, новостей: ${news.count}, ` +

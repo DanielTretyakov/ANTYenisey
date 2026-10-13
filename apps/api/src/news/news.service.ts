@@ -1,6 +1,8 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Role, type Prisma } from '@yenisey/database';
-import type { NewsDraft, NewsFeed, NewsItem, NewsSection } from '@yenisey/types';
+import type { NewsDraft, NewsEmailInfo, NewsFeed, NewsItem, NewsSection } from '@yenisey/types';
+import { newsRecipients, normalizeEmail, type NewsRecipient } from '../mail/mail-rules';
+import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { pageSize, publishedAtAfter, visibleSections } from './news-rules';
 
@@ -11,6 +13,7 @@ const NEWS_SELECT = {
   body: true,
   publishedAt: true,
   updatedAt: true,
+  emailedAt: true,
 } as const satisfies Prisma.PlatformNewsSelect;
 
 type Row = Prisma.PlatformNewsGetPayload<{ select: typeof NEWS_SELECT }>;
@@ -25,7 +28,10 @@ type Row = Prisma.PlatformNewsGetPayload<{ select: typeof NEWS_SELECT }>;
  */
 @Injectable()
 export class NewsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mail: MailService,
+  ) {}
 
   // --- Чтение --------------------------------------------------------------
 
@@ -139,6 +145,96 @@ export class NewsService {
     }
   }
 
+  // --- Рассылка письмом (12.10.2026) --------------------------------------
+
+  /** Сколько получат новость письмом — до нажатия «Отправить». */
+  async emailInfo(userId: string, id: string): Promise<NewsEmailInfo> {
+    await this.assertOwner(userId);
+
+    const news = await this.prisma.platformNews.findUnique({ where: { id }, select: { section: true, emailedAt: true } });
+
+    if (!news) throw new NotFoundException('Новость не найдена');
+
+    return { recipients: (await this.recipients(news.section)).length, emailedAt: news.emailedAt?.toISOString() ?? null };
+  }
+
+  /**
+   * Разослать опубликованную новость письмом — один раз: отметка ставится
+   * условным обновлением, и второе нажатие (или второй владелец) получит 409.
+   */
+  async email(userId: string, id: string): Promise<NewsEmailInfo> {
+    await this.assertOwner(userId);
+
+    if (!this.mail.enabled) {
+      throw new ConflictException('Почта сервиса пока не подключена');
+    }
+
+    const news = await this.prisma.platformNews.findUnique({ where: { id }, select: NEWS_SELECT });
+
+    if (!news) throw new NotFoundException('Новость не найдена');
+    if (!news.publishedAt) throw new BadRequestException('Сначала опубликуйте новость');
+
+    const now = new Date();
+    const recipients = await this.recipients(news.section);
+
+    await this.prisma.$transaction(async (tx) => {
+      const marked = await tx.platformNews.updateMany({ where: { id, emailedAt: null }, data: { emailedAt: now } });
+
+      if (marked.count === 0) throw new ConflictException('Эта новость уже разослана');
+
+      await this.mail.enqueue(
+        tx,
+        recipients.map((recipient) => ({
+          to: recipient.to,
+          userId: recipient.userId,
+          template: 'NEWS' as const,
+          payload: { newsId: news.id, title: news.title, body: news.body, section: news.section },
+          dedupeKey: `news:${news.id}`,
+        })),
+      );
+    });
+
+    return { recipients: recipients.length, emailedAt: now.toISOString() };
+  }
+
+  /**
+   * Кому уходит рассылка: учётки с согласием и подтверждённой почтой; раздел
+   * «Для клубов» — только сотрудники клубов (как `visibleSections`) и
+   * заявители с галочкой «новости для клубов». Письма клубам-кандидатам — только
+   * тем, кто сам согласился.
+   */
+  private async recipients(section: NewsSection): Promise<NewsRecipient[]> {
+    const forClubs = section === 'CLUBS';
+    const [users, applicants] = await Promise.all([
+      this.prisma.user.findMany({
+        where: {
+          newsEmailConsentAt: { not: null },
+          emailVerifiedAt: { not: null },
+          deactivatedAt: null,
+          anonymizedAt: null,
+          ...(forClubs
+            ? { memberships: { some: { deactivatedAt: null, roles: { hasSome: [Role.ADMIN, Role.MANAGER, Role.OWNER, Role.COACH] } } } }
+            : {}),
+        },
+        select: { id: true, email: true },
+      }),
+      forClubs
+        ? this.prisma.clubApplication.findMany({
+            where: { newsConsentAt: { not: null }, email: { not: null } },
+            select: { email: true },
+          })
+        : Promise.resolve([] as { email: string | null }[]),
+    ]);
+    const emails = [...users.map((user) => user.email), ...applicants.map((row) => row.email!)].map(normalizeEmail);
+    const suppressed = await this.prisma.emailSuppression.findMany({ where: { email: { in: emails } }, select: { email: true } });
+
+    return newsRecipients({
+      users,
+      applicants: applicants.map((row) => ({ email: row.email! })),
+      suppressed: new Set(suppressed.map((row) => row.email)),
+    });
+  }
+
   // --- Внутреннее ----------------------------------------------------------
 
   private async sectionsFor(viewerId: string | null): Promise<NewsSection[]> {
@@ -180,5 +276,6 @@ function toItem(row: Row): NewsItem {
     body: row.body,
     publishedAt: row.publishedAt?.toISOString() ?? null,
     updatedAt: row.updatedAt.toISOString(),
+    emailedAt: row.emailedAt?.toISOString() ?? null,
   };
 }

@@ -78,6 +78,46 @@ export class MailService {
   }
 
   /**
+   * Новости КНТ на почту — переключатель в кабинете. Включение — новое
+   * согласие: снимает прежнюю отписку адреса от новостей.
+   */
+  async setNewsConsent(userId: string, enabled: boolean): Promise<void> {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { newsEmailConsentAt: enabled ? new Date() : null },
+      select: { email: true },
+    });
+
+    if (enabled) {
+      await this.prisma.emailSuppression.deleteMany({ where: { email: normalizeEmail(user.email), scope: 'NEWS' } });
+    }
+  }
+
+  /**
+   * Отписка от новостей по ссылке из письма — по адресу: и учётка, и заявки
+   * клуба с этой почтой перестают получать рассылку.
+   */
+  async unsubscribe(email: string): Promise<void> {
+    const address = normalizeEmail(email);
+
+    await this.prisma.$transaction([
+      this.prisma.emailSuppression.upsert({
+        where: { email_scope: { email: address, scope: 'NEWS' } },
+        create: { email: address, scope: 'NEWS', reason: 'UNSUBSCRIBE' },
+        update: {},
+      }),
+      this.prisma.user.updateMany({
+        where: { email: { equals: address, mode: 'insensitive' } },
+        data: { newsEmailConsentAt: null },
+      }),
+      this.prisma.clubApplication.updateMany({
+        where: { email: { equals: address, mode: 'insensitive' } },
+        data: { newsConsentAt: null },
+      }),
+    ]);
+  }
+
+  /**
    * Ключ подписи ссылок из писем (отписка). Отдельной переменной окружения
    * нет: ключ выводится из секрета refresh-токенов, а сменить его — значит
    * лишь сделать недействительными ссылки отписки в старых письмах.

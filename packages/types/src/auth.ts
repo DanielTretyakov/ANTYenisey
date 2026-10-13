@@ -62,6 +62,11 @@ export interface RegisterRequest {
    * учётки ребёнка галочку ставит родитель.
    */
   consent: true;
+  /**
+   * Присылать новости КНТ на почту (12.10.2026) — отдельная неотмеченная
+   * галочка: реклама только с предварительного согласия (38-ФЗ).
+   */
+  newsConsent?: boolean;
 }
 
 export interface LoginRequest {
@@ -172,6 +177,8 @@ export interface PublicUser {
    * подтверждение): без этого уходят только письма о самой учётке.
    */
   emailVerified: boolean;
+  /** Согласие на новости КНТ на почту (38-ФЗ): отдельная галочка, снимается отпиской. */
+  newsEmail: boolean;
 }
 
 export interface AuthTokens {
