@@ -40,8 +40,8 @@ const THEMES: { value: ThemePreference; label: string }[] = [
  * владельца платформы, тема и «Выйти» — последним, отдельно: случайно его
  * больше не нажать.
  *
- * С 15.10.2026 (просьба владельца — сжать): «Рабочее место» — под названием
- * клуба, в строке с ролями, а не колонкой справа; тема — тремя значками в
+ * С 15.10.2026 (просьба владельца — сжать): «Рабочее место» — мелкой строкой
+ * под названием клуба и ролями, а не колонкой справа; тема — тремя значками в
  * строке «Выйти», а не отдельной строкой словами; строки плотнее.
  */
 export function AccountMenu({ user }: { user: PublicUser }) {
@@ -121,29 +121,21 @@ export function AccountMenu({ user }: { user: PublicUser }) {
           const desk = hasAnyRole(membership.roles, MANAGING_ROLES);
 
           return (
-            // Две ссылки одной строкой меню: клуб — названием, рабочее место —
-            // под ним, рядом с ролями. Вложить одну ссылку в другую нельзя.
+            // Две ссылки одним пунктом меню: клуб — названием, рабочее место —
+            // мелкой строкой под ролями. Вложить одну ссылку в другую нельзя.
             <div key={membership.slug} className="min-w-0 rounded-control px-3 py-1.5 hover:bg-surface-sunken">
               <Link href={`/clubs/${membership.slug}`} className="block truncate text-[0.875rem] text-text">
                 {membership.name}
               </Link>
-              {(roles || desk) && (
-                <span className="flex min-w-0 items-baseline gap-1.5 text-[0.75rem]">
-                  {roles && <span className="min-w-0 truncate text-text-subtle">{roles}</span>}
-                  {roles && desk && (
-                    <span aria-hidden="true" className="text-text-subtle">
-                      ·
-                    </span>
-                  )}
-                  {desk && (
-                    <Link
-                      href={`/clubs/${membership.slug}/desk`}
-                      className="shrink-0 font-medium whitespace-nowrap text-text-accent hover:underline"
-                    >
-                      Рабочее место
-                    </Link>
-                  )}
-                </span>
+              {roles && <span className="block truncate text-[0.75rem] text-text-subtle">{roles}</span>}
+              {desk && (
+                <Link
+                  href={`/clubs/${membership.slug}/desk`}
+                  className="mt-0.5 inline-flex items-center gap-1 text-[0.6875rem] font-medium text-text-accent hover:underline"
+                >
+                  Рабочее место
+                  <span aria-hidden="true">→</span>
+                </Link>
               )}
             </div>
           );
