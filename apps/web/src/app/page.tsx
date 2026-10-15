@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   openStateLabel,
   START_PAGE_COACHES,
@@ -378,6 +378,11 @@ function Results({
         : 'Все клубы платформы';
 
   const unread = useClubPostsUnread();
+  const unreadOf = (club: ClubCard): number => unread?.clubs.find((item) => item.slug === club.slug)?.unread ?? 0;
+  // По алфавиту (решение владельца от 15.10.2026) — порядок не зависит от
+  // того, в каком порядке клубы подключались.
+  const sorted = [...(clubs ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'ru', { sensitivity: 'base' }));
+  const carousel = useCarousel(sorted.length);
 
   return (
     <section id="kluby" className="mt-10 scroll-mt-40">
@@ -385,8 +390,18 @@ function Results({
         description="Клуб находится по городу клуба или любого его зала."
         action={
           clubs !== null && clubs.length > 0 ? (
-            <span className="text-[0.875rem] text-text-muted">
-              {clubs.length} {plural(clubs.length, 'клуб', 'клуба', 'клубов')}
+            <span className="flex items-center gap-3">
+              <span className="text-[0.875rem] text-text-muted">
+                {clubs.length} {plural(clubs.length, 'клуб', 'клуба', 'клубов')}
+              </span>
+              {/* Стрелки — в строке заголовка, а не поверх карточек: сбоку они
+                  закрывали начало названия клуба. На телефоне ряд листают пальцем. */}
+              {sorted.length > CAROUSEL_FROM && (
+                <span className="hidden gap-2 sm:flex">
+                  <CarouselArrow side="left" disabled={carousel.edges.start} onClick={() => carousel.page(-1)} />
+                  <CarouselArrow side="right" disabled={carousel.edges.end} onClick={() => carousel.page(1)} />
+                </span>
+              )}
             </span>
           ) : undefined
         }
@@ -413,16 +428,106 @@ function Results({
         </div>
       )}
 
-      {clubs && clubs.length > 0 && (
+      {sorted.length > 0 && sorted.length <= CAROUSEL_FROM && (
         <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {clubs.map((club) => (
+          {sorted.map((club) => (
             <li key={club.slug}>
-              <ClubTile club={club} unread={unread?.clubs.find((item) => item.slug === club.slug)?.unread ?? 0} />
+              <ClubTile club={club} unread={unreadOf(club)} />
             </li>
           ))}
         </ul>
       )}
+
+      {sorted.length > CAROUSEL_FROM && <ClubCarousel clubs={sorted} unreadOf={unreadOf} track={carousel.track} />}
     </section>
+  );
+}
+
+/** Больше стольких клубов в выдаче — карусель, а не второй ряд. */
+const CAROUSEL_FROM = 3;
+
+/**
+ * Карусель клубов (решение владельца от 15.10.2026): больше трёх — одним
+ * рядом, а не вторым и третьим рядом, которые отодвигали «моё» и новости.
+ * На компьютере — по три карточки и стрелки по бокам, на планшете — по две,
+ * на телефоне — листание пальцем, край следующей карточки виден: так ясно,
+ * что ряд продолжается. Стрелки — в строке заголовка, листают на ширину видимого.
+ */
+function ClubCarousel({
+  clubs,
+  unreadOf,
+  track,
+}: {
+  clubs: ClubCard[];
+  unreadOf: (club: ClubCard) => number;
+  track: React.RefObject<HTMLUListElement | null>;
+}) {
+  return (
+    <ul
+      ref={track}
+      aria-label="Клубы — листайте вбок"
+      className="-mx-5 flex snap-x snap-mandatory scroll-px-5 gap-4 overflow-x-auto px-5 pb-1 [scrollbar-width:none] sm:mx-0 sm:scroll-px-0 sm:px-0 [&::-webkit-scrollbar]:hidden"
+    >
+      {clubs.map((club) => (
+        <li
+          key={club.slug}
+          className="shrink-0 basis-[85%] snap-start sm:basis-[calc((100%-1rem)/2)] lg:basis-[calc((100%-2rem)/3)]"
+        >
+          <ClubTile club={club} unread={unreadOf(club)} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Лента карусели: дошла ли до краёв и листание на ширину видимого. */
+function useCarousel(count: number) {
+  const track = useRef<HTMLUListElement>(null);
+  const [edges, setEdges] = useState({ start: true, end: false });
+
+  useEffect(() => {
+    const element = track.current;
+    if (!element) return;
+
+    const update = (): void => {
+      const start = element.scrollLeft <= 1;
+      const end = element.scrollLeft + element.clientWidth >= element.scrollWidth - 1;
+      setEdges((prev) => (prev.start === start && prev.end === end ? prev : { start, end }));
+    };
+
+    update();
+    element.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+
+    return () => {
+      element.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [count]);
+
+  function page(direction: 1 | -1): void {
+    const element = track.current;
+    if (!element) return;
+    // Ширина видимого плюс зазор между карточками — следующая тройка встаёт ровно.
+    element.scrollBy({ left: direction * (element.clientWidth + 16), behavior: 'smooth' });
+  }
+
+  return { track, edges, page };
+}
+
+function CarouselArrow({ side, disabled, onClick }: { side: 'left' | 'right'; disabled: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={side === 'left' ? 'Предыдущие клубы' : 'Следующие клубы'}
+      className="grid h-10 w-10 place-items-center rounded-full border border-border bg-surface-raised text-text transition-colors hover:border-border-strong hover:bg-surface-sunken disabled:pointer-events-none disabled:opacity-35"
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+        <path d={side === 'left' ? 'M10 3.5 5.5 8l4.5 4.5' : 'M6 3.5 10.5 8 6 12.5'} />
+      </svg>
+    </button>
   );
 }
 
