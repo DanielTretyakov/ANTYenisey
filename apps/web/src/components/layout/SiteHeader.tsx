@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { type ReactNode } from 'react';
 import { PlatformLogo } from '@/components/brand/PlatformLogo';
 import { AccountMenu } from '@/components/layout/AccountMenu';
-import { ClubBar } from '@/components/layout/ClubNav';
+import { ClubBar, PageBar } from '@/components/layout/ClubNav';
 import type { SectionNavState } from '@/components/club/ClubSectionNav';
 import { ClubNewsButton } from '@/components/layout/ClubNewsButton';
 import { HEADER_HEIGHT, HEADER_LOGO_HEIGHT } from '@/components/layout/metrics';
@@ -35,7 +35,7 @@ export function SiteHeader({
   clubSlug,
   /** Действия самой страницы — то, что относится к экрану, а не к приложению. */
   actions,
-  /** Прижать шапку к верху при прокрутке. Стартовой странице не нужно. */
+  /** Прижать шапку к верху при прокрутке. */
   sticky = true,
   /**
    * Широкая полоса — под экраны, ширину которых диктуют данные, а не текст.
@@ -44,9 +44,15 @@ export function SiteHeader({
   wide = false,
   /** Разделы страницы клуба — на телефоне уходят в список строки клуба. */
   clubPage,
+  /**
+   * Разделы страницы без клуба (стартовая) — той же второй строкой, что
+   * разделы страницы клуба (решение владельца от 15.10.2026).
+   */
+  page,
 }: {
   clubSlug?: string;
   clubPage?: SectionNavState;
+  page?: SectionNavState;
   actions?: ReactNode;
   sticky?: boolean;
   wide?: boolean;
@@ -128,6 +134,7 @@ export function SiteHeader({
       </div>
 
       {clubSlug && <ClubBar slug={clubSlug} page={clubPage} />}
+      {!clubSlug && page && <PageBar page={page} label="Разделы стартовой" />}
     </header>
   );
 }

@@ -195,6 +195,33 @@ export function ClubBar({ slug, page }: { slug: string; page?: SectionNavState }
 }
 
 /**
+ * Строка разделов страницы без клуба — стартовая (просьба владельца от
+ * 15.10.2026: «как шапка страницы клуба»). Та же полоса той же высоты, те же
+ * пункты, что у разделов страницы в `ClubBar`, и тот же список на телефоне;
+ * знака клуба нет — страница платформенная.
+ */
+export function PageBar({ page, label }: { page: SectionNavState; label: string }) {
+  return (
+    <div className={cn('border-t border-border bg-surface/95', CLUB_BAR_HEIGHT)}>
+      <div className="mx-auto flex h-full w-full max-w-6xl items-center gap-3 px-5 sm:px-8">
+        <nav aria-label={label} className="-ml-2.5 hidden min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] sm:flex">
+          {page.items.map((item) => (
+            <PageSection key={item.id} label={item.label} current={page.currentId === item.id} onClick={() => page.go(item.id)} />
+          ))}
+        </nav>
+        <CompactSelect
+          label="Раздел"
+          value={page.currentId ?? page.items[0]?.id ?? ''}
+          options={page.items.map((item) => ({ value: item.id, label: item.label }))}
+          onChange={page.go}
+          className="w-full sm:hidden"
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
  * Раздел страницы клуба в строке клуба. Новые новости — числом-кружком:
  * подпись приходит как «Новости · 3 новых» (та же, что в списке на телефоне).
  */

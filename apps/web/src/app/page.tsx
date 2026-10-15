@@ -23,8 +23,8 @@ import { dayLabel, FeedEventCard, timeLabel, ViewerTime } from '@/components/eve
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { excerpt, NewsRow, newsDate } from '@/components/news/NewsParts';
 import { DevNotice } from '@/components/layout/DevNotice';
-import { SECTION_ACTIVE_OFFSET_START } from '@/components/layout/metrics';
-import { CompactSelect } from '@/components/ui/CompactSelect';
+import type { SectionNavState } from '@/components/club/ClubSectionNav';
+import { SECTION_ACTIVE_OFFSET_CLUB } from '@/components/layout/metrics';
 import { FirstSteps } from '@/components/start/FirstSteps';
 import { SiteFooter } from '@/components/layout/SiteFooter';
 import { SiteHeader } from '@/components/layout/SiteHeader';
@@ -70,6 +70,7 @@ import { useSession } from '@/lib/useSession';
  */
 export default function StartPage() {
   const session = useSession();
+  const startPage = useStartSections(session.status === 'ready');
 
   const [query, setQuery] = useState('');
   // `undefined` — город ещё выясняется (запомненный или Красноярск), `null` —
@@ -170,7 +171,7 @@ export default function StartPage() {
   return (
     <div className="flex min-h-dvh flex-col bg-surface">
       <DevNotice />
-      <SiteHeader sticky={false} />
+      <SiteHeader page={startPage} />
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-5 sm:px-8">
         <Hero
@@ -182,8 +183,6 @@ export default function StartPage() {
           onCity={chooseCity}
           onRegion={chooseRegion}
         />
-
-        <StartNav signedIn={session.status === 'ready'} />
 
         {error && <Alert>{error}</Alert>}
 
@@ -953,12 +952,14 @@ function SectionTitle({
 }
 
 /**
- * Липкое меню разделов стартовой (вариант А от 01.10.2026) — как на странице
- * клуба. Гостю — клубы и новости платформы; вошедшему — и своё. У «Моих
- * клубов» — число непрочитанного в их лентах. Пункт ведёт к блоку, которого
- * может не быть (нет новостей), — тогда меню его не показывает.
+ * Разделы стартовой — во второй строке шапки, как разделы страницы клуба в
+ * `ClubBar` (просьба владельца от 15.10.2026: отдельная плавающая плашка под
+ * обложкой слипалась с текстом при прокрутке). Гостю — клубы и новости
+ * платформы; вошедшему — и своё. У «Моих клубов» — число непрочитанного в их
+ * лентах. Пункт ведёт к блоку, которого может не быть (нет новостей), — тогда
+ * его нет и в меню; меньше двух пунктов — строки нет вовсе.
  */
-function StartNav({ signedIn }: { signedIn: boolean }) {
+function useStartSections(signedIn: boolean): SectionNavState | undefined {
   const unread = useClubPostsUnread();
   const [present, setPresent] = useState<string[]>([]);
   const [active, setActive] = useState<string | null>(null);
@@ -978,18 +979,19 @@ function StartNav({ signedIn }: { signedIn: boolean }) {
   ];
   const ids = items.map((item) => item.id).join(',');
 
-  // Какие блоки есть на странице и какой сейчас под меню.
+  // Какие блоки есть на странице и какой сейчас под шапкой.
   useEffect(() => {
     const list = ids.split(',');
     const check = (): void => {
-      setPresent(list.filter((id) => document.getElementById(id)));
+      const found = list.filter((id) => document.getElementById(id));
+      setPresent((prev) => (prev.join(',') === found.join(',') ? prev : found));
 
       let current: string | null = null;
       let currentTop = -Infinity;
 
       for (const id of list) {
         const top = document.getElementById(id)?.getBoundingClientRect().top;
-        if (top !== undefined && top < SECTION_ACTIVE_OFFSET_START && top > currentTop + 1) {
+        if (top !== undefined && top < SECTION_ACTIVE_OFFSET_CLUB && top > currentTop + 1) {
           current = id;
           currentTop = top;
         }
@@ -1011,62 +1013,20 @@ function StartNav({ signedIn }: { signedIn: boolean }) {
   const shown = items.filter((item) => present.includes(item.id));
 
   if (shown.length < 2) {
-    return null;
+    return undefined;
   }
 
-  return (
-    // Полоса под меню (просьба владельца от 15.10.2026: прилипшее вплотную к
-    // краю экрана меню слипалось с текстом): сверху отступ цветом страницы,
-    // снизу содержимое растворяется, а не обрезается краем меню. Полоса —
-    // во всю ширину, с полями страницы, иначе текст проглядывал бы по бокам;
-    // нажатия сквозь её прозрачный низ проходят к содержимому.
-    <div className="pointer-events-none sticky top-0 z-10 -mx-5 -mt-3 -mb-8 bg-gradient-to-b from-surface from-65% to-transparent px-4 pt-3 pb-10 sm:-mx-8 sm:px-7">
-      <nav
-        aria-label="Разделы стартовой"
-        className="pointer-events-auto rounded-card border border-border bg-surface-raised/90 p-1.5 shadow-sm backdrop-blur"
-      >
-        {/* На телефоне — список, а не лента вбок (решение владельца от 03.10.2026). */}
-        <CompactSelect
-          label="Раздел"
-          value={active && shown.some((item) => item.id === active) ? active : shown[0]!.id}
-          options={shown.map((item) => ({
-            value: item.id,
-            label: item.id === 'moi-kluby' && (unread?.total ?? 0) > 0 ? `${item.label} · ${unread!.total} новых` : item.label,
-          }))}
-          onChange={(id) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-          className="px-1.5 sm:hidden"
-        />
+  const total = unread?.total ?? 0;
 
-        <ul className="hidden max-w-full gap-1 overflow-x-auto [scrollbar-width:none] sm:flex">
-          {shown.map((item) => (
-            <li key={item.id}>
-              <button
-                type="button"
-                onClick={() => document.getElementById(item.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                aria-current={active === item.id ? 'true' : undefined}
-                className={cn(
-                  'inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[0.875rem] whitespace-nowrap transition-colors',
-                  active === item.id ? 'bg-accent text-accent-text' : 'text-text-muted hover:bg-surface-sunken hover:text-text',
-                )}
-              >
-                {item.label}
-                {item.id === 'moi-kluby' && (unread?.total ?? 0) > 0 && (
-                  <span
-                    className={cn(
-                      'grid h-[1.125rem] min-w-[1.125rem] place-items-center rounded-full px-1 text-[0.6875rem] font-semibold',
-                      active === item.id ? 'bg-accent-text text-accent' : 'bg-accent text-accent-text',
-                    )}
-                  >
-                    {unread!.total}
-                  </span>
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </nav>
-    </div>
-  );
+  return {
+    items: shown.map((item) => ({
+      id: item.id,
+      // Та же подпись, что у новостей в строке клуба: число — кружком.
+      label: item.id === 'moi-kluby' && total > 0 ? `${item.label} · ${total} новых` : item.label,
+    })),
+    currentId: active,
+    go: (id) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+  };
 }
 
 /** Заглушка карточек — той же сетки, что выдача: список не подпрыгивает. */
