@@ -198,13 +198,20 @@ export default function StartPage() {
                 рядом, одной высоты, их новости — под ними во всю ширину.
                 Новости рядом с записями растягивали плитку записей в пустоту.
                 «Мои тренеры» — полосой во всю ширину между ними (вариант А от
-                02.10.2026): у тренера длинная строка занятия. */}
-            <div className="mt-16 grid gap-4 lg:grid-cols-2">
-              <MyEntries />
-              <MyClubs />
-              <MyCoaches />
-              <MyClubPosts />
-            </div>
+                02.10.2026): у тренера длинная строка занятия. Заголовок — как у
+                соседних разделов (решение от 15.10.2026): без него плитки
+                читались продолжением выдачи клубов. */}
+            <section aria-labelledby="moyo" className="mt-16">
+              <SectionTitle id="moyo" description="Записи, клубы, тренеры и новости — всё ваше в одном месте.">
+                Мой КНТ
+              </SectionTitle>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <MyEntries />
+                <MyClubs />
+                <MyCoaches />
+                <MyClubPosts />
+              </div>
+            </section>
             <Nearest />
           </>
         )}
@@ -1070,10 +1077,12 @@ const KICKER = 'text-[0.75rem] font-semibold tracking-[0.1em] text-text-subtle u
 
 /** Заголовок блока — шрифтом обложки, с описанием, как на странице клуба. */
 function SectionTitle({
+  id,
   children,
   description,
   action,
 }: {
+  id?: string;
   children: React.ReactNode;
   description?: React.ReactNode;
   action?: React.ReactNode;
@@ -1081,7 +1090,9 @@ function SectionTitle({
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
       <div className="min-w-0 max-w-3xl">
-        <h2 className="font-display text-[1.375rem] leading-tight sm:text-[1.5rem]">{children}</h2>
+        <h2 id={id} className="font-display text-[1.375rem] leading-tight sm:text-[1.5rem]">
+          {children}
+        </h2>
         {description && <p className="mt-1 text-[0.9375rem] text-text-muted">{description}</p>}
       </div>
       {action}
