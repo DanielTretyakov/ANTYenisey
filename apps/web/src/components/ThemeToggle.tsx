@@ -48,10 +48,11 @@ export function ThemeToggle() {
   );
 }
 
-function ThemeIcon({ preference }: { preference: ThemePreference }) {
+/** Значок темы — и у кнопки в шапке гостя, и в меню аккаунта (15.10.2026). */
+export function ThemeIcon({ preference, className = 'h-5 w-5' }: { preference: ThemePreference; className?: string }) {
   const common = {
     viewBox: '0 0 20 20',
-    className: 'h-5 w-5',
+    className,
     fill: 'none',
     stroke: 'currentColor',
     strokeWidth: 1.6,

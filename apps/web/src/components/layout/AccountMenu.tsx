@@ -8,6 +8,7 @@ import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { rolesLabel } from '@/lib/roles';
 import { clearSession } from '@/lib/session';
+import { ThemeIcon } from '@/components/ThemeToggle';
 import { applyTheme, readTheme, type ThemePreference } from '@/lib/theme';
 import { useDisclosure } from '@/lib/useDisclosure';
 
@@ -24,9 +25,9 @@ function shortName(fullName: string): string {
 }
 
 const THEMES: { value: ThemePreference; label: string }[] = [
-  { value: 'light', label: 'светлая' },
-  { value: 'dark', label: 'тёмная' },
-  { value: 'system', label: 'как в системе' },
+  { value: 'light', label: 'Светлая тема' },
+  { value: 'dark', label: 'Тёмная тема' },
+  { value: 'system', label: 'Тема как в системе' },
 ];
 
 /**
@@ -36,8 +37,12 @@ const THEMES: { value: ThemePreference; label: string }[] = [
  * шапка не решала. Всё, что не нужно на каждом шаге, — в меню: кабинет, мои
  * клубы со ссылкой на рабочее место (сотрудник попадает на смену откуда
  * угодно, а не только со страницы клуба), тренеры, уведомления, разделы
- * владельца платформы, тема тремя словами вместо значка-монитора и «Выйти» —
- * последним, отдельно: случайно его больше не нажать.
+ * владельца платформы, тема и «Выйти» — последним, отдельно: случайно его
+ * больше не нажать.
+ *
+ * С 15.10.2026 (просьба владельца — сжать): «Рабочее место» — под названием
+ * клуба, в строке с ролями, а не колонкой справа; тема — тремя значками в
+ * строке «Выйти», а не отдельной строкой словами; строки плотнее.
  */
 export function AccountMenu({ user }: { user: PublicUser }) {
   const router = useRouter();
@@ -98,7 +103,7 @@ export function AccountMenu({ user }: { user: PublicUser }) {
           menu.open ? 'grid grid-cols-[minmax(0,1fr)]' : 'hidden',
         )}
       >
-        <div className="flex items-center gap-3 border-b border-border px-3 pt-2 pb-3">
+        <div className="flex items-center gap-3 border-b border-border px-3 pt-1.5 pb-2.5">
           <Avatar>{initials(user.fullName)}</Avatar>
           <span className="min-w-0">
             {/* ФИО целиком, переносом: «кто вошёл» — ради этой строки меню и открывают. */}
@@ -111,21 +116,38 @@ export function AccountMenu({ user }: { user: PublicUser }) {
         <MenuLink href="/my-bookings">Мои записи</MenuLink>
 
         {user.memberships.length > 0 && <Group>Мои клубы</Group>}
-        {user.memberships.map((membership) => (
-          <div key={membership.slug} className="flex items-center gap-1">
-            <MenuLink href={`/clubs/${membership.slug}`} grow hint={isStaff(membership.roles) ? rolesLabel(membership.roles) : undefined}>
-              {membership.name}
-            </MenuLink>
-            {hasAnyRole(membership.roles, MANAGING_ROLES) && (
-              <Link
-                href={`/clubs/${membership.slug}/desk`}
-                className="shrink-0 rounded-control px-2.5 py-2 text-[0.8125rem] whitespace-nowrap text-text-accent hover:bg-surface-sunken"
-              >
-                Рабочее место
+        {user.memberships.map((membership) => {
+          const roles = isStaff(membership.roles) ? rolesLabel(membership.roles) : null;
+          const desk = hasAnyRole(membership.roles, MANAGING_ROLES);
+
+          return (
+            // Две ссылки одной строкой меню: клуб — названием, рабочее место —
+            // под ним, рядом с ролями. Вложить одну ссылку в другую нельзя.
+            <div key={membership.slug} className="min-w-0 rounded-control px-3 py-1.5 hover:bg-surface-sunken">
+              <Link href={`/clubs/${membership.slug}`} className="block truncate text-[0.875rem] text-text">
+                {membership.name}
               </Link>
-            )}
-          </div>
-        ))}
+              {(roles || desk) && (
+                <span className="flex min-w-0 items-baseline gap-1.5 text-[0.75rem]">
+                  {roles && <span className="min-w-0 truncate text-text-subtle">{roles}</span>}
+                  {roles && desk && (
+                    <span aria-hidden="true" className="text-text-subtle">
+                      ·
+                    </span>
+                  )}
+                  {desk && (
+                    <Link
+                      href={`/clubs/${membership.slug}/desk`}
+                      className="shrink-0 font-medium whitespace-nowrap text-text-accent hover:underline"
+                    >
+                      Рабочее место
+                    </Link>
+                  )}
+                </span>
+              )}
+            </div>
+          );
+        })}
 
         {user.platformOwner && (
           <>
@@ -140,34 +162,35 @@ export function AccountMenu({ user }: { user: PublicUser }) {
         <MenuLink href="/cabinet/edit/notifications">Уведомления</MenuLink>
         <MenuLink href="/help">Помощь</MenuLink>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-          <span className="text-[0.875rem] text-text">Тема</span>
-          <span role="radiogroup" aria-label="Тема" className="inline-flex rounded-control border border-border p-0.5">
+        {/* Последняя строка: «Выйти» слева, тема значками справа. */}
+        <div className="mt-1 flex items-center justify-between gap-2 border-t border-border pt-1.5">
+          <button
+            type="button"
+            onClick={() => void logout()}
+            className="rounded-control px-3 py-2 text-left text-[0.875rem] text-danger hover:bg-surface-sunken"
+          >
+            Выйти
+          </button>
+          <span role="radiogroup" aria-label="Тема" className="inline-flex rounded-full border border-border p-0.5">
             {THEMES.map((item) => (
               <button
                 key={item.value}
                 type="button"
                 role="radio"
                 aria-checked={theme === item.value}
+                aria-label={item.label}
+                title={item.label}
                 onClick={() => chooseTheme(item.value)}
                 className={cn(
-                  'rounded-[0.4rem] px-2 py-1 text-[0.75rem] whitespace-nowrap',
-                  theme === item.value ? 'bg-text text-surface' : 'text-text-muted hover:text-text',
+                  'grid h-8 w-8 place-items-center rounded-full transition-colors',
+                  theme === item.value ? 'bg-surface-accent-soft text-text-accent' : 'text-text-subtle hover:text-text',
                 )}
               >
-                {item.label}
+                <ThemeIcon preference={item.value} className="h-4 w-4" />
               </button>
             ))}
           </span>
         </div>
-
-        <button
-          type="button"
-          onClick={() => void logout()}
-          className="mt-1 rounded-control border-t border-border px-3 py-2.5 text-left text-[0.875rem] text-danger hover:bg-surface-sunken"
-        >
-          Выйти
-        </button>
       </div>
     </div>
   );
@@ -185,17 +208,13 @@ function Avatar({ children }: { children: ReactNode }) {
 }
 
 function Group({ children }: { children: ReactNode }) {
-  return <p className="px-3 pt-3 pb-1 text-[0.6875rem] tracking-[0.1em] text-text-subtle uppercase">{children}</p>;
+  return <p className="px-3 pt-2.5 pb-0.5 text-[0.6875rem] tracking-[0.1em] text-text-subtle uppercase">{children}</p>;
 }
 
-function MenuLink({ href, children, hint, grow = false }: { href: string; children: ReactNode; hint?: string; grow?: boolean }) {
+function MenuLink({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <Link
-      href={href}
-      className={cn('min-w-0 rounded-control px-3 py-2 text-[0.875rem] text-text hover:bg-surface-sunken', grow && 'grow')}
-    >
+    <Link href={href} className="min-w-0 rounded-control px-3 py-1.5 text-[0.875rem] text-text hover:bg-surface-sunken">
       <span className="block truncate">{children}</span>
-      {hint && <span className="block truncate text-[0.75rem] text-text-subtle">{hint}</span>}
     </Link>
   );
 }
