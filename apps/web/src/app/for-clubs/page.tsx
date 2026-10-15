@@ -242,17 +242,25 @@ export default function ForClubsPage() {
         <h2 id="voprosy" className="font-display text-[1.5rem] sm:text-[1.875rem]">
           Частые вопросы
         </h2>
-        <div className="mt-6 grid gap-3 lg:grid-cols-2">
-          {FAQ.map((item) => (
-            <details key={item.q} className="group rounded-card border border-border bg-surface-raised px-5 py-4">
-              <summary className="flex cursor-pointer list-none items-start justify-between gap-4 text-[1rem] font-medium">
-                {item.q}
-                <span aria-hidden="true" className="mt-0.5 text-text-subtle transition-transform group-open:rotate-45">
-                  +
-                </span>
-              </summary>
-              <p className="mt-3 text-[0.9375rem] text-text-muted">{item.a}</p>
-            </details>
+        {/* Две независимые колонки, у каждой — своя половина вопросов: в общей
+            сетке раскрытый вопрос растягивал соседний по строке пустой
+            карточкой, а CSS-колонки перекладывали вопросы из одной колонки в
+            другую при раскрытии (15.10.2026). */}
+        <div className="mt-6 grid items-start gap-3 lg:grid-cols-2">
+          {[FAQ.slice(0, Math.ceil(FAQ.length / 2)), FAQ.slice(Math.ceil(FAQ.length / 2))].map((column, index) => (
+            <div key={index} className="grid gap-3">
+              {column.map((item) => (
+                <details key={item.q} className="group rounded-card border border-border bg-surface-raised px-5 py-4">
+                  <summary className="flex cursor-pointer list-none items-start justify-between gap-4 text-[1rem] font-medium">
+                    {item.q}
+                    <span aria-hidden="true" className="mt-0.5 text-text-subtle transition-transform group-open:rotate-45">
+                      +
+                    </span>
+                  </summary>
+                  <p className="mt-3 text-[0.9375rem] text-text-muted">{item.a}</p>
+                </details>
+              ))}
+            </div>
           ))}
         </div>
       </section>
