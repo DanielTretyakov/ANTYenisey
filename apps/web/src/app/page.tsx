@@ -316,6 +316,7 @@ function Hero({
             <SearchIcon />
             <input
               type="search"
+              name="club"
               value={query}
               onChange={(event) => onQuery(event.target.value)}
               placeholder="Название клуба"

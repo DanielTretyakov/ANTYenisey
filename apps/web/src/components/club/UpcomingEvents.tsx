@@ -303,6 +303,7 @@ export function UpcomingEvents({
               <span className="sr-only">Поиск мероприятия</span>
               <input
                 type="search"
+                name="event"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Найти по названию или тренеру"

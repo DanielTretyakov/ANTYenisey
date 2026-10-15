@@ -200,6 +200,7 @@ function AddClub({
           <span className="sr-only">Название клуба</span>
           <input
             type="search"
+            name="club"
             autoFocus
             value={query}
             onChange={(event) => setQuery(event.target.value)}
