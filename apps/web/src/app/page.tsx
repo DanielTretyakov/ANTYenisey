@@ -189,7 +189,8 @@ export default function StartPage() {
 
         <Results clubs={clubs} city={city ?? null} region={city ? null : (region ?? null)} query={query.trim()} />
 
-        {/* «С чего начать» — новичку и гостю, пока шаги не сделаны (решение от 02.10.2026). */}
+        {/* «С чего начать» — новичку и гостю, пока шаги не сделаны (решение от 02.10.2026);
+            кнопкой в правом нижнем углу со списком над ней (15.10.2026). */}
         <FirstSteps />
 
         {session.status === 'ready' && (
