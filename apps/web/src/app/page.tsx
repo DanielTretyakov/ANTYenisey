@@ -1015,50 +1015,57 @@ function StartNav({ signedIn }: { signedIn: boolean }) {
   }
 
   return (
-    <nav
-      aria-label="Разделы стартовой"
-      className="sticky top-0 z-10 -mx-1 mb-2 rounded-card border border-border bg-surface-raised/90 p-1.5 backdrop-blur"
-    >
-      {/* На телефоне — список, а не лента вбок (решение владельца от 03.10.2026). */}
-      <CompactSelect
-        label="Раздел"
-        value={active && shown.some((item) => item.id === active) ? active : shown[0]!.id}
-        options={shown.map((item) => ({
-          value: item.id,
-          label: item.id === 'moi-kluby' && (unread?.total ?? 0) > 0 ? `${item.label} · ${unread!.total} новых` : item.label,
-        }))}
-        onChange={(id) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-        className="px-1.5 sm:hidden"
-      />
+    // Полоса под меню (просьба владельца от 15.10.2026: прилипшее вплотную к
+    // краю экрана меню слипалось с текстом): сверху отступ цветом страницы,
+    // снизу содержимое растворяется, а не обрезается краем меню. Полоса —
+    // во всю ширину, с полями страницы, иначе текст проглядывал бы по бокам;
+    // нажатия сквозь её прозрачный низ проходят к содержимому.
+    <div className="pointer-events-none sticky top-0 z-10 -mx-5 -mt-3 -mb-8 bg-gradient-to-b from-surface from-65% to-transparent px-4 pt-3 pb-10 sm:-mx-8 sm:px-7">
+      <nav
+        aria-label="Разделы стартовой"
+        className="pointer-events-auto rounded-card border border-border bg-surface-raised/90 p-1.5 shadow-sm backdrop-blur"
+      >
+        {/* На телефоне — список, а не лента вбок (решение владельца от 03.10.2026). */}
+        <CompactSelect
+          label="Раздел"
+          value={active && shown.some((item) => item.id === active) ? active : shown[0]!.id}
+          options={shown.map((item) => ({
+            value: item.id,
+            label: item.id === 'moi-kluby' && (unread?.total ?? 0) > 0 ? `${item.label} · ${unread!.total} новых` : item.label,
+          }))}
+          onChange={(id) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+          className="px-1.5 sm:hidden"
+        />
 
-      <ul className="hidden max-w-full gap-1 overflow-x-auto [scrollbar-width:none] sm:flex">
-        {shown.map((item) => (
-          <li key={item.id}>
-            <button
-              type="button"
-              onClick={() => document.getElementById(item.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              aria-current={active === item.id ? 'true' : undefined}
-              className={cn(
-                'inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[0.875rem] whitespace-nowrap transition-colors',
-                active === item.id ? 'bg-accent text-accent-text' : 'text-text-muted hover:bg-surface-sunken hover:text-text',
-              )}
-            >
-              {item.label}
-              {item.id === 'moi-kluby' && (unread?.total ?? 0) > 0 && (
-                <span
-                  className={cn(
-                    'grid h-[1.125rem] min-w-[1.125rem] place-items-center rounded-full px-1 text-[0.6875rem] font-semibold',
-                    active === item.id ? 'bg-accent-text text-accent' : 'bg-accent text-accent-text',
-                  )}
-                >
-                  {unread!.total}
-                </span>
-              )}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </nav>
+        <ul className="hidden max-w-full gap-1 overflow-x-auto [scrollbar-width:none] sm:flex">
+          {shown.map((item) => (
+            <li key={item.id}>
+              <button
+                type="button"
+                onClick={() => document.getElementById(item.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                aria-current={active === item.id ? 'true' : undefined}
+                className={cn(
+                  'inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[0.875rem] whitespace-nowrap transition-colors',
+                  active === item.id ? 'bg-accent text-accent-text' : 'text-text-muted hover:bg-surface-sunken hover:text-text',
+                )}
+              >
+                {item.label}
+                {item.id === 'moi-kluby' && (unread?.total ?? 0) > 0 && (
+                  <span
+                    className={cn(
+                      'grid h-[1.125rem] min-w-[1.125rem] place-items-center rounded-full px-1 text-[0.6875rem] font-semibold',
+                      active === item.id ? 'bg-accent-text text-accent' : 'bg-accent text-accent-text',
+                    )}
+                  >
+                    {unread!.total}
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    </div>
   );
 }
 
