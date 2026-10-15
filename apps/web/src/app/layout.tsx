@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
+import { QuickHelp } from '@/components/help/QuickHelp';
+import { HELP_ARTICLES } from '@/content/help';
 import { onest, unbounded } from '@/lib/fonts';
 import { THEME_INIT_SCRIPT } from '@/lib/theme';
 import './globals.css';
@@ -34,7 +36,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             успевает поставить data-theme раньше, чем React сверит разметку. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        {/* Быстрая помощь — на всех страницах (решение владельца от 15.10.2026).
+            Статьи — только заголовками и выдержками: тексты в браузер не нужны. */}
+        <QuickHelp articles={HELP_ARTICLES.map(({ slug, title, summary }) => ({ slug, title, summary }))} />
+      </body>
     </html>
   );
 }

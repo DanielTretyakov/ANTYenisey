@@ -107,7 +107,8 @@ export function FirstSteps() {
   const nextStep = STEPS.find((step) => !done.has(step.id));
 
   return (
-    <div ref={panel.root} className="fixed right-4 bottom-4 z-30 sm:right-6 sm:bottom-6">
+    // Левее кнопки «?» быстрой помощи: та стоит в самом углу на всех страницах.
+    <div ref={panel.root} className="fixed right-[4.75rem] bottom-4 z-30 sm:right-[5.25rem] sm:bottom-6">
       <section
         id={panel.panelId}
         aria-labelledby="first-steps"

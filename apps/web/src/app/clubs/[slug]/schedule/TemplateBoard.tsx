@@ -229,11 +229,12 @@ export function TemplateBoard({
  *
  * Сетка занимает почти всю высоту окна, и «Сохранить» под ней оказывалась за
  * краем: администратор закрашивал вечер и листал страницу, чтобы сохранить
- * (решение от 05.10.2026 — «слишком далеко листать вниз»).
+ * (решение от 05.10.2026 — «слишком далеко листать вниз»). Справа — место под
+ * кнопку «?» быстрой помощи: она в углу экрана и иначе закрывала «Сохранить».
  */
 export function ActionBar({ children }: { children: ReactNode }) {
   return (
-    <div className="sticky bottom-0 z-[31] -mx-4 mt-4 flex flex-wrap items-center gap-2 border-t border-border bg-surface-raised/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+    <div className="sticky bottom-0 z-[31] -mx-4 mt-4 flex flex-wrap items-center gap-2 border-t border-border bg-surface-raised/95 py-3 pr-[4.5rem] pl-4 backdrop-blur sm:-mx-6 sm:pr-[5.5rem] sm:pl-6">
       {children}
     </div>
   );
