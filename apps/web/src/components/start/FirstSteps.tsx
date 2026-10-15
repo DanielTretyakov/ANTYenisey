@@ -113,9 +113,9 @@ export function FirstSteps() {
         id={panel.panelId}
         aria-labelledby="first-steps"
         hidden={!panel.open}
-        className="absolute right-0 bottom-full mb-3 w-[min(23rem,calc(100vw-2rem))] overflow-hidden rounded-card border border-border bg-surface-raised shadow-lg"
+        className="absolute right-0 bottom-full mb-3 flex max-h-[calc(100dvh-14.5rem)] w-[min(23rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-card border border-border bg-surface-raised shadow-lg"
       >
-        <header className="border-b border-border bg-surface-accent-soft px-5 pt-4 pb-4">
+        <header className="shrink-0 border-b border-border bg-surface-accent-soft px-5 pt-4 pb-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-[0.6875rem] font-semibold tracking-[0.1em] text-text-accent uppercase">С чего начать</p>
@@ -156,7 +156,8 @@ export function FirstSteps() {
           </div>
         </header>
 
-        <ol className="grid gap-1 p-2">
+        {/* Не влезло под шапку — прокручивается список, заголовок остаётся (как у быстрой помощи). */}
+        <ol className="grid gap-1 overflow-y-auto p-2">
           {STEPS.map((step, index) => {
             const ok = done.has(step.id);
             const current = step === nextStep;
@@ -235,7 +236,7 @@ export function FirstSteps() {
           })}
         </ol>
 
-        <footer className="flex items-center justify-between gap-3 border-t border-border px-5 py-3 text-[0.8125rem]">
+        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-5 py-3 text-[0.8125rem]">
           <Link
             href="/help"
             onClick={panel.close}

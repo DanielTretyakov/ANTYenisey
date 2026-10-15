@@ -24,7 +24,10 @@ export interface QuickHelpArticle {
  * статей — разметка, и тянуть их в браузер ради списка незачем.
  *
  * Слой — z-[32]: над панелью «Сохранить» расписания (z-[31]), её правый край
- * пуст; под шапкой (z-[35]) и окнами (z-40).
+ * пуст; под шапкой (z-[35]) и окнами (z-40). Поэтому окно не выше места
+ * между липкой шапкой со второй строкой (8rem) и кнопкой с отступами
+ * (~5.25rem): иначе шапка закрывала его заголовок; не влезло — прокручивается
+ * список, заголовок остаётся.
  */
 export function QuickHelp({ articles }: { articles: QuickHelpArticle[] }) {
   const pathname = usePathname();
@@ -44,9 +47,9 @@ export function QuickHelp({ articles }: { articles: QuickHelpArticle[] }) {
         id={panel.panelId}
         aria-labelledby="quick-help"
         hidden={!panel.open}
-        className="absolute right-0 bottom-full mb-3 flex max-h-[calc(100dvh-7rem)] w-[min(23rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-card border border-border bg-surface-raised shadow-lg"
+        className="absolute right-0 bottom-full mb-3 flex max-h-[calc(100dvh-14.5rem)] w-[min(23rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-card border border-border bg-surface-raised shadow-lg"
       >
-        <header className="border-b border-border bg-surface-accent-soft px-5 pt-4 pb-4">
+        <header className="shrink-0 border-b border-border bg-surface-accent-soft px-5 pt-4 pb-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-[0.6875rem] font-semibold tracking-[0.1em] text-text-accent uppercase">Быстрая помощь</p>
@@ -98,7 +101,7 @@ export function QuickHelp({ articles }: { articles: QuickHelpArticle[] }) {
           ))}
         </ul>
 
-        <footer className="flex items-center justify-between gap-3 border-t border-border px-5 py-3 text-[0.8125rem]">
+        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-5 py-3 text-[0.8125rem]">
           <Link href="/help" onClick={panel.close} className="font-medium text-text-accent underline-offset-2 hover:underline">
             Вся справка
           </Link>
