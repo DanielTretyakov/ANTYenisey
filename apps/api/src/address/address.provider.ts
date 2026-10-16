@@ -119,11 +119,11 @@ export class DisabledAddressProvider extends AddressProvider {
   readonly mode = 'off' as const;
 
   suggest(): Promise<FoundAddress[]> {
-    throw new ServiceUnavailableException('Подсказки адресов не подключены: не задан DADATA_API_KEY');
+    throw new ServiceUnavailableException('Подсказки адресов пока не подключены');
   }
 
   findById(): Promise<FoundAddress | null> {
-    throw new ServiceUnavailableException('Подсказки адресов не подключены: не задан DADATA_API_KEY');
+    throw new ServiceUnavailableException('Подсказки адресов пока не подключены');
   }
 }
 

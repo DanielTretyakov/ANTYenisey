@@ -13,7 +13,7 @@ import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { CreateChildForm } from './FamilyCards';
 
 function messageOf(cause: unknown): string {
-  return cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером';
+  return cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз';
 }
 
 /**
@@ -59,7 +59,7 @@ export function ClubFamilyBlock({
     <Card>
       <CardHeader
         title="Семья"
-        description="Пока ребёнку нет 14, записывает и отменяет за него родитель. Закрепить чужую учётку подтверждает сам ребёнок — у себя в кабинете."
+        description="Пока ребёнку нет 14, записывает и отменяет за него родитель. Если у ребёнка уже есть аккаунт, привязку он подтверждает сам в своём кабинете."
       />
       <CardBody className="grid grid-cols-[minmax(0,1fr)] gap-5">
         {error && <Alert>{error}</Alert>}
@@ -138,11 +138,11 @@ export function ClubFamilyBlock({
             {mode === 'child' && (
               <div className="mt-3">
                 <CreateChildForm
-                  title="Учётка ребёнка — почту и пароль задаёт родитель"
+                  title="Аккаунт ребёнка: почту и пароль задаёт родитель"
                   atDesk
                   parentPhone={personPhone}
                   submit={(payload) => club.createChildFor(personId, payload)}
-                  onDone={(child) => finish(`Учётка заведена: ${child.fullName}. Ребёнок сразу в клубе и закреплён.`)}
+                  onDone={(child) => finish(`Аккаунт создан: ${child.fullName}. Ребёнок уже в клубе и привязан к родителю.`)}
                   onCancel={() => setMode(null)}
                 />
               </div>

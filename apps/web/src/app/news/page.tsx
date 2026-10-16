@@ -103,8 +103,7 @@ export default function NewsPage() {
     >
       <h1 className="mb-2 text-[1.75rem]">Новости платформы</h1>
       <p className="mb-6 max-w-2xl text-[0.9375rem] text-text-muted">
-        Что нового в КНТ: общие новости, обновления продукта и — для сотрудников клубов — то, что меняется в работе
-        клуба.
+        Что нового в КНТ: общие новости, обновления сайта, а для сотрудников клубов — изменения в работе клуба.
       </p>
 
       {/* На телефоне — список разделов (решение от 03.10.2026). */}
@@ -134,7 +133,7 @@ export default function NewsPage() {
 
       <Card>
         <CardBody>
-          {feed === null && !error && <p className="py-4 text-[0.9375rem] text-text-muted">Загружаю…</p>}
+          {feed === null && !error && <p className="py-4 text-[0.9375rem] text-text-muted">Загружаем…</p>}
 
           {feed !== null && feed.items.length === 0 && (
             <p className="py-4 text-[0.9375rem] text-text-muted">Здесь пока ничего нет.</p>

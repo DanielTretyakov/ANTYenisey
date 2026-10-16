@@ -53,7 +53,7 @@ export class JwtAuthGuard implements CanActivate {
         return true;
       }
 
-      throw new UnauthorizedException('Требуется авторизация');
+      throw new UnauthorizedException('Нужно войти');
     }
 
     try {
@@ -73,7 +73,7 @@ export class JwtAuthGuard implements CanActivate {
         return true;
       }
 
-      throw new UnauthorizedException('Токен недействителен или истёк');
+      throw new UnauthorizedException('Сессия истекла, войдите заново');
     }
   }
 }

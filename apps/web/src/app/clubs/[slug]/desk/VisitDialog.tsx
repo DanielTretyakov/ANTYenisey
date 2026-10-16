@@ -77,7 +77,7 @@ export function VisitDialog({
       });
       onCreated();
     } catch (cause: unknown) {
-      setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
+      setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
     } finally {
       setPending(false);
     }
@@ -89,8 +89,8 @@ export function VisitDialog({
       onClose={onClose}
       description={
         <>
-          Человек пришёл без брони или играл, а записать забыли. Визит ляжет в историю клиента;
-          денег он не двигает — платную аренду заводит «Посадить клиента».
+          Человек пришёл без брони или играл, а записать забыли. Визит попадёт в историю клиента,
+          денег за него не начисляется. Платную аренду оформляйте через «Посадить клиента».
         </>
       }
     >

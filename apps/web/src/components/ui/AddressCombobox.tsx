@@ -129,7 +129,7 @@ export function AddressCombobox({
 
   const note =
     status === 'loading'
-      ? 'Ищу в справочнике…'
+      ? 'Ищем в справочнике…'
       : status === 'empty'
         ? 'Такого дома в справочнике нет — проверьте улицу и номер дома.'
         : status === 'error'

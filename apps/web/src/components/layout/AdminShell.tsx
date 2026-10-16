@@ -159,7 +159,7 @@ function AdminNav({ slug, clubName, roles }: { slug: string; clubName: string | 
           label="Раздел"
           current={current ?? ''}
           options={[
-            ...shift.map((section) => ({ href: clubPath(slug, section.path), label: section.label, group: 'Операционка' })),
+            ...shift.map((section) => ({ href: clubPath(slug, section.path), label: section.label, group: 'Ежедневная работа' })),
             ...setup.map((section) => ({ href: clubPath(slug, section.path), label: section.label, group: 'Устройство клуба' })),
           ]}
           className="grow"
@@ -168,7 +168,7 @@ function AdminNav({ slug, clubName, roles }: { slug: string; clubName: string | 
       </div>
 
       <div className="hidden lg:flex lg:flex-col">
-        <Group title="Операционка" sections={shift} slug={slug} />
+        <Group title="Ежедневная работа" sections={shift} slug={slug} />
         <Group title="Устройство клуба" sections={setup} slug={slug} />
         <SectionHelp slug={slug} />
       </div>

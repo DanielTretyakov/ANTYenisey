@@ -69,7 +69,7 @@ export function MyClubsCard({ user }: { user: PublicUser }) {
       <CardBody>
         {error && <Alert>{error}</Alert>}
 
-        {clubs === null && !error && <p className="text-[0.875rem] text-text-muted">Загружаю…</p>}
+        {clubs === null && !error && <p className="text-[0.875rem] text-text-muted">Загружаем…</p>}
 
         {clubs?.length === 0 && !adding && (
           <p className="text-[0.875rem] text-text-muted">
@@ -213,7 +213,7 @@ function AddClub({
         </Button>
       </div>
 
-      {found === null && <p className="mt-3 text-[0.875rem] text-text-muted">Ищу…</p>}
+      {found === null && <p className="mt-3 text-[0.875rem] text-text-muted">Ищем…</p>}
 
       {found !== null && available.length === 0 && (
         <p className="mt-3 text-[0.875rem] text-text-muted">

@@ -148,7 +148,7 @@ function RankBlock({
         setError('Игрок поправил разряд, пока вы смотрели. Карточка обновлена — проверьте и решите ещё раз.');
         onStale();
       } else {
-        setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
+        setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
       }
     } finally {
       setPending(null);

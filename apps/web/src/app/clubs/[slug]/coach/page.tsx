@@ -41,7 +41,7 @@ export default function MyCoachCardPage() {
             ? 'Эта страница — для тренеров клуба.'
             : cause instanceof ApiError
               ? cause.message
-              : 'Не удалось связаться с сервером',
+              : 'Нет связи. Проверьте интернет и попробуйте ещё раз',
         ),
       );
   }, [club]);
@@ -68,7 +68,7 @@ export default function MyCoachCardPage() {
           <Card>
             <CardHeader
               title="Карточка тренера"
-              description="Её видят все, не входя: по ней выбирают, к кому идти заниматься. Карточка одна на все клубы, где вы тренируете."
+              description="Её видят все посетители сайта, даже без входа, и по ней выбирают тренера. Карточка одна на все клубы, где вы тренируете."
             />
             <CardBody className="grid grid-cols-[minmax(0,1fr)] gap-7">
               <CoachEditor

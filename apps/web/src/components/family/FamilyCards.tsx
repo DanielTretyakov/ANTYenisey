@@ -13,7 +13,7 @@ import { guardianshipLeft } from '@/lib/family';
 import { GenderField, genderFrom } from '@/components/ui/GenderField';
 
 function messageOf(cause: unknown): string {
-  return cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером';
+  return cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз';
 }
 
 /**
@@ -43,7 +43,7 @@ export function ParentFamilyCard({
     <Card className="mt-6 max-w-2xl">
       <CardHeader
         title="Мои дети"
-        description="Пока ребёнку нет 14, записывает и отменяет за него родитель, он же ведёт профиль игрока. Ребёнок входит своей учёткой и видит, куда записан."
+        description="Пока ребёнку нет 14, записывает и отменяет за него родитель, он же ведёт профиль игрока. Ребёнок входит под своим аккаунтом и видит, куда записан."
       />
       <CardBody className="grid grid-cols-[minmax(0,1fr)] gap-6">
         {kids.length === 0 && mode === null && (
@@ -79,7 +79,7 @@ export function ParentFamilyCard({
               Добавить ребёнка
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setMode('attach')}>
-              У ребёнка уже есть учётка
+              У ребёнка уже есть аккаунт
             </Button>
           </div>
         )}
@@ -233,7 +233,7 @@ export function CreateChildForm({
   onDone,
   onCancel,
   submit = (payload) => api.createChild(payload),
-  title = 'Новая учётка ребёнка',
+  title = 'Новый аккаунт ребёнка',
   atDesk = false,
 }: {
   parentPhone: string;
@@ -333,7 +333,7 @@ export function CreateChildForm({
 
       <div className="flex gap-2">
         <Button type="submit" size="sm" pending={pending} disabled={!consent}>
-          Завести учётку
+          Создать аккаунт
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
           Отмена
@@ -375,9 +375,9 @@ function AttachChildForm({ onCancel }: { onCancel: () => void }) {
       onSubmit={(event) => void send(event)}
       className="rounded-control border border-border bg-surface-sunken px-4 pt-4 pb-3"
     >
-      <h3 className="mb-1 text-[0.9375rem] font-medium">Закрепить учётку ребёнка</h3>
+      <h3 className="mb-1 text-[0.9375rem] font-medium">Привязать аккаунт ребёнка</h3>
       <p className="mb-3 text-[0.8125rem] text-text-muted">
-        Ребёнок подтвердит заявку у себя в кабинете — без его подтверждения закрепить нельзя.
+        Ребёнок подтвердит заявку у себя в кабинете. Без его подтверждения привязать аккаунт нельзя.
       </p>
 
       {error && <Alert>{error}</Alert>}
@@ -449,7 +449,7 @@ export function ChildFamilyCard() {
       <CardBody className="grid grid-cols-[minmax(0,1fr)] gap-4">
         {error && <Alert>{error}</Alert>}
 
-        {guardian === undefined && <p className="text-[0.875rem] text-text-muted">Загружаю…</p>}
+        {guardian === undefined && <p className="text-[0.875rem] text-text-muted">Загружаем…</p>}
 
         {guardian && (
           <p className="text-[0.9375rem]">
@@ -459,7 +459,7 @@ export function ChildFamilyCard() {
 
         {guardian === null && (
           <p className="text-[0.875rem] text-text-muted">
-            За вами пока никто не закреплён. Записать вас может администратор клуба у стойки, а родитель —
+            Родитель к вашему аккаунту пока не привязан. Записать вас может администратор клуба у стойки, а родитель —
             после того как вы подтвердите его заявку.
           </p>
         )}

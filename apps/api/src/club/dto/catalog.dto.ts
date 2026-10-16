@@ -60,7 +60,7 @@ export class TrainingTypeDto implements TrainingTypeRequest {
 
   @IsInt({ message: 'Цена указывается целым числом копеек' })
   @Min(0, { message: 'Цена не может быть отрицательной' })
-  @Max(MAX_PRICE, { message: 'Цена неправдоподобно велика' })
+  @Max(MAX_PRICE, { message: 'Цена слишком большая' })
   price: number;
 
   @IsOptional()
@@ -108,7 +108,7 @@ export class TournamentTypeDto implements TournamentTypeRequest {
 
   @IsInt({ message: 'Цена указывается целым числом копеек' })
   @Min(0, { message: 'Цена не может быть отрицательной' })
-  @Max(MAX_PRICE, { message: 'Цена неправдоподобно велика' })
+  @Max(MAX_PRICE, { message: 'Цена слишком большая' })
   price: number;
 
   @IsOptional()

@@ -57,7 +57,7 @@ export function CreateClubDialog({
       setCreated(result.slug);
       onCreated();
     } catch (cause: unknown) {
-      setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
+      setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
     } finally {
       setPending(false);
     }
@@ -137,7 +137,7 @@ export function CreateClubDialog({
                 className={inputClassName}
               />
               <span className="text-[0.8125rem] text-text-subtle">
-                Учётка с этой почтой уже должна быть — пусть руководитель сначала зарегистрируется на сайте.
+                Аккаунт с этой почтой уже должен быть: пусть руководитель сначала зарегистрируется на сайте.
               </span>
             </label>
 

@@ -183,7 +183,7 @@ export class PeopleService {
     });
 
     if (!user) {
-      throw new NotFoundException('Человек не найден на платформе');
+      throw new NotFoundException('Такого человека на сайте нет');
     }
 
     await this.membership.ensureClient(tenantId, userId);

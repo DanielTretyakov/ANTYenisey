@@ -91,7 +91,7 @@ export class ActingClientGuard implements CanActivate {
       // Открытый список мероприятий смотрят и без входа — но за ребёнка
       // без входа не смотрят.
       if (forId) {
-        throw new UnauthorizedException('Требуется авторизация');
+        throw new UnauthorizedException('Нужно войти');
       }
 
       request.actingClient = null;

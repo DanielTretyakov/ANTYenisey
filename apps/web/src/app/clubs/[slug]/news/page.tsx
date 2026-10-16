@@ -72,7 +72,7 @@ export default function ClubNewsPage() {
 
       <Card>
         <CardBody>
-          {posts === null && !error && <p className="py-4 text-[0.9375rem] text-text-muted">Загружаю…</p>}
+          {posts === null && !error && <p className="py-4 text-[0.9375rem] text-text-muted">Загружаем…</p>}
 
           {posts !== null && posts.length === 0 && (
             <p className="py-4 text-[0.9375rem] text-text-muted">Клуб пока ничего не публиковал.</p>

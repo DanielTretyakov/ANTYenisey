@@ -72,7 +72,7 @@ export function NewClientDialog({
         await club.lookupPerson(value.includes('@') ? { email: value } : { phone: value }),
       );
     } catch (cause: unknown) {
-      setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
+      setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
     } finally {
       setPending(false);
     }
@@ -85,7 +85,7 @@ export function NewClientDialog({
     try {
       onAttached(await club.attachPerson(id));
     } catch (cause: unknown) {
-      setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
+      setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
     } finally {
       setPending(false);
     }
@@ -97,7 +97,7 @@ export function NewClientDialog({
       onClose={onClose}
       description={
         <>
-          Учётку человек заводит сам — пароль знает только он. Дайте отсканировать код, потом
+          Аккаунт человек заводит сам, чтобы пароль знал только он. Дайте ему отсканировать код, потом
           найдите его по почте или телефону и привяжите к клубу.
         </>
       }
@@ -148,19 +148,19 @@ export function NewClientDialog({
           </label>
 
           <p className="mt-2 text-[0.8125rem] text-text-subtle">
-            Только целиком: по куску почты поиск ничего не найдёт — это чужие данные.
+            Нужна почта целиком: по части адреса поиск не работает, чтобы никто не подбирал чужие данные.
           </p>
 
           {found && !found.found && (
             <p className="mt-3 text-[0.875rem] text-text-muted">
-              Такого человека на платформе нет. Пусть зарегистрируется по коду — после этого он
+              Такого человека на сайте нет. Пусть зарегистрируется по коду — после этого он
               уже будет в клубе.
             </p>
           )}
 
           {found?.ambiguous && (
             <p className="mt-3 text-[0.875rem] text-warning">
-              С таким телефоном на платформе несколько человек — так бывает у семьи с одним
+              С таким телефоном на сайте несколько человек — так бывает у семьи с одним
               номером. Спросите почту: она у каждого своя.
             </p>
           )}

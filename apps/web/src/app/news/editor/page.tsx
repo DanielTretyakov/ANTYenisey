@@ -129,7 +129,7 @@ export default function NewsEditorPage() {
                 + Новая новость
               </Button>
 
-              {items === null && <p className="text-[0.9375rem] text-text-muted">Загружаю…</p>}
+              {items === null && <p className="text-[0.9375rem] text-text-muted">Загружаем…</p>}
               {items?.length === 0 && <p className="text-[0.9375rem] text-text-muted">Новостей пока нет.</p>}
 
               <ul className="divide-y divide-border">

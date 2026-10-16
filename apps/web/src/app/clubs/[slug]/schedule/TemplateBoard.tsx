@@ -179,7 +179,7 @@ export function TemplateBoard({
           );
         })}
         <span className="ml-2 text-[0.8125rem] text-text-subtle">
-          Как зал живёт обычно — для всех дней, не отвязанных в режиме «День».
+          Обычная неделя зала. Действует для всех дней, кроме отвязанных в режиме «День».
         </span>
       </div>
 
@@ -243,7 +243,7 @@ export function ActionBar({ children }: { children: ReactNode }) {
 export function NoTables() {
   return (
     <p className="text-[0.9375rem] text-text-muted">
-      В этом зале нет столов — составлять расписание пока не для чего. Столы заводятся в разделе
+      В этом зале нет столов. Заведите их в разделе
       «Настройки».
     </p>
   );

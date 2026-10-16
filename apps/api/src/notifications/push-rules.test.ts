@@ -19,10 +19,10 @@ describe('toPushPayload', () => {
     });
   });
 
-  it('однострочное — под заголовком «Енисей», без кнопки ведёт на сайт', () => {
+  it('однострочное — под заголовком «КНТ», без кнопки ведёт на сайт', () => {
     const payload = toPushPayload({ text: 'Проверка связи.' }, context);
 
-    assert.equal(payload.title, 'Енисей');
+    assert.equal(payload.title, 'КНТ');
     assert.equal(payload.body, 'Проверка связи.');
     assert.equal(payload.url, 'https://ant-yenisey.ru');
   });

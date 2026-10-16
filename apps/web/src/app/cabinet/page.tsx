@@ -56,7 +56,7 @@ export default function CabinetPage() {
         if (!cancelled) setPlayer(found);
       })
       .catch((cause: unknown) => {
-        if (!cancelled) setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
+        if (!cancelled) setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
       });
 
     return () => {

@@ -23,7 +23,7 @@ export class VerifyEmailDto implements VerifyEmailRequest {
 }
 
 export class ForgotPasswordDto implements ForgotPasswordRequest {
-  @IsEmail({}, { message: 'email: адрес вида name@example.ru' })
+  @IsEmail({}, { message: 'Почта — адрес вида name@example.ru' })
   @MaxLength(254)
   email: string;
 }
@@ -34,7 +34,7 @@ export class ResetPasswordDto implements ResetPasswordRequest {
   token: string;
 
   @IsString()
-  @MinLength(8, { message: 'password: минимум 8 символов' })
+  @MinLength(8, { message: 'Пароль — не короче 8 символов' })
   @MaxLength(128)
   password: string;
 }
@@ -45,7 +45,7 @@ export class ChangePasswordDto implements ChangePasswordRequest {
   currentPassword: string;
 
   @IsString()
-  @MinLength(8, { message: 'newPassword: минимум 8 символов' })
+  @MinLength(8, { message: 'Новый пароль — не короче 8 символов' })
   @MaxLength(128)
   newPassword: string;
 }

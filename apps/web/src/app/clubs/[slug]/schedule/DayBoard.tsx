@@ -411,7 +411,7 @@ export function DayBoard({
           onReset={() => void reset()}
         />
 
-        <span className="ml-auto flex items-center gap-2">
+        <span className="ml-auto flex flex-wrap items-center justify-end gap-2">
           <Button
             type="button"
             variant="secondary"
@@ -498,7 +498,7 @@ function DayState({
   if (asking === 'detach') {
     return (
       <Question
-        text="Расписание дня станет копией шаблона и дальше будет жить само по себе: правки шаблона на него перестанут действовать. Занятия для записи при этом не заводятся — их вы поставите кистью; турниры из шаблона заведутся на эту дату."
+        text="Расписание дня станет копией шаблона, и правки шаблона на него больше не повлияют. Запись на тренировки при этом не откроется: её открывают кистью. Турниры из шаблона появятся на эту дату."
         confirm="Отвязать"
         pending={pending}
         onConfirm={onDetach}

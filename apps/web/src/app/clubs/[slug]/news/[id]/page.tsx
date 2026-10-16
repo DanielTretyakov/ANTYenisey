@@ -64,7 +64,7 @@ export default function ClubPostPage() {
     <ClubSubpage title={post?.title ?? 'Новость клуба'} back={{ href: `/clubs/${slug}/news`, label: 'Все новости клуба' }}>
       {error && <Alert>{error}</Alert>}
 
-      {!post && !error && <p className="text-[0.9375rem] text-text-muted">Загружаю…</p>}
+      {!post && !error && <p className="text-[0.9375rem] text-text-muted">Загружаем…</p>}
 
       {post && (
         <Card className="max-w-3xl">

@@ -84,7 +84,7 @@ export function ClubNewsColumn() {
           <p className="px-5 py-4 text-[0.9375rem] text-danger">{error}</p>
         ) : posts === null ? (
           <p className="px-5 py-4 text-[0.9375rem] text-text-muted" aria-busy="true">
-            Загружаю…
+            Загружаем…
           </p>
         ) : shown.length === 0 ? (
           <p className="px-5 py-4 text-[0.9375rem] text-text-muted">

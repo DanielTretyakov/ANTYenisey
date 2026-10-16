@@ -35,7 +35,7 @@ export function toPushPayload(
   const single = body === '';
 
   return {
-    title: single ? 'Енисей' : first,
+    title: single ? 'КНТ' : first,
     body: truncate(single ? first : body, BODY_LIMIT),
     url: message.link?.url ?? context.webOrigin,
     tag: context.tag,

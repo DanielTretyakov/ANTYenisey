@@ -924,7 +924,7 @@ function Nearest() {
 
   return (
     <section id="blizhaishee" className="mt-16 scroll-mt-40">
-      <SectionTitle description="Ближайшие занятия и турниры клубов, где вы бываете, — запись в окне мероприятия.">
+      <SectionTitle description="Ближайшие занятия и турниры ваших клубов. Нажмите на любое, чтобы записаться.">
         Ближайшее в моих клубах
       </SectionTitle>
 

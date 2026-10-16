@@ -53,9 +53,9 @@ const MAX_PRICE = 10_000_000;
 /** Целая неотрицательная сумма в копейках. */
 const MoneyField = (): PropertyDecorator =>
   ((target: object, key: string | symbol) => {
-    IsInt({ message: `${String(key)}: сумма указывается целым числом копеек` })(target, key);
-    Min(0, { message: `${String(key)}: сумма не может быть отрицательной` })(target, key);
-    Max(MAX_PRICE, { message: `${String(key)}: сумма неправдоподобно велика` })(target, key);
+    IsInt({ message: 'Цена указывается целым числом копеек' })(target, key);
+    Min(0, { message: 'Цена не может быть отрицательной' })(target, key);
+    Max(MAX_PRICE, { message: 'Цена слишком большая' })(target, key);
   }) as PropertyDecorator;
 
 const trimmed = () =>
@@ -102,16 +102,16 @@ export class CreateHallDto implements CreateHallRequest {
    */
   @IsOptional()
   @Transform(({ value }: { value: unknown }) => (typeof value === 'string' && value.trim() === '' ? null : value))
-  @Matches(/^\+7[0-9]{10}$/, { message: 'phone: телефон зала в формате +79991234567' })
+  @Matches(/^\+7[0-9]{10}$/, { message: 'Телефон зала — в формате +79991234567' })
   phone: string | null;
 
   @IsOptional()
   @Transform(({ value }: { value: unknown }) => (typeof value === 'string' && value.trim() === '' ? null : value))
-  @Matches(/^[^@\s]+@[^@\s]+\.[^@\s]+$/, { message: 'email: ожидается адрес почты' })
+  @Matches(/^[^@\s]+@[^@\s]+\.[^@\s]+$/, { message: 'Почта указана с ошибкой' })
   @MaxLength(200)
   email: string | null;
 
-  @IsIn(BOOKING_STEPS, { message: 'bookingStep: недопустимый шаг бронирования' })
+  @IsIn(BOOKING_STEPS, { message: 'Такого шага брони нет' })
   bookingStep: BookingStep;
 
   @MoneyField()
@@ -186,17 +186,17 @@ export class UpdateHallDto implements UpdateHallRequest {
    */
   @IsOptional()
   @Transform(({ value }: { value: unknown }) => (typeof value === 'string' && value.trim() === '' ? null : value))
-  @Matches(/^\+7[0-9]{10}$/, { message: 'phone: телефон зала в формате +79991234567' })
+  @Matches(/^\+7[0-9]{10}$/, { message: 'Телефон зала — в формате +79991234567' })
   phone?: string | null;
 
   @IsOptional()
   @Transform(({ value }: { value: unknown }) => (typeof value === 'string' && value.trim() === '' ? null : value))
-  @Matches(/^[^@\s]+@[^@\s]+\.[^@\s]+$/, { message: 'email: ожидается адрес почты' })
+  @Matches(/^[^@\s]+@[^@\s]+\.[^@\s]+$/, { message: 'Почта указана с ошибкой' })
   @MaxLength(200)
   email?: string | null;
 
   @IsOptional()
-  @IsIn(BOOKING_STEPS, { message: 'bookingStep: недопустимый шаг бронирования' })
+  @IsIn(BOOKING_STEPS, { message: 'Такого шага брони нет' })
   bookingStep?: BookingStep;
 
   @IsOptional()

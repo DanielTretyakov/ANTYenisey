@@ -21,7 +21,7 @@ export default function ErrorPage({ error, reset }: { error: Error & { digest?: 
         <p className="text-[0.75rem] font-semibold tracking-[0.1em] text-text-subtle uppercase">Сбой</p>
         <h1 className="font-display text-[2rem] leading-tight">Страница не открылась</h1>
         <p className="text-[1rem] text-text-muted">
-          Что-то пошло не так у нас, а не у вас. Попробуйте ещё раз; если не выйдет — вернитесь чуть позже.
+          У нас что-то сломалось. Попробуйте ещё раз, а если не выйдет, зайдите чуть позже.
         </p>
         <div className="flex flex-wrap items-center gap-4">
           <Button onClick={reset}>Попробовать ещё раз</Button>

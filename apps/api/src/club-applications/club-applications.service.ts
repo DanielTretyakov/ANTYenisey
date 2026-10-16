@@ -62,7 +62,7 @@ export class ClubApplicationsService {
     const cityId = blankToNull(dto.cityId);
     const city = cityId ? await this.prisma.city.findUnique({ where: { id: cityId }, select: { name: true } }) : null;
 
-    if (cityId && !city) throw new BadRequestException('cityId: такого города нет в справочнике');
+    if (cityId && !city) throw new BadRequestException('Такого города нет в справочнике');
 
     const now = new Date();
     // Ночью владельца не будим: заявка подождёт восьми утра по поясу платформы.

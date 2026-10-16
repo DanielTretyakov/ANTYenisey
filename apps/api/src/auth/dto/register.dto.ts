@@ -27,24 +27,24 @@ export class PersonDto {
   // форму можно обойти запросом напрямую в API.
   @Transform(trimName)
   @IsString()
-  @MinLength(2, { message: 'lastName: фамилия не короче 2 символов' })
-  @MaxLength(100, { message: 'lastName: фамилия не длиннее 100 символов' })
-  @Matches(NAME_PATTERN, { message: 'lastName: в фамилии допустимы только буквы, дефис и апостроф' })
+  @MinLength(2, { message: 'Фамилия — не короче 2 символов' })
+  @MaxLength(100, { message: 'Фамилия — не длиннее 100 символов' })
+  @Matches(NAME_PATTERN, { message: 'В фамилии допустимы только буквы, дефис и апостроф' })
   lastName: string;
 
   @Transform(trimName)
   @IsString()
-  @MinLength(2, { message: 'firstName: имя не короче 2 символов' })
-  @MaxLength(100, { message: 'firstName: имя не длиннее 100 символов' })
-  @Matches(NAME_PATTERN, { message: 'firstName: в имени допустимы только буквы, дефис и апостроф' })
+  @MinLength(2, { message: 'Имя — не короче 2 символов' })
+  @MaxLength(100, { message: 'Имя — не длиннее 100 символов' })
+  @Matches(NAME_PATTERN, { message: 'В имени допустимы только буквы, дефис и апостроф' })
   firstName: string;
 
   @Transform(trimName)
   @IsString()
-  @MinLength(2, { message: 'middleName: отчество не короче 2 символов' })
-  @MaxLength(100, { message: 'middleName: отчество не длиннее 100 символов' })
+  @MinLength(2, { message: 'Отчество — не короче 2 символов' })
+  @MaxLength(100, { message: 'Отчество — не длиннее 100 символов' })
   @Matches(NAME_PATTERN, {
-    message: 'middleName: в отчестве допустимы только буквы, дефис и апостроф',
+    message: 'В отчестве допустимы только буквы, дефис и апостроф',
   })
   middleName: string;
 
@@ -52,7 +52,7 @@ export class PersonDto {
     typeof value === 'string' ? value.replace(/[\s()-]/g, '') : value,
   )
   @Matches(/^\+7\d{10}$/, {
-    message: 'phone: ожидается формат +79991234567',
+    message: 'Телефон — в формате +79991234567',
   })
   phone: string;
 
@@ -61,7 +61,7 @@ export class PersonDto {
    * 25.09.2026). Обязателен и в регистрации, и в правке личных данных: у
    * учёток, заведённых раньше, он пуст, и правка его и добавляет.
    */
-  @IsIn(GENDERS, { message: 'gender: укажите пол — MALE или FEMALE' })
+  @IsIn(GENDERS, { message: 'Укажите пол' })
   gender: Gender;
 }
 
@@ -80,12 +80,12 @@ export class AccountDto extends PersonDto implements Omit<RegisterRequest, 'tena
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim().toLowerCase() : value,
   )
-  @IsEmail({}, { message: 'email: некорректный адрес' })
+  @IsEmail({}, { message: 'Почта указана с ошибкой' })
   @MaxLength(254)
   email: string;
 
   @IsString()
-  @MinLength(8, { message: 'password: минимум 8 символов' })
+  @MinLength(8, { message: 'Пароль — не короче 8 символов' })
   // Верхняя граница — не каприз: argon2 хеширует вход целиком, и мегабайтный
   // «пароль» превращает форму входа в DoS-вектор.
   @MaxLength(128)
@@ -97,7 +97,7 @@ export class AccountDto extends PersonDto implements Omit<RegisterRequest, 'tena
    * текущего дня, а декораторы такого не умеют.
    */
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
-    message: 'birthDate: ожидается дата в виде 2001-05-17',
+    message: 'Дата рождения указана с ошибкой',
   })
   birthDate: string;
 
@@ -109,7 +109,7 @@ export class AccountDto extends PersonDto implements Omit<RegisterRequest, 'tena
    * были закрыты и учётка ребёнка из кабинета, и учётка ребёнка у стойки:
    * там галочку ставит родитель.
    */
-  @Equals(true, { message: 'consent: нужно согласие на обработку персональных данных' })
+  @Equals(true, { message: 'Нужно согласие на обработку персональных данных' })
   consent: true;
 }
 

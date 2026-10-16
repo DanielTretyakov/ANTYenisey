@@ -445,7 +445,7 @@ function Now({ day }: { day: DeskDay }) {
     <Card>
       <CardHeader
         title="Сейчас"
-        description="Состояние зала на текущий момент. Закрытое расписанием время администратор занять всё равно может — жизнь в зале сложнее расписания."
+        description="Что происходит в зале прямо сейчас. Время, закрытое расписанием, администратор всё равно может занять."
       />
       <CardBody>
         <ul className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
@@ -897,7 +897,7 @@ function duration(startsAt: string, endsAt: string): string {
 }
 
 function messageOf(cause: unknown): string {
-  return cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером';
+  return cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз';
 }
 
 /**

@@ -36,7 +36,7 @@ export function CoachStatsPanel({ load }: { load: (period: CoachStatsPeriod) => 
         if (!cancelled) setStats(loaded);
       })
       .catch((cause: unknown) => {
-        if (!cancelled) setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
+        if (!cancelled) setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
       });
 
     return () => {
@@ -78,7 +78,7 @@ export function CoachStatsPanel({ load }: { load: (period: CoachStatsPeriod) => 
             <Figure
               label="Заполненность"
               value={stats.averageFill === null ? '—' : `${stats.averageFill} %`}
-              note="записей к местам"
+              note="записей от числа мест"
             />
           </dl>
 

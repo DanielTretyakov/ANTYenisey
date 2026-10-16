@@ -465,7 +465,7 @@ export class BookingService {
     }
 
     if (dto.studentId === coachId) {
-      throw new BadRequestException('Сам себе учеником тренер не бывает');
+      throw new BadRequestException('Тренер не может быть своим учеником');
     }
 
     if (dto.withRobot) {

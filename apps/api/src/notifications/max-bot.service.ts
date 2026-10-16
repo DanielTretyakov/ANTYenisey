@@ -43,8 +43,8 @@ export class MaxBotService {
             event.maxUserId,
             result.ok
               ? [
-                  result.replaced ? 'Этот MAX был привязан к другой учётке — теперь он привязан к вашей.' : null,
-                  `Готово: уведомления «Енисея» для учётки ${shortName(result.fullName)} будут приходить сюда.`,
+                  result.replaced ? 'Этот MAX был привязан к другому аккаунту — теперь он привязан к вашему.' : null,
+                  `Готово: уведомления КНТ для аккаунта ${shortName(result.fullName)} будут приходить сюда.`,
                   'Что присылать, настраивается в личном кабинете. Отключить — команда /stop.',
                 ]
                   .filter(Boolean)
@@ -61,7 +61,7 @@ export class MaxBotService {
 
         if (link) {
           await this.links.markStarted(event.maxUserId);
-          await this.reply(event.maxUserId, `Уведомления для учётки ${shortName(link.fullName)} снова включены.`);
+          await this.reply(event.maxUserId, `Уведомления для аккаунта ${shortName(link.fullName)} снова включены.`);
         } else {
           await this.reply(event.maxUserId, this.helpText(false), true);
         }
@@ -83,8 +83,8 @@ export class MaxBotService {
           await this.reply(
             event.maxUserId,
             removed
-              ? 'Уведомления отключены, привязка к учётке снята. Подключить снова можно в личном кабинете.'
-              : 'Этот MAX ни к какой учётке не привязан.',
+              ? 'Уведомления отключены, привязка к аккаунту снята. Подключить снова можно в личном кабинете.'
+              : 'Этот MAX не привязан ни к одному аккаунту.',
           );
           return;
         }
@@ -98,8 +98,8 @@ export class MaxBotService {
 
   private helpText(linked: boolean): string {
     return linked
-      ? 'Это бот уведомлений «Енисея»: сюда приходят напоминания и новости клуба. Настроить, что присылать, — в личном кабинете. Отключить — команда /stop.'
-      : 'Это бот уведомлений «Енисея». Чтобы получать напоминания о записях, откройте личный кабинет на сайте и нажмите «Подключить MAX».';
+      ? 'Это бот уведомлений КНТ: сюда приходят напоминания и новости клуба. Настроить, что присылать, — в личном кабинете. Отключить — команда /stop.'
+      : 'Это бот уведомлений КНТ. Чтобы получать напоминания о записях, откройте личный кабинет на сайте и нажмите «Подключить MAX».';
   }
 
   private async reply(maxUserId: bigint, text: string, withCabinetLink = false): Promise<void> {

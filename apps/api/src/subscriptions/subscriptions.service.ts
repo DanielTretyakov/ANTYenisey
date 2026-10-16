@@ -875,7 +875,7 @@ export class SubscriptionsService {
     });
 
     if (halls.length === 0) {
-      throw new BadRequestException('У клуба нет ни одного зала — срок абонемента считать не по чему');
+      throw new BadRequestException('У клуба нет ни одного зала, а срок абонемента считается по времени зала');
     }
 
     if (halls.length > 1) {

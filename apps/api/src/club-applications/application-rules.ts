@@ -22,7 +22,7 @@ export function contactsProblem(contacts: ApplicationContacts): string | null {
   const phone = contacts.phone?.trim() ?? '';
   const email = contacts.email?.trim() ?? '';
 
-  return phone === '' && email === '' ? 'Оставьте телефон или почту — иначе нам не с кем связаться' : null;
+  return phone === '' && email === '' ? 'Оставьте телефон или почту, чтобы мы могли с вами связаться' : null;
 }
 
 /** Пустая строка формы — «не указано», а не значение. */

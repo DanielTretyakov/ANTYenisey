@@ -48,7 +48,7 @@ export function MyCoachesCard() {
       <CardBody>
         {error && <Alert>{error}</Alert>}
 
-        {coaches === null && !error && <p className="text-[0.875rem] text-text-muted">Загружаю…</p>}
+        {coaches === null && !error && <p className="text-[0.875rem] text-text-muted">Загружаем…</p>}
 
         {coaches?.length === 0 && (
           <p className="text-[0.875rem] text-text-muted">

@@ -347,7 +347,7 @@ export default function BookingPage() {
       <Card className="mb-6">
         <CardHeader
           title="Время"
-          description="Щёлкните клетку начала, затем клетку конца на том же столе — отрезок закрасится. Занятое подписано: аренда, занятие, турнир; на занятие и турнир можно нажать — откроется запись. Сетка — в часах работы зала."
+          description="Щёлкните клетку начала, затем клетку конца на том же столе. На занятых клетках написано, чем они заняты; нажмите на занятие или турнир, чтобы записаться. Сетка показывает часы работы зала."
         />
         <CardBody>
           {day?.closedDay ? (
@@ -394,7 +394,7 @@ export default function BookingPage() {
               {hall?.hasRobotOption && !withStudent && (
                 <Toggle
                   label="Со столовым роботом"
-                  hint="Отдельная услуга со своей ценой, а не наценка поверх аренды."
+                  hint="У стола с роботом своя цена."
                   checked={withRobot}
                   onChange={(event) => setWithRobot(event.target.checked)}
                 />
@@ -451,7 +451,7 @@ export default function BookingPage() {
         <Card className="mt-6">
           <CardHeader
             title="Мои спарринги"
-            description="С учеником — он видит спарринг в «Моих записях» и платит цену типа. Без ученика стол занят на вас."
+            description="Спарринг с учеником виден ему в «Моих записях», и он платит цену типа спарринга. Без ученика стол записан на вас."
           />
           <CardBody>
             {sparrings === null && <p className="text-[0.875rem] text-text-muted">Загружаем…</p>}
@@ -827,5 +827,5 @@ function instantAt(date: string, minute: number, timezone: string): string {
 }
 
 function messageOf(cause: unknown): string {
-  return cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером';
+  return cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз';
 }

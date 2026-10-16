@@ -171,7 +171,7 @@ export function RatingFull({ initialPeriod }: { initialPeriod: RatingPeriod }) {
 
         {rating === null ? (
           <p className="text-[0.9375rem] text-text-muted" aria-busy="true">
-            Загружаю…
+            Загружаем…
           </p>
         ) : rating.rows.length === 0 ? (
           <p className="text-[0.9375rem] text-text-muted">Отмеченных визитов за этот период нет.</p>

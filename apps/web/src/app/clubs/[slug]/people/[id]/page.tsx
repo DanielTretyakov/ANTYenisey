@@ -63,7 +63,7 @@ export default function PersonPage() {
       })
       .catch((cause: unknown) => {
         setCard(null);
-        setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
+        setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
       });
   }, [allowed, club, personId]);
 
@@ -139,7 +139,7 @@ export default function PersonPage() {
           <Card>
             <CardHeader
               title="Записи"
-              description="Аренда, занятия и турниры в этом клубе — свежие сверху. Списание показано у отмен и неявок: за ними стоят деньги."
+              description="Аренда, занятия и турниры в этом клубе, свежие сверху. У отмен и неявок показано, сколько списано."
             />
 
             {card.entries.length === 0 ? (
@@ -161,7 +161,7 @@ export default function PersonPage() {
             <Card>
               <CardHeader
                 title="Визиты с порога"
-                description="Человек пришёл без брони или визит внесли задним числом при сверке истории. Денег такой визит не двигает."
+                description="Человек пришёл без брони или визит внесли задним числом при сверке истории. Денег за такой визит не начисляется."
               />
               <ul className="divide-y divide-border">
                 {card.visits.map((visit) => (

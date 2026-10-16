@@ -166,7 +166,7 @@ export default function ClubPostsEditorPage() {
                 + Новая публикация
               </Button>
 
-              {items === null && <p className="text-[0.9375rem] text-text-muted">Загружаю…</p>}
+              {items === null && <p className="text-[0.9375rem] text-text-muted">Загружаем…</p>}
               {items?.length === 0 && <p className="text-[0.9375rem] text-text-muted">Публикаций пока нет.</p>}
 
               <ul className="divide-y divide-border">
@@ -199,7 +199,7 @@ export default function ClubPostsEditorPage() {
               title={welcome ? 'Приветствие клуба' : editing ? 'Правка публикации' : 'Новая публикация'}
               description={
                 welcome
-                  ? 'Закреплено первым в «Новостях клуба» — его первым читает новичок. Сообщением не рассылается, удалить нельзя — только скрыть.'
+                  ? 'Закреплено первым в «Новостях клуба», его первым читает новичок. Клиентам не рассылается. Удалить нельзя, можно только скрыть.'
                   : 'Жирный, курсив, подчёркивание и списки — кнопками над текстом. В сообщение клиентам уходят заголовок и первый абзац.'
               }
             />

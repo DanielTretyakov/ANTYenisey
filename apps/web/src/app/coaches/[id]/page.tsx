@@ -63,7 +63,7 @@ export default function CoachPage() {
         setError(
           cause instanceof ApiError && cause.status === 404
             ? 'Тренер не найден.'
-            : 'Не удалось связаться с сервером',
+            : 'Нет связи. Проверьте интернет и попробуйте ещё раз',
         ),
       );
   }, [params.id]);

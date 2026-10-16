@@ -43,7 +43,7 @@ const CATEGORY_TEXT: Partial<Record<NotificationCategoryName, { label: string; h
   },
   PLATFORM_DIGEST: {
     label: 'Сводка платформы',
-    hint: 'В 9:00: новые учётки и клубы, кто выбрал клубы своими, записи и состояние уведомлений.',
+    hint: 'В 9:00: новые аккаунты и клубы, кто выбрал клубы своими, записи и состояние уведомлений.',
   },
 };
 
@@ -160,7 +160,7 @@ export function NotificationsCard() {
       const subscription = await subscribe(publicKey);
       setView(await api.subscribePush(subscriptionBody(subscription)));
       setDeviceSubscribed(true);
-      setNotice('Уведомления на этом устройстве включены. Проверьте — отправьте проверочное.');
+      setNotice('Уведомления на этом устройстве включены. Чтобы проверить, отправьте проверочное сообщение.');
     } finally {
       // Человек мог запретить уведомления в запросе — блок должен это показать.
       setSupport(pushSupport());
@@ -194,7 +194,7 @@ export function NotificationsCard() {
           {error && <Alert>{error}</Alert>}
           {notice && <Alert tone="info">{notice}</Alert>}
 
-          {!view && !error && <p className="text-[0.875rem] text-text-muted">Загружаю…</p>}
+          {!view && !error && <p className="text-[0.875rem] text-text-muted">Загружаем…</p>}
 
           {max && (
             <section aria-labelledby="notify-max">
@@ -246,7 +246,7 @@ export function NotificationsCard() {
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                   {max.blocked ? (
                     <Alert tone="warning">
-                      Бот остановлен в MAX, и сообщения не доходят. Откройте чат с ботом «Енисея» и нажмите «Начать» —
+                      Бот остановлен в MAX, и сообщения не доходят. Откройте чат с ботом КНТ и нажмите «Начать» —
                       подключать заново не нужно.
                     </Alert>
                   ) : (

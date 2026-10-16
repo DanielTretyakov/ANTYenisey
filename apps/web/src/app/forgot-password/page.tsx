@@ -37,7 +37,7 @@ export default function ForgotPasswordPage() {
   return (
     <AuthLayout
       title="Восстановление пароля"
-      subtitle="Пришлём ссылку для нового пароля на почту учётки."
+      subtitle="Пришлём ссылку для нового пароля на почту, с которой вы регистрировались."
       footer={
         <Link href="/login" className="font-medium text-text-accent hover:underline">
           Вернуться ко входу
@@ -48,8 +48,8 @@ export default function ForgotPasswordPage() {
 
       {sent ? (
         <Alert tone="info">
-          Если учётка с почтой {sent} есть, письмо со ссылкой уже в пути. Ссылка действует один час. Не пришло —
-          проверьте папку «Спам».
+          Если аккаунт с почтой {sent} есть, письмо со ссылкой уже в пути. Ссылка действует один час. Если письма
+          нет, проверьте папку «Спам».
         </Alert>
       ) : (
         <form onSubmit={handleSubmit}>

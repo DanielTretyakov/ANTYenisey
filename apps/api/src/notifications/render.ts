@@ -279,7 +279,7 @@ export function renderNotification(type: string, payload: unknown, context: Rend
   switch (type) {
     case 'TEST':
       return {
-        text: 'Проверка связи: уведомления «Енисея» будут приходить сюда.',
+        text: 'Проверка связи: уведомления КНТ будут приходить сюда.',
         link: { label: 'Настройки уведомлений', url: `${context.webOrigin}/cabinet#notifications` },
       };
 
@@ -372,7 +372,7 @@ export function renderNotification(type: string, payload: unknown, context: Rend
 
       return {
         text: lines(
-          `${p.guardian} просит закрепить вас за собой как ребёнка: тогда родитель сможет записывать вас и вести ваш профиль.`,
+          `${p.guardian} просит привязать ваш аккаунт к своему как родитель: тогда сможет записывать вас и вести ваш профиль.`,
           'Согласиться или отказаться можно в личном кабинете.',
         ),
         link: cabinet,
@@ -425,7 +425,7 @@ export function renderNotification(type: string, payload: unknown, context: Rend
           'Не отмечено присутствие',
           `${what}, ${when(p.startsAt, p.timezone)}–${time(p.endsAt, p.timezone)}${p.place ? ` · ${p.place}` : ''}`,
           `Без отметки: ${p.count} — ${names(p.people, p.count)}`,
-          'Через сутки после окончания система сама поставит неявку.',
+          'Через сутки после окончания сайт сам поставит неявку.',
         ),
         link: { label: 'Экран смены', url: `${context.webOrigin}/clubs/${p.slug}/desk` },
       };
@@ -479,7 +479,7 @@ export function renderNotification(type: string, payload: unknown, context: Rend
         text: lines(
           `Смена не назначена · ${dayLabel(p.date)}`,
           `В зале «${p.hall}» клуба «${p.club}» на этот день нет ни одного администратора — ни по шаблону, ни вручную.`,
-          'Без смены «Смену» открывает только руководство: отметить пришедших будет некому.',
+          'Если никого не назначить, «Смену» сможет открыть только руководство, и отмечать пришедших будет некому.',
         ),
         link: { label: 'Расписание персонала', url: `${context.webOrigin}/clubs/${p.slug}/staff` },
       };
@@ -645,7 +645,7 @@ export function renderNotification(type: string, payload: unknown, context: Rend
         text: lines(
           `Сводка платформы за ${calendar(p.date)}`,
           '',
-          `Учётки: +${p.users.added} (всего ${p.users.total})`,
+          `Аккаунты: +${p.users.added} (всего ${p.users.total})`,
           `Клубы: +${p.clubs.added} (всего ${p.clubs.total})`,
           `Своим отметили: ${p.favourites.count}${byClub ? ` — ${byClub}` : ''}`,
           `Новых записей: ${p.entries}`,

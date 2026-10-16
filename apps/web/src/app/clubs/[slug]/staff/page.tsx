@@ -153,10 +153,10 @@ export default function StaffSchedulePage() {
     <AdminShell>
       <h1 className="mb-2 text-[1.75rem]">Расписание персонала</h1>
       <p className="mb-6 max-w-2xl text-[0.9375rem] text-text-muted">
-        Кто из администраторов работает в зале в какой день. Обычную неделю задаёт шаблон, замену — день поверх
-        шаблона. «Смена» откроется только тем, кто на ней, — чтобы никто другой случайно ничего не внёс; им же придёт
-        сообщение в MAX. Руководство работает на смене всегда. Если на завтра в зале никого, управляющему и
-        руководителю утром придёт напоминание.
+        Кто из администраторов в какой день работает в зале. Обычную неделю задаёт шаблон, а замену можно назначить
+        на конкретный день. «Смена» открывается только тем, кто на ней, и им приходит сообщение в MAX. Руководство
+        может открыть смену в любой день. Если на завтра в зале никого нет, управляющему и руководителю утром придёт
+        напоминание.
       </p>
 
       {session.status === 'ready' && !allowed && (
@@ -229,7 +229,7 @@ export default function StaffSchedulePage() {
             <Alert tone="info">Смены в этом зале назначает его управляющий.</Alert>
           )}
 
-          {hall?.canPlan && schedule === null && <p className="text-[0.9375rem] text-text-muted">Загружаю…</p>}
+          {hall?.canPlan && schedule === null && <p className="text-[0.9375rem] text-text-muted">Загружаем…</p>}
 
           {hall?.canPlan && schedule && schedule.candidates.length === 0 && (
             <Alert tone="info">
@@ -247,7 +247,7 @@ export default function StaffSchedulePage() {
                 <ul className="divide-y divide-border">
                   {schedule.template.map((row) => (
                     <li key={row.weekday} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-2.5">
-                      <span className="w-52 shrink-0 text-[0.9375rem]">{WEEKDAY_NAMES[row.weekday - 1]}</span>
+                      <span className="w-full shrink-0 text-[0.9375rem] sm:w-52">{WEEKDAY_NAMES[row.weekday - 1]}</span>
                       <span className="flex min-w-0 flex-1 flex-wrap gap-1.5" role="group" aria-label={`Шаблон: ${WEEKDAY_NAMES[row.weekday - 1]}`}>
                         {schedule.candidates.map((person) => (
                           <Tab
@@ -259,8 +259,8 @@ export default function StaffSchedulePage() {
                           </Tab>
                         ))}
                       </span>
-                      <span className="w-28 text-right text-[0.8125rem] text-text-subtle">
-                        {pendingDate === `w${row.weekday}` ? 'Сохраняю…' : row.adminIds.length === 0 ? 'никого' : ''}
+                      <span className="w-full text-[0.8125rem] text-text-subtle sm:w-28 sm:text-right">
+                        {pendingDate === `w${row.weekday}` ? 'Сохраняем…' : row.adminIds.length === 0 ? 'никого' : ''}
                       </span>
                     </li>
                   ))}
@@ -279,7 +279,7 @@ export default function StaffSchedulePage() {
                 <ul className="divide-y divide-border">
                   {schedule.days.map((day) => (
                     <li key={day.date} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-2.5">
-                      <span className="w-52 shrink-0 text-[0.9375rem]">
+                      <span className="w-full shrink-0 text-[0.9375rem] sm:w-52">
                         {dayLabel(day.date)}
                         {day.date === schedule.today && (
                           <span className="ml-2 text-[0.75rem] tracking-[0.06em] text-text-accent uppercase">сегодня</span>
@@ -296,10 +296,10 @@ export default function StaffSchedulePage() {
                           </Tab>
                         ))}
                       </span>
-                      <span className="flex w-44 flex-col items-end text-right text-[0.8125rem] text-text-subtle">
+                      <span className="flex w-full flex-col items-start text-[0.8125rem] text-text-subtle sm:w-44 sm:items-end sm:text-right">
                         <span className={cn(day.adminIds.length === 0 && 'text-danger')}>
                           {pendingDate === day.date
-                            ? 'Сохраняю…'
+                            ? 'Сохраняем…'
                             : day.adminIds.length === 0
                               ? 'никого'
                               : `${day.adminIds.length} ${plural(day.adminIds.length, 'человек', 'человека', 'человек')}`}

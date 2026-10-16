@@ -51,7 +51,7 @@ export function EnrollClientForm({
       setClient(null);
       onEnrolled();
     } catch (cause: unknown) {
-      setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
+      setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
     } finally {
       setPending(false);
     }

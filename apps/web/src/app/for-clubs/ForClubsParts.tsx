@@ -92,7 +92,7 @@ export function ApplicationForm() {
     const email = String(form.get('email') ?? '').trim();
 
     if (!phone && !email) {
-      setError('Оставьте телефон или почту — иначе нам не с кем связаться');
+      setError('Оставьте телефон или почту, чтобы мы могли с вами связаться');
       return;
     }
 
@@ -203,7 +203,7 @@ export function ApplicationForm() {
       />
 
       <Button type="submit" pending={pending} disabled={!consent} size="lg">
-        {pending ? 'Отправляю…' : 'Отправить заявку'}
+        {pending ? 'Отправляем…' : 'Отправить заявку'}
       </Button>
     </form>
   );

@@ -29,7 +29,7 @@ export function MarkedBlock({ day, onChanged }: { day: DeskDay; onChanged: () =>
     <Card>
       <CardHeader
         title="Отмечено в этот день"
-        description="Исправить отметку можно только с причиной: за ней стоят деньги, и через неделю спорить без причины будет не о чем."
+        description="Исправить отметку можно только с причиной: от отметки зависят деньги, и причина пригодится, если клиент спросит позже."
       />
 
       {rows.length === 0 && day.visits.length === 0 ? (
@@ -157,7 +157,7 @@ function CorrectMark({
       await club.markAttendance(row.kind, row.entryId, { ...choice.request, reason });
       onDone();
     } catch (cause: unknown) {
-      setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
+      setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
     } finally {
       setPending(false);
     }
@@ -221,7 +221,7 @@ function History({ row, timezone, date }: { row: MarkedRow; timezone: string; da
       })
       .catch((cause: unknown) => {
         if (!cancelled) {
-          setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
+          setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
         }
       });
 

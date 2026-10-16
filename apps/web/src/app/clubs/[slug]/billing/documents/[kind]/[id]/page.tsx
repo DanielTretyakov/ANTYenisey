@@ -51,7 +51,7 @@ export default function BillingDocumentPage() {
           <>
             {!doc.seller && (
               <div className="rounded border border-black/30 px-4 py-3 text-[0.875rem] print:hidden">
-                Реквизиты продавца не заданы на сервере (BILLING_SELLER_*): документ неполный, отправлять его нельзя.
+                Реквизиты продавца ещё не указаны: документ неполный, отправлять его нельзя.
               </div>
             )}
 

@@ -4599,7 +4599,7 @@ async function notifications() {
   const asB = as(r.body?.accessToken ?? '');
   r = await asB('/me/notifications/max', { method: 'POST' });
   await event({ update_type: 'bot_started', timestamp: Date.now(), chat_id: 1, user: user(maxIdA), payload: tokenOf(r.body?.url ?? 'https://x.invalid') });
-  assert('бот предупредил о переносе привязки', /к другой учётке/.test(await lastTo(maxIdA)));
+  assert('бот предупредил о переносе привязки', /к другому аккаунту/.test(await lastTo(maxIdA)));
   r = await asA('/me/notifications');
   assert('первая учётка отвязана', r.body?.max?.linked === false);
 
@@ -4761,7 +4761,7 @@ async function clientNotifications() {
   r = await parent.asUser('/me/children/attach', { method: 'POST', json: { email: teen.email } });
   check('родитель подал заявку', 200, r.status);
   await dispatch();
-  assert('ребёнку пришла заявка родителя', /^Детков О\. просит закрепить вас/.test(await lastTo(maxTeen)));
+  assert('ребёнку пришла заявка родителя', /^Детков О\. просит привязать ваш аккаунт/.test(await lastTo(maxTeen)));
 
   r = await teen.asUser('/me/guardianship/requests');
   r = await teen.asUser(`/me/guardianship/requests/${r.body?.[0]?.id}/confirm`, { method: 'POST' });
@@ -5006,7 +5006,7 @@ async function digests() {
 
   const platform = (await sentTo()).filter((message) => message.text.startsWith('Сводка платформы'));
   assert('владельцу платформы пришла сводка платформы', platform.length === 1);
-  assert('в ней учётки, клубы и состояние MAX', /Учётки: \+\d+ \(всего \d+\)/.test(platform[0]?.text ?? '') && /MAX: подключено \d+/.test(platform[0]?.text ?? ''));
+  assert('в ней аккаунты, клубы и состояние MAX', /Аккаунты: \+\d+ \(всего \d+\)/.test(platform[0]?.text ?? '') && /MAX: подключено \d+/.test(platform[0]?.text ?? ''));
 }
 
 /**

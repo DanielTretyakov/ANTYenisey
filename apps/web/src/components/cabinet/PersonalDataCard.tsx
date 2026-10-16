@@ -14,7 +14,7 @@ import { saveSession } from '@/lib/session';
 import { GENDER_LABEL, GenderField, genderFrom } from '@/components/ui/GenderField';
 
 function messageOf(cause: unknown): string {
-  return cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером';
+  return cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз';
 }
 
 /**
@@ -170,12 +170,12 @@ function FixedFacts({ user }: { user: PublicUser }) {
           value={
             user.consentAt
               ? `дано ${new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(user.consentAt))}`
-              : 'не запрашивалось — учётка заведена до 3 октября 2026 г.'
+              : 'не запрашивалось: аккаунт создан до 3 октября 2026 г.'
           }
         />
       </dl>
       <p className="mt-3 text-[0.8125rem] text-text-subtle">
-        Почта — ваш логин, дата рождения решает правила до 14 лет. Их меняет администратор клуба.
+        Почта — ваш логин, а от даты рождения зависят правила для детей до 14 лет. Их меняет администратор клуба.
       </p>
     </div>
     </>
@@ -220,12 +220,12 @@ function PasswordCard() {
     <Card className="max-w-2xl">
       <CardHeader
         title="Пароль"
-        description="После смены все остальные входы — на других устройствах и в других браузерах — закроются."
+        description="После смены пароля вы выйдете из аккаунта на других устройствах и в других браузерах."
       />
       <CardBody>
         <form onSubmit={(event) => void submit(event)}>
           {error && <Alert>{error}</Alert>}
-          {done && <Alert tone="info">Пароль изменён. Остальные входы закрыты.</Alert>}
+          {done && <Alert tone="info">Пароль изменён. На других устройствах нужно будет войти заново.</Alert>}
 
           <Field label="Текущий пароль" name="currentPassword" type="password" autoComplete="current-password" required />
           <div className="grid gap-x-4 sm:grid-cols-2">

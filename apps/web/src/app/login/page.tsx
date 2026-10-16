@@ -55,7 +55,7 @@ export default function LoginPage() {
       subtitle="Один аккаунт на все клубы платформы."
       footer={
         <>
-          Нет учётной записи?{' '}
+          Нет аккаунта?{' '}
           <Link href={registerHref(next)} className="font-medium text-text-accent hover:underline">
             Зарегистрироваться
           </Link>
@@ -84,7 +84,7 @@ export default function LoginPage() {
         )}
 
         <Button type="submit" pending={pending} fullWidth size="lg" className="mt-2">
-          {pending ? 'Проверяю…' : 'Войти'}
+          {pending ? 'Проверяем…' : 'Войти'}
         </Button>
       </form>
     </AuthLayout>

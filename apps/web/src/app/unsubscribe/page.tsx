@@ -38,7 +38,7 @@ export default function UnsubscribePage() {
         <>
           <Alert tone="info">Готово: новости КНТ на {email} больше не придут.</Alert>
           <p className="text-[0.9375rem] text-text-muted">
-            Письма о вашей учётке и о деньгах клуба приходят по-прежнему. Вернуть рассылку можно в{' '}
+            Письма о вашем аккаунте и об оплатах в клубе будут приходить по-прежнему. Вернуть рассылку можно в{' '}
             <Link href="/cabinet/edit/notifications" className="font-medium text-text-accent hover:underline">
               уведомлениях кабинета
             </Link>

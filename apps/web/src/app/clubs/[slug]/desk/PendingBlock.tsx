@@ -43,7 +43,7 @@ export function PendingBlock({ day, onChanged }: { day: DeskDay; onChanged: () =
     <Card className="border-warning-border">
       <CardHeader
         title="Требует отметки"
-        description="Началось, а пришёл человек или нет — не записано. Здесь всё неотмеченное клуба, а не только этого зала и дня. Что не отметить, система через сутки после окончания закроет неявкой со списанием."
+        description="Уже началось, но не отмечено, пришёл человек или нет. Здесь всё по клубу, за все залы и дни. Если не отметить, через сутки после окончания сайт сам поставит неявку со списанием."
       />
 
       {/* По дням (решение владельца от 11.10.2026): сегодня раскрыт, прошлые
@@ -300,7 +300,7 @@ function MarkAll({ event, waiting, onDone }: { event: DeskEvent; waiting: number
       setAsking(false);
       onDone();
     } catch (cause: unknown) {
-      setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
+      setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
     } finally {
       setPending(false);
     }

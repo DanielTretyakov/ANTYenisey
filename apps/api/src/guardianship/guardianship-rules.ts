@@ -73,7 +73,7 @@ export function decideCreateChild(input: {
     return {
       ok: false,
       status: 400,
-      message: 'С 14 лет человек записывается сам — ему нужна обычная регистрация, а не учётка ребёнка',
+      message: 'С 14 лет человек записывается сам — ему нужна обычная регистрация, а не аккаунт ребёнка',
     };
   }
 
@@ -164,7 +164,7 @@ export function decideAnswer(input: {
   }
 
   if (!isChild(input.childBirthDate, input.today)) {
-    return { ok: false, status: 409, message: 'С 14 лет закреплять вас за родителем уже не нужно' };
+    return { ok: false, status: 409, message: 'С 14 лет привязывать вас к родителю уже не нужно' };
   }
 
   if (!canBeGuardian(request.guardianBirthDate, input.today)) {

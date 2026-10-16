@@ -284,7 +284,7 @@ export function HallForm({
           <div className="grid gap-x-6 sm:grid-cols-2">
             <Select
               label="Часовой пояс зала"
-              hint="От него считаются пороги отмены, напоминания и то, какой дате принадлежит расписание. У каждого зала свой."
+              hint="По нему считаются сроки отмены, время напоминаний и границы дня в расписании. У каждого зала свой."
               options={timezoneOptions(hall.timezone)}
               value={form.timezone}
               onChange={(event) => set('timezone', event.target.value)}
@@ -318,7 +318,7 @@ export function HallForm({
             />
             <Field
               label="Почта зала"
-              hint="Тоже необязательна: пусто — пишут на почту клуба."
+              hint="Необязательно. Если пусто, пишут на почту клуба."
               value={form.email}
               onChange={(event) => set('email', event.target.value)}
               placeholder="zal@example.ru"
@@ -353,7 +353,7 @@ export function HallForm({
 
           <Toggle
             label="В зале есть аренда «стол + робот»"
-            hint="Отдельная услуга со своей сеткой цен, а не наценка поверх обычной аренды."
+            hint="У стола с роботом свои цены."
             checked={form.hasRobotOption}
             disabled={!money}
             onChange={(event) => set('hasRobotOption', event.target.checked)}

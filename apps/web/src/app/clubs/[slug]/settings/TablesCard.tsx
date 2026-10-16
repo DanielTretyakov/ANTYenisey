@@ -117,7 +117,7 @@ export function TablesCard({
 
         {own.length === 0 && upcoming.length === 0 ? (
           <p className="mb-4 text-[0.9375rem] text-text-muted">
-            В зале пока нет столов. Пока их нет, ни забронировать, ни составить расписание нечего.
+            В зале пока нет столов. Без них нельзя ни бронировать, ни составить расписание.
           </p>
         ) : (
           <ul className="mb-5 divide-y divide-border border-y border-border">

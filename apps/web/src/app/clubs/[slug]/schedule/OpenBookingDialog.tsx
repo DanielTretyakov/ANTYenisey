@@ -158,7 +158,7 @@ export function OpenBookingDialog({
     // По дню за раз, а не разом: отказ одного дня (скажем, тип сняли с
     // продажи) не должен отменять уже открытые остальные.
     for (const [index, plan] of plans.entries()) {
-      setProgress(`Открываю ${index + 1} из ${plans.length}: ${formatDate(plan.date)}`);
+      setProgress(`Открываем ${index + 1} из ${plans.length}: ${formatDate(plan.date)}`);
 
       try {
         const drafts = await resolveEvents(club, plan.slots, plan.saved, { date: plan.date, timezone, capacity });
@@ -245,7 +245,7 @@ export function OpenBookingDialog({
 
             {error && <p className="text-[0.875rem] text-danger">{error}</p>}
 
-            {plans === null && !error && <p className="text-text-muted">Смотрю расписание…</p>}
+            {plans === null && !error && <p className="text-text-muted">Смотрим расписание…</p>}
 
             {plans !== null && plans.length === 0 && (
               <p className="text-text-muted">
@@ -270,9 +270,9 @@ export function OpenBookingDialog({
 
             {plans !== null && plans.length > 0 && (
               <p className="text-[0.8125rem] text-text-subtle">
-                Дни, которые шли по шаблону, отвяжутся от него: занятию нужно своё окно в расписании даты.
-                Правки шаблона на них действовать перестанут — вернуть день к шаблону можно в любой момент,
-                занятия без записей уйдут вместе с ним.
+                Дни, которые шли по шаблону, отвяжутся от него, и правки шаблона на них больше не повлияют.
+                Вернуть день к шаблону можно в любой момент,
+                занятия без записей при этом исчезнут.
                 {plans.some((plan) => plan.date === date) && ' Несохранённые правки этого дня сохранятся вместе с записью.'}
               </p>
             )}

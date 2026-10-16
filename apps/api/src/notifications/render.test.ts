@@ -170,7 +170,7 @@ describe('абонемент, разряд, семья', () => {
   it('заявка родителя — кто и где ответить', () => {
     const { text } = renderNotification('GUARDIANSHIP_REQUESTED', { guardian: 'Петров О.' }, context);
 
-    assert.match(text, /^Петров О\. просит закрепить вас/);
+    assert.match(text, /^Петров О\. просит привязать ваш аккаунт/);
     assert.match(text, /в личном кабинете/);
   });
 });
@@ -361,7 +361,7 @@ describe('утренние сводки', () => {
     );
 
     assert.match(text, /^Сводка платформы за 23 сентября/);
-    assert.match(text, /Учётки: \+12 \(всего 340\)/);
+    assert.match(text, /Аккаунты: \+12 \(всего 340\)/);
     assert.match(text, /Своим отметили: 5 — «Енисей» 4, «Другой» 1/);
     assert.match(text, /MAX: подключено 45, бот остановлен у 2, не доставлено за день 0/);
   });

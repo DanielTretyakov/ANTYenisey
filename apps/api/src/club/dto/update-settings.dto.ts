@@ -65,7 +65,7 @@ export class UpdateClubSettingsDto implements UpdateClubSettingsRequest {
     typeof value === 'string' && value.trim() === '' ? null : value,
   )
   @Matches(/^\+7[0-9]{10}$/, {
-    message: 'phone: телефон в формате +79991234567',
+    message: 'Телефон — в формате +79991234567',
   })
   phone?: string | null;
 
@@ -73,7 +73,7 @@ export class UpdateClubSettingsDto implements UpdateClubSettingsRequest {
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' && value.trim() === '' ? null : value,
   )
-  @Matches(/^[^@\s]+@[^@\s]+\.[^@\s]+$/, { message: 'email: ожидается адрес почты' })
+  @Matches(/^[^@\s]+@[^@\s]+\.[^@\s]+$/, { message: 'Почта указана с ошибкой' })
   @MaxLength(200)
   email?: string | null;
 
@@ -86,7 +86,7 @@ export class UpdateClubSettingsDto implements UpdateClubSettingsRequest {
     typeof value === 'string' ? value.trim() || null : value,
   )
   @IsString()
-  @MaxLength(2000, { message: 'description: не длиннее 2000 символов' })
+  @MaxLength(2000, { message: 'Описание — не длиннее 2000 символов' })
   description?: string | null;
 
   /** Ценности — список целиком; пустой — убрать блок. */
@@ -121,14 +121,14 @@ export class UpdateClubSettingsDto implements UpdateClubSettingsRequest {
    */
   @IsOptional()
   @Matches(/^#[0-9a-fA-F]{6}$/, {
-    message: 'accentColor: ожидается цвет вида «#126b54»',
+    message: 'Цвет — в виде «#126b54»',
   })
   accentColor?: string | null;
 
   @IsOptional()
   @IsInt()
   @Min(0)
-  @Max(100, { message: 'noShowChargePercent: процент лежит в диапазоне 0..100' })
+  @Max(100, { message: 'Процент — от 0 до 100' })
   noShowChargePercent?: number;
 
   @IsOptional()

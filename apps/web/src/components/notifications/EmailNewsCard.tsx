@@ -47,7 +47,7 @@ export function EmailNewsCard() {
     <Card className="mt-6 max-w-2xl">
       <CardHeader
         title="Почта"
-        description={`Письма приходят на ${user.email}. О самой учётке и о деньгах клуба пишем всегда — эти письма не выключаются.`}
+        description={`Письма приходят на ${user.email}. Письма о вашем аккаунте и об оплатах в клубе приходят всегда, их выключить нельзя.`}
       />
       <CardBody>
         <EmailVerifyNotice user={user} className="mb-4" />

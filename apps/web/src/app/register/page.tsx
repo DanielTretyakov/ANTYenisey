@@ -88,7 +88,7 @@ function RegisterForm({ clubSlug, next }: { clubSlug: string | null; next: strin
     }
 
     if (!consent) {
-      setError('Без согласия на обработку персональных данных учётку не завести');
+      setError('Без согласия на обработку персональных данных зарегистрироваться нельзя');
       return;
     }
 
@@ -123,7 +123,7 @@ function RegisterForm({ clubSlug, next }: { clubSlug: string | null; next: strin
       subtitle="Одна анкета — и запись на тренировки, столы и турниры открыта."
       footer={
         <>
-          Уже есть учётная запись?{' '}
+          Уже есть аккаунт?{' '}
           <Link href={next ? `/login?next=${encodeURIComponent(next)}` : '/login'} className="font-medium text-text-accent hover:underline">
             Войти
           </Link>
@@ -157,7 +157,7 @@ function RegisterForm({ clubSlug, next }: { clubSlug: string | null; next: strin
         {child && (
           <Alert tone="info">
             До 14 лет на занятия и турниры записывает родитель. Зарегистрироваться можно, а потом
-            попросите родителя закрепить вашу учётку у себя в кабинете — или администратора у стойки клуба.
+            попросите родителя привязать ваш аккаунт у себя в кабинете или обратитесь к администратору клуба.
           </Alert>
         )}
 
@@ -183,7 +183,7 @@ function RegisterForm({ clubSlug, next }: { clubSlug: string | null; next: strin
         />
 
         <Button type="submit" pending={pending} disabled={!consent} fullWidth size="lg" className="mt-2">
-          {pending ? 'Отправляю…' : 'Зарегистрироваться'}
+          {pending ? 'Отправляем…' : 'Зарегистрироваться'}
         </Button>
       </form>
     </AuthLayout>

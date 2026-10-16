@@ -31,7 +31,7 @@ export function MySubscriptions({ forPerson }: { forPerson: string | null }) {
         if (!cancelled) setSubscriptions(loaded);
       })
       .catch((cause: unknown) => {
-        if (!cancelled) setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
+        if (!cancelled) setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
       });
 
     return () => {
@@ -49,7 +49,7 @@ export function MySubscriptions({ forPerson }: { forPerson: string | null }) {
     <Card className="max-w-2xl">
       <CardHeader
         title="Абонементы"
-        description="Оплачивают записи сами: визит списывается при записи и возвращается при отмене. Купить абонемент можно у стойки клуба."
+        description="Визит списывается сам при записи и возвращается при отмене. Купить абонемент можно у стойки клуба."
       />
       <CardBody>
         {error && <Alert>{error}</Alert>}

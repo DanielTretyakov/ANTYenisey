@@ -132,7 +132,7 @@ export function SparringStudentPicker({
             </ul>
           )}
           <p className="mt-1.5 text-[0.8125rem] text-text-subtle">
-            Без ученика стол берётся на вас: за неявку платите вы, как раньше.
+            Без ученика стол записывается на вас, и за неявку платите вы.
           </p>
         </div>
       )}

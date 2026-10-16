@@ -14,7 +14,7 @@ import { ledgerLabel, planTermsLabel, remainingLabel, validUntilLabel } from '@/
 import { useClubApi } from '@/lib/useClubApi';
 
 function messageOf(cause: unknown): string {
-  return cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером';
+  return cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз';
 }
 
 /**
@@ -126,7 +126,7 @@ export function ClubSubscriptionsBlock({
               {halls.length > 1 && (
                 <Select
                   label="Зал продажи"
-                  hint="По его часовому поясу кончится срок, и в его деньгах дня будет видна продажа."
+                  hint="По его местному времени закончится срок, и продажа попадёт в деньги дня этого зала."
                   value={hallId}
                   onChange={(event) => setHallId(event.target.value)}
                   options={halls.map((hall) => ({ value: hall.id, label: hall.name }))}
@@ -135,7 +135,7 @@ export function ClubSubscriptionsBlock({
               {chosen && (
                 <p className="mb-4 text-[0.875rem] text-text-muted">
                   К оплате у стойки: <span className="text-text">{formatKopecks(chosen.price)}</span>. Деньги
-                  принимаются вне системы; срок пойдёт с сегодняшнего дня.
+                  принимаются на месте, сайт их не проводит. Срок пойдёт с сегодняшнего дня.
                 </p>
               )}
               <div className="flex flex-wrap gap-2">

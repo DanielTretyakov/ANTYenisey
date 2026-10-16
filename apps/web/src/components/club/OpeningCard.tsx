@@ -42,7 +42,7 @@ export function OpeningCard({ onOpened }: { onOpened?: () => void }) {
       setState(await club.publishClub());
       onOpened?.();
     } catch (cause: unknown) {
-      setError(cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером');
+      setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
     } finally {
       setPending(false);
     }
@@ -52,7 +52,7 @@ export function OpeningCard({ onOpened }: { onOpened?: () => void }) {
     <Card className="mb-6 border-warning-border">
       <CardHeader
         title="Клуб ещё не открыт"
-        description="Его нет в поиске, страницу видят только сотрудники клуба. Настройки применяются сразу, а не в полночь. Откройте клуб, когда готов хотя бы один зал — с адресом и столами; с открытия идут 7 пробных дней подписки."
+        description="Его нет в поиске, страницу видят только сотрудники клуба. Настройки применяются сразу, а не в полночь. Откройте клуб, когда будет готов хотя бы один зал с адресом и столами. С момента открытия начнутся 7 пробных дней подписки."
       />
       <CardBody>
         {error && <Alert>{error}</Alert>}

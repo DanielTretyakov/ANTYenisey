@@ -32,7 +32,7 @@ export default function PlayerPage() {
         setError(
           cause instanceof ApiError && cause.status === 404
             ? 'Игрок не найден или его страница закрыта.'
-            : 'Не удалось связаться с сервером',
+            : 'Нет связи. Проверьте интернет и попробуйте ещё раз',
         ),
       );
   }, [params.id]);

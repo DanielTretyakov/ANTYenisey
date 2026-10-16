@@ -18,7 +18,7 @@ const MB = 1024 * 1024;
 type Update = (profile: PlayerProfile) => void;
 
 function messageOf(cause: unknown): string {
-  return cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером';
+  return cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз';
 }
 
 /**
@@ -99,7 +99,7 @@ export function PlayerEditor({
           <CardBody>
             {error && <Alert>{error}</Alert>}
 
-            {!profile && !error && <p className="text-[0.875rem] text-text-muted">Загружаю…</p>}
+            {!profile && !error && <p className="text-[0.875rem] text-text-muted">Загружаем…</p>}
 
             {profile && readOnly && <ReadOnlySection section={section} profile={profile} name={name} />}
 
@@ -128,7 +128,7 @@ function descriptionOf(
   if (readOnly) {
     // Без «Профиль ведёт родитель»: родителя может и не быть — ребёнок
     // зарегистрировался сам, а заявку ещё никто не прислал.
-    return 'До 14 лет профиль правит закреплённый за вами родитель, а вы его смотрите.';
+    return 'До 14 лет профиль меняет ваш родитель, а вы можете его смотреть.';
   }
 
   if (section === 'rank') {
@@ -228,7 +228,7 @@ function AvatarBlock({ profile, name, onChange }: { profile: PlayerProfile; name
             )}
           </div>
           <p className="mt-2 text-[0.8125rem] text-text-subtle">
-            JPEG, PNG или WebP до 5 МБ. Место съёмки и другие данные снимка сервер удаляет.
+            JPEG, PNG или WebP до 5 МБ. Место съёмки и другие данные снимка мы удаляем.
           </p>
           <input
             ref={input}

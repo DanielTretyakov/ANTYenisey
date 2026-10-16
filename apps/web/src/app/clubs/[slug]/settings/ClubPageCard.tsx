@@ -92,7 +92,7 @@ function LogoBlock({
       <h3 className="text-[0.9375rem] font-medium">Логотип</h3>
       <p className="mt-0.5 text-[0.8125rem] text-text-muted">
         Только квадратный знак от 128×128 точек — JPEG, PNG или WebP, лучше с прозрачным фоном.
-        Неквадратную картинку сервер не примет. Фотографий у клуба нет: страницу оформляет
+        Неквадратную картинку сайт не примет. Фотографий у клуба нет: страницу оформляет
         фирменный цвет, а без логотипа рядом с названием стоит монограмма.
       </p>
 
@@ -256,7 +256,7 @@ function CoachListBlock({ halls }: { halls: Hall[] }) {
         </div>
       )}
 
-      {coaches === null && !error && <p className="mt-3 text-[0.875rem] text-text-muted">Загружаю…</p>}
+      {coaches === null && !error && <p className="mt-3 text-[0.875rem] text-text-muted">Загружаем…</p>}
 
       {coaches?.length === 0 && (
         <p className="mt-3 text-[0.875rem] text-text-muted">

@@ -20,14 +20,14 @@ const blank = ({ value }: { value: unknown }): unknown =>
 export class ClubApplicationDto implements ClubApplicationRequest {
   @Transform(trim)
   @IsString()
-  @MinLength(2, { message: 'contactName: как к вам обращаться — не короче 2 символов' })
-  @MaxLength(100, { message: 'contactName: не длиннее 100 символов' })
+  @MinLength(2, { message: 'Как к вам обращаться — не короче 2 символов' })
+  @MaxLength(100, { message: 'Как к вам обращаться — не длиннее 100 символов' })
   contactName: string;
 
   @Transform(trim)
   @IsString()
-  @MinLength(2, { message: 'clubName: название клуба — не короче 2 символов' })
-  @MaxLength(120, { message: 'clubName: не длиннее 120 символов' })
+  @MinLength(2, { message: 'Название клуба — не короче 2 символов' })
+  @MaxLength(120, { message: 'Название клуба — не длиннее 120 символов' })
   clubName: string;
 
   @Transform(blank)
@@ -40,25 +40,25 @@ export class ClubApplicationDto implements ClubApplicationRequest {
     typeof value === 'string' ? (value.trim() === '' ? undefined : value.replace(/[\s()-]/g, '')) : value,
   )
   @IsOptional()
-  @Matches(/^\+7\d{10}$/, { message: 'phone: ожидается формат +79991234567' })
+  @Matches(/^\+7\d{10}$/, { message: 'Телефон — в формате +79991234567' })
   phone?: string;
 
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? (value.trim() === '' ? undefined : value.trim().toLowerCase()) : value,
   )
   @IsOptional()
-  @IsEmail({}, { message: 'email: некорректный адрес' })
+  @IsEmail({}, { message: 'Почта указана с ошибкой' })
   @MaxLength(254)
   email?: string;
 
   @IsOptional()
-  @IsInt({ message: 'halls: число залов — целое' })
+  @IsInt({ message: 'Число залов — целое' })
   @Min(1)
   @Max(100)
   halls?: number;
 
   @IsOptional()
-  @IsInt({ message: 'tables: число столов — целое' })
+  @IsInt({ message: 'Число столов — целое' })
   @Min(1)
   @Max(1000)
   tables?: number;
@@ -66,11 +66,11 @@ export class ClubApplicationDto implements ClubApplicationRequest {
   @Transform(blank)
   @IsOptional()
   @IsString()
-  @MaxLength(2000, { message: 'comment: не длиннее 2000 символов' })
+  @MaxLength(2000, { message: 'Комментарий — не длиннее 2000 символов' })
   comment?: string;
 
   /** Имя и телефон заявителя — персональные данные: без согласия не принимаем. */
-  @Equals(true, { message: 'consent: нужно согласие на обработку персональных данных' })
+  @Equals(true, { message: 'Нужно согласие на обработку персональных данных' })
   consent: true;
 
   /** Новости КНТ для клубов на почту — необязательная галочка (12.10.2026). */
@@ -92,6 +92,6 @@ export class ClubApplicationUpdateDto implements ClubApplicationUpdate {
   @Transform(blank)
   @IsOptional()
   @IsString()
-  @MaxLength(2000, { message: 'note: заметка — не длиннее 2000 символов' })
+  @MaxLength(2000, { message: 'Заметка — не длиннее 2000 символов' })
   note: string | null;
 }

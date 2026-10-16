@@ -50,7 +50,7 @@ export default function NewsItemPage() {
 
       {error && <Alert>{error}</Alert>}
 
-      {!item && !error && <p className="text-[0.9375rem] text-text-muted">Загружаю…</p>}
+      {!item && !error && <p className="text-[0.9375rem] text-text-muted">Загружаем…</p>}
 
       {item && (
         <Card className="max-w-3xl">

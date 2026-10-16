@@ -50,7 +50,7 @@ export default function ResetPasswordPage() {
   return (
     <AuthLayout
       title="Новый пароль"
-      subtitle="После смены мы выйдем из учётки на всех устройствах."
+      subtitle="После смены пароля вы выйдете из аккаунта на всех устройствах."
       footer={
         <Link href="/forgot-password" className="font-medium text-text-accent hover:underline">
           Запросить новую ссылку
