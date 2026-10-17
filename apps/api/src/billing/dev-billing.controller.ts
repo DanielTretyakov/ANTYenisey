@@ -72,9 +72,11 @@ export class DevBillingController {
     const city = await this.prisma.city.findFirst({ where: { name: 'Красноярск' }, select: { id: true } });
     const tenant = await this.prisma.tenant.upsert({
       where: { slug: PROBE_SLUG },
-      update: {},
-      // Открыт: смоук смотрит его открытую карточку без входа, а черновик
-      // посторонним — «не найден».
+      // Открыт на время прогона: смоук смотрит его открытую карточку без
+      // входа, а черновик посторонним — «не найден». В конце раздела 50
+      // смоук возвращает его в черновик (просьба владельца от 17.10.2026:
+      // служебный клуб не должен висеть в поиске), как `probe-draft`.
+      update: { publishedAt: new Date() },
       create: { name: 'Клуб проверки подписки', slug: PROBE_SLUG, cityId: city?.id ?? null, publishedAt: new Date() },
       select: { id: true },
     });

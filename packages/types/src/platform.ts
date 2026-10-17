@@ -65,17 +65,6 @@ export interface ClubCard extends ClubRef {
   fromPrice: number | null;
   /** Часы и пояса залов — «Открыто до 23:00 / Закрыто» считает веб на месте. */
   hours: { workingHours: WorkingHours | null; timezone: string }[];
-  /** Ближайшее занятие или турнир клуба в ближайшие две недели. */
-  next: ClubCardEvent | null;
-}
-
-/** Ближайшее мероприятие в карточке клуба: что и когда — по часам зала. */
-export interface ClubCardEvent {
-  kind: 'TRAINING' | 'TOURNAMENT';
-  /** Вид: «Детская тренировка», «Клуб 100». */
-  title: string;
-  startsAt: string;
-  timezone: string;
 }
 
 /** Что спрашивает стартовая страница у поиска клубов. */

@@ -2,6 +2,8 @@
 
 import type { FeedEvent } from '@yenisey/types';
 import { KindBadge } from '@/components/club/EventRow';
+import { CARD_COVER } from '@/components/ui/CardRow';
+import { clubAccent } from '@/lib/clubTheme';
 import { formatKopecks } from '@/lib/money';
 import { dateIn, timeIn, viewerTime, viewerZone } from '@/lib/zonedTime';
 
@@ -29,6 +31,51 @@ export function FeedEventCard({ event, onOpen }: { event: FeedEvent; onOpen: (ev
       <span className="mt-1 text-[0.8125rem] text-text-muted">
         {event.club.name}
         {event.subtitle && ` · ${event.subtitle}`} · {formatKopecks(event.price)}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * То же мероприятие высокой карточкой 9:16 — «Ближайшее в моих клубах» на
+ * стартовой (решение владельца от 17.10.2026: в стиле вкладок страницы
+ * клуба). Обложка — в цвете клуба мероприятия: у ленты клубы разные, и
+ * `clubAccent` ставится на саму карточку. На обложке — вид, день и время
+ * крупно, ниже — название, ведущий, клуб и цена. Щелчок — окно с записью.
+ */
+export function FeedEventTall({ event, onOpen }: { event: FeedEvent; onOpen: (event: FeedEvent) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(event)}
+      style={clubAccent(event.club.accentColor)}
+      className="group flex aspect-[9/16] w-full flex-col overflow-hidden rounded-card border border-border bg-surface-raised text-left transition-colors hover:border-border-strong"
+    >
+      <span className="flex h-[42%] w-full shrink-0 flex-col justify-between p-4" style={{ background: CARD_COVER }}>
+        <KindBadge kind={event.kind} />
+        <span className="block text-white">
+          <span className="block text-[0.8125rem] text-white/75">{dayLabel(event.startsAt, event.timezone)}</span>
+          <span className="mt-0.5 block font-display text-[1.75rem] leading-none">{timeLabel(event.startsAt, event.timezone)}</span>
+          <ViewerTime
+            startsAt={event.startsAt}
+            endsAt={null}
+            timezone={event.timezone}
+            className="mt-1 block text-[0.75rem] text-white/70"
+          />
+        </span>
+      </span>
+
+      <span className="flex min-h-0 w-full flex-1 flex-col p-4">
+        <span className="font-display text-[1.0625rem] leading-tight text-text [text-wrap:balance] group-hover:underline">
+          {event.title}
+        </span>
+        {event.subtitle && <span className="mt-1.5 text-[0.8125rem] text-text-muted">{event.subtitle}</span>}
+        <span className="mt-1 text-[0.8125rem] text-text-muted">{event.club.name}</span>
+
+        <span className="mt-auto flex items-end justify-between gap-2 pt-4">
+          <span className="font-display text-[1.0625rem] text-text">{formatKopecks(event.price)}</span>
+          <span className="text-[0.875rem] text-text-accent">Записаться →</span>
+        </span>
       </span>
     </button>
   );

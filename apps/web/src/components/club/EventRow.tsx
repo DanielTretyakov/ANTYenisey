@@ -50,6 +50,7 @@ export function EventRow({
   forPerson,
   onChanged,
   onOpen,
+  hideDate = false,
 }: {
   slug: string;
   event: ClubEvent;
@@ -57,6 +58,8 @@ export function EventRow({
   forPerson: string | null;
   onChanged: () => void;
   onOpen: () => void;
+  /** Строка в группе дня — дата у группы, здесь только время. */
+  hideDate?: boolean;
 }) {
   const { toggle, pending, error } = useEventAction(slug, forPerson, onChanged);
 
@@ -68,7 +71,7 @@ export function EventRow({
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
         {/* У занятия известно окончание, у турнира нет: WhenSpan сам сводится к
             одной строке времени, когда конца не задано. */}
-        <WhenSpan startsAt={event.startsAt} endsAt={event.endsAt} timezone={event.timezone} />
+        <WhenSpan startsAt={event.startsAt} endsAt={event.endsAt} timezone={event.timezone} hideDate={hideDate} />
 
         <span className="min-w-0 grow">
           {/* Название открывает окно мероприятия: там описание, зал и кто

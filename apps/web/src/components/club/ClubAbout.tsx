@@ -17,7 +17,7 @@ export function ClubAbout({ tenant }: { tenant: PublicTenant | null }) {
   const empty = !tenant.description && tenant.values.length === 0;
 
   return (
-    <section className="mb-12" aria-label="О клубе">
+    <section aria-label="О клубе">
       <SectionHeading title="О клубе" description="Чем живёт клуб и ради чего в него приходят." />
 
       {empty && <p className="text-[0.9375rem] text-text-muted">Клуб пока не рассказал о себе.</p>}

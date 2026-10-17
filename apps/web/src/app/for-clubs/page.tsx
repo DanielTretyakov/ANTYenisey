@@ -185,7 +185,7 @@ export default function ForClubsPage() {
         </ul>
       </section>
 
-      <section className="mt-16" aria-labelledby="kazhdomu">
+      <section className="section-rule mt-16" aria-labelledby="kazhdomu">
         <h2 id="kazhdomu" className="font-display text-[1.5rem] sm:text-[1.875rem]">
           Каждому — своё
         </h2>
@@ -206,7 +206,7 @@ export default function ForClubsPage() {
         </div>
       </section>
 
-      <section className="mt-16" aria-labelledby="kak-podklyuchit">
+      <section className="section-rule mt-16" aria-labelledby="kak-podklyuchit">
         <h2 id="kak-podklyuchit" className="font-display text-[1.5rem] sm:text-[1.875rem]">
           Как подключиться
         </h2>
@@ -223,7 +223,7 @@ export default function ForClubsPage() {
         </ol>
       </section>
 
-      <section id={PLANS_ANCHOR} className="mt-16 scroll-mt-28" aria-labelledby="tarify-title">
+      <section id={PLANS_ANCHOR} className="section-rule mt-16 scroll-mt-28" aria-labelledby="tarify-title">
         <h2 id="tarify-title" className="font-display text-[1.5rem] sm:text-[1.875rem]">
           Тарифы
         </h2>
@@ -238,7 +238,7 @@ export default function ForClubsPage() {
         <PlanCards />
       </section>
 
-      <section className="mt-16" aria-labelledby="voprosy">
+      <section className="section-rule mt-16" aria-labelledby="voprosy">
         <h2 id="voprosy" className="font-display text-[1.5rem] sm:text-[1.875rem]">
           Частые вопросы
         </h2>
@@ -265,7 +265,7 @@ export default function ForClubsPage() {
         </div>
       </section>
 
-      <section id={CONTACT_ANCHOR} className="mt-16 scroll-mt-28" aria-labelledby="svyaz-title">
+      <section id={CONTACT_ANCHOR} className="section-rule mt-16 scroll-mt-28" aria-labelledby="svyaz-title">
         <h2 id="svyaz-title" className="font-display text-[1.5rem] sm:text-[1.875rem]">
           Связаться с нами
         </h2>

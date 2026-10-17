@@ -197,3 +197,64 @@
     transparent
   );
 }
+
+@utility accent-gradient {
+  /* Главное действие страницы клуба — «Забронировать стол» (просьбы
+     владельца от 17.10.2026): не однотонно, а градиентом от цвета клуба к
+     чёрному, как полоса карточки зала. Текст — `--accent-text`, подобранный
+     к самому цвету клуба: он стоит на светлом конце. */
+  background-image: linear-gradient(
+    135deg,
+    var(--accent),
+    color-mix(in oklab, var(--accent) 45%, var(--ink-950))
+  );
+  color: var(--accent-text);
+  transition: filter 150ms;
+
+  &:hover {
+    filter: brightness(1.08);
+  }
+
+  &:active {
+    filter: brightness(0.94);
+  }
+}
+
+@utility section-rule {
+  /* Разделитель крупных разделов страницы (просьба владельца от 17.10.2026:
+     пустые отступы между разделами читались дырой). Рисуется поверх уже
+     существующего отступа над разделом — ровно в его середине, — поэтому
+     вёрстку не двигает. Высота отступа — `--rule-gap` (по умолчанию 4rem,
+     как mt-16); разделу с другим отступом её задают явно. Линия — та же
+     река, что river-rule, посередине — мяч, всегда оранжевый. На странице
+     клуба линия — в цвете клуба (просьба владельца от 17.10.2026). */
+  position: relative;
+
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(var(--rule-gap, 4rem) / -2);
+    height: 1px;
+    /* brand-500 посередине: border-accent в тёмной теме сливался с фоном.
+       На странице клуба `--rule-color` — цвет клуба (`clubAccent`). */
+    --rule-line: color-mix(in oklab, var(--rule-color, var(--brand-500)) 55%, transparent);
+    background: linear-gradient(to right, transparent, var(--rule-line) 20%, var(--rule-line) 80%, transparent);
+    pointer-events: none;
+  }
+
+  &::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: calc(var(--rule-gap, 4rem) / -2);
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--ball);
+    box-shadow: 0 0 0 5px var(--surface);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+}

@@ -1,252 +1,265 @@
 'use client';
 
 import Link from 'next/link';
-import { formatPhone } from '@/lib/phone';
-import {
-  localWeekMinute,
-  openState,
-  openStateLabel,
-  WEEKDAY_SHORT,
-  workingHoursLines,
-  type PublicTenant,
-} from '@yenisey/types';
+import type { ReactNode } from 'react';
+import { openState, openStateLabel, workingHoursLines, type PublicTenant } from '@yenisey/types';
 import { Button } from '@/components/ui/Button';
+import { CarouselArrow, LoopCarousel, useLoopCarousel } from '@/components/ui/LoopCarousel';
 import { cn } from '@/lib/cn';
 import type { EventViewer } from '@/lib/eventViewer';
 import { formatKopecks } from '@/lib/money';
+import { formatPhone } from '@/lib/phone';
 import { plural } from '@/lib/plural';
+import { streetOf } from '@/lib/hallAddress';
+import { SectionHeading } from './SectionHeading';
+
+/** Больше стольких залов — карусель, а не второй ряд. */
+const PER_ROW = 3;
 
 /**
- * Залы: куда ехать, когда открыто, почём стол, где на карте. Адрес — крупно:
- * ради него на страницу и приходят (решение владельца от 25.09.2026). Часы
- * работы и «открыто сейчас» — на виду, шапка карточки — в цвете клуба
- * (решение от 30.09.2026).
+ * Залы клуба (решения владельца от 17.10.2026): по три в ряд, больше трёх —
+ * каруселью по кругу, как клубы на стартовой. Слева во всю высоту — полоса
+ * в духе прежней обложки карточки: тёмный градиент цвета клуба. В карточке
+ * сверху вниз — название, адрес (город, ниже улица), контакты, часы работы,
+ * столы, цена часа аренды (робот — пометкой под ней) и сколько тренировок и
+ * турниров в зале за ближайшую неделю.
+ *
+ * Строки карточек — общие строки сетки (CSS subgrid): высота строки — по
+ * самой высокой ячейке в ней, поэтому строки соседних карточек стоят
+ * вровень, а то, чего нет ни у одного зала (робот, кнопка брони), строки не
+ * занимает вовсе. Фиксированные высоты оставляли бы пустое место там, где
+ * у всех карточек пусто.
  */
 export function HallCards({
   slug,
   tenant,
   viewer,
+  title,
+  description,
 }: {
   slug: string;
-  /** Клуб с залами, уже суженными выбором зала. */
   tenant: PublicTenant | null;
   viewer: EventViewer;
+  title: string;
+  description: string;
 }) {
-  if (!tenant) {
-    return <div className="h-64 rounded-card border border-border bg-surface-raised" aria-busy="true" />;
-  }
+  const halls = tenant?.halls ?? [];
+  const looped = halls.length > PER_ROW;
+  const carousel = useLoopCarousel(halls.length, looped, halls.map((hall) => hall.id).join(','));
 
-  if (tenant.halls.length === 0) {
-    return (
-      <p className="rounded-card border border-dashed border-border px-5 py-8 text-[0.9375rem] text-text-muted">
-        Залы клуб пока не указал.
-      </p>
-    );
-  }
-
-  // Бронирует стол клиент; сотруднику и ребёнку до 14 кнопка не нужна.
-  const canBook = viewer === 'client' || viewer === 'anonymous';
+  // Бронирует стол клиент; сотруднику и ребёнку до 14 кнопки нет — и строки под неё тоже.
+  const canBook = (viewer === 'client' || viewer === 'anonymous') && halls.some((hall) => hall.tables > 0);
+  // Строк в карточке: название, адрес, контакты, часы, столы, цена, мероприятия (+ кнопка).
+  const span = canBook ? 'row-span-8' : 'row-span-7';
+  const cell = cn(span, 'grid grid-rows-subgrid gap-y-0');
+  const card = (hall: Hall): ReactNode =>
+    tenant && <HallCard hall={hall} tenant={tenant} slug={slug} canBook={canBook} span={span} />;
 
   return (
-    // Один зал — карточка во всю ширину колонки текста; несколько — сеткой.
-    <ul className={cn('grid gap-5', tenant.halls.length === 1 ? 'max-w-2xl' : 'md:grid-cols-2')}>
-      {tenant.halls.map((hall) => (
-        <li key={hall.id} className="flex flex-col overflow-hidden rounded-card border border-border bg-surface-raised">
-          {/* Обложка карточки в цвете клуба (вариант Д от 30.09.2026): место
-              под снимок зала, пока его нет — плоскость с отблеском. */}
-          <div
-            className="relative flex h-28 items-end px-5 pb-3"
-            style={{
-              background:
-                'radial-gradient(420px 140px at 90% 0%, color-mix(in oklab, var(--accent) 55%, transparent), transparent 70%), linear-gradient(135deg, color-mix(in oklab, var(--accent) 45%, var(--ink-950)), var(--ink-950))',
-            }}
-          >
-            <OpenBadge hall={hall} />
-          </div>
-          <h3 className="px-5 pt-4 font-display text-[1.1875rem] leading-snug">{hall.name}</h3>
+    <>
+      <SectionHeading
+        title={title}
+        description={description}
+        action={
+          looped ? (
+            // Стрелки — в строке заголовка, как у клубов на стартовой; на
+            // телефоне ряд листают пальцем.
+            <span className="hidden gap-2 sm:flex">
+              <CarouselArrow side="left" label="Предыдущие залы" onClick={() => carousel.page(-1)} />
+              <CarouselArrow side="right" label="Следующие залы" onClick={() => carousel.page(1)} />
+            </span>
+          ) : undefined
+        }
+      />
 
-          <div className="flex flex-1 flex-col px-5 pt-3 pb-5">
-            <div className="flex items-start gap-2.5">
-              <PinIcon />
-              <div className="min-w-0">
-                {hall.address ? (
-                  <>
-                    <p className="text-[1rem] leading-snug text-text">{placeOf(hall)}</p>
-                    <a
-                      href={mapHref(hall)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-1 inline-block text-[0.875rem] text-text-accent underline-offset-2 hover:underline"
-                    >
-                      На карте
-                    </a>
-                  </>
-                ) : (
-                  <p className="text-[0.9375rem] text-text-muted">
-                    {hall.city ? `${hall.city} — ` : ''}адрес уточняйте{' '}
-                    {tenant.phone ? (
-                      <a href={`tel:${tenant.phone}`} className="text-text-accent underline-offset-2 hover:underline">
-                        по телефону
-                      </a>
-                    ) : (
-                      'у клуба'
-                    )}
-                  </p>
-                )}
-              </div>
-            </div>
+      {!tenant && <div className="h-64 rounded-card border border-border bg-surface-raised" aria-busy="true" />}
 
-            <HallContacts hall={hall} tenant={tenant} />
+      {tenant && halls.length === 0 && (
+        <p className="rounded-card border border-dashed border-border px-5 py-8 text-[0.9375rem] text-text-muted">
+          Залы клуб пока не указал.
+        </p>
+      )}
 
-            <HallHours hall={hall} />
+      {tenant && halls.length > 0 && !looped && (
+        <ul className="grid gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+          {halls.map((hall) => (
+            <li key={hall.id} className={cell}>
+              {card(hall)}
+            </li>
+          ))}
+        </ul>
+      )}
 
-            <dl className="mt-4 grid grid-cols-2 gap-2 text-[0.8125rem]">
-              <PriceTile label="Стол, час" value={formatKopecks(hall.tableHourPrice)} />
-              <PriceTile label="Дальше, полчаса" value={formatKopecks(hall.tableExtra30MinPrice)} />
-              {hall.robotHourPrice !== null && (
-                <PriceTile label="С роботом, час" value={formatKopecks(hall.robotHourPrice)} />
-              )}
-              <PriceTile label="Столов" value={`${hall.tables} ${plural(hall.tables, 'стол', 'стола', 'столов')}`} />
-            </dl>
-
-            {canBook && hall.tables > 0 && (
-              <div className="mt-auto pt-5">
-                <Link href={`/clubs/${slug}/booking?hall=${hall.id}`}>
-                  <Button size="sm">Забронировать в этом зале</Button>
-                </Link>
-              </div>
-            )}
-          </div>
-        </li>
-      ))}
-    </ul>
+      {tenant && looped && (
+        <LoopCarousel
+          items={halls}
+          keyOf={(hall) => hall.id}
+          render={card}
+          track={carousel.track}
+          label="Залы клуба — листайте вбок"
+          itemClassName={cell}
+          layout={cn(
+            'grid grid-flow-col gap-x-4 auto-cols-[85%] sm:auto-cols-[calc((100%-1rem)/2)] lg:auto-cols-[calc((100%-2rem)/3)]',
+            canBook ? 'grid-rows-[repeat(8,auto)]' : 'grid-rows-[repeat(7,auto)]',
+          )}
+        />
+      )}
+    </>
   );
 }
 
 type Hall = PublicTenant['halls'][number];
 
-/** «Открыто до 23:00» — заливкой цвета клуба; закрыто — приглушённо. */
-function OpenBadge({ hall }: { hall: Hall }) {
-  const state = openState(hall.workingHours, new Date(), hall.timezone);
-
-  if (!state) {
-    return null;
-  }
+function HallCard({
+  hall,
+  tenant,
+  slug,
+  canBook,
+  span,
+}: {
+  hall: Hall;
+  tenant: PublicTenant;
+  slug: string;
+  canBook: boolean;
+  span: string;
+}) {
+  // Свои телефон и почта зала (решение от 25.09.2026), а без них — клуба.
+  const phone = hall.phone ?? tenant.phone;
+  const email = hall.email ?? tenant.email;
+  const shared = hall.phone === null && hall.email === null && (phone !== null || email !== null);
+  const street = streetOf(hall);
+  const { trainings, tournaments } = hall.weekEvents;
 
   return (
-    <span
+    <article
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[0.8125rem] font-medium whitespace-nowrap',
-        state.open ? 'bg-white text-ink-950' : 'bg-black/45 text-white/85 backdrop-blur-sm',
+        span,
+        'grid grid-cols-[2.625rem_minmax(0,1fr)] grid-rows-subgrid gap-y-0 overflow-hidden rounded-card border border-border bg-surface-raised',
       )}
     >
+      {/* Полоса в духе прежней обложки (просьба владельца от 17.10.2026):
+          цвет клуба, притемнённый к чернилам, и отблеск сверху. */}
       <span
         aria-hidden="true"
-        className={cn('h-1.5 w-1.5 rounded-full', state.open ? 'bg-accent' : 'bg-white/60')}
+        className="col-start-1 row-span-full row-start-1"
+        style={{
+          background:
+            'radial-gradient(160px 260px at 0% 0%, color-mix(in oklab, var(--accent) 60%, transparent), transparent 75%), linear-gradient(180deg, color-mix(in oklab, var(--accent) 45%, var(--ink-950)), var(--ink-950))',
+        }}
       />
-      {openStateLabel(state)}
-    </span>
+
+      <h3 className="col-start-2 px-5 pt-4 pb-1.5 font-display text-[1.1875rem] leading-snug">{hall.name}</h3>
+
+      <Row label="Адрес" first>
+        <span className="block">{hall.city ?? 'Город не указан'}</span>
+        {street ? (
+          <>
+            <span className="block">{street}</span>
+            <a
+              href={mapHref(hall)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[0.8125rem] text-text-accent underline-offset-2 hover:underline"
+            >
+              На карте
+            </a>
+          </>
+        ) : (
+          <span className="block text-text-muted">адрес уточняйте у клуба</span>
+        )}
+      </Row>
+
+      <Row label="Контакты">
+        {phone && (
+          <a href={`tel:${phone}`} className="block text-text-accent underline-offset-2 hover:underline">
+            {formatPhone(phone)}
+          </a>
+        )}
+        {email && (
+          <a href={`mailto:${email}`} className="block break-all text-text-accent underline-offset-2 hover:underline">
+            {email}
+          </a>
+        )}
+        {!phone && !email && <span className="text-text-muted">не указаны</span>}
+        {shared && <span className="block text-[0.75rem] text-text-subtle">общие контакты клуба</span>}
+      </Row>
+
+      <Row label="Часы работы">
+        <Hours hall={hall} />
+      </Row>
+
+      <Row label="Столов">{hall.tables}</Row>
+
+      <Row label="Аренда стола, час">
+        <span className="font-display text-[1.0625rem] text-text-accent">{formatKopecks(hall.tableHourPrice)}</span>
+        {hall.robotHourPrice !== null && (
+          <span className="flex items-center gap-1.5 text-[0.8125rem] whitespace-nowrap text-text-muted">
+            <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--hue-amber)]" />
+            С роботом — {formatKopecks(hall.robotHourPrice)}/час
+          </span>
+        )}
+      </Row>
+
+      <Row label="Мероприятий за 7 дней" last={!canBook}>
+        {trainings + tournaments > 0 ? (
+          `${trainings} ${plural(trainings, 'тренировка', 'тренировки', 'тренировок')}, ${tournaments} ${plural(tournaments, 'турнир', 'турнира', 'турниров')}`
+        ) : (
+          <span className="text-text-muted">пока нет</span>
+        )}
+      </Row>
+
+      {canBook && (
+        <div className="col-start-2 self-end px-5 pt-2 pb-5">
+          {hall.tables > 0 && (
+            <Link href={`/clubs/${slug}/booking?hall=${hall.id}`}>
+              <Button size="sm" variant="gradient" className="w-full">
+                Забронировать стол
+              </Button>
+            </Link>
+          )}
+        </div>
+      )}
+    </article>
+  );
+}
+
+/** Строка карточки — ячейка общей строки сетки. */
+function Row({ label, first, last, children }: { label: string; first?: boolean; last?: boolean; children: ReactNode }) {
+  return (
+    <div className={cn('col-start-2 px-5', first ? 'pt-1' : 'pt-2', last ? 'pb-4' : 'pb-2')}>
+      <div className={cn(!first && 'border-t border-border pt-2')}>
+        <p className="text-[0.75rem] text-text-subtle">{label}</p>
+        <div className="text-[0.875rem] leading-snug text-text">{children}</div>
+      </div>
+    </div>
   );
 }
 
 /**
- * Часы работы — всегда отдельным блоком: «сегодня» крупно, неделя строками.
- * Не указаны — так и написано: пустое место читалось бы как «работает всегда».
+ * Часы работы — всегда: не указаны — так и написано, пустое место читалось бы
+ * как «работает всегда». «Открыто сейчас» — по часам зала.
  */
-function HallHours({ hall }: { hall: Hall }) {
-  const hours = hall.workingHours;
-
-  if (!hours) {
-    return (
-      <div className="mt-4 flex items-start gap-2.5 rounded-control border border-dashed border-border px-3.5 py-3 text-[0.875rem] text-text-muted">
-        <ClockIcon />
-        <p>Часы работы клуб пока не указал — уточняйте по телефону.</p>
-      </div>
-    );
+function Hours({ hall }: { hall: Hall }) {
+  if (!hall.workingHours) {
+    return <span className="text-text-muted">не указаны, уточняйте по телефону</span>;
   }
 
-  const { weekday } = localWeekMinute(new Date(), hall.timezone);
-  const today = hours[weekday] ?? null;
+  const state = openState(hall.workingHours, new Date(), hall.timezone);
 
   return (
-    <div className="mt-4 rounded-control border border-border-accent/40 bg-surface-accent-soft/60 px-3.5 py-3 text-[0.875rem]">
-      <p className="flex items-center gap-2.5 text-text">
-        <ClockIcon />
-        <span>
-          <span className="text-text-muted">Сегодня, {WEEKDAY_SHORT[weekday]!.toLowerCase()}:</span>{' '}
-          <span className="font-medium">{today ? `${today.open}–${today.close}` : 'выходной'}</span>
+    <>
+      {state && (
+        <span className={cn('flex items-center gap-1.5 font-medium', state.open ? 'text-text-accent' : 'text-text-muted')}>
+          <span aria-hidden="true" className={cn('h-1.5 w-1.5 rounded-full', state.open ? 'bg-accent' : 'bg-text-subtle')} />
+          {openStateLabel(state)}
         </span>
-      </p>
-      <ul className="mt-1.5 pl-[1.625rem] text-text-muted" aria-label="Часы работы">
-        {workingHoursLines(hours).map((line) => (
+      )}
+      <ul className="mt-0.5 text-text-muted" aria-label="Часы работы по дням">
+        {workingHoursLines(hall.workingHours).map((line) => (
           <li key={line}>{line}</li>
         ))}
       </ul>
-    </div>
-  );
-}
-
-function PriceTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-control border border-border px-3 py-2">
-      <dt className="text-text-subtle">{label}</dt>
-      <dd className="font-display text-[1.0625rem] text-text-accent">{value}</dd>
-    </div>
-  );
-}
-
-/**
- * Кому звонить про этот зал: свои телефон и почта зала (решение владельца от
- * 25.09.2026), а без них — клуба, с пометкой, что это общий номер.
- */
-function HallContacts({ hall, tenant }: { hall: Hall; tenant: PublicTenant }) {
-  const own = hall.phone !== null || hall.email !== null;
-  const phone = hall.phone ?? tenant.phone;
-  const email = hall.email ?? tenant.email;
-
-  if (!phone && !email) {
-    return null;
-  }
-
-  return (
-    <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.875rem]">
-      {phone && (
-        <a href={`tel:${phone}`} className="text-text-accent underline-offset-2 hover:underline">
-          {formatPhone(phone)}
-        </a>
-      )}
-      {email && (
-        <a href={`mailto:${email}`} className="text-text-accent underline-offset-2 hover:underline">
-          {email}
-        </a>
-      )}
-      {!own && <span className="text-[0.8125rem] text-text-subtle">общий номер клуба</span>}
-    </p>
-  );
-}
-
-function ClockIcon() {
-  return (
-    <svg viewBox="0 0 16 16" className="h-4 w-4 shrink-0 text-text-accent" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-      <circle cx="8" cy="8" r="6.2" />
-      <path d="M8 4.8V8l2.2 1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function PinIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      className="mt-0.5 h-4 w-4 shrink-0 text-text-accent"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      aria-hidden="true"
-    >
-      <path d="M8 14.5s4.5-4.2 4.5-7.7a4.5 4.5 0 1 0-9 0c0 3.5 4.5 7.7 4.5 7.7Z" />
-      <circle cx="8" cy="6.8" r="1.6" />
-    </svg>
+    </>
   );
 }
 
@@ -255,7 +268,7 @@ function PinIcon() {
  * в адресе ещё нет: DaData пишет «г Красноярск, ул …», и «Красноярск, г
  * Красноярск» читалось бы как ошибка вёрстки.
  */
-function placeOf(hall: PublicTenant['halls'][number]): string {
+function placeOf(hall: Hall): string {
   if (!hall.address) {
     return hall.city ?? '';
   }
@@ -266,7 +279,7 @@ function placeOf(hall: PublicTenant['halls'][number]): string {
 }
 
 /** Яндекс.Карты: по координатам дома, а без них — поиском по адресу. */
-function mapHref(hall: PublicTenant['halls'][number]): string {
+function mapHref(hall: Hall): string {
   if (hall.latitude !== null && hall.longitude !== null) {
     return `https://yandex.ru/maps/?pt=${hall.longitude},${hall.latitude}&z=17&l=map`;
   }

@@ -35,6 +35,7 @@ import { clubTimezone } from '../notifications/clock';
 import { localParts } from '../club/closures';
 import { staffJoinProblem } from '../staff/shift-rules';
 import { StaffService } from '../staff/staff.service';
+import { hallScope } from './hall-scope';
 
 /**
  * Мероприятия клуба и запись на них: занятия и турниры одним списком.
@@ -55,33 +56,6 @@ const MAX_RANGE_MS = 31 * 24 * 3600_000;
 /** Отказ записи на отменённое клубом (решение владельца от 10.10.2026). */
 const CANCELLED_TRAINING = 'Клуб отменил это занятие — записаться на него нельзя';
 const CANCELLED_TOURNAMENT = 'Клуб отменил этот турнир — записаться на него нельзя';
-
-/**
- * Мероприятия в залах страницы клуба (решение владельца от 25.09.2026):
- * мероприятие — в зале, если стоит в его расписании; без окна в сетке — там,
- * где идёт его вид (пусто — во всех залах).
- *
- * Одно правило на список «Предстоящих» и на «Ближайшее» у вида: разойдись
- * они, карточка вида и список под ней называли бы разные проведения.
- */
-function hallScope(value: string | undefined): {
-  training: Prisma.TrainingSessionWhereInput;
-  tournament: Prisma.TournamentWhereInput;
-} {
-  const halls = value ? value.split(',').filter(Boolean) : null;
-
-  if (!halls) {
-    return { training: {}, tournament: {} };
-  }
-
-  const typeInHalls = { OR: [{ halls: { none: {} } }, { halls: { some: { hallId: { in: halls } } } }] };
-  const placedInHalls = { some: { table: { hallId: { in: halls } } } };
-
-  return {
-    training: { OR: [{ dayClosures: placedInHalls }, { dayClosures: { none: {} }, trainingType: typeInHalls }] },
-    tournament: { OR: [{ dayClosures: placedInHalls }, { dayClosures: { none: {} }, tournamentType: typeInHalls }] },
-  };
-}
 
 @Injectable()
 export class EventsService {

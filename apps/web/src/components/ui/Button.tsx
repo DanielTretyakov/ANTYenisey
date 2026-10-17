@@ -1,11 +1,13 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-ghost';
+type Variant = 'primary' | 'gradient' | 'secondary' | 'ghost' | 'danger' | 'danger-ghost';
 type Size = 'sm' | 'md' | 'lg';
 
 const VARIANTS: Record<Variant, string> = {
   primary: 'bg-accent text-accent-text hover:bg-accent-hover active:bg-accent-active shadow-sm',
+  // Главное действие страницы клуба — градиентом цвета клуба (`accent-gradient`).
+  gradient: 'accent-gradient shadow-sm',
   secondary: 'bg-surface-raised text-text border border-border-strong hover:bg-surface-sunken',
   ghost: 'bg-transparent text-text-muted hover:bg-surface-sunken hover:text-text',
   danger: 'bg-danger-soft text-danger border border-danger-border hover:bg-danger-soft/70',

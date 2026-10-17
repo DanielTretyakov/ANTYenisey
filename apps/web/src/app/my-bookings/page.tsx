@@ -158,7 +158,7 @@ function Group({
   }
 
   return (
-    <section className="mb-14">
+    <section className="mb-14 [section+&]:section-rule [section+&]:[--rule-gap:3.5rem]">
       <h2 className="mb-5 text-[1.375rem]">{title}</h2>
 
       <div className="grid gap-8">

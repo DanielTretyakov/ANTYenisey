@@ -7,6 +7,7 @@ import {
   LogoShapeError,
   logoShapeProblem,
   normalizeAvatar,
+  normalizeCoachPhoto,
   normalizeDocumentImage,
   normalizeLogo,
 } from './image-normalizer.ts';
@@ -50,6 +51,25 @@ describe('normalizeAvatar', () => {
   it('обрезанный файл — ошибка', async () => {
     const whole = await photoWithExif(400, 400);
     await assert.rejects(normalizeAvatar(whole.subarray(0, Math.floor(whole.length / 2))));
+  });
+});
+
+describe('normalizeCoachPhoto', () => {
+  it('портрет — целиком, без кадрирования, не больше 1080×1920', async () => {
+    const big = await sharp({ create: { width: 3000, height: 6000, channels: 3, background: '#a33' } }).jpeg().toBuffer();
+    const meta = await sharp(await normalizeCoachPhoto(big)).metadata();
+
+    assert.equal(meta.format, 'webp');
+    assert.equal(meta.width, 960);
+    assert.equal(meta.height, 1920);
+  });
+
+  it('маленькое не растягивается, координаты съёмки уходят', async () => {
+    const out = await normalizeCoachPhoto(await photoWithExif(600, 400));
+    const meta = await sharp(out).metadata();
+
+    assert.deepEqual([meta.width, meta.height].sort(), [400, 600]);
+    assert.equal(meta.exif, undefined);
   });
 });
 

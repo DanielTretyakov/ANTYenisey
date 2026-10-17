@@ -6787,6 +6787,13 @@ async function platformBilling() {
   assert('и он без оплаты', (r.body ?? []).some((row) => row.slug === slug && row.status === 'EXEMPT'));
   r = await asAdmin(`/platform/clubs/${slug}/exempt`, { method: 'PUT', json: { exempt: false } });
   assert('снятие «без оплаты» возвращает оплаченный срок', (r.body ?? []).some((row) => row.slug === slug && row.status === 'ACTIVE'));
+
+  // --- Обратно в черновик: служебный клуб не висит в поиске между прогонами
+  // (17.10.2026); следующий прогон откроет его тем же `probe-club`.
+  r = await asAdmin(`/platform/club-setup/${slug}/published`, { method: 'PUT', json: { published: false } });
+  check('пробный клуб подписки возвращён в черновик', 200, r.status);
+  r = await call(`/clubs?query=${encodeURIComponent('Клуб проверки подписки')}`);
+  assert('и в поиске его нет', !(r.body ?? []).some((club) => club.slug === slug));
 }
 
 /**

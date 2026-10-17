@@ -10,7 +10,7 @@ import {
 } from '../events/event-view';
 import { distinctNearest } from './feed-rules';
 import { PrismaService } from '../prisma/prisma.service';
-import { CARD_SELECT, nextEvents, toCard } from '../tenants/club-card';
+import { CARD_SELECT, toCard } from '../tenants/club-card';
 
 /**
  * Клуб мероприятия в ленте: минимум, которого хватает, чтобы его назвать,
@@ -38,9 +38,7 @@ export class MeService {
       orderBy: { slot: 'asc' },
     });
 
-    const next = await nextEvents(this.prisma, rows.map((row) => row.tenant), new Date());
-
-    return rows.map((row) => ({ ...toCard(row.tenant, next.get(row.tenant.id) ?? null), slot: row.slot }));
+    return rows.map((row) => ({ ...toCard(row.tenant), slot: row.slot }));
   }
 
   /**

@@ -141,7 +141,7 @@ export function ClubBar({ slug, page }: { slug: string; page?: SectionNavState }
                         <Link
                           key={section.href}
                           href={section.href}
-                          className="inline-flex h-8 items-center rounded-control bg-accent px-3 text-[0.8125rem] font-medium whitespace-nowrap text-accent-text transition-colors hover:bg-accent-hover"
+                          className="accent-gradient inline-flex h-8 items-center rounded-control px-3 text-[0.8125rem] font-medium whitespace-nowrap shadow-sm"
                         >
                           {section.label}
                         </Link>

@@ -53,6 +53,22 @@ export async function normalizeAvatar(input: Uint8Array): Promise<Uint8Array> {
     .toBuffer();
 }
 
+/**
+ * Фото тренера — целиком, без кадрирования (решение владельца от 17.10.2026):
+ * карточка тренера на странице клуба — высокий прямоугольник 9:16, и тренер
+ * показывает себя в полный рост. Не больше 1080×1920 с сохранением пропорций;
+ * маленькое не растягивается.
+ */
+export const COACH_PHOTO_MAX_WIDTH = 1080;
+export const COACH_PHOTO_MAX_HEIGHT = 1920;
+
+export async function normalizeCoachPhoto(input: Uint8Array): Promise<Uint8Array> {
+  return open(input)
+    .resize(COACH_PHOTO_MAX_WIDTH, COACH_PHOTO_MAX_HEIGHT, { fit: 'inside', withoutEnlargement: true })
+    .webp({ quality: 82 })
+    .toBuffer();
+}
+
 /** Сторона логотипа клуба: тот же квадрат, что аватар. */
 export const LOGO_SIZE = 512;
 

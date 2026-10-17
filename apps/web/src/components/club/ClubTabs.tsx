@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   availableInAny,
   type ClubCatalogItem,
@@ -9,21 +9,29 @@ import {
   type PublicTenant,
 } from '@yenisey/types';
 import { CoachHeart } from '@/components/coach/CoachHeart';
-import { PlayerAvatar } from '@/components/player/PlayerView';
-import { PlanGroups, PLANS_ANCHOR } from '@/components/subscriptions/PlanList';
+import { AvatarPlaceholder } from '@/components/player/AvatarPlaceholder';
+import { planGroups, PlanGroupCard, PLANS_ANCHOR } from '@/components/subscriptions/PlanList';
 import { CompactSelect } from '@/components/ui/CompactSelect';
+import { CARD_COVER as COVER, CardRow } from '@/components/ui/CardRow';
 import { Tab } from '@/components/ui/Tab';
 import { api } from '@/lib/api';
 import { formatKopecks } from '@/lib/money';
+import { useClubApi, useClubSlug } from '@/lib/useClubApi';
+import { useFileUrl } from '@/lib/useFileUrl';
 import { useSession } from '@/lib/useSession';
 import { KindBadge, shortWhen } from './EventRow';
+import { HallMenu } from './HallMenu';
 import { SectionHeading } from './SectionHeading';
 
 /**
- * Вкладки выбранного зала (решения владельца от 25, 27 и 30.09.2026):
- * мероприятия, тренеры и абонементы. Всё — в пределах зала, выбранного выше.
- * Сам зал — карточкой прямо под выбором зала (`HallCards`), а не вкладкой:
- * выбрал зал — сразу видишь, где он и когда открыт.
+ * Мероприятия, тренеры и абонементы клуба вкладками (решения владельца от
+ * 25, 27 и 30.09.2026; вид — от 17.10.2026).
+ *
+ * С 17.10.2026: свой фильтр по залам справа в заголовке (тот же `HallMenu`,
+ * что в «Предстоящих», у каждого блока свой выбор); карточки — одним рядом,
+ * по четыре, больше четырёх — каруселью по кругу, одна под другой не встают.
+ * Карточки видов и тренеров — высокие прямоугольники 9:16: тренер
+ * показывает себя на фото в полный рост.
  *
  * Выбранная вкладка живёт в адресе (`#meropriyatiya`…): ссылка «Больше абонементов»
  * из кабинета ведёт на `#abonementy` и обязана открыть именно её. Адрес
@@ -53,23 +61,23 @@ const TAB_LEADS: Record<TabId, string> = {
 /** Якорь самих вкладок — к нему прокручивает переход по `#abonementy`. */
 export const TABS_ANCHOR = 'o-klube';
 
+
 export function ClubTabs({
   tenant,
   catalog,
   plans,
-  hallIds,
   onShowSchedule,
 }: {
   tenant: PublicTenant | null;
+  /** Виды по всему клубу; при фильтре залов вкладка читает свои. */
   catalog: ClubCatalogItem[] | null;
   plans: PublicPlan[] | null;
-  /** Выбранные фильтром залы; пусто — все (решение владельца от 25.09.2026). */
-  hallIds: string[] | null;
   /** «Показать расписание» у вида — фильтр в «Предстоящих» и прокрутка к ним. */
   onShowSchedule: (item: ClubCatalogItem) => void;
 }) {
   const [active, setActive] = useState<TabId>('meropriyatiya');
   const [fromHash, setFromHash] = useState(false);
+  const halls = useTabHalls(tenant);
 
   // Вкладка из адреса. В эффекте, а не в начальном состоянии: на сервере
   // адреса нет, и разметка разошлась бы с первой отрисовкой в браузере.
@@ -106,30 +114,27 @@ export function ClubTabs({
     window.history.replaceState(null, '', `#${id}`);
   };
 
-  // Фильтр залов: залы — выбранные, виды и тренеры — те, что там есть,
-  // тарифы — те, что покрывают хоть один доступный там вид.
-  const scoped = scopeTo(hallIds, tenant, catalog, plans);
+  // Фильтр залов: виды и тренеры — те, что там есть, тарифы — те, что
+  // покрывают хоть один доступный там вид. «Ближайшее» у вида — в выбранных
+  // залах: его считает сервер (`catalog?halls=`), как и список «Предстоящих».
+  const hallCatalog = useHallCatalog(halls.ids, catalog);
+  const scoped = scopeTo(halls.ids, tenant, hallCatalog, plans);
 
   const counts: Record<TabId, number | null> = {
     meropriyatiya: scoped.catalog?.length ?? null,
     trenery: scoped.tenant?.coaches.length ?? null,
-    [PLANS_ANCHOR]: scoped.plans?.length ?? null,
+    [PLANS_ANCHOR]: scoped.plans ? planGroups(scoped.plans).length : null,
   };
 
-  const labelOf = (tab: (typeof TABS)[number]): string => tab.label;
-
-  // Заголовок блока — про выбранный зал, если он один (решение от 30.09.2026).
-  const onlyHall = scoped.tenant?.halls.length === 1 ? scoped.tenant.halls[0]! : null;
-  const canPick = (tenant?.halls.length ?? 0) >= 2;
-
   return (
-    <section id={TABS_ANCHOR} className="mb-14 scroll-mt-48">
+    <section id={TABS_ANCHOR} className="section-rule mb-14 scroll-mt-48">
       <SectionHeading
-        title={onlyHall && canPick ? `В зале «${onlyHall.name}»` : 'Мероприятия, тренеры и абонементы'}
-        description={
-          canPick
-            ? 'Виды занятий и турниров, тренеры и абонементы — в зале, выбранном выше. Сменить зал — там же.'
-            : 'Виды занятий и турниров, тренеры и абонементы клуба — по вкладкам.'
+        title="Мероприятия, тренеры и абонементы"
+        description="Виды занятий и турниров, тренеры и абонементы клуба — по вкладкам."
+        action={
+          tenant && tenant.halls.length > 1 ? (
+            <HallMenu halls={tenant.halls} value={halls.ids} onChange={halls.choose} />
+          ) : undefined
         }
       />
 
@@ -149,14 +154,8 @@ export function ClubTabs({
       <div className="-mx-1 mb-3 hidden overflow-x-auto px-1 pb-1 [scrollbar-width:none] sm:block">
         <div className="flex w-max gap-1.5 border-b border-border pb-3" role="tablist" aria-label="О клубе">
           {TABS.map((tab) => (
-            <Tab
-              key={tab.id}
-              inTablist
-              active={active === tab.id}
-              onClick={() => choose(tab.id)}
-              badge={counts[tab.id] || undefined}
-            >
-              {labelOf(tab)}
+            <Tab key={tab.id} inTablist active={active === tab.id} onClick={() => choose(tab.id)} badge={counts[tab.id] || undefined}>
+              {tab.label}
             </Tab>
           ))}
         </div>
@@ -164,13 +163,83 @@ export function ClubTabs({
 
       <p className="mb-5 text-[0.875rem] text-text-muted">{TAB_LEADS[active]}</p>
 
-      <div role="tabpanel" aria-label={labelOf(TABS.find((tab) => tab.id === active)!)}>
+      <div role="tabpanel" aria-label={TABS.find((tab) => tab.id === active)!.label}>
         {active === 'meropriyatiya' && <CatalogTab catalog={scoped.catalog} onShowSchedule={onShowSchedule} />}
         {active === 'trenery' && <CoachesTab tenant={scoped.tenant} />}
         {active === PLANS_ANCHOR && <PlansTab plans={scoped.plans} />}
       </div>
     </section>
   );
+}
+
+/**
+ * Фильтр залов вкладок — свой, отдельно от «Предстоящих». Помнит браузер,
+ * у каждого клуба свой ключ; зал, которого у клуба больше нет, отбрасывается,
+ * а все залы разом — то же, что без фильтра.
+ */
+function useTabHalls(tenant: PublicTenant | null): { ids: string[] | null; choose: (ids: string[] | null) => void } {
+  const slug = useClubSlug();
+  const key = `yenisey.tabHalls.${slug}`;
+  const [saved, setSaved] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    try {
+      const value = JSON.parse(window.localStorage.getItem(key) ?? 'null') as unknown;
+      if (Array.isArray(value) && value.every((id) => typeof id === 'string')) setSaved(value);
+    } catch {
+      // нет хранилища — без фильтра
+    }
+  }, [key]);
+
+  const choose = useCallback(
+    (ids: string[] | null) => {
+      setSaved(ids);
+      try {
+        window.localStorage.setItem(key, JSON.stringify(ids));
+      } catch {
+        // не запомнили — не беда
+      }
+    },
+    [key],
+  );
+
+  const ids = useMemo(() => {
+    if (!tenant || !saved) return null;
+    const known = saved.filter((id) => tenant.halls.some((hall) => hall.id === id));
+    return known.length === 0 || known.length === tenant.halls.length ? null : known;
+  }, [tenant, saved]);
+
+  return { ids, choose };
+}
+
+/** Виды с «Ближайшим» в выбранных залах; без фильтра — общий список страницы. */
+function useHallCatalog(hallIds: string[] | null, catalog: ClubCatalogItem[] | null): ClubCatalogItem[] | null {
+  const club = useClubApi();
+  const halls = hallIds?.join(',') ?? '';
+  const [scoped, setScoped] = useState<{ halls: string; items: ClubCatalogItem[] } | null>(null);
+
+  useEffect(() => {
+    if (!halls) return;
+    let cancelled = false;
+
+    club
+      .catalog(halls)
+      .then((items) => {
+        if (!cancelled) setScoped({ halls, items });
+      })
+      .catch(() => {
+        if (!cancelled) setScoped({ halls, items: [] });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // Перечитать и вслед за общим списком: после записи «ближайшее» сдвигается.
+  }, [club, halls, catalog]);
+
+  if (!halls) return catalog;
+
+  return scoped?.halls === halls ? scoped.items : null;
 }
 
 /** Всё содержимое вкладок — в пределах выбранных залов. */
@@ -227,7 +296,7 @@ const CATALOG_EMPTY: Record<CatalogKind, string> = {
 };
 
 /**
- * Что вообще есть в зале — все виды занятий и турниров, а не ближайшая
+ * Что вообще есть в клубе — все виды занятий и турниров, а не ближайшая
  * неделя: человек выбирает клуб по тому, чем в нём занимаются. Сверху —
  * «Все · Турниры · Тренировки».
  */
@@ -255,62 +324,31 @@ function CatalogTab({
   const idle = ofKind.filter((item) => item.nextStartsAt === null);
   const shown = scheduled.length === 0 || showIdle ? ofKind : scheduled;
 
+  const kinds = (
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Вид мероприятий">
+      {CATALOG_KINDS.map((item) => (
+        <Tab key={item.value} active={kind === item.value} onClick={() => setKind(item.value)} badge={count(item.value)}>
+          {item.label}
+        </Tab>
+      ))}
+    </div>
+  );
+
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center gap-1.5" role="group" aria-label="Вид мероприятий">
-        {CATALOG_KINDS.map((item) => (
-          <Tab
-            key={item.value}
-            active={kind === item.value}
-            onClick={() => setKind(item.value)}
-            badge={count(item.value)}
-          >
-            {item.label}
-          </Tab>
-        ))}
-      </div>
-
       {shown.length === 0 ? (
-        <Empty>{CATALOG_EMPTY[kind]}</Empty>
+        <>
+          <div className="mb-4">{kinds}</div>
+          <Empty>{CATALOG_EMPTY[kind]}</Empty>
+        </>
       ) : (
-        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {shown.map((item) => (
-            <li
-              key={`${item.kind}-${item.typeId}`}
-              className="flex flex-col rounded-card border border-border bg-surface-raised px-5 py-5"
-            >
-              <KindBadge kind={item.kind} />
-              <h3 className="mt-3 text-[1.125rem] leading-snug">
-                {item.name}
-                {item.ratingLabel && !item.name.includes(item.ratingLabel) && (
-                  <span className="ml-2 text-[0.8125rem] text-text-subtle">рейтинг до {item.ratingLabel}</span>
-                )}
-              </h3>
-              {item.description && (
-                <p className="mt-2 line-clamp-4 text-[0.875rem] leading-relaxed whitespace-pre-line text-text-muted">
-                  {item.description}
-                </p>
-              )}
-
-              <div className="mt-auto pt-4">
-                <p className="font-display text-[1.125rem] text-text">{formatKopecks(item.price)}</p>
-                <p className="mt-0.5 text-[0.8125rem] text-text-muted">
-                  {item.nextStartsAt ? `Ближайшее: ${shortWhen(item.nextStartsAt, item.nextTimezone)}` : 'Сейчас в расписании нет'}
-                </p>
-
-                {item.upcomingCount > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => onShowSchedule(item)}
-                    className="mt-3 text-[0.875rem] text-text-accent underline-offset-2 hover:underline"
-                  >
-                    Показать расписание →
-                  </button>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
+        <CardRow
+          items={shown}
+          keyOf={(item) => `${item.kind}-${item.typeId}`}
+          label="Мероприятия клуба — листайте вбок"
+          toolbar={kinds}
+          render={(item) => <CatalogCard item={item} onShowSchedule={onShowSchedule} />}
+        />
       )}
 
       {scheduled.length > 0 && idle.length > 0 && (
@@ -323,6 +361,52 @@ function CatalogTab({
         </button>
       )}
     </div>
+  );
+}
+
+
+/**
+ * Вид мероприятия — прямоугольник 9:16: сверху обложка в цвете клуба с
+ * видом и названием, ниже описание, цена, ближайшая дата и расписание.
+ */
+function CatalogCard({ item, onShowSchedule }: { item: ClubCatalogItem; onShowSchedule: (item: ClubCatalogItem) => void }) {
+  return (
+    <article className="flex aspect-[9/16] h-full flex-col overflow-hidden rounded-card border border-border bg-surface-raised">
+      <div className="flex h-[42%] shrink-0 flex-col justify-between p-4" style={{ background: COVER }}>
+        <KindBadge kind={item.kind} />
+        <h3 className="font-display text-[1.0625rem] leading-tight text-white [text-wrap:balance]">
+          {item.name}
+          {item.ratingLabel && !item.name.includes(item.ratingLabel) && (
+            <span className="mt-1 block font-sans text-[0.8125rem] text-white/70">рейтинг до {item.ratingLabel}</span>
+          )}
+        </h3>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col p-4">
+        {item.description ? (
+          <p className="line-clamp-5 text-[0.8125rem] leading-relaxed whitespace-pre-line text-text-muted">{item.description}</p>
+        ) : (
+          <p className="text-[0.875rem] text-text-subtle">Описания пока нет.</p>
+        )}
+
+        <div className="mt-auto pt-4">
+          <p className="font-display text-[1.0625rem] text-text">{formatKopecks(item.price)}</p>
+          <p className="mt-0.5 text-[0.8125rem] text-text-muted">
+            {item.nextStartsAt ? `Ближайшее: ${shortWhen(item.nextStartsAt, item.nextTimezone)}` : 'Сейчас в расписании нет'}
+          </p>
+
+          {item.upcomingCount > 0 && (
+            <button
+              type="button"
+              onClick={() => onShowSchedule(item)}
+              className="mt-3 text-[0.875rem] text-text-accent underline-offset-2 hover:underline"
+            >
+              Показать расписание →
+            </button>
+          )}
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -349,13 +433,16 @@ function CoachesTab({ tenant }: { tenant: PublicTenant | null }) {
   }
 
   if (tenant.coaches.length === 0) {
-    return <Empty>Тренеров в клубе пока нет.</Empty>;
+    return <Empty>Тренеров здесь пока нет.</Empty>;
   }
 
   return (
-    <ul className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
-      {tenant.coaches.map((coach) => (
-        <li key={coach.id} className="relative">
+    <CardRow
+      items={tenant.coaches}
+      keyOf={(coach) => coach.id}
+      label="Тренеры клуба — листайте вбок"
+      render={(coach) => (
+        <div className="relative h-full">
           {!(session.status === 'ready' && session.user.id === coach.id) && session.status !== 'loading' && (
             <CoachHeart
               coachId={coach.id}
@@ -363,36 +450,60 @@ function CoachesTab({ tenant }: { tenant: PublicTenant | null }) {
               anonymous={session.status === 'anonymous'}
               favourite={session.status === 'anonymous' ? false : favourites ? favourites.has(coach.id) : null}
               onChange={(list) => setFavourites(new Set(list.map((item) => item.id)))}
-              className="absolute top-2.5 right-2.5 z-10"
+              className="absolute top-3 right-3 z-10"
             />
           )}
-          <Link
-            href={`/coaches/${coach.id}`}
-            className="group flex h-full flex-col items-center rounded-card border border-border bg-surface-raised px-3 py-5 text-center transition-colors hover:border-border-strong sm:px-5 sm:py-6"
-          >
-            <PlayerAvatar fileId={coach.photoFileId} name={coach.name} gender={coach.gender} size="lg" />
-            <span className="mt-4 text-[1.0625rem] text-text group-hover:underline">{coach.name}</span>
-            {coach.leads.length > 0 && (
-              <span className="mt-1 text-[0.8125rem] text-text-muted">Ведёт: {coach.leads.join(', ')}</span>
-            )}
-            <span className="mt-auto flex flex-wrap justify-center gap-1.5 pt-4">
-              {coach.groupPrice !== null && <PricePill label="Группа" price={coach.groupPrice} />}
-              {coach.individualPrice !== null && <PricePill label="Индивидуально" price={coach.individualPrice} />}
-              {coach.groupPrice === null && coach.individualPrice === null && (
-                <span className="text-[0.8125rem] text-text-subtle">Цены — у тренера</span>
-              )}
-            </span>
-          </Link>
-        </li>
-      ))}
-    </ul>
+          <CoachCard coach={coach} />
+        </div>
+      )}
+    />
+  );
+}
+
+type Coach = PublicTenant['coaches'][number];
+
+/**
+ * Тренер — прямоугольник 9:16 во весь рост (решение владельца от 17.10.2026):
+ * фото на всю карточку, имя, «Ведёт» и цены — снизу поверх затемнения. Без
+ * фото — рисованная заглушка на обложке в цвете клуба.
+ */
+function CoachCard({ coach }: { coach: Coach }) {
+  const url = useFileUrl(coach.photoFileId);
+
+  return (
+    <Link
+      href={`/coaches/${coach.id}`}
+      className="group relative block aspect-[9/16] overflow-hidden rounded-card border border-border"
+      style={url ? undefined : { background: COVER }}
+    >
+      {url ? (
+        // Обычный <img>, а не next/image: адрес — blob:, оптимизатору нечего с ним делать.
+        <img src={url} alt="" className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
+      ) : (
+        <span aria-hidden="true" className="absolute inset-x-[18%] top-[14%] block aspect-square overflow-hidden rounded-full opacity-90">
+          <AvatarPlaceholder gender={coach.gender} />
+        </span>
+      )}
+
+      <span className="absolute inset-x-0 bottom-0 flex flex-col gap-1 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-4 pt-16 pb-4 text-white">
+        <span className="font-display text-[1.0625rem] leading-tight group-hover:underline">{coach.name}</span>
+        {coach.leads.length > 0 && <span className="text-[0.8125rem] text-white/75">Ведёт: {coach.leads.join(', ')}</span>}
+        <span className="mt-2 flex flex-wrap gap-1.5">
+          {coach.groupPrice !== null && <PricePill label="Группа" price={coach.groupPrice} />}
+          {coach.individualPrice !== null && <PricePill label="Индивидуально" price={coach.individualPrice} />}
+          {coach.groupPrice === null && coach.individualPrice === null && (
+            <span className="text-[0.8125rem] text-white/70">Цены — у тренера</span>
+          )}
+        </span>
+      </span>
+    </Link>
   );
 }
 
 function PricePill({ label, price }: { label: string; price: number }) {
   return (
-    <span className="rounded-full border border-border px-2.5 py-1 text-[0.8125rem] text-text-muted">
-      {label} <span className="text-text">{formatKopecks(price)}</span>
+    <span className="rounded-full bg-white/15 px-2 py-0.5 text-[0.75rem] text-white/80 backdrop-blur-sm">
+      {label} <span className="text-white">{formatKopecks(price)}</span>
     </span>
   );
 }
@@ -408,11 +519,16 @@ function PlansTab({ plans }: { plans: PublicPlan[] | null }) {
   }
 
   return (
-    <PlanGroups plans={plans} />
+    <CardRow
+      items={planGroups(plans)}
+      keyOf={(group) => group.key}
+      label="Абонементы клуба — листайте вбок"
+      render={(group) => <PlanGroupCard plans={group.plans} />}
+    />
   );
 }
 
-function Empty({ children }: { children: React.ReactNode }) {
+function Empty({ children }: { children: ReactNode }) {
   return (
     <p className="rounded-card border border-dashed border-border px-5 py-8 text-[0.9375rem] text-text-muted">
       {children}
@@ -422,9 +538,9 @@ function Empty({ children }: { children: React.ReactNode }) {
 
 function CardsSkeleton() {
   return (
-    <div className="grid gap-4 sm:grid-cols-2" aria-busy="true">
-      {[0, 1].map((key) => (
-        <div key={key} className="h-44 rounded-card border border-border bg-surface-raised" />
+    <div className="grid grid-cols-4 gap-4" aria-busy="true">
+      {[0, 1, 2, 3].map((key) => (
+        <div key={key} className="aspect-[9/16] rounded-card border border-border bg-surface-raised max-sm:hidden max-sm:first:block max-sm:first:col-span-3 max-sm:first:w-[72%]" />
       ))}
     </div>
   );

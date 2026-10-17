@@ -11,14 +11,6 @@ import { ClubRatingColumn, RATING_ANCHOR } from '@/components/club/ClubRatingCol
 import { ABOUT_ANCHOR, useSectionNav } from '@/components/club/ClubSectionNav';
 import { ClubTabs, TABS_ANCHOR } from '@/components/club/ClubTabs';
 import { HallCards } from '@/components/club/HallCards';
-import {
-  ALL_HALLS,
-  HALL_PICKER_ANCHOR,
-  HallPicker,
-  normalizeSelection,
-  selectedHallIds,
-  type HallSelection,
-} from '@/components/club/HallFilter';
 import { RowSkeleton } from '@/components/club/EventRow';
 import { SectionHeading } from '@/components/club/SectionHeading';
 import { UPCOMING_ANCHOR, UpcomingEvents, type KindFilter } from '@/components/club/UpcomingEvents';
@@ -46,11 +38,13 @@ import { useSession } from '@/lib/useSession';
  * 11.10.2026): человек, открывший клуб, хочет понять, когда прийти, куда и
  * почём. Раньше «Предстоящие» стояли последними — на телефоне на десятом
  * экране, под описанием, ценностями, новостями, рейтингом и карточками залов.
- * Сверху вниз: обложка; «Мои мероприятия» (только если есть); выбор зала — от
- * него зависит всё ниже; «Предстоящие» неделей или месяцем; вкладки
- * «Мероприятия · Тренеры · Абонементы»; карточки залов (адрес, часы, цены,
- * бронь); новости и рейтинг двумя колонками; «О клубе». Плитки «коротко» сняты:
- * они повторяли карточки залов, «Мои мероприятия» и вкладку тренеров.
+ * Сверху вниз: обложка; «Мои мероприятия» (только если есть); «Предстоящие»
+ * неделей или месяцем, с фильтром по виду и по залам; вкладки
+ * «Мероприятия · Тренеры · Абонементы»; карточки залов узкими прямоугольниками,
+ * больше четырёх — каруселью; новости и рейтинг двумя колонками; «О клубе».
+ * Плитки «коротко» сняты: они повторяли карточки залов, «Мои мероприятия» и
+ * вкладку тренеров. Отдельный выбор зала над расписанием снят 17.10.2026 —
+ * залы выбираются фильтром в самих «Предстоящих» и больше ничего не сужают.
  *
  * «Мои мероприятия» — выше «Предстоящих», как требует ТЗ: на страницу клуба
  * заходят чаще всего посмотреть, куда уже записан и когда идти.
@@ -98,25 +92,27 @@ export default function ClubPage() {
   const [catalog, setCatalog] = useState<ClubCatalogItem[] | null>(null);
   const [plans, setPlans] = useState<PublicPlan[] | null>(null);
   const [filter, setFilter] = useState<KindFilter | null>(null);
-  const [halls, setHalls] = useState<HallSelection>(ALL_HALLS);
+  const [hallFilter, setHallFilter] = useState<string[] | null>(null);
 
-  // Выбор зала помнит браузер — у каждого клуба свой: человек из Абакана не
-  // должен каждый раз заново отсеивать Красноярск. Хранилище может быть
-  // недоступно (приватный режим) — тогда просто «все».
-  const hallsKey = `yenisey.halls.${slug}`;
+  // Фильтр залов «Предстоящих» (решение владельца от 17.10.2026; до того —
+  // отдельный выбор зала над расписанием, от которого зависело всё ниже).
+  // Помнит браузер — у каждого клуба свой: человек из Абакана не должен
+  // каждый раз заново отсеивать Красноярск. Хранилище может быть недоступно
+  // (приватный режим) — тогда просто «все».
+  const hallsKey = `yenisey.hallFilter.${slug}`;
 
   useEffect(() => {
     try {
-      const saved = JSON.parse(window.localStorage.getItem(hallsKey) ?? 'null') as HallSelection | null;
-      if (saved && typeof saved === 'object') setHalls({ city: saved.city ?? null, hallId: saved.hallId ?? null });
+      const saved = JSON.parse(window.localStorage.getItem(hallsKey) ?? 'null') as unknown;
+      if (Array.isArray(saved) && saved.every((id) => typeof id === 'string')) setHallFilter(saved);
     } catch {
       // нет хранилища — остаёмся на «всех»
     }
   }, [hallsKey]);
 
   const chooseHalls = useCallback(
-    (selection: HallSelection) => {
-      setHalls(selection);
+    (selection: string[] | null) => {
+      setHallFilter(selection);
       try {
         window.localStorage.setItem(hallsKey, JSON.stringify(selection));
       } catch {
@@ -126,20 +122,13 @@ export default function ClubPage() {
     [hallsKey],
   );
 
-  // Выбранные залы; сохранённый зал, которого у клуба больше нет, — «все».
-  const effectiveHalls = useMemo(
-    () => (tenant ? normalizeSelection(tenant.halls, halls) : ALL_HALLS),
-    [tenant, halls],
-  );
-  const hallIds = useMemo(
-    () => (tenant ? selectedHallIds(tenant.halls, effectiveHalls) : null),
-    [tenant, effectiveHalls],
-  );
-  // Названия выбранных залов — для строки «Залы: …» над расписанием.
-  const hallNames = useMemo(
-    () => (tenant && hallIds ? tenant.halls.filter((hall) => hallIds.includes(hall.id)).map((hall) => hall.name) : null),
-    [tenant, hallIds],
-  );
+  // Выбранные залы, которые у клуба есть; сохранённых больше нет или выбраны
+  // все — фильтра нет.
+  const hallIds = useMemo(() => {
+    if (!tenant || !hallFilter) return null;
+    const known = hallFilter.filter((id) => tenant.halls.some((hall) => hall.id === id));
+    return known.length === 0 || known.length === tenant.halls.length ? null : known;
+  }, [tenant, hallFilter]);
 
   // Новости и рейтинг — блоки, а не вкладки: переход по `#novosti` (из
   // сообщения клиентам и со стартовой) прокручивает к ним, когда обложка и
@@ -156,7 +145,7 @@ export default function ClubPage() {
       const target = hash;
 
       // Блоки, а не вкладки: к ним — прокруткой, когда страница приехала.
-      if ([NEWS_ANCHOR, RATING_ANCHOR, HALL_PICKER_ANCHOR, HALLS_ANCHOR, ABOUT_ANCHOR, UPCOMING_ANCHOR].includes(target)) {
+      if ([NEWS_ANCHOR, RATING_ANCHOR, HALLS_ANCHOR, ABOUT_ANCHOR, UPCOMING_ANCHOR].includes(target)) {
         requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView({ block: 'start' }));
       }
     };
@@ -182,17 +171,16 @@ export default function ClubPage() {
   }, [slug]);
 
   // Виды мероприятий нужны двоим — вкладке «Мероприятия клуба» и чипам
-  // фильтра в «Предстоящих», — поэтому грузятся здесь, один раз. Перечитываются
-  // вместе со списком: после записи «ближайшее» у вида могло сдвинуться. И при
-  // смене зала: «Ближайшее» у вида — в выбранных залах, как список под ним.
-  const catalogHalls = hallIds?.join(',') ?? '';
-
+  // фильтра в «Предстоящих», — поэтому грузятся здесь, один раз и по всему
+  // клубу: фильтр залов стоит в «Предстоящих» и вкладок не сужает, а чипы он
+  // отсеивает сам по залам вида. Перечитываются вместе со списком: после
+  // записи «ближайшее» у вида могло сдвинуться.
   useEffect(() => {
     club
-      .catalog(catalogHalls || undefined)
+      .catalog()
       .then(setCatalog)
       .catch(() => setCatalog([]));
-  }, [club, eventsVersion, catalogHalls]);
+  }, [club, eventsVersion]);
 
   useEffect(() => {
     club
@@ -258,7 +246,7 @@ export default function ClubPage() {
     <div className="flex min-h-dvh flex-col bg-surface" style={clubAccent(tenant?.accentColor)}>
       <SiteHeader clubSlug={slug} clubPage={sectionNav} />
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-5 pb-20 sm:px-8">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-5 sm:px-8">
         {/* Подписка клуба на КНТ приостановлена за неоплату (решение от
             02.10.2026): страница открыта, но записаться и забронировать нельзя. */}
         {/* Черновик (11.10.2026): сюда доходят только свои — посторонним 404. */}
@@ -309,9 +297,6 @@ export default function ClubPage() {
           readOnly={family.selfIsChild}
         />
 
-        {/* Выбор зала — над расписанием: от него зависит всё ниже. */}
-        {tenant && <HallPicker halls={tenant.halls} value={effectiveHalls} onChange={chooseHalls} />}
-
         <UpcomingEvents
           slug={slug}
           version={eventsVersion}
@@ -322,42 +307,44 @@ export default function ClubPage() {
           catalog={catalog}
           filter={filter}
           onFilter={setFilter}
+          halls={tenant?.halls ?? []}
           hallIds={hallIds}
-          hallNames={hallNames}
+          onHalls={chooseHalls}
         />
 
         <ClubTabs
           tenant={tenant}
           catalog={catalog}
           plans={plans}
-          hallIds={hallIds}
           onShowSchedule={showSchedule}
         />
 
         {tenant && (
-          <section id={HALLS_ANCHOR} className="mb-14 scroll-mt-48">
-            <SectionHeading
-              title={tenant.halls.length === 1 ? 'Зал клуба' : 'Залы'}
-              description="Где играют, когда открыто и почём стол — бронь прямо из карточки."
-            />
+          <section id={HALLS_ANCHOR} className="section-rule mb-14 scroll-mt-48 [--rule-gap:3.5rem]">
             <HallCards
               slug={slug}
-              tenant={{ ...tenant, halls: hallIds ? tenant.halls.filter((hall) => hallIds.includes(hall.id)) : tenant.halls }}
+              tenant={tenant}
               viewer={viewer}
+              title={tenant.halls.length === 1 ? 'Зал клуба' : 'Залы'}
+              description="Где играют, когда открыто и почём стол — бронь прямо из карточки."
             />
           </section>
         )}
 
         {/* Общее для всех залов — новости и рейтинг двумя колонками одной
             высоты (решения от 30.09 и 01.10.2026), ниже действия. */}
-        <div className="mb-14 grid gap-10 lg:grid-cols-2 lg:gap-4">
+        <div className="section-rule mb-14 grid gap-10 [--rule-gap:3.5rem] lg:grid-cols-2 lg:gap-4">
           <ClubNewsColumn />
           <ClubRatingColumn />
         </div>
 
-        <div id={ABOUT_ANCHOR} className="scroll-mt-48">
+        <div id={ABOUT_ANCHOR} className="section-rule scroll-mt-48 [--rule-gap:3.5rem]">
           <ClubAbout tenant={tenant} />
         </div>
+
+        {/* Линия и после «О клубе» (17.10.2026) — посередине 80px до подвала:
+            сама отступа не добавляет, `-mb-10` возвращает свои 40px. */}
+        <div aria-hidden="true" className="section-rule mt-10 -mb-10 [--rule-gap:0px]" />
       </main>
 
       <SiteFooter />

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   openStateLabel,
   START_PAGE_COACHES,
@@ -19,10 +19,10 @@ import { clubOpenState } from '@/components/club/ClubHero';
 import { ClubMark } from '@/components/club/ClubMark';
 import { WhenSpan } from '@/components/club/When';
 import { EventDialog } from '@/components/events/EventDialog';
-import { dayLabel, FeedEventCard, timeLabel, ViewerTime } from '@/components/events/FeedEventCard';
+import { dayLabel, FeedEventTall, timeLabel, ViewerTime } from '@/components/events/FeedEventCard';
+import { CardRow } from '@/components/ui/CardRow';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { excerpt, NewsRow, newsDate } from '@/components/news/NewsParts';
-import { DevNotice } from '@/components/layout/DevNotice';
 import type { SectionNavState } from '@/components/club/ClubSectionNav';
 import { SECTION_ACTIVE_OFFSET_CLUB } from '@/components/layout/metrics';
 import { FirstSteps } from '@/components/start/FirstSteps';
@@ -33,6 +33,7 @@ import { Button } from '@/components/ui/Button';
 import { CityCombobox } from '@/components/ui/CityCombobox';
 import { RegionCombobox } from '@/components/ui/RegionCombobox';
 import { SearchIcon } from '@/components/ui/SearchIcon';
+import { CarouselArrow, LoopCarousel, useLoopCarousel } from '@/components/ui/LoopCarousel';
 import { api, ApiError } from '@/lib/api';
 import {
   ANY_CITY,
@@ -47,7 +48,6 @@ import { useClubPostsUnread } from '@/lib/clubPostsUnread';
 import { readableOn } from '@/lib/clubTheme';
 import { cn } from '@/lib/cn';
 import { formatKopecks } from '@/lib/money';
-import { dateIn } from '@/lib/zonedTime';
 import { plural } from '@/lib/plural';
 import { entryPriceLabel } from '@/lib/subscriptions';
 import { useSession } from '@/lib/useSession';
@@ -170,7 +170,6 @@ export default function StartPage() {
 
   return (
     <div className="flex min-h-dvh flex-col bg-surface">
-      <DevNotice />
       <SiteHeader page={startPage} />
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-5 sm:px-8">
@@ -201,7 +200,7 @@ export default function StartPage() {
                 02.10.2026): у тренера длинная строка занятия. Заголовок — как у
                 соседних разделов (решение от 15.10.2026): без него плитки
                 читались продолжением выдачи клубов. */}
-            <section aria-labelledby="moyo" className="mt-16">
+            <section aria-labelledby="moyo" className="section-rule mt-16">
               <SectionTitle id="moyo" description="Записи, клубы, тренеры и новости — всё ваше в одном месте.">
                 Мой КНТ
               </SectionTitle>
@@ -390,7 +389,7 @@ function Results({
   // По алфавиту (решение владельца от 15.10.2026) — порядок не зависит от
   // того, в каком порядке клубы подключались.
   const sorted = [...(clubs ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'ru', { sensitivity: 'base' }));
-  const carousel = useCarousel(sorted.length, sorted.map((club) => club.slug).join(','));
+  const carousel = useLoopCarousel(sorted.length, sorted.length > CAROUSEL_FROM, sorted.map((club) => club.slug).join(','));
 
   return (
     <section id="kluby" className="mt-10 scroll-mt-40">
@@ -406,8 +405,8 @@ function Results({
                   закрывали начало названия клуба. На телефоне ряд листают пальцем. */}
               {sorted.length > CAROUSEL_FROM && (
                 <span className="hidden gap-2 sm:flex">
-                  <CarouselArrow side="left" onClick={() => carousel.page(-1)} />
-                  <CarouselArrow side="right" onClick={() => carousel.page(1)} />
+                  <CarouselArrow side="left" label="Предыдущие клубы" onClick={() => carousel.page(-1)} />
+                  <CarouselArrow side="right" label="Следующие клубы" onClick={() => carousel.page(1)} />
                 </span>
               )}
             </span>
@@ -446,131 +445,22 @@ function Results({
         </ul>
       )}
 
-      {sorted.length > CAROUSEL_FROM && <ClubCarousel clubs={sorted} unreadOf={unreadOf} track={carousel.track} />}
+      {sorted.length > CAROUSEL_FROM && (
+        <LoopCarousel
+          items={sorted}
+          keyOf={(club) => club.slug}
+          render={(club) => <ClubTile club={club} unread={unreadOf(club)} />}
+          track={carousel.track}
+          label="Клубы — листайте вбок"
+          itemClassName="basis-[85%] sm:basis-[calc((100%-1rem)/2)] lg:basis-[calc((100%-2rem)/3)]"
+        />
+      )}
     </section>
   );
 }
 
 /** Больше стольких клубов в выдаче — карусель, а не второй ряд. */
 const CAROUSEL_FROM = 3;
-
-/**
- * Карусель клубов (решения владельца от 15.10.2026): больше трёх — одним
- * рядом, а не вторым и третьим рядом, которые отодвигали «моё» и новости, и
- * по кругу — за последним клубом справа снова первый. На компьютере — по три
- * карточки, на планшете — по две, на телефоне — листание пальцем, край
- * следующей карточки виден. Стрелки — в строке заголовка, листают на ширину
- * видимого.
- *
- * Круг — тремя копиями ряда: смотрят всегда среднюю, а когда прокрутка
- * останавливается в крайней копии, лента незаметно перескакивает на то же
- * место средней (копии одинаковы, глаз скачка не видит). Крайние копии —
- * `inert`: по ним не ходит Tab и их не читает экранный диктор.
- */
-function ClubCarousel({
-  clubs,
-  unreadOf,
-  track,
-}: {
-  clubs: ClubCard[];
-  unreadOf: (club: ClubCard) => number;
-  track: React.RefObject<HTMLUListElement | null>;
-}) {
-  return (
-    <ul
-      ref={track}
-      aria-label="Клубы — листайте вбок"
-      className="-mx-5 flex snap-x snap-mandatory scroll-px-5 gap-4 overflow-x-auto px-5 pb-1 [scrollbar-width:none] sm:mx-0 sm:scroll-px-0 sm:px-0 [&::-webkit-scrollbar]:hidden"
-    >
-      {[0, 1, 2].flatMap((copy) =>
-        clubs.map((club) => (
-          <li
-            key={`${copy}-${club.slug}`}
-            inert={copy !== 1}
-            aria-hidden={copy !== 1 || undefined}
-            className="shrink-0 basis-[85%] snap-start sm:basis-[calc((100%-1rem)/2)] lg:basis-[calc((100%-2rem)/3)]"
-          >
-            <ClubTile club={club} unread={unreadOf(club)} />
-          </li>
-        )),
-      )}
-    </ul>
-  );
-}
-
-/**
- * Лента карусели по кругу: держит прокрутку в средней из трёх копий ряда и
- * листает на ширину видимого.
- */
-function useCarousel(count: number, members: string) {
-  const track = useRef<HTMLUListElement>(null);
-
-  // Другой состав выдачи (сменили город) — снова с первого клуба.
-  useEffect(() => {
-    const element = track.current;
-    if (!element || count <= CAROUSEL_FROM) return;
-
-    // Ширина одной копии ряда вместе с зазором до следующей.
-    const copyWidth = (): number => {
-      const items = element.children;
-      return (items[count] as HTMLElement).offsetLeft - (items[0] as HTMLElement).offsetLeft;
-    };
-
-    // Остановились в крайней копии — на то же место средней.
-    const recenter = (): void => {
-      const width = copyWidth();
-      if (element.scrollLeft < width - 1) element.scrollLeft += width;
-      else if (element.scrollLeft >= 2 * width - 1) element.scrollLeft -= width;
-    };
-
-    const reset = (): void => {
-      element.scrollLeft = copyWidth();
-    };
-
-    reset();
-
-    // Конец прокрутки: `scrollend`, где он есть, иначе — пауза в событиях.
-    let timer = 0;
-    const onScroll = (): void => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(recenter, 150);
-    };
-    const native = 'onscrollend' in window;
-
-    element.addEventListener(native ? 'scrollend' : 'scroll', native ? recenter : onScroll, { passive: true });
-    window.addEventListener('resize', reset);
-
-    return () => {
-      window.clearTimeout(timer);
-      element.removeEventListener(native ? 'scrollend' : 'scroll', native ? recenter : onScroll);
-      window.removeEventListener('resize', reset);
-    };
-  }, [count, members]);
-
-  function page(direction: 1 | -1): void {
-    const element = track.current;
-    if (!element) return;
-    // Ширина видимого плюс зазор между карточками — следующая тройка встаёт ровно.
-    element.scrollBy({ left: direction * (element.clientWidth + 16), behavior: 'smooth' });
-  }
-
-  return { track, page };
-}
-
-function CarouselArrow({ side, onClick }: { side: 'left' | 'right'; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={side === 'left' ? 'Предыдущие клубы' : 'Следующие клубы'}
-      className="grid h-10 w-10 place-items-center rounded-full border border-border bg-surface-raised text-text transition-colors hover:border-border-strong hover:bg-surface-sunken"
-    >
-      <svg viewBox="0 0 16 16" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-        <path d={side === 'left' ? 'M10 3.5 5.5 8l4.5 4.5' : 'M6 3.5 10.5 8 6 12.5'} />
-      </svg>
-    </button>
-  );
-}
 
 /**
  * Карточка клуба в выдаче: обложка в цвете клуба, знак на её краю, название
@@ -608,8 +498,7 @@ function ClubTile({ club, unread }: { club: ClubCard; unread: number }) {
         <span className="mt-1 text-[0.875rem] text-text-muted">
           {places || 'Город не указан'} · {hallsLabel(club.hallCount)}
         </span>
-        {/* Ответы до перехода (решение от 12.10.2026): почём стол, открыто ли
-            и что ближайшее — время по часам зала, как везде. */}
+        {/* Ответы до перехода (решения от 12 и 17.10.2026): почём стол и открыто ли. */}
         <ClubTileFacts club={club} />
         <span className="mt-auto flex items-center justify-between gap-3 pt-4">
           {unread > 0 ? <UnreadPill count={unread} accent={club.accentColor} /> : <span />}
@@ -620,30 +509,21 @@ function ClubTile({ club, unread }: { club: ClubCard; unread: number }) {
   );
 }
 
-/** Цена «от», «открыто сейчас» и ближайшее мероприятие в карточке клуба. */
+/**
+ * Цена «от» и «открыто сейчас» в карточке клуба — двумя строками (решение
+ * владельца от 17.10.2026; «ближайшее мероприятие» снято тем же решением).
+ */
 function ClubTileFacts({ club }: { club: ClubCard }) {
   const open = clubOpenState(club.hours, new Date());
 
-  if (club.fromPrice === null && !open && !club.next) {
+  if (club.fromPrice === null && !open) {
     return null;
   }
 
   return (
     <span className="mt-3 grid gap-1 text-[0.8125rem] text-text-muted">
-      {(club.fromPrice !== null || open) && (
-        <span>
-          {club.fromPrice !== null && `Стол от ${formatKopecks(club.fromPrice)}/час`}
-          {club.fromPrice !== null && open && ' · '}
-          {open && <span className={open.open ? 'text-text-accent' : undefined}>{openStateLabel(open)}</span>}
-        </span>
-      )}
-      {club.next && (
-        <span className="truncate">
-          {club.next.kind === 'TOURNAMENT' ? 'Турнир' : 'Ближайшее'}: {club.next.title},{' '}
-          {dateIn(club.next.startsAt, club.next.timezone, { weekday: 'short', day: 'numeric', month: 'short' })} в{' '}
-          {timeLabel(club.next.startsAt, club.next.timezone)}
-        </span>
-      )}
+      {club.fromPrice !== null && <span>Стол от {formatKopecks(club.fromPrice)}/час</span>}
+      {open && <span className={open.open ? 'text-text-accent' : undefined}>{openStateLabel(open)}</span>}
     </span>
   );
 }
@@ -923,21 +803,22 @@ function Nearest() {
   }
 
   return (
-    <section id="blizhaishee" className="mt-16 scroll-mt-40">
+    <section id="blizhaishee" className="section-rule mt-16 scroll-mt-40">
       <SectionTitle description="Ближайшие занятия и турниры ваших клубов. Нажмите на любое, чтобы записаться.">
         Ближайшее в моих клубах
       </SectionTitle>
 
       {events === null && <CardsSkeleton />}
 
+      {/* Высокими карточками по четыре, больше — каруселью, как вкладки
+          страницы клуба (решение владельца от 17.10.2026). */}
       {events && (
-        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {events.map((event) => (
-            <li key={`${event.club.slug}-${event.kind}-${event.id}`}>
-              <FeedEventCard event={event} onOpen={setOpen} />
-            </li>
-          ))}
-        </ul>
+        <CardRow
+          items={events}
+          keyOf={(event) => `${event.club.slug}-${event.kind}-${event.id}`}
+          label="Ближайшее в моих клубах — листайте вбок"
+          render={(event) => <FeedEventTall event={event} onOpen={setOpen} />}
+        />
       )}
 
       {open && (
@@ -1035,7 +916,7 @@ function LatestNews() {
   }
 
   return (
-    <section id="novosti-platformy" className="mt-16 scroll-mt-40">
+    <section id="novosti-platformy" className="section-rule mt-16 scroll-mt-40">
       <SectionTitle
         description="Что нового в КНТ: общие новости и обновления."
         action={

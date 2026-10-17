@@ -113,4 +113,9 @@ export interface PublicHall {
   workingHours: WorkingHours | null;
   /** Пояс зала — «открыто сейчас» считается по его часам, а не смотрящего. */
   timezone: string;
+  /**
+   * Занятий и турниров в зале за ближайшие 7 дней (17.10.2026) — по тому же
+   * правилу «мероприятие в зале», что фильтр «Предстоящих».
+   */
+  weekEvents: { trainings: number; tournaments: number };
 }

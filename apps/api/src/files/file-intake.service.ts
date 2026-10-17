@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { checkUpload, type FileKind, type StoredContentType } from './file-signature';
-import { LogoShapeError, normalizeAvatar, normalizeDocumentImage, normalizeLogo } from './image-normalizer';
+import { LogoShapeError, normalizeAvatar, normalizeCoachPhoto, normalizeDocumentImage, normalizeLogo } from './image-normalizer';
 
 /** Файл, готовый к записи: тип определён по байтам, картинка перекодирована. */
 export interface PreparedFile {
@@ -35,10 +35,15 @@ export class FileIntake {
     }
 
     try {
-      // Фотография тренера проходит тем же путём, что аватар: квадрат 512×512
-      // в WebP, метаданные с координатами съёмки не переживают перекодирование.
-      if (kind === 'AVATAR' || kind === 'COACH_PHOTO') {
+      // Аватар — квадрат 512×512 в WebP; фото тренера — целиком, без
+      // кадрирования (17.10.2026: карточка тренера — 9:16). Метаданные с
+      // координатами съёмки не переживают перекодирование ни там, ни там.
+      if (kind === 'AVATAR') {
         return { kind, contentType: 'image/webp', data: await normalizeAvatar(upload) };
+      }
+
+      if (kind === 'COACH_PHOTO') {
+        return { kind, contentType: 'image/webp', data: await normalizeCoachPhoto(upload) };
       }
 
       // Логотип клуба — только квадрат: неквадратный отклоняется, а не

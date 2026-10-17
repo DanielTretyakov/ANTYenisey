@@ -43,6 +43,8 @@ export function clubAccent(color: string | null | undefined): CSSProperties {
     // а не по теме: в тёмной теме токен тёмный под яркий изумруд платформы,
     // и на тёмно-зелёном «Енисее» надпись тонула в заливке.
     '--accent-text': readableOn(color),
+    // Разделитель разделов (`section-rule`) — линия в цвете клуба, мяч свой.
+    '--rule-color': color,
   } as CSSProperties;
 }
 

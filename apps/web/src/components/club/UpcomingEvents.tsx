@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { availableInAny, type ClubCatalogItem, type ClubEvent, type EventKind } from '@yenisey/types';
+import { availableInAny, type ClubCatalogItem, type ClubEvent, type EventKind, type PublicHall } from '@yenisey/types';
 import { EventDialog } from '@/components/events/EventDialog';
 import { CompactSelect } from '@/components/ui/CompactSelect';
 import { inputClassName } from '@/components/ui/Field';
@@ -16,8 +16,9 @@ import { useClubApi } from '@/lib/useClubApi';
 import { weekDays, weekEnd, weekLabel, weekStart } from '@/lib/week';
 import { EventRow, KIND_PAINT, RowSkeleton, shortWhen } from './EventRow';
 import { MonthCalendar } from './MonthCalendar';
+import { HallMenu } from './HallMenu';
 import { SectionHeading } from './SectionHeading';
-import { dayIn } from '@/lib/zonedTime';
+import { dateIn, dayIn } from '@/lib/zonedTime';
 import { ViewerTime } from '@/components/events/FeedEventCard';
 
 /**
@@ -65,8 +66,9 @@ export function UpcomingEvents({
   catalog,
   filter,
   onFilter,
+  halls,
   hallIds,
-  hallNames = null,
+  onHalls,
 }: {
   slug: string;
   /** Растёт после записи или отмены — список перечитывается. */
@@ -79,13 +81,11 @@ export function UpcomingEvents({
   catalog: ClubCatalogItem[] | null;
   filter: KindFilter | null;
   onFilter: (filter: KindFilter | null) => void;
-  /** Залы фильтра страницы; пусто — все. */
+  /** Залы клуба — пункты фильтра по залу; меньше двух — фильтра нет. */
+  halls: readonly PublicHall[];
+  /** Выбранные залы; пусто — все. */
   hallIds: string[] | null;
-  /**
-   * Названия выбранных залов — строкой «Залы: …» под заголовком, чтобы было
-   * видно, чьё это расписание; пусто — все залы клуба.
-   */
-  hallNames?: string[] | null;
+  onHalls: (hallIds: string[] | null) => void;
 }) {
   const club = useClubApi();
   const [view, setView] = useState<'week' | 'month'>('week');
@@ -107,13 +107,13 @@ export function UpcomingEvents({
   const searching = view === 'week' && query.trim() !== '';
   // Залы — строкой: массив новый на каждой отрисовке, а эффекту нужна
   // стабильная зависимость.
-  const halls = hallIds?.join(',') ?? '';
+  const hallsQuery = hallIds?.join(',') ?? '';
 
   // Окно списка: неделя, месяц или — при поиске — всё предстоящее. С
   // выбранным ребёнком отметка «записан» в списке — его, а не родителя.
   useEffect(() => {
     let cancelled = false;
-    const inHalls: EventsFilter = halls ? { halls } : {};
+    const inHalls: EventsFilter = hallsQuery ? { halls: hallsQuery } : {};
     const range: EventsFilter = searching
       ? { ...inHalls }
       : view === 'week'
@@ -140,7 +140,7 @@ export function UpcomingEvents({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [club, forPerson, view, week, month, searching, query, version, halls]);
+  }, [club, forPerson, view, week, month, searching, query, version, hallsQuery]);
 
   // Ближайшие проведения выбранного мероприятия — по всем датам, не по окну.
   // У вида целиком «Ближайшего» нет: список ниже и так только из него.
@@ -154,7 +154,7 @@ export function UpcomingEvents({
     setNearest(null);
 
     club
-      .events(forPerson, { kind: filter.kind, typeId: filter.typeId, limit: NEAREST, ...(halls ? { halls } : {}) })
+      .events(forPerson, { kind: filter.kind, typeId: filter.typeId, limit: NEAREST, ...(hallsQuery ? { halls: hallsQuery } : {}) })
       .then((found) => {
         if (!cancelled) setNearest(found);
       })
@@ -165,7 +165,7 @@ export function UpcomingEvents({
     return () => {
       cancelled = true;
     };
-  }, [club, forPerson, filter, version, halls]);
+  }, [club, forPerson, filter, version, hallsQuery]);
 
   const needle = query.trim().toLowerCase();
   const ofKind = (event: ClubEvent): boolean =>
@@ -195,7 +195,7 @@ export function UpcomingEvents({
     : null;
   const today = new Date();
 
-  const row = (event: ClubEvent) => (
+  const row = (event: ClubEvent, hideDate = false) => (
     <li key={`${event.kind}-${event.id}`}>
       <EventRow
         slug={slug}
@@ -204,9 +204,15 @@ export function UpcomingEvents({
         forPerson={forPerson}
         onChanged={onChanged}
         onOpen={() => setOpen(event)}
+        hideDate={hideDate}
       />
     </li>
   );
+
+  // «Вся неделя» — по дням (решение владельца от 17.10.2026): дата один раз
+  // у группы, по высоте посередине, у мероприятий — только время; дату от
+  // мероприятий дня отделяет тонкая полоса. День — по часам зала мероприятия.
+  const grouped = view === 'week' && day === null && !searching;
 
   return (
     <section id={UPCOMING_ANCHOR} className="mb-16 scroll-mt-48">
@@ -216,9 +222,8 @@ export function UpcomingEvents({
           title="Предстоящие мероприятия"
           description={
             <>
-              Тренировки и турниры по дням, неделей или месяцем. Записаться можно прямо в строке. Кнопки «Тренировки»
-              и «Турниры» оставляют только их, а в их списке можно выбрать конкретное мероприятие. Залы:{' '}
-              <span className="text-text">{hallNames ? hallNames.join(', ') : 'все залы клуба'}</span>
+              Тренировки и турниры по дням, неделей или месяцем. Записаться можно прямо в строке. Фильтры ниже
+              оставляют только нужный вид, конкретное мероприятие или залы.
             </>
           }
         />
@@ -244,11 +249,13 @@ export function UpcomingEvents({
           кнопка оставляет только свой вид, её список — конкретное мероприятие
           этого вида из тех, что идут в выбранных залах. Раньше здесь была
           лента всех видов подряд — на телефоне она уходила за край. */}
-      {chips.length > 0 && (
+      {(chips.length > 0 || halls.length > 1) && (
         <div className="mb-5 flex flex-wrap items-center gap-1.5" role="group" aria-label="Что показать">
-          <Tab active={filter === null} onClick={() => onFilter(null)}>
-            Все
-          </Tab>
+          {chips.length > 0 && (
+            <Tab active={filter === null} onClick={() => onFilter(null)}>
+              Все
+            </Tab>
+          )}
           {KIND_MENUS.map((menu) => {
             const types = chips.filter((item) => item.kind === menu.kind);
 
@@ -264,6 +271,9 @@ export function UpcomingEvents({
               />
             );
           })}
+          {/* Залы (решение владельца от 17.10.2026): отдельного выбора зала на
+              странице больше нет — фильтр здесь, один, несколько или все. */}
+          {halls.length > 1 && <HallMenu halls={halls} value={hallIds} onChange={onHalls} />}
         </div>
       )}
 
@@ -418,7 +428,26 @@ export function UpcomingEvents({
 
       {/* Ключ из вида и идентификатора: занятия и турниры лежат в разных
           таблицах, и совпадение идентификаторов между ними ничем не запрещено. */}
-      {listed && listed.length > 0 && <ul className="border-t border-border">{listed.map(row)}</ul>}
+      {listed && listed.length > 0 && !grouped && <ul className="border-t border-border">{listed.map((event) => row(event))}</ul>}
+
+      {listed && listed.length > 0 && grouped && (
+        <ul className="border-t border-border">
+          {byDay(listed).map((group) => (
+            <li key={group.key} className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 border-b border-border py-3 sm:grid-cols-[8.5rem_minmax(0,1fr)] sm:gap-x-5">
+              <div className="relative flex items-center pr-4">
+                <span aria-hidden="true" className="absolute inset-y-1 right-0 w-[3px] rounded-full bg-accent/70" />
+                <span className="block">
+                  <span className="block text-[0.75rem] tracking-[0.06em] text-text-subtle uppercase">{group.weekday}</span>
+                  <span className="block font-display text-[1rem] leading-tight text-text sm:text-[1.0625rem]">{group.date}</span>
+                </span>
+              </div>
+              <ul className="[&>li:last-child>div]:border-b-0 [&>li>div]:py-3.5">
+                {group.events.map((event) => row(event, true))}
+              </ul>
+            </li>
+          ))}
+        </ul>
+      )}
 
       {open && (
         <EventDialog
@@ -633,4 +662,32 @@ function KindMenu({
       )}
     </div>
   );
+}
+
+/**
+ * Мероприятия недели, сложенные по дням — по часам зала каждого: занятие в
+ * 01:00 по Красноярску стоит в своём дне, а не в соседнем по Москве. Порядок
+ * дней и мероприятий внутри — как в списке (он уже по времени).
+ */
+function byDay(events: readonly ClubEvent[]): { key: string; weekday: string; date: string; events: ClubEvent[] }[] {
+  const groups: { key: string; weekday: string; date: string; events: ClubEvent[] }[] = [];
+
+  for (const event of events) {
+    const key = dayIn(event.startsAt, event.timezone);
+    const last = groups[groups.length - 1];
+
+    if (last && last.key === key) {
+      last.events.push(event);
+      continue;
+    }
+
+    groups.push({
+      key,
+      weekday: dateIn(event.startsAt, event.timezone, { weekday: 'long' }),
+      date: dateIn(event.startsAt, event.timezone, { day: 'numeric', month: 'long' }),
+      events: [event],
+    });
+  }
+
+  return groups;
 }

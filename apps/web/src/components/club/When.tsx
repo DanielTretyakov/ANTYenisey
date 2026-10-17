@@ -15,16 +15,29 @@ import { dateIn, timeIn, viewerTime, viewerZone } from '@/lib/zonedTime';
  * тренировку в 14:00, а в сетке, на афише и в сообщении MAX она стояла в 18:00.
  * Без `timezone` — по часам браузера, как прежде.
  */
-export function When({ instant, timezone, className }: { instant: string; timezone?: string; className?: string }) {
+export function When({
+  instant,
+  timezone,
+  className,
+  hideDate = false,
+}: {
+  instant: string;
+  timezone?: string;
+  className?: string;
+  /** Дата уже стоит у группы дня («Вся неделя» в «Предстоящих») — только время. */
+  hideDate?: boolean;
+}) {
   const zone = timezone ?? viewerZone();
   const hint = timezone ? viewerTime(instant, null, timezone) : null;
 
   return (
-    <span className={cn('block w-32 shrink-0', className)}>
-      <time dateTime={instant} className="block font-display text-[0.9375rem] text-text">
-        {dateIn(instant, zone, { day: 'numeric', month: 'long' })}
-      </time>
-      <span className="mt-0.5 block font-display text-[1.0625rem] text-text">{timeIn(instant, zone)}</span>
+    <span className={cn('block shrink-0', hideDate ? 'w-[10.5rem]' : 'w-32', className)}>
+      {!hideDate && (
+        <time dateTime={instant} className="block font-display text-[0.9375rem] text-text">
+          {dateIn(instant, zone, { day: 'numeric', month: 'long' })}
+        </time>
+      )}
+      <span className={cn('block font-display text-[1.0625rem] text-text', !hideDate && 'mt-0.5')}>{timeIn(instant, zone)}</span>
       {hint && <span className="mt-0.5 block text-[0.75rem] text-text-muted">{hint}</span>}
     </span>
   );
@@ -36,15 +49,18 @@ export function WhenSpan({
   endsAt,
   timezone,
   className,
+  hideDate = false,
 }: {
   startsAt: string;
   endsAt: string | null;
   /** Пояс зала; без него — часы браузера. */
   timezone?: string;
   className?: string;
+  /** Дата уже стоит у группы дня — только время. */
+  hideDate?: boolean;
 }) {
   if (!endsAt) {
-    return <When instant={startsAt} timezone={timezone} className={className} />;
+    return <When instant={startsAt} timezone={timezone} className={className} hideDate={hideDate} />;
   }
 
   const zone = timezone ?? viewerZone();
@@ -55,11 +71,13 @@ export function WhenSpan({
   const hint = timezone ? viewerTime(startsAt, endsAt, timezone) : null;
 
   return (
-    <span className={cn('block w-32 shrink-0', className)}>
-      <time dateTime={startsAt} className="block font-display text-[0.9375rem] text-text">
-        {date}
-      </time>
-      <span className="mt-0.5 block font-display text-[1.0625rem] whitespace-nowrap text-text">
+    <span className={cn('block shrink-0', hideDate ? 'w-[10.5rem]' : 'w-32', className)}>
+      {!hideDate && (
+        <time dateTime={startsAt} className="block font-display text-[0.9375rem] text-text">
+          {date}
+        </time>
+      )}
+      <span className={cn('block font-display text-[1.0625rem] whitespace-nowrap text-text', !hideDate && 'mt-0.5')}>
         {time(start)}
         <span className="text-text-subtle"> – </span>
         {time(end)}

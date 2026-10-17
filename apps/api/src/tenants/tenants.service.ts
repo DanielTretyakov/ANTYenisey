@@ -3,9 +3,10 @@ import { Role } from '@yenisey/database';
 import type { City, ClubCard, ClubSearchQuery, CitySearchQuery, PublicTenant } from '@yenisey/types';
 import { readWorkingHours, shortName } from '@yenisey/types';
 import { readClubValues } from '../club/settings-rules';
-import { CARD_SELECT, nextEvents, toCard } from './club-card';
+import { CARD_SELECT, toCard } from './club-card';
 import { cityLimit, cityPatterns } from './city-search';
 import { PrismaService } from '../prisma/prisma.service';
+import { hallScope } from '../events/hall-scope';
 
 /**
  * Поля клуба, из которых собирается карточка. Города берутся и у клуба, и у
@@ -115,9 +116,7 @@ export class TenantsService {
       take: 60,
     });
 
-    const next = await nextEvents(this.prisma, tenants, new Date());
-
-    return tenants.map((row) => toCard(row, next.get(row.id) ?? null));
+    return tenants.map((row) => toCard(row));
   }
 
   /**
@@ -204,6 +203,7 @@ export class TenantsService {
     }
 
     const card = toCard(tenant);
+    const weekEvents = await this.weekEventsByHall(tenant.id, tenant.halls.map((hall) => hall.id), now);
 
     return {
       slug: card.slug,
@@ -258,10 +258,42 @@ export class TenantsService {
         tables: hall._count.tables,
         workingHours: readWorkingHours(hall.workingHours),
         timezone: hall.timezone,
+        weekEvents: weekEvents.get(hall.id) ?? { trainings: 0, tournaments: 0 },
       })),
     };
   }
+
+  /**
+   * Сколько занятий и турниров в зале за ближайшие 7 дней — для карточки
+   * зала (решение владельца от 17.10.2026). Зал мероприятия — тем же
+   * `hallScope`, что список «Предстоящих» с фильтром по этому залу: число в
+   * карточке и строки в списке не разойдутся. Отменённое не считается, как и
+   * в открытых списках. Залов у клуба единицы — запрос на зал, параллельно.
+   */
+  private async weekEventsByHall(
+    tenantId: string,
+    hallIds: string[],
+    now: Date,
+  ): Promise<Map<string, { trainings: number; tournaments: number }>> {
+    const startsAt = { gte: now, lt: new Date(now.getTime() + WEEK_MS) };
+    const counts = await Promise.all(
+      hallIds.map(async (hallId) => {
+        const scope = hallScope(hallId);
+        const [trainings, tournaments] = await Promise.all([
+          this.prisma.trainingSession.count({ where: { tenantId, startsAt, cancelledAt: null, ...scope.training } }),
+          this.prisma.tournament.count({ where: { tenantId, startsAt, cancelledAt: null, ...scope.tournament } }),
+        ]);
+
+        return [hallId, { trainings, tournaments }] as const;
+      }),
+    );
+
+    return new Map(counts);
+  }
 }
+
+/** Окно «мероприятий на неделе» в карточке зала. */
+const WEEK_MS = 7 * 24 * 3600_000;
 
 /** «Ведёт: …» у тренера на странице клуба — по занятиям ближайшего месяца. */
 const LEADS_HORIZON_MS = 30 * 24 * 3600_000;
