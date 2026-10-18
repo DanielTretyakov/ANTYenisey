@@ -23,6 +23,8 @@ dist/
 .env
 .env.local
 .env.*.local
+# Секреты демо-стенда (образец — deploy/.env.demo.example)
+deploy/.env.demo
 
 # Сгенерированный Prisma-клиент
 packages/database/generated/

@@ -43,3 +43,27 @@
 		}
 	}
 }
+
+# Демо-стенд для показа заказчикам (deploy/compose.demo.yml, отдельный проект
+# со своей базой). Службы demo-api и demo-web подключены к сети этого проекта;
+# пока демо не поднято, здесь 502, а боевой домен выше от него не зависит.
+demo.{$DOMAIN} {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy demo-api:3001
+	}
+
+	handle {
+		reverse_proxy demo-web:3000
+	}
+
+	header {
+		# Выдуманные клубы и люди не должны попасть в поиск рядом с боевым сайтом.
+		X-Robots-Tag "noindex, nofollow"
+		X-Frame-Options DENY
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}

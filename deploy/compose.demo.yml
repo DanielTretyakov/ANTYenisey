@@ -1,0 +1,110 @@
+# Демо-стенд КНТ для показа заказчикам — второй экземпляр на том же VPS.
+#
+# Своя копия кода (/opt/yenisey-demo), своя база, свои секреты. Данные —
+# выдуманный «живой мир» из apps/api/scripts/demo-world.ts, а не люди.
+#
+# Прокси свой не поднимаем: порты 80 и 443 заняты боевым Caddy, и второй
+# сертификат он получит сам. Поэтому демо-API и демо-веб подключены ещё и к
+# сети боевого проекта (yenisey_default) — Caddy находит их там по именам.
+#
+# ИМЕНА СЛУЖБ — только с префиксом demo-. Compose заводит имя службы
+# псевдонимом в КАЖДОЙ сети, куда она подключена: служба `api` в сети боевого
+# проекта отвечала бы на имя `api` наравне с боевой, и боевой Caddy раскидывал
+# бы запросы ant-yenisey.ru между двумя базами. База демо в общую сеть не
+# подключается вовсе.
+#
+# Запуск — deploy/deploy-demo.sh (рядом лежит deploy/.env.demo, образец —
+# .env.demo.example). Подробности — docs/DEPLOY.md, раздел «Демо-стенд».
+
+name: yenisey-demo
+
+services:
+  demo-postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      LANG: ru_RU.utf8
+    volumes:
+      - demo-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    expose:
+      - '5432'
+    networks:
+      - default
+
+  demo-api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      demo-postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@demo-postgres:5432/${POSTGRES_DB}?schema=public
+      SHADOW_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@demo-postgres:5432/${POSTGRES_DB}_shadow?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_ACCESS_TTL: 15m
+      JWT_REFRESH_TTL: 30d
+      API_PORT: 3001
+      CORS_ORIGINS: https://${DOMAIN}
+      WEB_ORIGIN: https://${DOMAIN}
+      PLATFORM_TIMEZONE: Asia/Krasnoyarsk
+      # Неявки ставит не джоба, а ночной прогон demo-world (86 % «пришёл»):
+      # джоба закрыла бы всё прошедшее неявкой, и рейтинг опустел бы.
+      ATTENDANCE_JOB: 'off'
+      # Ни сообщений, ни писем, ни оплаты: на демо выдуманные люди.
+      NOTIFICATIONS_JOB: 'off'
+      BILLING_JOB: 'off'
+      MAX_BOT_TOKEN: ''
+      SMTP_URL: ''
+      YOOKASSA_SHOP_ID: ''
+      YOOKASSA_SECRET_KEY: ''
+      DADATA_API_KEY: ${DADATA_API_KEY:-}
+      # Пароль демо-учёток — его читает только demo-world, сам API нет.
+      DEMO_PASSWORD: ${DEMO_PASSWORD}
+    expose:
+      - '3001'
+    networks:
+      - default
+      - prod
+    healthcheck:
+      test: ['CMD-SHELL', 'node -e "fetch(\"http://127.0.0.1:3001/api/health\").then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"']
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  demo-web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ''
+    restart: unless-stopped
+    depends_on:
+      - demo-api
+    expose:
+      - '3000'
+    networks:
+      - default
+      - prod
+
+networks:
+  default:
+  # Сеть боевого проекта — только чтобы до демо дотянулся боевой Caddy.
+  prod:
+    external: true
+    name: yenisey_default
+
+volumes:
+  demo-postgres-data:

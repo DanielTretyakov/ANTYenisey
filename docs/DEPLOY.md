@@ -180,6 +180,77 @@ ssh yenisey@сервер 'docker compose --env-file /opt/yenisey/deploy/.env -f 
 $COMPOSE exec -T postgres sh -c 'gunzip -c /backups/ИМЯ.sql.gz | psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 ```
 
+## Демо-стенд
+
+`https://demo.ant-yenisey.ru` — второй экземпляр на том же сервере для показа
+заказчикам (решение владельца от 17.10.2026). Свой каталог `/opt/yenisey-demo`,
+свой проект compose `yenisey-demo` (`deploy/compose.demo.yml`), своя база и
+свои секреты (`deploy/.env.demo`, образец — `.env.demo.example`). Сообщения,
+почта, оплата и джоба неявок выключены.
+
+Данные — выдуманный «живой мир» `apps/api/scripts/demo-world.ts`: четыре клуба
+в Красноярске, Абакане с Минусинском и Иркутске (другой часовой пояс — видна
+подпись «у вас …»), залы, тренеры, виды занятий, шаблон недели, мероприятия
+на четыре недели назад и три вперёд, клиенты с записями и визитами, абонементы,
+ленты и новости платформы. Сценарий пишет **только в базу с «demo» в имени** и
+идемпотентен: повторный прогон раскладывает новые дни на краю окна и отмечает
+прошедшее (86 % «пришёл»). Локально:
+
+```bash
+DATABASE_URL=postgresql://…/yenisey_demo DEMO_PASSWORD=… pnpm demo:world
+```
+
+Демо-учётки (пароль — `DEMO_PASSWORD`): `owner@knt.test` (владелец платформы),
+`director@` (руководитель «Енисея»), `manager@` (управляющий залов «Пироги» и
+«Баки»), `admin@` (администратор, на смене каждый день), `coach@` (тренер),
+`player@`, `parent@` и `child@` (родитель с ребёнком 10 лет). На сайте пароль
+нигде не написан — его называют заказчику.
+
+**Сеть.** Своего прокси у демо нет: порты 80/443 у боевого Caddy, он же
+выписывает сертификат на `demo.`. Службы `demo-api` и `demo-web` подключены к
+сети боевого проекта `yenisey_default`. **Имена служб — только с префиксом
+`demo-`**: compose заводит имя службы псевдонимом в каждой сети, и служба `api`
+в боевой сети делила бы запросы ant-yenisey.ru с боевым API. База демо в боевую
+сеть не подключается.
+
+Первый запуск:
+
+```bash
+# 1. DNS: A-запись demo.ant-yenisey.ru → IP сервера (панель reg.ru).
+# 2. Код и окружение.
+git clone -b app-skeleton <репозиторий> /opt/yenisey-demo
+cp /opt/yenisey-demo/deploy/.env.demo.example /opt/yenisey-demo/deploy/.env.demo   # заполнить
+# 3. Сборка, база, данные, запуск.
+cd /opt/yenisey-demo && setsid nohup bash deploy/deploy-demo.sh > ~/deploy-demo.log 2>&1 < /dev/null &
+# 4. Блок demo.{$DOMAIN} в боевом Caddyfile — без перезапуска боевых служб.
+cd /opt/yenisey && git fetch
+git show origin/app-skeleton:deploy/Caddyfile > deploy/Caddyfile   # на месте, тот же inode
+docker compose --env-file deploy/.env -f deploy/compose.yml exec caddy caddy reload --config /etc/caddy/Caddyfile
+git checkout -- deploy/Caddyfile
+```
+
+Шаг 4 пишет файл **на месте**: Caddyfile примонтирован в контейнер одним
+файлом, а `git pull` и `git checkout` заменяют файл новым, и контейнер
+продолжал бы видеть старый до перезапуска. Последняя строка возвращает
+рабочую копию боевого стенда к её коммиту; содержимое у контейнера уже новое,
+и следующая боевая выкладка его не изменит.
+
+Сборка Next.js съедает полтора-два гигабайта, а сервер общий с боевым:
+`deploy-demo.sh` не начинает её, если свободно меньше 1,5 ГБ и своп меньше
+2 ГБ, и собирает под `nice`.
+
+Обновление и уход за данными:
+
+```bash
+cd /opt/yenisey-demo && bash deploy/deploy-demo.sh           # новая версия кода
+cd /opt/yenisey-demo && bash deploy/deploy-demo.sh refresh   # только данные
+cd /opt/yenisey-demo && bash deploy/deploy-demo.sh reset     # база с нуля после показа
+
+crontab -e
+# каждую ночь: новые дни на краю окна, отметки прошедшего
+30 3 * * * cd /opt/yenisey-demo && bash deploy/deploy-demo.sh refresh >> ~/demo-refresh.log 2>&1
+```
+
 ## Что смотреть, когда что-то не так
 
 ```bash
