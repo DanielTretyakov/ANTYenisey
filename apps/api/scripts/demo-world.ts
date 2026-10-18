@@ -1028,11 +1028,25 @@ async function main(): Promise<void> {
   const now = new Date();
   const demoHash = await hashPassword(password);
 
-  // Демо-учётки для показа — с известным паролем.
-  const platformOwner = await upsertUser({ email: `owner@${DOMAIN}`, fullName: 'Платформов Олег Викторович', gender: 'MALE', birthDate: '1983-04-12', phone: nextPhone(), passwordHash: demoHash, platformOwner: true });
-  const director = await upsertUser({ email: `director@${DOMAIN}`, fullName: 'Руководов Игорь Петрович', gender: 'MALE', birthDate: '1978-09-01', phone: nextPhone(), passwordHash: demoHash });
-  const manager = await upsertUser({ email: `manager@${DOMAIN}`, fullName: 'Управляева Ольга Сергеевна', gender: 'FEMALE', birthDate: '1985-02-14', phone: nextPhone(), passwordHash: demoHash });
-  const admin = await upsertUser({ email: `admin@${DOMAIN}`, fullName: 'Администраторова Юлия Андреевна', gender: 'FEMALE', birthDate: '1996-06-20', phone: nextPhone(), passwordHash: demoHash });
+  // Демо-учётки для показа — с известным паролем. Адреса учёток «Енисея»
+  // называют клуб и роль (решение владельца от 18.10.2026); прежние адреса
+  // переименовываются на месте, со всеми записями и ролями.
+  for (const [before, after] of [
+    ['owner', 'platform'],
+    ['director', 'yenisey.owner'],
+    ['manager', 'yenisey.manager'],
+    ['admin', 'yenisey.admin'],
+    ['coach', 'yenisey.coach'],
+  ]) {
+    const taken = await prisma.user.count({ where: { email: `${after}@${DOMAIN}` } });
+    if (taken === 0) {
+      await prisma.user.updateMany({ where: { email: `${before}@${DOMAIN}` }, data: { email: `${after}@${DOMAIN}` } });
+    }
+  }
+  const platformOwner = await upsertUser({ email: `platform@${DOMAIN}`, fullName: 'Платформов Олег Викторович', gender: 'MALE', birthDate: '1983-04-12', phone: nextPhone(), passwordHash: demoHash, platformOwner: true });
+  const director = await upsertUser({ email: `yenisey.owner@${DOMAIN}`, fullName: 'Руководов Игорь Петрович', gender: 'MALE', birthDate: '1978-09-01', phone: nextPhone(), passwordHash: demoHash });
+  const manager = await upsertUser({ email: `yenisey.manager@${DOMAIN}`, fullName: 'Управляева Ольга Сергеевна', gender: 'FEMALE', birthDate: '1985-02-14', phone: nextPhone(), passwordHash: demoHash });
+  const admin = await upsertUser({ email: `yenisey.admin@${DOMAIN}`, fullName: 'Администраторова Юлия Андреевна', gender: 'FEMALE', birthDate: '1996-06-20', phone: nextPhone(), passwordHash: demoHash });
   const player = await upsertUser({ email: `player@${DOMAIN}`, fullName: 'Игроков Максим Дмитриевич', gender: 'MALE', birthDate: '1993-11-08', phone: nextPhone(), passwordHash: demoHash });
   const parent = await upsertUser({ email: `parent@${DOMAIN}`, fullName: 'Родителева Наталья Игоревна', gender: 'FEMALE', birthDate: '1986-03-03', phone: nextPhone(), passwordHash: demoHash });
   const child = await upsertUser({ email: `child@${DOMAIN}`, fullName: 'Родителев Коля Олегович', gender: 'MALE', birthDate: `${now.getFullYear() - 10}-05-17`, phone: nextPhone(), passwordHash: demoHash });
@@ -1052,13 +1066,13 @@ async function main(): Promise<void> {
 
   const people = await seedPeople();
 
-  // Тренеры — учётки по клубам; первый тренер «Енисея» — демо-учётка coach@.
+  // Тренеры — учётки по клубам; первый тренер «Енисея» — демо-учётка yenisey.coach@.
   const clubs: ClubState[] = [];
   for (const def of CLUBS) {
     const coachIds: string[] = [];
     for (const [index, coach] of def.coaches.entries()) {
-      const email = def.slug === 'yenisey' && index === 0 ? `coach@${DOMAIN}` : `coach-${def.slug}-${index + 1}@${DOMAIN}`;
-      coachIds.push(await upsertUser({ email, fullName: coach.name, gender: coach.gender, birthDate: coach.born, phone: nextPhone(), passwordHash: email === `coach@${DOMAIN}` ? demoHash : NO_LOGIN }));
+      const email = def.slug === 'yenisey' && index === 0 ? `yenisey.coach@${DOMAIN}` : `coach-${def.slug}-${index + 1}@${DOMAIN}`;
+      coachIds.push(await upsertUser({ email, fullName: coach.name, gender: coach.gender, birthDate: coach.born, phone: nextPhone(), passwordHash: email === `yenisey.coach@${DOMAIN}` ? demoHash : NO_LOGIN }));
     }
 
     const yenisey = def.slug === 'yenisey';
@@ -1146,7 +1160,7 @@ async function main(): Promise<void> {
   });
 
   console.log(`Демо-мир: клубов ${clubs.length}, новых дней залов ${days}, отмечено прошедших записей ${marked}.`);
-  console.log(`Демо-учётки (пароль — DEMO_PASSWORD): owner@, director@, manager@, admin@, coach@, player@, parent@, child@ — на ${DOMAIN}.`);
+  console.log(`Демо-учётки (пароль — DEMO_PASSWORD): platform@, yenisey.owner@, yenisey.manager@, yenisey.admin@, yenisey.coach@, player@, parent@, child@ — на ${DOMAIN}.`);
 }
 
 main()
