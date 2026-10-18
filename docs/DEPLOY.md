@@ -183,7 +183,8 @@ $COMPOSE exec -T postgres sh -c 'gunzip -c /backups/ИМЯ.sql.gz | psql -U "$PO
 ## Демо-стенд
 
 `https://demo.ant-yenisey.ru` — второй экземпляр на том же сервере для показа
-заказчикам (решение владельца от 17.10.2026). Свой каталог `/opt/yenisey-demo`,
+заказчикам (решение владельца от 17.10.2026). Свой каталог `/home/yenisey/yenisey-demo` (в `/opt` пользователю
+`yenisey` писать нельзя),
 свой проект compose `yenisey-demo` (`deploy/compose.demo.yml`), своя база и
 свои секреты (`deploy/.env.demo`, образец — `.env.demo.example`). Сообщения,
 почта, оплата и джоба неявок выключены.
@@ -218,10 +219,10 @@ DATABASE_URL=postgresql://…/yenisey_demo DEMO_PASSWORD=… pnpm demo:world
 ```bash
 # 1. DNS: A-запись demo.ant-yenisey.ru → IP сервера (панель reg.ru).
 # 2. Код и окружение.
-git clone -b app-skeleton <репозиторий> /opt/yenisey-demo
-cp /opt/yenisey-demo/deploy/.env.demo.example /opt/yenisey-demo/deploy/.env.demo   # заполнить
+git clone -b app-skeleton <репозиторий> /home/yenisey/yenisey-demo
+cp /home/yenisey/yenisey-demo/deploy/.env.demo.example /home/yenisey/yenisey-demo/deploy/.env.demo   # заполнить
 # 3. Сборка, база, данные, запуск.
-cd /opt/yenisey-demo && setsid nohup bash deploy/deploy-demo.sh > ~/deploy-demo.log 2>&1 < /dev/null &
+cd /home/yenisey/yenisey-demo && setsid nohup bash deploy/deploy-demo.sh > ~/deploy-demo.log 2>&1 < /dev/null &
 # 4. Блок demo.{$DOMAIN} в боевом Caddyfile — без перезапуска боевых служб.
 cd /opt/yenisey && git fetch
 git show origin/app-skeleton:deploy/Caddyfile > deploy/Caddyfile   # на месте, тот же inode
@@ -242,13 +243,13 @@ git checkout -- deploy/Caddyfile
 Обновление и уход за данными:
 
 ```bash
-cd /opt/yenisey-demo && bash deploy/deploy-demo.sh           # новая версия кода
-cd /opt/yenisey-demo && bash deploy/deploy-demo.sh refresh   # только данные
-cd /opt/yenisey-demo && bash deploy/deploy-demo.sh reset     # база с нуля после показа
+cd /home/yenisey/yenisey-demo && bash deploy/deploy-demo.sh           # новая версия кода
+cd /home/yenisey/yenisey-demo && bash deploy/deploy-demo.sh refresh   # только данные
+cd /home/yenisey/yenisey-demo && bash deploy/deploy-demo.sh reset     # база с нуля после показа
 
 crontab -e
 # каждую ночь: новые дни на краю окна, отметки прошедшего
-30 3 * * * cd /opt/yenisey-demo && bash deploy/deploy-demo.sh refresh >> ~/demo-refresh.log 2>&1
+30 3 * * * cd /home/yenisey/yenisey-demo && bash deploy/deploy-demo.sh refresh >> ~/demo-refresh.log 2>&1
 ```
 
 ## Что смотреть, когда что-то не так

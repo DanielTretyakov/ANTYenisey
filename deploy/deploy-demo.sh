@@ -2,14 +2,14 @@
 #
 # Демо-стенд КНТ (demo.ant-yenisey.ru): выкладка и ночное обновление данных.
 #
-#   cd /opt/yenisey-demo && bash deploy/deploy-demo.sh           # выкладка
-#   cd /opt/yenisey-demo && bash deploy/deploy-demo.sh refresh   # только данные
-#   cd /opt/yenisey-demo && bash deploy/deploy-demo.sh reset     # данные с нуля
+#   cd /home/yenisey/yenisey-demo && bash deploy/deploy-demo.sh           # выкладка
+#   cd /home/yenisey/yenisey-demo && bash deploy/deploy-demo.sh refresh   # только данные
+#   cd /home/yenisey/yenisey-demo && bash deploy/deploy-demo.sh reset     # данные с нуля
 #
 # Боевой стенд скрипт не трогает: другой каталог, другой проект compose
 # (yenisey-demo), своя база. Через ssh — отвязанным от сессии, как deploy.sh:
 #
-#   ssh сервер 'cd /opt/yenisey-demo && setsid nohup bash deploy/deploy-demo.sh > ~/deploy-demo.log 2>&1 < /dev/null &'
+#   ssh сервер 'cd /home/yenisey/yenisey-demo && setsid nohup bash deploy/deploy-demo.sh > ~/deploy-demo.log 2>&1 < /dev/null &'
 #
 # refresh — для cron раз в сутки: demo-world раскладывает новые дни на краю
 # окна и отмечает прошедшее, и демо не устаревает.
