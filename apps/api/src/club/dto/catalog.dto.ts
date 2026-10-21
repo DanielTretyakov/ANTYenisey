@@ -15,6 +15,9 @@ import {
 } from 'class-validator';
 import type {
   EventPageQuery,
+  Gender,
+  RatingSystem,
+  RestrictionsRequest,
   TournamentRequest,
   TournamentTypeRequest,
   TrainingSessionRequest,
@@ -51,7 +54,30 @@ const MAX_PRICE = 10_000_000;
 const trimmed = () =>
   Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value));
 
-export class TrainingTypeDto implements TrainingTypeRequest {
+/**
+ * Кто может записаться на вид (решения владельца от 20.10.2026). Не прислано —
+ * не трогать, `null` — снять; «от» не больше «до» проверяет сервис — здесь
+ * нечем сравнить два поля.
+ */
+class RestrictionsDto implements RestrictionsRequest {
+  @IsOptional()
+  @IsInt({ message: 'Возраст — целым числом лет' })
+  @Min(0, { message: 'Возраст — от 0 до 120 лет' })
+  @Max(120, { message: 'Возраст — от 0 до 120 лет' })
+  minAge?: number | null;
+
+  @IsOptional()
+  @IsInt({ message: 'Возраст — целым числом лет' })
+  @Min(0, { message: 'Возраст — от 0 до 120 лет' })
+  @Max(120, { message: 'Возраст — от 0 до 120 лет' })
+  maxAge?: number | null;
+
+  @IsOptional()
+  @IsIn(['MALE', 'FEMALE'], { message: 'Пол: MALE или FEMALE' })
+  gender?: Gender | null;
+}
+
+export class TrainingTypeDto extends RestrictionsDto implements TrainingTypeRequest {
   @IsString()
   @trimmed()
   @MinLength(1, { message: 'У типа тренировки должно быть название' })
@@ -86,7 +112,7 @@ export class TrainingTypeDto implements TrainingTypeRequest {
   hallIds?: string[];
 }
 
-export class TournamentTypeDto implements TournamentTypeRequest {
+export class TournamentTypeDto extends RestrictionsDto implements TournamentTypeRequest {
   @IsString()
   @trimmed()
   @MinLength(1, { message: 'У типа турнира должно быть название' })
@@ -105,6 +131,11 @@ export class TournamentTypeDto implements TournamentTypeRequest {
   @trimmed()
   @MaxLength(32)
   ratingLabel?: string | null;
+
+  /** Чей рейтинг у планки — тоже справка (решение владельца от 20.10.2026). */
+  @IsOptional()
+  @IsIn(['RTTW', 'RTTF', 'FNTR'], { message: 'Система рейтинга: RTTW, RTTF или FNTR' })
+  ratingSystem?: RatingSystem | null;
 
   @IsInt({ message: 'Цена указывается целым числом копеек' })
   @Min(0, { message: 'Цена не может быть отрицательной' })

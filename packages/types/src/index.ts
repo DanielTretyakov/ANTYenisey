@@ -7,6 +7,7 @@ export * from './club-applications';
 export * from './club-posts';
 export * from './coach';
 export * from './desk';
+export * from './eligibility';
 export * from './family';
 export * from './halls';
 export * from './markup';

@@ -3,7 +3,15 @@
 import Link from 'next/link';
 import { formatPhone } from '@/lib/phone';
 import { useCallback, useEffect, useState } from 'react';
-import { hasAnyRole, MANAGING_ROLES, type EventDetail, type EventKind, type EventParticipant } from '@yenisey/types';
+import {
+  hasAnyRole,
+  MANAGING_ROLES,
+  ratingNote,
+  restrictionsLabel,
+  type EventDetail,
+  type EventKind,
+  type EventParticipant,
+} from '@yenisey/types';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -145,6 +153,12 @@ export function EventDialog({
                 )}
               </Fact>
 
+              {/* Кто может записаться (решения владельца от 20.10.2026): сервер
+                  проверяет возраст и пол при записи, рейтинг — справка. */}
+              {restrictionsLabel(event.restrictions) && (
+                <Fact label="Для кого">{restrictionsLabel(event.restrictions)}</Fact>
+              )}
+
               {event.coach && (
                 <Fact label="Тренер">
                   <Link
@@ -231,11 +245,10 @@ function EventTitle({ event }: { event: EventDetail }) {
   return (
     <>
       {event.title}
-      {/* Ограничение по рейтингу — только если его нет в самом названии:
-          «Клуб 100 рейтинг до 100» читается как опечатка. */}
-      {event.ratingLabel && !event.title.includes(event.ratingLabel) && (
+      {/* Планка рейтинга — без повтора числа из названия (`ratingNote`). */}
+      {ratingNote(event.title, event.ratingSystem, event.ratingLabel) && (
         <span className="ml-2 text-[0.875rem] font-normal text-text-subtle">
-          рейтинг до {event.ratingLabel}
+          {ratingNote(event.title, event.ratingSystem, event.ratingLabel)}
         </span>
       )}
     </>

@@ -13,8 +13,9 @@ import type { WorkingHours } from './working-hours';
  * клиентом: название, часовой пояс, политика неявки, правила абонемента.
  * У **зала** — то, что различается между помещениями: цены и шаг брони.
  */
-import type { Role } from './auth';
+import type { Gender, Role } from './auth';
 import type { DeskMarkInfo, DeskVisit } from './desk';
+import type { EventRestrictions, RatingSystem } from './eligibility';
 import type { BookingEntry } from './platform';
 import type { CoachInClub } from './coach';
 import type { ClubPersonFamily } from './family';
@@ -528,9 +529,21 @@ export interface TrainingType {
    * всех залах клуба.
    */
   hallIds: string[];
+  /** Кто может записаться: возраст и пол (решение владельца от 20.10.2026). */
+  restrictions: EventRestrictions;
 }
 
-export interface TrainingTypeRequest {
+/**
+ * Ограничения вида в запросе. Не прислано — не трогать; `null` — снять:
+ * старый клиент, не знающий полей, не должен открывать детскую группу всем.
+ */
+export interface RestrictionsRequest {
+  minAge?: number | null;
+  maxAge?: number | null;
+  gender?: Gender | null;
+}
+
+export interface TrainingTypeRequest extends RestrictionsRequest {
   name: string;
   price: number;
   isActive?: boolean;
@@ -552,6 +565,8 @@ export interface TournamentType {
   name: string;
   /** Число-ограничение из названия, например «100». Ни на что не влияет. */
   ratingLabel: string | null;
+  /** Чей рейтинг — RTTW, RTTF или ФНТР. Тоже справка. */
+  ratingSystem: RatingSystem | null;
   /** Цена участия, копейки. */
   price: number;
   isActive: boolean;
@@ -564,11 +579,15 @@ export interface TournamentType {
    * всех залах клуба.
    */
   hallIds: string[];
+  /** Кто может записаться: возраст и пол (решение владельца от 20.10.2026). */
+  restrictions: EventRestrictions;
 }
 
-export interface TournamentTypeRequest {
+export interface TournamentTypeRequest extends RestrictionsRequest {
   name: string;
   ratingLabel?: string | null;
+  /** Не прислано — не трогать. Без `ratingLabel` система не сохраняется. */
+  ratingSystem?: RatingSystem | null;
   price: number;
   isActive?: boolean;
   /** Не прислано — не трогать; пусто или `null` — стереть. */

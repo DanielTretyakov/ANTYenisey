@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import type { ClubEvent, EventKind } from '@yenisey/types';
+import { ratingNote, restrictionsLabel, type ClubEvent, type EventKind } from '@yenisey/types';
 import { WhenSpan } from '@/components/club/When';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/cn';
@@ -82,11 +82,17 @@ export function EventRow({
             className="block text-left text-[1rem] text-text underline-offset-2 hover:underline"
           >
             {event.title}
-            {/* Ограничение по рейтингу дописывается, только если его нет в самом
-                названии: типы «Енисея» называются «Клуб 100», и приписка давала
-                бы «Клуб 100 рейтинг до 100». */}
-            {event.ratingLabel && !event.title.includes(event.ratingLabel) && (
-              <span className="ml-2 text-[0.8125rem] text-text-subtle">рейтинг до {event.ratingLabel}</span>
+            {/* Планка рейтинга дописывается без повтора числа из названия: типы
+                «Енисея» называются «Клуб 100» (`ratingNote`). */}
+            {ratingNote(event.title, event.ratingSystem, event.ratingLabel) && (
+              <span className="ml-2 text-[0.8125rem] text-text-subtle">
+                {ratingNote(event.title, event.ratingSystem, event.ratingLabel)}
+              </span>
+            )}
+            {/* «Для кого» — до кнопки: 25-летний не должен узнавать о детской
+                группе из отказа сервера (20.10.2026). */}
+            {restrictionsLabel(event.restrictions) && (
+              <span className="ml-2 text-[0.8125rem] text-text-subtle">· {restrictionsLabel(event.restrictions)}</span>
             )}
           </button>
 

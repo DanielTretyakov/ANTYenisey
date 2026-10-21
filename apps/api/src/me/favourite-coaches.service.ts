@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Role } from '@yenisey/database';
-import { shortName, type FavouriteCoach } from '@yenisey/types';
+import { shortName, type CoachSearchItem, type FavouriteCoach } from '@yenisey/types';
 import { nextSessionPerCoach } from '../events/coach-sessions';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -83,6 +83,71 @@ export class FavouriteCoachesService {
     }
 
     return this.list(userId);
+  }
+
+  /**
+   * Поиск тренера по ФИО — чтобы отметить его из кабинета, не обходя
+   * страницы клубов.
+   *
+   * Ищет ровно тех, кого посетитель и так видит во вкладках «Тренеры»:
+   * действующая роль с ценами, клуб открыт (черновики не перечисляются), тренер
+   * не скрыт клубом. Поэтому кусок имени здесь допустим — в отличие от поиска
+   * людей клуба, это не перебор чужих учёток. «Ё» = «е»: «Ковалев» находит
+   * «Ковалёва». От двух букв и не больше десятка строк.
+   */
+  async search(userId: string, query: string): Promise<CoachSearchItem[]> {
+    const needle = query.trim().replace(/[Ёё]/g, (letter) => (letter === 'Ё' ? 'Е' : 'е'));
+    const pattern = `%${needle.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+
+    const found = await this.prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT u."id"
+      FROM "User" u
+      WHERE u."id" <> ${userId}
+        AND u."deactivatedAt" IS NULL
+        AND u."anonymizedAt" IS NULL
+        AND translate(u."fullName", 'Ёё', 'Ее') ILIKE ${pattern}
+        AND EXISTS (
+          SELECT 1
+          FROM "TenantMembership" m
+          JOIN "Tenant" t ON t."id" = m."tenantId"
+          JOIN "CoachProfile" p ON p."userId" = m."userId" AND p."tenantId" = m."tenantId"
+          WHERE m."userId" = u."id"
+            AND 'COACH' = ANY (m."roles"::text[])
+            AND m."deactivatedAt" IS NULL
+            AND m."coachHidden" = false
+            AND t."publishedAt" IS NOT NULL
+        )
+      ORDER BY u."fullName"
+      LIMIT 10
+    `);
+
+    if (found.length === 0) {
+      return [];
+    }
+
+    const rows = await this.prisma.user.findMany({
+      where: { id: { in: found.map((row) => row.id) } },
+      select: {
+        id: true,
+        fullName: true,
+        gender: true,
+        coachCard: { select: { photoFileId: true } },
+        memberships: {
+          where: { ...ACTIVE_COACHING, coachHidden: false, tenant: { publishedAt: { not: null } } },
+          select: { tenant: { select: { slug: true, name: true, accentColor: true } } },
+          orderBy: { tenant: { name: 'asc' } },
+        },
+      },
+      orderBy: { fullName: 'asc' },
+    });
+
+    return rows.map((coach) => ({
+      id: coach.id,
+      name: shortName(coach.fullName),
+      photoFileId: coach.coachCard?.photoFileId ?? null,
+      gender: coach.gender,
+      clubs: coach.memberships.map((membership) => membership.tenant),
+    }));
   }
 
   /** Снять отметку. Ушедшего отовсюду тренера тоже можно снять. */

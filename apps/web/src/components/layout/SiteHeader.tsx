@@ -83,6 +83,11 @@ export function SiteHeader({
           <NavLink href="/" active={active('/')}>
             Найти клуб
           </NavLink>
+          {/* Глобальный поиск игроков и тренеров с рейтингами (решение
+              владельца от 20.10.2026). */}
+          <NavLink href="/players" active={active('/players')}>
+            Найти игрока
+          </NavLink>
           {signedIn && (
             <NavLink href="/my-bookings" active={active('/my-bookings')}>
               Мои записи
@@ -105,6 +110,18 @@ export function SiteHeader({
             <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" aria-hidden="true">
               <circle cx="9" cy="9" r="5.5" />
               <path d="M13.2 13.2 17 17" />
+            </svg>
+          </Link>
+
+          <Link
+            href="/players"
+            aria-label="Найти игрока"
+            title="Найти игрока"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-control text-text-muted transition-colors hover:bg-surface-sunken hover:text-text md:hidden"
+          >
+            <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" aria-hidden="true">
+              <circle cx="10" cy="6.5" r="3" />
+              <path d="M4 17c.6-3.2 3-5 6-5s5.4 1.8 6 5" />
             </svg>
           </Link>
 

@@ -32,6 +32,12 @@ export class RatingController {
 export class MeRatingController {
   constructor(private readonly rating: RatingService) {}
 
+  /** Стоит ли флажок — им же человек скрыт и из «Найти игрока» (20.10.2026). */
+  @Get()
+  get(@CurrentUser() user: AccessTokenPayload): Promise<{ hidden: boolean }> {
+    return this.rating.hidden(user.sub);
+  }
+
   @Put()
   set(@CurrentUser() user: AccessTokenPayload, @Body() dto: RatingVisibilityDto): Promise<{ hidden: boolean }> {
     return this.rating.setHidden(user.sub, dto.hidden);

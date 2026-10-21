@@ -1510,3 +1510,56 @@ ALTER TABLE "EmailMessage"
 ALTER TABLE "EmailToken"
   ADD CONSTRAINT "EmailToken_expiry"
   CHECK ("expiresAt" > "createdAt" AND "email" = lower(btrim("email")));
+
+-- ---------------------------------------------------------------------------
+-- Кто может записаться (решения владельца от 20.10.2026)
+-- ---------------------------------------------------------------------------
+
+-- Возраст — полные годы на день проведения, как у типа спарринга; «от» не
+-- больше «до», иначе на вид не запишется никто. Пол проверяет enum.
+ALTER TABLE "TrainingType"
+  ADD CONSTRAINT "TrainingType_restrictions_sane"
+  CHECK (
+    ("minAge" IS NULL OR "minAge" BETWEEN 0 AND 120)
+    AND ("maxAge" IS NULL OR "maxAge" BETWEEN 0 AND 120)
+    AND ("minAge" IS NULL OR "maxAge" IS NULL OR "minAge" <= "maxAge")
+  );
+
+-- То же у турнира, и система рейтинга — только при самой планке: «рейтинг
+-- ФНТР» без числа ничего не говорит.
+ALTER TABLE "TournamentType"
+  ADD CONSTRAINT "TournamentType_restrictions_sane"
+  CHECK (
+    ("minAge" IS NULL OR "minAge" BETWEEN 0 AND 120)
+    AND ("maxAge" IS NULL OR "maxAge" BETWEEN 0 AND 120)
+    AND ("minAge" IS NULL OR "maxAge" IS NULL OR "minAge" <= "maxAge")
+    AND ("ratingSystem" IS NULL OR "ratingLabel" IS NOT NULL)
+  );
+
+-- Рейтинг из внешней системы (решения владельца от 20.10.2026): очки и место
+-- не отрицательные, id источника — без пробелов и не длиннее разумного: он
+-- уходит в адрес ссылки на страницу игрока там.
+ALTER TABLE "ExternalRating"
+  ADD CONSTRAINT "ExternalRating_values_sane"
+  CHECK (
+    "rating" BETWEEN 0 AND 100000
+    AND ("place" IS NULL OR "place" > 0)
+    AND "externalId" ~ '^[0-9A-Za-z_-]{1,40}$'
+  );
+
+-- «Это я!» — один профиль источника закрепляет только один человек: иначе
+-- двое тёзок закрепили бы за собой одного и того же игрока. Сверка без выбора
+-- (claimedAt пусто) этим индексом не связана — её держит uniqueClaims.
+CREATE UNIQUE INDEX "ExternalRating_one_claim"
+  ON "ExternalRating" ("system", "externalId")
+  WHERE "claimedAt" IS NOT NULL;
+
+ALTER TABLE "ExternalRatingChoice"
+  ADD CONSTRAINT "ExternalRatingChoice_values_sane"
+  CHECK (
+    "rating" BETWEEN 0 AND 100000
+    AND ("place" IS NULL OR "place" > 0)
+    AND "externalId" ~ '^[0-9A-Za-z_-]{1,40}$'
+    AND btrim("name") <> '' AND char_length("name") <= 200
+    AND ("birthYear" IS NULL OR "birthYear" BETWEEN 1900 AND 2100)
+  );

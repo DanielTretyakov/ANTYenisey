@@ -946,6 +946,57 @@ async function main() {
     r = await asAdmin(`/clubs/yenisey/tournament-types/${tournamentTypeId}`, { method: 'DELETE' });
     check('тип с заведёнными турнирами удалить нельзя', 409, r.status);
 
+    // Кто может записаться (решения владельца от 20.10.2026): возраст и пол у
+    // вида проверяет сервер — и самозапись, и запись клубом по звонку.
+    // Рейтинг — справка с системой. Пробный — 25-летний мужчина из прогона.
+    {
+      const typePath = `/clubs/yenisey/tournament-types/${tournamentTypeId}`;
+      const typeBody = { name: tournamentTypeName, ratingLabel: '100', price: 50000 };
+
+      r = await asAdmin(typePath, { method: 'PATCH', json: { ...typeBody, minAge: 14, maxAge: 10 } });
+      check('возраст «от» больше «до» отклонён', 400, r.status);
+
+      r = await asAdmin(typePath, { method: 'PATCH', json: { ...typeBody, ratingSystem: 'FNTR', gender: 'FEMALE' } });
+      check('вид турнира только для женщин', 200, r.status);
+      assert('ограничения и система рейтинга сохранены', r.body?.restrictions?.gender === 'FEMALE' && r.body?.ratingSystem === 'FNTR');
+
+      r = await asAdmin(typePath, { method: 'PATCH', json: { ...typeBody, ratingLabel: null } });
+      assert('без планки система рейтинга снята', r.status === 200 && r.body?.ratingSystem === null);
+
+      r = await post('/auth/register', registration({ lastName: 'Ограничений', birthDate: '2001-05-17', gender: 'MALE' }));
+      check('пробный мужчина 25 лет', 201, r.status);
+      const manId = r.body?.user?.id ?? '';
+      const manAuth = { Authorization: `Bearer ${r.body?.accessToken ?? ''}` };
+      const asMan = (path, options = {}) => call(path, { ...options, headers: { ...manAuth, ...options.headers } });
+      const signUp = `/clubs/yenisey/tournaments/${tournamentId}/registration`;
+
+      r = await asMan(signUp, { method: 'POST' });
+      check('мужчину на женский турнир не записывает', 403, r.status);
+      assert('сказано, что только для женщин', JSON.stringify(r.body?.message ?? '').includes('только для женщин'));
+
+      r = await asAdmin('/clubs/yenisey/desk/event-entries', {
+        method: 'POST',
+        json: { kind: 'TOURNAMENT', eventId: tournamentId, clientId: manId },
+      });
+      check('и клуб по звонку не записывает', 403, r.status);
+
+      r = await asAdmin(typePath, { method: 'PATCH', json: { ...typeBody, gender: null, minAge: 7, maxAge: 13 } });
+      check('вид турнира 7–13 лет', 200, r.status);
+
+      r = await call(`/clubs/yenisey/events/tournament/${tournamentId}`);
+      assert('окно мероприятия отдаёт «для кого»', r.body?.restrictions?.minAge === 7 && r.body?.restrictions?.maxAge === 13);
+
+      r = await asMan(signUp, { method: 'POST' });
+      check('25-летнего на детский турнир не записывает', 403, r.status);
+      assert('сказан возраст на день турнира', JSON.stringify(r.body?.message ?? '').includes('25 лет'));
+
+      // Записи без ограничений здесь нет намеренно: даже отменённая строка
+      // не даст ниже убрать этот турнир вместе с днём, а сама запись
+      // проверяется в разделе мероприятий.
+      r = await asAdmin(typePath, { method: 'PATCH', json: { ...typeBody, minAge: null, maxAge: null } });
+      assert('ограничения сняты', r.status === 200 && r.body?.restrictions?.minAge === null);
+    }
+
     if (coachId) {
       r = await asAdmin(`/clubs/yenisey/halls/${hallId}/template`, {
         method: 'PUT',
@@ -3930,6 +3981,34 @@ async function playerProfile() {
   assert('имя сокращено', r.body?.name === 'Ракеткин И.');
   assert('ни почты, ни телефона, ни даты рождения',
     r.body && !('email' in r.body) && !('phone' in r.body) && !('birthDate' in r.body));
+  // Плашки ФНТР/RTTF/RTTW (20.10.2026): сверка ходит в настоящие сайты и в
+  // прогоне не запускается — здесь только форма ответа.
+  assert('рейтинги внешних систем — списком', Array.isArray(r.body?.externalRatings));
+
+  // «Найти игрока» (20.10.2026): взрослый — «Фамилия Имя» и год; ребёнка
+  // младше 14 в выдаче нет вовсе; скрывшийся флажком рейтинга — тоже.
+  r = await call(`/players?${new URLSearchParams({ query: 'Ракеткин Игорь 2001' })}`);
+  check('поиск игроков открыт без входа', 200, r.status);
+  {
+    const found = (r.body?.rows ?? []).find((row) => row.id === playerId);
+    assert('взрослый найден по фамилии, имени и году', found?.name === 'Ракеткин Игорь' && found?.birthYear === 2001);
+    assert('в строке — рейтинги трёх систем', found && 'FNTR' in found.ratings && 'RTTW' in found.ratings && 'RTTF' in found.ratings);
+  }
+  r = await call(`/players?${new URLSearchParams({ query: 'Юнцов Коля' })}`);
+  assert('ребёнка младше 14 в поиске нет', !(r.body?.rows ?? []).some((row) => row.id === minorId));
+  r = await asPlayer('/me/rating', { method: 'PUT', json: { hidden: true } });
+  r = await call(`/players?${new URLSearchParams({ query: 'Ракеткин Игорь' })}`);
+  assert('скрывшийся из рейтингов не находится и поиском', !(r.body?.rows ?? []).some((row) => row.id === playerId));
+  r = await asPlayer('/me/rating');
+  assert('флажок читается', r.body?.hidden === true);
+  await asPlayer('/me/rating', { method: 'PUT', json: { hidden: false } });
+  r = await call('/players?sort=elo');
+  check('неизвестный порядок отклонён', 400, r.status);
+  r = await asPlayer('/me/player/external-ratings/FNTR/claim', { method: 'POST', json: { externalId: '9' } });
+  check('«это я» — только из предложенного сверкой', 404, r.status);
+
+  // Публичная страница снова — проверки поиска выше перезаписали ответ.
+  r = await call(`/players/${playerId}`);
   assert('разряд с подписью клуба, без приказа',
     r.body?.rank?.status === 'VERIFIED' && typeof r.body?.rank?.verifiedBy?.clubName === 'string'
       && r.body?.rank?.verifiedBy?.by === undefined && !('orderNumber' in (r.body?.rank ?? {})));

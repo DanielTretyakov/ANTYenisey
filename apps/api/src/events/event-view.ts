@@ -1,5 +1,13 @@
-import { BookingStatus, type Gender } from '@yenisey/database';
-import type { ClubCatalogItem, ClubEvent, ClubRef, EventDetail, EventKind, EventPlace } from '@yenisey/types';
+import { BookingStatus, type Gender, type RatingSystem } from '@yenisey/database';
+import type {
+  ClubCatalogItem,
+  ClubEvent,
+  ClubRef,
+  EventDetail,
+  EventKind,
+  EventPlace,
+  EventRestrictions,
+} from '@yenisey/types';
 import { shortName } from '@yenisey/types';
 import { participantView } from '../players/player-rules';
 
@@ -52,6 +60,22 @@ export const CLUB_ZONE_SELECT = {
   select: { halls: { select: { timezone: true }, orderBy: { createdAt: 'asc' }, take: 1 } },
 } as const;
 
+/**
+ * Кто может записаться — у вида (решения владельца от 20.10.2026). Выбирается
+ * вместе со строкой: «для кого» показывается в списке до нажатия кнопки.
+ */
+export const RESTRICTIONS_SELECT = { minAge: true, maxAge: true, gender: true } as const;
+
+/** У турнира к ним — справочная планка рейтинга с системой. */
+export const TOURNAMENT_RULES_SELECT = { ...RESTRICTIONS_SELECT, ratingLabel: true, ratingSystem: true } as const;
+
+type Restricted = { minAge: number | null; maxAge: number | null; gender: Gender | null };
+
+/** Ограничения вида строкой ответа — только три поля, без остального типа. */
+export function restrictionsOf(type: Restricted): EventRestrictions {
+  return { minAge: type.minAge, maxAge: type.maxAge, gender: type.gender };
+}
+
 /** Пояс, если в клубе нет ни одного зала: тот же запасной, что у сводок. */
 const FALLBACK_ZONE = 'Asia/Krasnoyarsk';
 
@@ -62,7 +86,7 @@ export const TOURNAMENT_EVENT_SELECT = {
   endsAt: true,
   tournamentTypeId: true,
   tournamentType: {
-    select: { name: true, ratingLabel: true, price: true, halls: TYPE_HALLS_SELECT, tenant: CLUB_ZONE_SELECT },
+    select: { name: true, ...TOURNAMENT_RULES_SELECT, price: true, halls: TYPE_HALLS_SELECT, tenant: CLUB_ZONE_SELECT },
   },
   dayClosures: HALL_NAME_SELECT,
   registrations: {
@@ -78,7 +102,7 @@ export const TRAINING_EVENT_SELECT = {
   endsAt: true,
   capacity: true,
   trainingTypeId: true,
-  trainingType: { select: { name: true, price: true, halls: TYPE_HALLS_SELECT, tenant: CLUB_ZONE_SELECT } },
+  trainingType: { select: { name: true, ...RESTRICTIONS_SELECT, price: true, halls: TYPE_HALLS_SELECT, tenant: CLUB_ZONE_SELECT } },
   dayClosures: HALL_NAME_SELECT,
   coach: { select: { membership: { select: { user: { select: { fullName: true } } } } } },
   bookings: {
@@ -129,7 +153,8 @@ type TournamentRow = HallSource & {
   tournamentTypeId: string;
   startsAt: Date;
   endsAt: Date;
-  tournamentType: { name: string; ratingLabel: string | null; price: number } & TypeHalls;
+  tournamentType: { name: string; ratingLabel: string | null; ratingSystem: RatingSystem | null; price: number } & Restricted &
+    TypeHalls;
   registrations: Participant[];
 };
 
@@ -139,7 +164,7 @@ type TrainingRow = HallSource & {
   startsAt: Date;
   endsAt: Date;
   capacity: number;
-  trainingType: { name: string; price: number } & TypeHalls;
+  trainingType: { name: string; price: number } & Restricted & TypeHalls;
   coach: { membership: { user: { fullName: string } } };
   bookings: Participant[];
 };
@@ -151,6 +176,8 @@ export function tournamentEvent(row: TournamentRow, userId: string | null): Club
     typeId: row.tournamentTypeId,
     title: row.tournamentType.name,
     ratingLabel: row.tournamentType.ratingLabel,
+    ratingSystem: row.tournamentType.ratingSystem,
+    restrictions: restrictionsOf(row.tournamentType),
     startsAt: row.startsAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
     subtitle: null,
@@ -178,6 +205,8 @@ export function trainingEvent(row: TrainingRow, userId: string | null): ClubEven
     title: row.trainingType.name,
     // Число-ограничение по рейтингу — свойство турнира, у занятия его нет.
     ratingLabel: null,
+    ratingSystem: null,
+    restrictions: restrictionsOf(row.trainingType),
     startsAt: row.startsAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
     subtitle: `Тренер: ${shortName(row.coach.membership.user.fullName)}`,
@@ -208,8 +237,9 @@ export function catalogItem(
     description: string | null;
     price: number;
     ratingLabel?: string | null;
+    ratingSystem?: RatingSystem | null;
     halls: { hallId: string }[];
-  },
+  } & Restricted,
   next: { startsAt: Date | null; count: number } | undefined,
   /** Пояс ближайшего проведения — его время показывается по часам его зала. */
   nextZone: string | null = null,
@@ -221,6 +251,8 @@ export function catalogItem(
     description: type.description,
     price: type.price,
     ratingLabel: type.ratingLabel ?? null,
+    ratingSystem: type.ratingSystem ?? null,
+    restrictions: restrictionsOf(type),
     nextStartsAt: next?.startsAt?.toISOString() ?? null,
     nextTimezone: next?.startsAt ? nextZone : null,
     upcomingCount: next?.count ?? 0,
@@ -298,7 +330,7 @@ export const TOURNAMENT_DETAIL_SELECT = {
   tournamentType: {
     select: {
       name: true,
-      ratingLabel: true,
+      ...TOURNAMENT_RULES_SELECT,
       price: true,
       description: true,
       halls: TYPE_HALLS_SELECT,
@@ -317,7 +349,7 @@ export const TOURNAMENT_DETAIL_SELECT = {
 export const TRAINING_DETAIL_SELECT = {
   ...TRAINING_EVENT_SELECT,
   trainingType: {
-    select: { name: true, price: true, description: true, halls: TYPE_HALLS_SELECT, tenant: CLUB_ZONE_SELECT },
+    select: { name: true, ...RESTRICTIONS_SELECT, price: true, description: true, halls: TYPE_HALLS_SELECT, tenant: CLUB_ZONE_SELECT },
   },
   coach: { select: { userId: true, membership: { select: { user: { select: { fullName: true } } } } } },
   bookings: {

@@ -1,4 +1,5 @@
 import type { Gender } from './auth';
+import type { RatingSystem } from './eligibility';
 
 /**
  * Профиль игрока: аватар, инвентарь, достижения, спортивный разряд.
@@ -204,6 +205,76 @@ export interface PublicPlayer {
    * родитель.
    */
   visits: PlayerVisitTops | null;
+  /**
+   * Рейтинги во внешних системах — плашками (решения владельца от 20.10.2026).
+   * Находит их сервер сам, раз в сутки; не нашёл — плашки нет. Порядок —
+   * ФНТР, RTTF, RTTW.
+   */
+  externalRatings: ExternalRatingBadge[];
+}
+
+/** Плашка рейтинга внешней системы в профиле игрока. */
+export interface ExternalRatingBadge {
+  system: RatingSystem;
+  rating: number;
+  /** Место в общем рейтинге; RTTW его в списке не даёт. */
+  place: number | null;
+  /** На какую дату рейтинг в источнике, «YYYY-MM-DD». */
+  asOf: string | null;
+  /** Страница игрока в источнике. */
+  url: string;
+}
+
+/**
+ * Вариант «выберите себя» (решение владельца от 20.10.2026): сверка нашла под
+ * ФИО и год человека нескольких игроков источника. Видит только он сам (и
+ * родитель за ребёнка).
+ */
+export interface ExternalRatingChoice {
+  externalId: string;
+  /** Как игрок записан в источнике — «Иванов Пётр Сергеевич». */
+  name: string;
+  city: string | null;
+  birthYear: number | null;
+  rating: number;
+  place: number | null;
+  /** Страница игрока в источнике — свериться, прежде чем выбрать. */
+  url: string;
+}
+
+/** Своё о внешних рейтингах: что закреплено самим и из чего выбирать. */
+export interface MyExternalRatings {
+  /** Системы, где человек сам выбрал себя: их можно открепить. */
+  claimed: RatingSystem[];
+  choices: Partial<Record<RatingSystem, ExternalRatingChoice[]>>;
+}
+
+/** По чему упорядочить «Найти игрока»: по фамилии или по рейтингу системы. */
+export type PlayerSearchSort = 'name' | RatingSystem;
+
+/**
+ * Строка «Найти игрока» (решения владельца от 20.10.2026): все с 14 лет,
+ * кроме скрывшихся флажком «не показывать меня в рейтингах».
+ */
+export interface PlayerSearchRow {
+  id: string;
+  /** «Фамилия Имя» — без отчества (решение от 20.10.2026). */
+  name: string;
+  /** Пусто — дата рождения не указана (старые учётки). */
+  birthYear: number | null;
+  avatarFileId: string | null;
+  gender: Gender | null;
+  /** Тренирует сейчас в открытом клубе — ссылка на карточку тренера. */
+  isCoach: boolean;
+  /** Клуб, где чаще всего бывал за последние 365 дней. */
+  topClub: { slug: string; name: string; accentColor: string | null } | null;
+  /** Рейтинги систем; пусто — не найден. */
+  ratings: Record<RatingSystem, number | null>;
+}
+
+export interface PlayerSearchPage {
+  total: number;
+  rows: PlayerSearchRow[];
 }
 
 /** Клуб в «Больше всего посещений». */

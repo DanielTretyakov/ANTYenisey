@@ -2,7 +2,25 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { canSetClubMoney, hasAnyRole, MANAGING_ROLES, type EventPageQuery, type Hall, type SubscriptionPlan, type Tournament, type TournamentType, type TrainingSession, type TrainingType } from '@yenisey/types';
+import {
+  canSetClubMoney,
+  hasAnyRole,
+  MANAGING_ROLES,
+  RATING_SYSTEM_LABEL,
+  RATING_SYSTEMS,
+  ratingText,
+  restrictionsLabel,
+  type EventPageQuery,
+  type EventRestrictions,
+  type Gender,
+  type Hall,
+  type RatingSystem,
+  type SubscriptionPlan,
+  type Tournament,
+  type TournamentType,
+  type TrainingSession,
+  type TrainingType,
+} from '@yenisey/types';
 import { SparringTypesCard } from './SparringTypesCard';
 import { SubscriptionPlansCard } from './SubscriptionPlansCard';
 import { CancelEventDialog } from '@/components/events/CancelEventDialog';
@@ -283,6 +301,9 @@ function TrainingTypesCard({
                           isActive: type.isActive,
                           description: values.description,
                           hallIds: values.hallIds,
+                          minAge: values.minAge,
+                          maxAge: values.maxAge,
+                          gender: values.gender,
                         });
                         setEditingId(null);
                         return types
@@ -297,6 +318,7 @@ function TrainingTypesCard({
                   {type.name}
                   <DescriptionHint text={type.description} />
                   <HallsHint hallIds={type.hallIds} halls={halls} />
+                  <RestrictionsHint restrictions={type.restrictions} />
                 </span>
                 <span className="text-[0.875rem] text-text-muted">{formatKopecks(type.price)}</span>
                 {type.usageCount > 0 && (
@@ -462,10 +484,14 @@ function TournamentTypesCard({
                         .updateTournamentType(type.id, {
                           name: values.name,
                           ratingLabel: values.ratingLabel,
+                          ratingSystem: values.ratingSystem,
                           price: values.price,
                           isActive: type.isActive,
                           description: values.description,
                           hallIds: values.hallIds,
+                          minAge: values.minAge,
+                          maxAge: values.maxAge,
+                          gender: values.gender,
                         })
                         .then((updated) => {
                           onChange(
@@ -492,11 +518,12 @@ function TournamentTypesCard({
                       {type.name}
                       {type.ratingLabel && (
                         <span className="ml-2 text-[0.8125rem] text-text-subtle">
-                          рейтинг {type.ratingLabel}
+                          {ratingText(type.ratingSystem, type.ratingLabel)}
                         </span>
                       )}
                       <DescriptionHint text={type.description} />
                       <HallsHint hallIds={type.hallIds} halls={halls} />
+                      <RestrictionsHint restrictions={type.restrictions} />
                     </span>
                     <span className="text-[0.875rem] text-text-muted">
                       {formatKopecks(type.price)}
@@ -976,7 +1003,15 @@ function TypeEditor({
   onCancel,
   onError,
 }: {
-  initial: { name: string; ratingLabel?: string | null; price: number; description: string | null; hallIds: string[] };
+  initial: {
+    name: string;
+    ratingLabel?: string | null;
+    ratingSystem?: RatingSystem | null;
+    price: number;
+    description: string | null;
+    hallIds: string[];
+    restrictions: EventRestrictions;
+  };
   halls: Hall[];
   /** Цена — у руководства (решение от 11.10.2026): без права поле только показывает её. */
   money: boolean;
@@ -988,12 +1023,17 @@ function TypeEditor({
     price: number;
     description: string | null;
     hallIds: string[];
-  }) => void;
+    ratingSystem: RatingSystem | null;
+  } & EventRestrictions) => void;
   onCancel: () => void;
   onError: (message: string | null) => void;
 }) {
   const [name, setName] = useState(initial.name);
   const [rating, setRating] = useState(initial.ratingLabel ?? '');
+  const [ratingSystem, setRatingSystem] = useState<RatingSystem | ''>(initial.ratingSystem ?? '');
+  const [minAge, setMinAge] = useState(initial.restrictions.minAge?.toString() ?? '');
+  const [maxAge, setMaxAge] = useState(initial.restrictions.maxAge?.toString() ?? '');
+  const [gender, setGender] = useState<Gender | ''>(initial.restrictions.gender ?? '');
   const [price, setPrice] = useState(kopecksToInput(initial.price));
   const [description, setDescription] = useState(initial.description ?? '');
   const [hallIds, setHallIds] = useState<string[]>(initial.hallIds);
@@ -1008,13 +1048,24 @@ function TypeEditor({
       return;
     }
 
+    const ages = [minAge, maxAge].map((value) => (value.trim() === '' ? null : Number(value)));
+
+    if (ages.some((age) => age !== null && (!Number.isInteger(age) || age < 0 || age > 120))) {
+      onError('Возраст — целым числом лет, от 0 до 120');
+      return;
+    }
+
     onError(null);
     onSave({
       name: name.trim(),
       ratingLabel: rating.trim() || null,
+      ratingSystem: rating.trim() ? ratingSystem || null : null,
       price: kopecks,
       description: description.trim() || null,
       hallIds,
+      minAge: ages[0] ?? null,
+      maxAge: ages[1] ?? null,
+      gender: gender || null,
     });
   }
 
@@ -1030,14 +1081,29 @@ function TypeEditor({
       />
 
       {withRating && (
-        <input
-          aria-label="Ограничение по рейтингу"
-          placeholder="рейтинг"
-          maxLength={32}
-          value={rating}
-          onChange={(event) => setRating(event.target.value)}
-          className={cn(inputClassName, 'w-32 py-1.5 text-[0.9375rem]')}
-        />
+        <>
+          <select
+            aria-label="Система рейтинга"
+            value={ratingSystem}
+            onChange={(event) => setRatingSystem(event.target.value as RatingSystem | '')}
+            className={cn(inputClassName, 'w-28! py-1.5 text-[0.9375rem]')}
+          >
+            <option value="">рейтинг</option>
+            {RATING_SYSTEMS.map((system) => (
+              <option key={system} value={system}>
+                {RATING_SYSTEM_LABEL[system]}
+              </option>
+            ))}
+          </select>
+          <input
+            aria-label="Ограничение по рейтингу"
+            placeholder="до, напр. 100"
+            maxLength={32}
+            value={rating}
+            onChange={(event) => setRating(event.target.value)}
+            className={cn(inputClassName, 'w-32 py-1.5 text-[0.9375rem]')}
+          />
+        </>
       )}
 
       <MoneyField className="w-32" value={price} onChange={setPrice} disabled={!money} />
@@ -1052,6 +1118,45 @@ function TypeEditor({
         className={cn(inputClassName, 'w-full basis-full py-1.5 text-[0.9375rem]')}
       />
 
+      {/* Кто может записаться (решения владельца от 20.10.2026): сервер
+          проверяет при любой записи, и у стойки тоже. Рейтинг — справка. */}
+      <fieldset className="flex w-full basis-full flex-wrap items-center gap-2">
+        <legend className="mb-1.5 text-[0.8125rem] text-text-muted">
+          Кто может записаться — проверяется при записи, и у стойки тоже
+        </legend>
+        <span className="text-[0.875rem] text-text-muted">возраст от</span>
+        <input
+          aria-label="Возраст от, полных лет"
+          inputMode="numeric"
+          placeholder="—"
+          maxLength={3}
+          value={minAge}
+          onChange={(event) => setMinAge(event.target.value.replace(/\D/g, ''))}
+          className={cn(inputClassName, 'w-16! py-1.5 text-center text-[0.9375rem]')}
+        />
+        <span className="text-[0.875rem] text-text-muted">до</span>
+        <input
+          aria-label="Возраст до, полных лет включительно"
+          inputMode="numeric"
+          placeholder="—"
+          maxLength={3}
+          value={maxAge}
+          onChange={(event) => setMaxAge(event.target.value.replace(/\D/g, ''))}
+          className={cn(inputClassName, 'w-16! py-1.5 text-center text-[0.9375rem]')}
+        />
+        <span className="text-[0.875rem] text-text-muted">лет</span>
+        <select
+          aria-label="Кто по полу"
+          value={gender}
+          onChange={(event) => setGender(event.target.value as Gender | '')}
+          className={cn(inputClassName, 'w-auto! py-1.5 text-[0.9375rem]')}
+        >
+          <option value="">мужчины и женщины</option>
+          <option value="FEMALE">только женщины</option>
+          <option value="MALE">только мужчины</option>
+        </select>
+      </fieldset>
+
       {halls.length > 1 && <HallPicker halls={halls} value={hallIds} onChange={setHallIds} />}
 
       <Button type="submit" size="sm" pending={pending} disabled={name.trim() === ''}>
@@ -1062,6 +1167,13 @@ function TypeEditor({
       </Button>
     </form>
   );
+}
+
+/** «Для кого» под названием вида; без ограничений — ничего. */
+function RestrictionsHint({ restrictions }: { restrictions: EventRestrictions }) {
+  const label = restrictionsLabel(restrictions);
+
+  return label ? <span className="mt-0.5 block truncate text-[0.8125rem] text-text-subtle">для кого: {label}</span> : null;
 }
 
 /** «Все залы» или список — под названием вида, когда залов у клуба несколько. */

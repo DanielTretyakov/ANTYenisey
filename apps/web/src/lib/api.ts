@@ -69,6 +69,11 @@ import type {
   PublicCoach,
   FavouriteClub,
   FavouriteCoach,
+  CoachSearchItem,
+  MyExternalRatings,
+  PlayerSearchPage,
+  PlayerSearchSort,
+  RatingSystem,
   EventDetail,
   EventKind,
   FeedEvent,
@@ -447,6 +452,10 @@ export const api = {
   // --- Мои тренеры (решение от 02.10.2026): закладка, предела нет.
   myCoaches: (): Promise<FavouriteCoach[]> => authorized('/me/coaches'),
 
+  /** Поиск тренера по ФИО, чтобы отметить (от двух букв). */
+  searchCoaches: (query: string): Promise<CoachSearchItem[]> =>
+    authorized(`/me/coaches/search?${new URLSearchParams({ query })}`),
+
   /** Отметить тренера. Идемпотентно, как у клуба. */
   addCoach: (id: string): Promise<FavouriteCoach[]> => authorized(`/me/coaches/${id}`, { method: 'PUT' }),
 
@@ -543,6 +552,29 @@ export const api = {
    * администраторы его клубов.
    */
   player: (id: string): Promise<PublicPlayer> => optionallyAuthorized(`/players/${id}`),
+
+  /** «Найти игрока»: ФИО и год одной строкой, порядок, страница по 30. */
+  searchPlayers: (query: { query?: string; sort?: PlayerSearchSort; offset?: number }): Promise<PlayerSearchPage> => {
+    const params = new URLSearchParams();
+
+    if (query.query?.trim()) params.set('query', query.query.trim());
+    if (query.sort && query.sort !== 'name') params.set('sort', query.sort);
+    if (query.offset) params.set('offset', String(query.offset));
+
+    const search = params.toString();
+
+    return request(`/players${search ? `?${search}` : ''}`);
+  },
+
+  // --- «Выберите себя»: внешние рейтинги, где под ФИО нашлись несколько.
+  myExternalRatings: (forPerson?: string | null): Promise<MyExternalRatings> =>
+    authorized(withFor('/me/player/external-ratings', forPerson)),
+
+  claimExternalRating: (system: RatingSystem, externalId: string, forPerson?: string | null): Promise<MyExternalRatings> =>
+    authorized(withFor(`/me/player/external-ratings/${system}/claim`, forPerson), json('POST', { externalId })),
+
+  unclaimExternalRating: (system: RatingSystem, forPerson?: string | null): Promise<MyExternalRatings> =>
+    authorized(withFor(`/me/player/external-ratings/${system}/claim`, forPerson), { method: 'DELETE' }),
 
   // --- Карточка тренера. Одна на все клубы, поэтому клуба в адресе нет:
   // заполняет её сам тренер, а клуб только смотрит.
@@ -655,6 +687,8 @@ export const api = {
   /** Непрочитанное в лентах моих клубов — шапка и карточки на стартовой. */
   clubPostsUnread: (): Promise<ClubPostsUnread> => authorized('/me/club-posts/unread'),
   /** «Не показывать меня в рейтингах» — во всех клубах сразу. */
+  ratingHidden: (): Promise<{ hidden: boolean }> => authorized('/me/rating'),
+
   setRatingHidden: (hidden: boolean): Promise<{ hidden: boolean }> =>
     authorized('/me/rating', json('PUT', { hidden })),
 

@@ -11,6 +11,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   Req,
   Res,
   UseInterceptors,
@@ -18,7 +19,9 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import type { StoredFileKind } from '@yenisey/database';
-import type { PlayerProfile, PublicPlayer } from '@yenisey/types';
+import type { PlayerProfile, PlayerSearchPage, PublicPlayer } from '@yenisey/types';
+import { PlayerSearchDto } from './dto/player-search.dto';
+import { PlayerSearchService } from './player-search.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrentClub } from '../auth/decorators/current-club.decorator';
 import { Acting, ClientAction, type ActingClient } from '../guardianship/acting-client.guard';
@@ -128,7 +131,21 @@ export class MePlayerController {
  */
 @Controller('players')
 export class PlayersController {
-  constructor(private readonly players: PlayersService) {}
+  constructor(
+    private readonly players: PlayersService,
+    private readonly search: PlayerSearchService,
+  ) {}
+
+  /**
+   * «Найти игрока» — открыто, как страницы игроков. Частота ограничена:
+   * выдача — люди, а не прайс.
+   */
+  @Public()
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Get()
+  find(@Query() query: PlayerSearchDto): Promise<PlayerSearchPage> {
+    return this.search.search(query);
+  }
 
   @Public()
   @Get(':id')

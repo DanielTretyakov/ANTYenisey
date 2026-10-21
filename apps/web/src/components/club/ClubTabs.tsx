@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   availableInAny,
+  ratingNote,
+  restrictionsLabel,
   type ClubCatalogItem,
   type PublicPlan,
   type PublicTenant,
@@ -376,8 +378,13 @@ function CatalogCard({ item, onShowSchedule }: { item: ClubCatalogItem; onShowSc
         <KindBadge kind={item.kind} />
         <h3 className="font-display text-[1.0625rem] leading-tight text-white [text-wrap:balance]">
           {item.name}
-          {item.ratingLabel && !item.name.includes(item.ratingLabel) && (
-            <span className="mt-1 block font-sans text-[0.8125rem] text-white/70">рейтинг до {item.ratingLabel}</span>
+          {ratingNote(item.name, item.ratingSystem, item.ratingLabel) && (
+            <span className="mt-1 block font-sans text-[0.8125rem] text-white/70">
+              {ratingNote(item.name, item.ratingSystem, item.ratingLabel)}
+            </span>
+          )}
+          {restrictionsLabel(item.restrictions) && (
+            <span className="mt-1 block font-sans text-[0.8125rem] text-white/70">{restrictionsLabel(item.restrictions)}</span>
           )}
         </h3>
       </div>

@@ -7,8 +7,12 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@yenisey/database';
 import { BookingStatus } from '@yenisey/database';
+import { restrictionsProblem } from '@yenisey/types';
 import type {
   EventPageQuery,
+  EventRestrictions,
+  RatingSystem,
+  RestrictionsRequest,
   Tournament,
   TournamentRequest,
   TournamentType,
@@ -48,6 +52,9 @@ export class CatalogService {
         price: true,
         isActive: true,
         description: true,
+        minAge: true,
+        maxAge: true,
+        gender: true,
         halls: { select: { hallId: true } },
         _count: { select: { closureRules: true, dayClosures: true } },
       },
@@ -63,6 +70,7 @@ export class CatalogService {
       description: type.description,
       usageCount: type._count.closureRules + type._count.dayClosures,
       hallIds: type.halls.map((link) => link.hallId),
+      restrictions: { minAge: type.minAge, maxAge: type.maxAge, gender: type.gender },
     }));
   }
 
@@ -84,6 +92,7 @@ export class CatalogService {
         price: dto.price,
         isActive: dto.isActive ?? true,
         description: descriptionOf(dto.description) ?? null,
+        ...restrictionsPatch(dto, OPEN_TO_ALL),
       },
       select: { id: true },
     });
@@ -100,15 +109,15 @@ export class CatalogService {
     canSetPrice = true,
   ): Promise<TrainingType> {
     const name = dto.name.trim();
+    const current = await this.prisma.trainingType.findFirst({
+      where: { id, tenantId },
+      select: { price: true, minAge: true, maxAge: true, gender: true },
+    });
 
     // Цены — у руководства (решение владельца от 11.10.2026): администратор
     // правит вид, но цену присылает прежней.
-    if (!canSetPrice) {
-      const current = await this.prisma.trainingType.findFirst({ where: { id, tenantId }, select: { price: true } });
-
-      if (current && current.price !== dto.price) {
-        throw new ForbiddenException(PRICE_CHANGE_DENIED);
-      }
+    if (!canSetPrice && current && current.price !== dto.price) {
+      throw new ForbiddenException(PRICE_CHANGE_DENIED);
     }
 
     if (name === '') {
@@ -128,6 +137,7 @@ export class CatalogService {
         price: dto.price,
         ...(dto.isActive === undefined ? {} : { isActive: dto.isActive }),
         ...(dto.description === undefined ? {} : { description: descriptionOf(dto.description) }),
+        ...restrictionsPatch(dto, current ?? OPEN_TO_ALL),
       },
     });
 
@@ -242,9 +252,13 @@ export class CatalogService {
         id: true,
         name: true,
         ratingLabel: true,
+        ratingSystem: true,
         price: true,
         isActive: true,
         description: true,
+        minAge: true,
+        maxAge: true,
+        gender: true,
         halls: { select: { hallId: true } },
         _count: { select: { tournaments: true } },
       },
@@ -255,11 +269,13 @@ export class CatalogService {
       id: type.id,
       name: type.name,
       ratingLabel: type.ratingLabel,
+      ratingSystem: type.ratingSystem,
       price: type.price,
       isActive: type.isActive,
       description: type.description,
       tournamentCount: type._count.tournaments,
       hallIds: type.halls.map((link) => link.hallId),
+      restrictions: { minAge: type.minAge, maxAge: type.maxAge, gender: type.gender },
     }));
   }
 
@@ -278,10 +294,11 @@ export class CatalogService {
         data: {
           tenantId,
           name,
-          ratingLabel: dto.ratingLabel?.trim() || null,
+          ...ratingOf(dto, null),
           price: dto.price,
           isActive: dto.isActive ?? true,
           description: descriptionOf(dto.description) ?? null,
+          ...restrictionsPatch(dto, OPEN_TO_ALL),
         },
         select: { id: true },
       });
@@ -301,13 +318,13 @@ export class CatalogService {
     canSetPrice = true,
   ): Promise<TournamentType> {
     const name = dto.name.trim();
+    const current = await this.prisma.tournamentType.findFirst({
+      where: { id, tenantId },
+      select: { price: true, ratingSystem: true, minAge: true, maxAge: true, gender: true },
+    });
 
-    if (!canSetPrice) {
-      const current = await this.prisma.tournamentType.findFirst({ where: { id, tenantId }, select: { price: true } });
-
-      if (current && current.price !== dto.price) {
-        throw new ForbiddenException(PRICE_CHANGE_DENIED);
-      }
+    if (!canSetPrice && current && current.price !== dto.price) {
+      throw new ForbiddenException(PRICE_CHANGE_DENIED);
     }
 
     if (name === '') {
@@ -318,10 +335,11 @@ export class CatalogService {
       where: { id, tenantId },
       data: {
         name,
-        ratingLabel: dto.ratingLabel?.trim() || null,
+        ...ratingOf(dto, current?.ratingSystem ?? null),
         price: dto.price,
         ...(dto.isActive === undefined ? {} : { isActive: dto.isActive }),
         ...(dto.description === undefined ? {} : { description: descriptionOf(dto.description) }),
+        ...restrictionsPatch(dto, current ?? OPEN_TO_ALL),
       },
     });
 
@@ -708,6 +726,47 @@ export class CatalogService {
 
     return error;
   }
+}
+
+const OPEN_TO_ALL: EventRestrictions = { minAge: null, maxAge: null, gender: null };
+
+/**
+ * Планка рейтинга с системой. Планка, как и прежде, присылается всегда;
+ * система не прислана — остаётся сохранённая. Без планки системы нет (CHECK
+ * TournamentType_restrictions_sane): «рейтинг ФНТР» без числа ничего не говорит.
+ */
+function ratingOf(
+  dto: TournamentTypeRequest,
+  currentSystem: RatingSystem | null,
+): { ratingLabel: string | null; ratingSystem: RatingSystem | null } {
+  const ratingLabel = dto.ratingLabel?.trim() || null;
+  const ratingSystem = dto.ratingSystem === undefined ? currentSystem : dto.ratingSystem;
+
+  return { ratingLabel, ratingSystem: ratingLabel ? ratingSystem : null };
+}
+
+/**
+ * Ограничения вида из формы → в базу (решения владельца от 20.10.2026). Не
+ * прислано — не трогаем, как описание; проверяется то, что получится вместе с
+ * уже сохранённым: «до 10» к сохранённому «с 12» не подходит никому.
+ */
+function restrictionsPatch(
+  dto: RestrictionsRequest,
+  current: EventRestrictions,
+): Partial<EventRestrictions> {
+  const patch: Partial<EventRestrictions> = {};
+
+  if (dto.minAge !== undefined) patch.minAge = dto.minAge;
+  if (dto.maxAge !== undefined) patch.maxAge = dto.maxAge;
+  if (dto.gender !== undefined) patch.gender = dto.gender;
+
+  const problem = restrictionsProblem({ ...current, ...patch });
+
+  if (problem) {
+    throw new BadRequestException(problem);
+  }
+
+  return patch;
 }
 
 /**

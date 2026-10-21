@@ -1,13 +1,19 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, SportRankStatus, StoredFileKind } from '@yenisey/database';
 import type {
+  ExternalRatingBadge,
   PlayerAchievement,
   PlayerProfile,
   PlayerRank,
   PublicPlayer,
+  RatingSystem,
   SportRankLevel,
 } from '@yenisey/types';
 import { shortName } from '@yenisey/types';
+import { profileUrl } from '../external-ratings/external-rules';
+
+/** Порядок плашек: федерация первой, дальше любительские. */
+const EXTERNAL_ORDER: RatingSystem[] = ['FNTR', 'RTTF', 'RTTW'];
 import { formatBirthDate, parsePastDate } from '../auth/birth-date';
 import { FileIntake } from '../files/file-intake.service';
 import { FileStorage } from '../files/file-storage';
@@ -143,7 +149,30 @@ export class PlayersService {
       visits: canSeeVisits(row.ratingHidden, owner, viewer)
         ? await this.rating.playerTops(row.id, row.ratingHidden)
         : null,
+      externalRatings: await this.externalRatings(row.id),
     };
+  }
+
+  /**
+   * Рейтинги во внешних системах — что нашла ежедневная сверка (решения
+   * владельца от 20.10.2026). Флаг «не показывать меня в рейтингах» их не
+   * прячет: он про посещения клубов, а эти рейтинги и так открыты у себя.
+   */
+  private async externalRatings(userId: string): Promise<ExternalRatingBadge[]> {
+    const rows = await this.prisma.externalRating.findMany({
+      where: { userId },
+      select: { system: true, externalId: true, rating: true, place: true, asOf: true },
+    });
+
+    return rows
+      .sort((a, b) => EXTERNAL_ORDER.indexOf(a.system) - EXTERNAL_ORDER.indexOf(b.system))
+      .map((row): ExternalRatingBadge => ({
+        system: row.system,
+        rating: row.rating,
+        place: row.place,
+        asOf: row.asOf?.toISOString().slice(0, 10) ?? null,
+        url: profileUrl(row.system, row.externalId),
+      }));
   }
 
   async updateEquipment(userId: string, dto: UpdateEquipmentDto): Promise<PlayerProfile> {

@@ -761,6 +761,14 @@ enum Gender {
   FEMALE
 }
 
+/// Рейтинговая система настольного тенниса — для справочной планки турнира
+/// («рейтинг ФНТР до 100»). Система рейтинг не проверяет.
+enum RatingSystem {
+  RTTW
+  RTTF
+  FNTR
+}
+
 model User {
   id           String   @id @default(cuid())
   /// Почта уникальна ПО ВСЕЙ ПЛАТФОРМЕ, а не внутри клуба: второго аккаунта с
@@ -860,6 +868,8 @@ model User {
   playerProfile PlayerProfile?
   achievements  Achievement[]
   sportRank     SportRank?
+  externalRatings ExternalRating[]
+  externalRatingChoices ExternalRatingChoice[]
   files         StoredFile[]
 
   // Карточка тренера — тоже свойство человека: она одна на все клубы, где он
@@ -1408,6 +1418,14 @@ model TrainingType {
   /// станет.
   description String?
 
+  /// Кто может записаться (решения владельца от 20.10.2026): полные годы на
+  /// день занятия и пол; пусто — без предела. Проверяет сервер при любой
+  /// записи, и клуб по звонку тоже не обходит. Правило — `eligibilityProblem`
+  /// в @yenisey/types, форма — CHECK TrainingType_restrictions_sane.
+  minAge Int?
+  maxAge Int?
+  gender Gender?
+
   sessions          TrainingSession[]
   closureRules      TableClosureRule[]
   dayClosures       DayClosure[]
@@ -1529,11 +1547,21 @@ model TournamentType {
   tenant      Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   name        String
   ratingLabel String? // справочное число-ограничение в названии (напр. «100» у «Клуб 100») — не проверяется системой, чисто информация для игрока
+  /// Чей это рейтинг — RTTW, RTTF или ФНТР (решение владельца от 20.10.2026).
+  /// Тоже справка: допуск по рейтингу решают на месте соревнований. Только
+  /// вместе с `ratingLabel` (CHECK TournamentType_restrictions_sane).
+  ratingSystem RatingSystem?
   price       Int // текущая цена участия, копейки
   isActive    Boolean @default(true)
   /// Описание для окна мероприятия: формат, регламент, взнос. Как у типа
   /// занятия — одно на все проведения.
   description String?
+
+  /// Кто может записаться — как у типа занятия: полные годы на день турнира
+  /// и пол, пусто — без предела. Проверяет сервер (`eligibilityProblem`).
+  minAge Int?
+  maxAge Int?
+  gender Gender?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2858,6 +2886,64 @@ model PlatformNews {
 
   @@index([publishedAt])
   @@index([section, publishedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Рейтинги во внешних системах
+// ---------------------------------------------------------------------------
+
+/// Рейтинг игрока в ФНТР, RTTW или RTTF — плашкой в профиле (решения
+/// владельца от 20.10.2026). Человек ничего не вводит: раз в сутки
+/// `ExternalRatingsJob` сам находит его в источнике по фамилии, имени и году
+/// рождения (у RTTW дат нет — по отчеству) и пишет сюда. Не нашёлся или нашлись
+/// двое — строки нет: лучше без плашки, чем с чужим рейтингом. Источник
+/// недоступен — строка остаётся прежней, с датой.
+///
+/// Производные данные, а не запись человека: каскад с учёткой.
+model ExternalRating {
+  userId String
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  system RatingSystem
+
+  /// Id игрока в источнике — для ссылки на его страницу там.
+  externalId String
+  rating     Int
+  /// Место в общем рейтинге источника; RTTW в списке его не даёт.
+  place      Int?
+  /// На какую дату рейтинг в источнике (у ФНТР — первое число месяца).
+  asOf       DateTime? @db.Date
+  /// Когда сверка последний раз нашла человека.
+  checkedAt  DateTime  @default(now())
+  /// Человек сам выбрал себя из нескольких совпавших («это я!»). Такую строку
+  /// сверка не перевыбирает и не снимает, только обновляет числа; один профиль
+  /// источника закрепляет только один человек (частичный уникальный индекс
+  /// `ExternalRating_one_claim` в constraints.sql).
+  claimedAt  DateTime?
+
+  @@id([userId, system])
+  @@index([system, externalId])
+}
+
+/// Варианты «выберите себя» (решение владельца от 20.10.2026): сверка нашла
+/// под ФИО и год человека нескольких игроков источника и показывает их ему
+/// самому — в кабинете, рядом с плашкой. Выбор становится `ExternalRating` с
+/// `claimedAt`, варианты стираются. Каждая сверка пишет их заново.
+model ExternalRatingChoice {
+  userId String
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  system RatingSystem
+
+  externalId String
+  /// Как игрок записан в источнике: ФИО, город, год рождения — чтобы узнать себя.
+  name       String
+  city       String?
+  birthYear  Int?
+  rating     Int
+  place      Int?
+  asOf       DateTime? @db.Date
+  createdAt  DateTime  @default(now())
+
+  @@id([userId, system, externalId])
 }
 
 // ---------------------------------------------------------------------------

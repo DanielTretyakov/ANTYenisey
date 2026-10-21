@@ -114,6 +114,18 @@ const envSchema = z
       .string()
       .default('10m')
       .refine(isDuration, 'Ожидается длительность вида 30s, 5m, 1h'),
+    // Рейтинги во внешних системах (решения владельца от 20.10.2026): раз в
+    // сутки сервер сам находит игроков в ФНТР и показывает плашкой. По
+    // умолчанию — как остальные джобы: в production включена, в разработке нет.
+    EXTERNAL_RATINGS_JOB: optional(z.enum(['on', 'off'])),
+    EXTERNAL_RATINGS_JOB_INTERVAL: z
+      .string()
+      .default('24h')
+      .refine(isDuration, 'Ожидается длительность вида 30s, 5m, 1h'),
+    // RTTW — отдельным выключателем и выключен ВЕЗДЕ по умолчанию: его
+    // robots.txt запрещает роботов на всём сайте (Disallow: /). Включают
+    // осознанно — например, получив разрешение ttw.ru.
+    RTTW_FETCH: optional(z.enum(['on', 'off'])),
     // Магазин ЮKassa. Без ключей вне production — поддельный шлюз, в
     // production — оплата картой выключена (по счёту работает).
     YOOKASSA_SHOP_ID: optional(z.string().regex(/^[0-9]+$/, 'shopId ЮKassa — число')),
@@ -183,6 +195,16 @@ export function notificationsJobEnabled(env: Pick<Env, 'NOTIFICATIONS_JOB' | 'NO
 /** Работает ли отправщик почты: по умолчанию — как уведомления. */
 export function mailJobEnabled(env: Pick<Env, 'MAIL_JOB' | 'NODE_ENV'>): boolean {
   return (env.MAIL_JOB ?? (env.NODE_ENV === 'production' ? 'on' : 'off')) === 'on';
+}
+
+/** Работает ли ежедневная сверка внешних рейтингов: по умолчанию — как уведомления. */
+export function externalRatingsJobEnabled(env: Pick<Env, 'EXTERNAL_RATINGS_JOB' | 'NODE_ENV'>): boolean {
+  return (env.EXTERNAL_RATINGS_JOB ?? (env.NODE_ENV === 'production' ? 'on' : 'off')) === 'on';
+}
+
+/** Читать ли RTTW: только явным RTTW_FETCH=on — его robots.txt закрывает весь сайт. */
+export function rttwFetchEnabled(env: Pick<Env, 'RTTW_FETCH'>): boolean {
+  return env.RTTW_FETCH === 'on';
 }
 
 /** Адрес сайта для ссылок в сообщениях, без косой черты в конце. */

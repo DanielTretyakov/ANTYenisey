@@ -9,6 +9,7 @@
 import type { BookingStatus } from './booking';
 import type { PaidBySubscription } from './subscription';
 import type { Gender } from './auth';
+import type { EventRestrictions, RatingSystem } from './eligibility';
 import type { WorkingHours } from './working-hours';
 
 /**
@@ -116,6 +117,12 @@ export interface FavouriteCoach {
   /** Ближайшее его занятие в любом клубе; null — впереди ничего нет. */
   next: FeedEvent | null;
 }
+
+/**
+ * Тренер в поиске «Моих тренеров» (кабинет): кого можно отметить. Те же поля,
+ * что у избранного, без ближайшего занятия — выдача ищет, а не планирует.
+ */
+export type CoachSearchItem = Omit<FavouriteCoach, 'next'>;
 
 /** Сколько избранных тренеров показывает стартовая; остальные — в кабинете. */
 export const START_PAGE_COACHES = 6;
@@ -237,6 +244,14 @@ export interface ClubEvent {
    * всегда пусто.
    */
   ratingLabel: string | null;
+  /** Чей рейтинг у планки — RTTW, RTTF, ФНТР; тоже справка. У занятия пусто. */
+  ratingSystem: RatingSystem | null;
+  /**
+   * Кто может записаться — возраст и пол вида (решение владельца от
+   * 20.10.2026). Проверяет сервер при записи; здесь — чтобы показать «для
+   * кого» до нажатия кнопки.
+   */
+  restrictions: EventRestrictions;
   startsAt: string;
   endsAt: string;
   /** Тренер занятия. У турнира пусто. */
@@ -300,6 +315,9 @@ export interface ClubCatalogItem {
   price: number;
   /** Справочная планка рейтинга турнира; у занятия пусто. */
   ratingLabel: string | null;
+  ratingSystem: RatingSystem | null;
+  /** Кто может записаться — возраст и пол вида. */
+  restrictions: EventRestrictions;
   /** Ближайшее проведение; пусто — в расписании его пока нет. */
   nextStartsAt: string | null;
   /** Пояс зала ближайшего проведения — его время показывается по нему. */

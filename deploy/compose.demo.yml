@@ -65,6 +65,8 @@ services:
       # Ни сообщений, ни писем, ни оплаты: на демо выдуманные люди.
       NOTIFICATIONS_JOB: 'off'
       BILLING_JOB: 'off'
+      # Внешние рейтинги не ищем: люди демо выдуманы.
+      EXTERNAL_RATINGS_JOB: 'off'
       MAX_BOT_TOKEN: ''
       SMTP_URL: ''
       YOOKASSA_SHOP_ID: ''

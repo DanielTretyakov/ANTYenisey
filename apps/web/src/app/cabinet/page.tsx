@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { PublicPlayer } from '@yenisey/types';
+import type { MyExternalRatings, PublicPlayer } from '@yenisey/types';
 import { sectionHref } from '@/components/cabinet/sections';
 import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { AppShell } from '@/components/layout/AppShell';
@@ -67,6 +67,47 @@ export default function CabinetPage() {
   const child = family.selected;
   const readOnly = !child && user !== null && isChildBirthDate(user.birthDate);
 
+  // «Выберите себя» у плашек рейтингов (решение владельца от 20.10.2026).
+  // Ребёнок до 14 сам не выбирает — за него родитель, переключателем.
+  const [mine, setMine] = useState<MyExternalRatings | null>(null);
+  const [claiming, setClaiming] = useState(false);
+  const forPerson = child?.id ?? null;
+  const userId = user?.id ?? null;
+
+  useEffect(() => {
+    if (!userId || readOnly) return;
+
+    let cancelled = false;
+    setMine(null);
+
+    api
+      .myExternalRatings(forPerson)
+      .then((found) => {
+        if (!cancelled) setMine(found);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, readOnly, forPerson]);
+
+  async function changeClaim(action: () => Promise<MyExternalRatings>): Promise<void> {
+    if (!playerId) return;
+
+    setClaiming(true);
+    setError(null);
+
+    try {
+      setMine(await action());
+      setPlayer(await api.player(playerId));
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
+    } finally {
+      setClaiming(false);
+    }
+  }
+
   return (
     <AppShell footer="line">
       {user && family.children.length > 0 && (
@@ -81,6 +122,17 @@ export default function CabinetPage() {
         <PlayerPublicView
           player={player}
           eyebrow={child ? 'Страница игрока — так её видят другие' : 'Моя страница игрока — так её видят другие'}
+          ownRatings={
+            mine
+              ? {
+                  mine,
+                  busy: claiming,
+                  onClaim: (system, externalId) =>
+                    void changeClaim(() => api.claimExternalRating(system, externalId, forPerson)),
+                  onUnclaim: (system) => void changeClaim(() => api.unclaimExternalRating(system, forPerson)),
+                }
+              : undefined
+          }
           actions={
             <Link href={sectionHref('player', child?.id ?? null)}>
               <Button variant={readOnly ? 'secondary' : 'primary'}>

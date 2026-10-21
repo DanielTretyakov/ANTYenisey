@@ -93,6 +93,11 @@ services:
       # записи клуба, поэтому и здесь выключена, пока её не включат явно.
       BILLING_JOB: ${BILLING_JOB:-off}
       BILLING_JOB_INTERVAL: ${BILLING_JOB_INTERVAL:-10m}
+      # Рейтинги ФНТР (и RTTW) в профиле игрока — сверка раз в сутки. RTTW
+      # закрыт его robots.txt, поэтому выключен, пока не включат явно.
+      EXTERNAL_RATINGS_JOB: ${EXTERNAL_RATINGS_JOB:-on}
+      EXTERNAL_RATINGS_JOB_INTERVAL: ${EXTERNAL_RATINGS_JOB_INTERVAL:-24h}
+      RTTW_FETCH: ${RTTW_FETCH:-off}
       # Магазин ЮKassa. Пусто — оплата картой выключена, по счёту работает.
       YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
       YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}

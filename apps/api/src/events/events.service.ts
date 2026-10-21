@@ -6,7 +6,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AuditAction, BookingSource, BookingStatus, Prisma } from '@yenisey/database';
-import { isStaff, type BookingEntry, type ClubCatalogItem, type ClubEvent, type EventDetail, type EventKind } from '@yenisey/types';
+import {
+  eligibilityProblem,
+  isStaff,
+  unrestricted,
+  type BookingEntry,
+  type ClubCatalogItem,
+  type ClubEvent,
+  type EventDetail,
+  type EventKind,
+  type EventRestrictions,
+} from '@yenisey/types';
+import { BIRTH_PLACEHOLDER } from '../club/people-filter';
 import { cancellationOpen, cancellationPercent } from '../booking/availability';
 import {
   catalogItem,
@@ -17,6 +28,9 @@ import {
   CLUB_ZONE_SELECT,
   eventZone,
   HALL_NAME_SELECT,
+  RESTRICTIONS_SELECT,
+  restrictionsOf,
+  TOURNAMENT_RULES_SELECT,
   TYPE_HALLS_SELECT,
   tournamentDetail,
   tournamentEvent,
@@ -219,7 +233,14 @@ export class EventsService {
     const [trainingTypes, tournamentTypes, trainingNext, tournamentNext] = await Promise.all([
       this.prisma.trainingType.findMany({
         where: { tenantId, isActive: true },
-        select: { id: true, name: true, description: true, price: true, halls: { select: { hallId: true } } },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          price: true,
+          ...RESTRICTIONS_SELECT,
+          halls: { select: { hallId: true } },
+        },
       }),
       this.prisma.tournamentType.findMany({
         where: { tenantId, isActive: true },
@@ -228,7 +249,7 @@ export class EventsService {
           name: true,
           description: true,
           price: true,
-          ratingLabel: true,
+          ...TOURNAMENT_RULES_SELECT,
           halls: { select: { hallId: true } },
         },
       }),
@@ -395,6 +416,7 @@ export class EventsService {
       throw new BadRequestException(kind === 'TRAINING' ? 'Запись на это занятие закрыта' : 'Запись на этот турнир закрыта');
     }
 
+    await this.assertEligible(clientId, kind, event);
     await this.assertStaffMayJoin(tenantId, clientId, event.startsAt, event.coachId);
     await this.membership.ensureClient(tenantId, clientId);
 
@@ -515,9 +537,13 @@ export class EventsService {
     cancelledAt: Date | null;
     typeId: string;
     coachId: string | null;
+    name: string;
     price: number;
     isActive: boolean;
+    restrictions: EventRestrictions;
   }> {
+    const typeSelect = { select: { name: true, price: true, isActive: true, ...RESTRICTIONS_SELECT } } as const;
+
     if (kind === 'TRAINING') {
       const session = await this.prisma.trainingSession.findFirst({
         where: { id, tenantId },
@@ -527,13 +553,18 @@ export class EventsService {
           cancelledAt: true,
           trainingTypeId: true,
           coachId: true,
-          trainingType: { select: { price: true, isActive: true } },
+          trainingType: typeSelect,
         },
       });
 
       if (!session) throw new NotFoundException('Занятие не найдено');
 
-      return { ...session, typeId: session.trainingTypeId, ...session.trainingType };
+      return {
+        ...session,
+        typeId: session.trainingTypeId,
+        ...session.trainingType,
+        restrictions: restrictionsOf(session.trainingType),
+      };
     }
 
     const tournament = await this.prisma.tournament.findFirst({
@@ -543,13 +574,57 @@ export class EventsService {
         startsAt: true,
         cancelledAt: true,
         tournamentTypeId: true,
-        tournamentType: { select: { price: true, isActive: true } },
+        tournamentType: typeSelect,
       },
     });
 
     if (!tournament) throw new NotFoundException('Турнир не найден');
 
-    return { ...tournament, typeId: tournament.tournamentTypeId, coachId: null, ...tournament.tournamentType };
+    return {
+      ...tournament,
+      typeId: tournament.tournamentTypeId,
+      coachId: null,
+      ...tournament.tournamentType,
+      restrictions: restrictionsOf(tournament.tournamentType),
+    };
+  }
+
+  /**
+   * Подходит ли участник виду по возрасту и полу (решения владельца от
+   * 20.10.2026). Один путь на самозапись, запись родителем и запись клубом по
+   * звонку — обхода нет ни у кого. Дата рождения-заглушка старых учёток
+   * (`1900-01-01`) — «неизвестна», а не «126 лет»: иначе отказ говорил бы
+   * неправду.
+   */
+  private async assertEligible(
+    clientId: string,
+    kind: EventKind,
+    event: { name: string; startsAt: Date; restrictions: EventRestrictions },
+  ): Promise<void> {
+    if (unrestricted(event.restrictions)) {
+      return;
+    }
+
+    const person = await this.prisma.user.findUnique({
+      where: { id: clientId },
+      select: { birthDate: true, gender: true },
+    });
+
+    if (!person) {
+      throw new NotFoundException('Человек не найден');
+    }
+
+    const birthDate = person.birthDate.toISOString().slice(0, 10) === BIRTH_PLACEHOLDER ? null : person.birthDate;
+    const problem = eligibilityProblem(
+      { name: event.name, kind },
+      event.restrictions,
+      { birthDate, gender: person.gender },
+      event.startsAt,
+    );
+
+    if (problem) {
+      throw new ForbiddenException(problem);
+    }
   }
 
   /**

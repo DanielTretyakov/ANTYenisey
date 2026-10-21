@@ -100,7 +100,7 @@ interface ClubDef {
   values: { title: string; text: string }[];
   halls: HallDef[];
   coaches: { name: string; gender: 'MALE' | 'FEMALE'; born: string; halls?: number[]; group: number; individual: number; achievements: string; inventory: string }[];
-  trainingTypes: { name: string; price: number; description: string; halls?: number[] }[];
+  trainingTypes: { name: string; price: number; description: string; halls?: number[]; ages?: [number, number] }[];
   tournamentTypes: { name: string; price: number; rating?: string; description: string }[];
   plans: { name: string; trainings: number[]; tournaments: number[]; rental?: boolean; variants: { visits: number | null; days: number | null; price: number }[] }[];
   trainings: TrainingSlot[];
@@ -144,7 +144,7 @@ const CLUBS: ClubDef[] = [
     trainingTypes: [
       { name: 'Общая групповая тренировка', price: 700, description: 'Для тех, кто уже держит ракетку: разминка, отработка ударов в парах, игровая практика. Уровень — от начального до продвинутого.' },
       { name: 'Первая подача (для начинающих)', price: 600, description: 'С нуля: хватка, стойка, базовые удары и подача. Ракетку дадим, приходите в спортивной обуви.' },
-      { name: 'Детская тренировка', price: 500, description: 'Для детей 7–13 лет: координация, техника, игры. Группы по возрасту и уровню.' },
+      { name: 'Детская тренировка', price: 500, ages: [7, 13], description: 'Для детей 7–13 лет: координация, техника, игры. Группы по возрасту и уровню.' },
       { name: 'Тренировка с роботом', price: 800, description: 'Отработка ударов с роботом под присмотром тренера. Группа до четырёх человек.', halls: [0] },
     ],
     tournamentTypes: [
@@ -207,7 +207,7 @@ const CLUBS: ClubDef[] = [
     trainingTypes: [
       { name: 'Групповая тренировка', price: 650, description: 'Взрослая группа: техника, тактика, игровая практика.' },
       { name: 'Женская группа', price: 600, description: 'Группа для девушек и женщин любого уровня.', halls: [0] },
-      { name: 'Детская секция', price: 450, description: 'Для детей 7–13 лет: игры, техника и первые соревнования.' },
+      { name: 'Детская секция', price: 450, ages: [7, 13], description: 'Для детей 7–13 лет: игры, техника и первые соревнования.' },
     ],
     tournamentTypes: [
       { name: 'Турнир выходного дня', price: 600, description: 'Воскресный турнир для всех: группы и плей-офф.' },
@@ -258,7 +258,7 @@ const CLUBS: ClubDef[] = [
     ],
     trainingTypes: [
       { name: 'Общая тренировка', price: 550, description: 'Взрослая группа любого уровня.' },
-      { name: 'Детская группа', price: 400, description: 'Для детей 7–13 лет.' },
+      { name: 'Детская группа', price: 400, ages: [7, 13], description: 'Для детей 7–13 лет.' },
     ],
     tournamentTypes: [
       { name: 'Открытый турнир', price: 500, description: 'Субботний турнир для всех желающих.' },
@@ -303,7 +303,7 @@ const CLUBS: ClubDef[] = [
     ],
     trainingTypes: [
       { name: 'Групповая тренировка', price: 700, description: 'Взрослая группа: техника и игровая практика.' },
-      { name: 'Детская школа', price: 500, description: 'Дети 6–13 лет, группы по возрасту.' },
+      { name: 'Детская школа', price: 500, ages: [6, 13], description: 'Дети 6–13 лет, группы по возрасту.' },
       { name: 'Тактика и подача', price: 750, description: 'Для играющих: подача, приём, тактические схемы.', halls: [0] },
     ],
     tournamentTypes: [
@@ -692,6 +692,12 @@ async function seedClub(def: ClubDef, staff: { ownerId: string; adminId: string;
     row ??= await prisma.trainingType.create({ data: { tenantId, name: type.name, price: type.price * RUB, description: type.description }, select: { id: true } });
     for (const hallIndex of type.halls ?? []) {
       await prisma.trainingTypeHall.createMany({ data: [{ trainingTypeId: row.id, hallId: halls[hallIndex]!.id, tenantId }], skipDuplicates: true });
+    }
+    // Детские группы — с настоящим ограничением возраста (20.10.2026): на демо
+    // видно «7–13 лет» в расписании и отказ взрослому. Ставится и уже
+    // заведённым видам — демо обновляется поверх прежних данных.
+    if (type.ages) {
+      await prisma.trainingType.update({ where: { id: row.id }, data: { minAge: type.ages[0], maxAge: type.ages[1] } });
     }
     trainingTypes.push({ id: row.id, price: type.price * RUB });
   }
@@ -1140,6 +1146,18 @@ async function main(): Promise<void> {
 
   // Новости платформы.
   for (const news of [
+    {
+      section: 'UPDATES' as const,
+      title: 'Найти игрока, рейтинги ФНТР в профиле и запись по возрасту',
+      body:
+        'Что нового на платформе:\n\n' +
+        '- **Найти игрока** — в шапке рядом с «Найти клуб». Игроки и тренеры всех клубов: фамилия, имя, год рождения, клуб, где человек чаще всего бывает, и рейтинги ФНТР, RTTW и RTTF. Ищите по фамилии, имени и году — например, «Иванов Пётр 1990».\n' +
+        '- **Рейтинги в профиле игрока** — под именем плашки ФНТР, RTTF и RTTW. Вводить ничего не нужно: раз в сутки сайт сам находит вас в рейтинге ФНТР по фамилии, имени и дате рождения. Если под ваши данные подходят несколько игроков, в кабинете появится «выберите себя». RTTW и RTTF подключаем.\n' +
+        '- **Кто может записаться** — клуб указывает у вида занятия или турнира возраст и пол: детская группа без взрослых, турнир к 8 марта только для женщин. Неподходящего не запишет ни сайт, ни администратор по звонку. У турнира можно указать и рейтинг с системой — RTTW, RTTF или ФНТР.\n' +
+        '- **Поиск тренеров в кабинете** — в разделе «Клубы, тренеры и семья» тренера можно найти по фамилии и добавить в «Мои тренеры».\n\n' +
+        'Не хотите, чтобы вас находили? Отметьте «Не показывать меня в рейтингах» — флажок прячет и из поиска игроков.',
+      daysAgo: 0,
+    },
     { section: 'UPDATES' as const, title: 'Новая страница клуба', body: 'Расписание по дням, фильтр по залам, карточки тренеров во весь рост и залы с адресами и ценами.\n\n- фильтр «Все залы» в расписании\n- тренеры и мероприятия — карточками\n- бронь стола в два щелчка', daysAgo: 1 },
     { section: 'GENERAL' as const, title: 'В КНТ уже четыре клуба', body: 'К платформе присоединился КНТ «Байкал» из Иркутска. Записывайтесь на тренировки и турниры в любом клубе с одним аккаунтом.', daysAgo: 5 },
     { section: 'CLUBS' as const, title: 'Расписание персонала: шаблон недели', body: 'Руководители и управляющие задают обычную неделю смен, а замены — по дням.', daysAgo: 9 },

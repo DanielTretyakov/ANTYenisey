@@ -162,7 +162,13 @@ export class RatingService {
     return { month: view(tops.month), year: view(tops.year), all: view(tops.all), hiddenFromOthers };
   }
 
-  /** Выключатель «не показывать меня» — во всех клубах сразу. */
+  async hidden(userId: string): Promise<{ hidden: boolean }> {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { ratingHidden: true } });
+
+    return { hidden: user.ratingHidden };
+  }
+
+  /** Выключатель «не показывать меня» — во всех клубах сразу и в «Найти игрока». */
   async setHidden(userId: string, hidden: boolean): Promise<{ hidden: boolean }> {
     const user = await this.prisma.user.update({
       where: { id: userId },

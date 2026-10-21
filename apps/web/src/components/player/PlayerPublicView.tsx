@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import type { PublicPlayer } from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
+import { ExternalRatings, type OwnRatings } from './ExternalRatings';
 import { AchievementList, EquipmentList, PlayerAvatar, RankLine } from './PlayerView';
 import { PlayerVisitsCard } from './PlayerVisitsCard';
 
@@ -19,8 +20,11 @@ export function PlayerPublicView({
   player,
   eyebrow = 'Игрок',
   actions,
+  ownRatings,
 }: {
   player: PublicPlayer;
+  /** В кабинете — «выберите себя» и «это не я» у плашек рейтингов. */
+  ownRatings?: OwnRatings;
   /** Подпись над именем: «Игрок» на открытой странице, другое — в кабинете. */
   eyebrow?: string;
   /** Кнопки справа от имени — в кабинете там «Редактировать профиль». */
@@ -39,6 +43,7 @@ export function PlayerPublicView({
         <div className="min-w-0 grow">
           <p className="text-[0.75rem] tracking-[0.1em] text-text-subtle uppercase">{eyebrow}</p>
           <h1 className="mt-1 text-[2rem] leading-tight break-words">{player.name}</h1>
+          <ExternalRatings ratings={player.externalRatings} own={ownRatings} />
         </div>
         {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
       </header>

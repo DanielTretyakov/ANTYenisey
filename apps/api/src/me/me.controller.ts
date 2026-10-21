@@ -1,6 +1,14 @@
-import { Controller, Delete, Get, Param, Put } from '@nestjs/common';
-import type { AccessTokenPayload, BookingEntry, FavouriteClub, FavouriteCoach, FeedEvent } from '@yenisey/types';
+import { Controller, Delete, Get, Param, Put, Query } from '@nestjs/common';
+import type {
+  AccessTokenPayload,
+  BookingEntry,
+  CoachSearchItem,
+  FavouriteClub,
+  FavouriteCoach,
+  FeedEvent,
+} from '@yenisey/types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CoachSearchDto } from './dto/coach-search.dto';
 import { EntriesService } from '../entries/entries.service';
 import { Acting, ClientAction, type ActingClient } from '../guardianship/acting-client.guard';
 import { FavouriteCoachesService } from './favourite-coaches.service';
@@ -54,6 +62,12 @@ export class MeController {
   @Get('coaches')
   favouriteCoaches(@CurrentUser() user: AccessTokenPayload): Promise<FavouriteCoach[]> {
     return this.coaches.list(user.sub);
+  }
+
+  /** Найти тренера, чтобы отметить, — по ФИО, среди видимых в открытых клубах. */
+  @Get('coaches/search')
+  searchCoaches(@CurrentUser() user: AccessTokenPayload, @Query() query: CoachSearchDto): Promise<CoachSearchItem[]> {
+    return this.coaches.search(user.sub, query.query);
   }
 
   /** Отметить тренера. PUT, как у клуба: повтор ничего не меняет. */

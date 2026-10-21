@@ -102,7 +102,12 @@ export function ClubBar({ slug, page }: { slug: string; page?: SectionNavState }
   }, [slug]);
 
   const sections = clubSections(session.status === 'ready' ? session.user : null, slug);
-  const current = [...sections].reverse().find((section) => pathname === section.href || pathname.startsWith(`${section.href}/`));
+  // Самое длинное совпадение, а не первое и не последнее: «Мои группы»
+  // (`/coach/groups`) лежат под «Моей карточкой» (`/coach`), и по порядку
+  // списка подсвечивалась карточка.
+  const current = sections
+    .filter((section) => pathname === section.href || pathname.startsWith(`${section.href}/`))
+    .reduce<(typeof sections)[number] | undefined>((best, section) => (!best || section.href.length > best.href.length ? section : best), undefined);
 
   return (
     <div className={cn('border-t border-border bg-surface/95', CLUB_BAR_HEIGHT)}>

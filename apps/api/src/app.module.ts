@@ -20,6 +20,7 @@ import { PeopleModule } from './people/people.module';
 import { PlayersModule } from './players/players.module';
 import { NewsModule } from './news/news.module';
 import { BillingModule } from './billing/billing.module';
+import { ExternalRatingsModule } from './external-ratings/external-ratings.module';
 import { ClubApplicationsModule } from './club-applications/club-applications.module';
 import { ClubSetupModule } from './club-setup/club-setup.module';
 import { MailModule } from './mail/mail.module';
@@ -88,6 +89,7 @@ import { validateEnv, type Env } from './config/env';
     TenantsModule,
     NewsModule,
     BillingModule,
+    ExternalRatingsModule,
     ClubApplicationsModule,
     ClubSetupModule,
     MailModule,

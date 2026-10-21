@@ -1963,3 +1963,56 @@ DO $$ BEGIN
   INSERT INTO "EmailSuppression" (email,scope,reason) VALUES ('ivan@mail.ru','NEWS','UNSUBSCRIBE');
   RAISE NOTICE 'GS. Письмо в очереди и отписка................ OK (ожидалось)';
 EXCEPTION WHEN others THEN RAISE NOTICE 'GS. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- ---------------------------------------------------------------------------
+-- 49. Кто может записаться (решения владельца от 20.10.2026)
+-- ---------------------------------------------------------------------------
+
+-- GT. Возраст «с 14 до 10» — на такое занятие не запишется никто.
+SELECT pg_temp.expect('GT',
+  $q$UPDATE "TrainingType" SET "minAge" = 14, "maxAge" = 10 WHERE id = 'tt1'$q$,
+  '23514', 'TrainingType_restrictions_sane');
+
+-- GU. Система рейтинга без самой планки: «рейтинг ФНТР» без числа.
+SELECT pg_temp.expect('GU',
+  $q$UPDATE "TournamentType" SET "ratingSystem" = 'FNTR', "ratingLabel" = NULL WHERE id = 'tt_cn'$q$,
+  '23514', 'TournamentType_restrictions_sane');
+
+-- GV. Детская группа 7–13 и женский турнир с планкой ФНТР — законно.
+DO $$ BEGIN
+  UPDATE "TrainingType" SET "minAge" = 7, "maxAge" = 13 WHERE id = 'tt1';
+  UPDATE "TournamentType" SET "gender" = 'FEMALE', "ratingSystem" = 'FNTR', "ratingLabel" = '100' WHERE id = 'tt_cn';
+  RAISE NOTICE 'GV. Детская группа и женский турнир........... OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'GV. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- ---------------------------------------------------------------------------
+-- 50. Рейтинги во внешних системах (решения владельца от 20.10.2026)
+-- ---------------------------------------------------------------------------
+
+-- GW. Id источника уходит в адрес ссылки — с пробелом или «/» его нет.
+SELECT pg_temp.expect('GW',
+  $q$INSERT INTO "ExternalRating" ("userId",system,"externalId",rating) VALUES ('c1','RTTW','../evil',300)$q$,
+  '23514', 'ExternalRating_values_sane');
+
+-- GX. Место ноль не бывает.
+SELECT pg_temp.expect('GX',
+  $q$INSERT INTO "ExternalRating" ("userId",system,"externalId",rating,place) VALUES ('c1','FNTR','9',2219,0)$q$,
+  '23514', 'ExternalRating_values_sane');
+
+-- GY. Рейтинг ФНТР и RTTW у одного человека — законно, по строке на систему.
+DO $$ BEGIN
+  INSERT INTO "ExternalRating" ("userId",system,"externalId",rating,place,"asOf") VALUES ('c1','FNTR','9',2219,1,'2026-10-01');
+  INSERT INTO "ExternalRating" ("userId",system,"externalId",rating) VALUES ('c1','RTTW','79aacdc',291);
+  RAISE NOTICE 'GY. Рейтинги ФНТР и RTTW у игрока............. OK (ожидалось)';
+EXCEPTION WHEN others THEN RAISE NOTICE 'GY. ПРОВАЛ: %', SQLERRM; END $$;
+
+-- GZ. «Это я!»: профиль ФНТР '9' закрепил c1 — второй человек его не закрепит.
+UPDATE "ExternalRating" SET "claimedAt" = now() WHERE "userId" = 'c1' AND system = 'FNTR';
+SELECT pg_temp.expect('GZ',
+  $q$INSERT INTO "ExternalRating" ("userId",system,"externalId",rating,"claimedAt") VALUES ('u2','FNTR','9',2219,now())$q$,
+  '23505', 'ExternalRating_one_claim');
+
+-- HA. Вариант «выберите себя» без имени — узнать себя не по чему.
+SELECT pg_temp.expect('HA',
+  $q$INSERT INTO "ExternalRatingChoice" ("userId",system,"externalId",name,rating) VALUES ('c1','RTTW','abc','  ',300)$q$,
+  '23514', 'ExternalRatingChoice_values_sane');

@@ -9,6 +9,7 @@ import {
   RankReviewController,
 } from './players.controller';
 import { PlayersService } from './players.service';
+import { PlayerSearchService } from './player-search.service';
 import { RankReviewService } from './rank-review.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { RatingModule } from '../rating/rating.module';
@@ -23,7 +24,7 @@ import { RatingModule } from '../rating/rating.module';
 @Module({
   imports: [FilesModule, GuardianshipModule, NotificationsModule, RatingModule],
   controllers: [MePlayerController, PlayersController, PlayerFilesController, RankReviewController],
-  providers: [PlayersService, PlayerAccess, RankReviewService],
+  providers: [PlayersService, PlayerAccess, RankReviewService, PlayerSearchService],
   exports: [PlayersService],
 })
 export class PlayersModule {}

@@ -30,7 +30,7 @@ const RULES: Rule[] = [
   { match: club('/people'), slugs: ['lyudi-kluba', 'roli-sotrudnikov', 'rebyonok-uchyotka', 'profil-igroka'] },
   { match: club('/settings'), slugs: ['nastrojki-v-polnoch', 'otkrytie-kluba', 'roli-sotrudnikov', 'podpiska-knt'] },
   { match: club('/billing'), slugs: ['podpiska-knt'] },
-  { match: club('/catalog'), slugs: ['otmena-provedeniya', 'raspisanie-zala'] },
+  { match: club('/catalog'), slugs: ['kto-mozhet-zapisatsya', 'otmena-provedeniya', 'raspisanie-zala'] },
   // Тренер.
   { match: club('/coach/groups'), slugs: ['moi-gruppy', 'statistika-trenera', 'sparring'] },
   { match: club('/coach'), slugs: ['kartochka-trenera', 'moi-gruppy', 'sparring'] },
@@ -49,7 +49,8 @@ const RULES: Rule[] = [
   { match: exact('/cabinet/edit/clubs'), slugs: ['najti-klub', 'moi-trenery', 'rebyonok-uchyotka', 'rebyonku-14'] },
   { match: under('/cabinet'), slugs: ['profil-igroka', 'odin-akkaunt', 'rebyonok-uchyotka', 'abonement', 'uvedomleniya'] },
   { match: under('/coaches'), slugs: ['moi-trenery', 'kartochka-trenera', 'zapis-na-zanyatie'] },
-  { match: under('/players'), slugs: ['profil-igroka', 'rejting'] },
+  { match: exact('/players'), slugs: ['najti-igroka', 'profil-igroka', 'rejting'] },
+  { match: under('/players'), slugs: ['profil-igroka', 'najti-igroka', 'rejting'] },
   { match: under('/for-clubs'), slugs: ['otkrytie-kluba', 'podpiska-knt', 'roli-sotrudnikov'] },
   { match: under('/platform'), slugs: ['otkrytie-kluba', 'podpiska-knt'] },
   { match: exact('/register'), slugs: ['odin-akkaunt', 'rebyonok-uchyotka'] },
