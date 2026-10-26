@@ -145,6 +145,7 @@ export class TenantsService {
         vkUrl: true,
         maxUrl: true,
         publishedAt: true,
+        paymentMode: true,
         platformSubscription: { select: { status: true } },
         // Состав — все действующие тренеры, кроме скрытых администратором
         // (решение владельца от 25.09.2026): новый тренер появляется на
@@ -215,6 +216,7 @@ export class TenantsService {
       otherCities: card.otherCities,
       logoFileId: card.logoFileId,
       suspended: tenant.platformSubscription?.status === 'SUSPENDED',
+      paymentMode: tenant.paymentMode,
       accentColor: card.accentColor,
       phone: tenant.phone,
       email: tenant.email,

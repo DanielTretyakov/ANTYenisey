@@ -1,5 +1,6 @@
 import { BookingStatus, type Gender, type RatingSystem } from '@yenisey/database';
 import type {
+  ClientPaymentMode,
   ClubCatalogItem,
   ClubEvent,
   ClubRef,
@@ -323,7 +324,8 @@ const PLACE_SELECT = {
   take: 1,
 } as const;
 
-const CLUB_REF_SELECT = { select: { slug: true, name: true, accentColor: true } } as const;
+/** Клуб окна мероприятия: ссылка на страницу и как он берёт деньги. */
+const DETAIL_CLUB_SELECT = { select: { slug: true, name: true, accentColor: true, paymentMode: true } } as const;
 
 export const TOURNAMENT_DETAIL_SELECT = {
   ...TOURNAMENT_EVENT_SELECT,
@@ -342,7 +344,7 @@ export const TOURNAMENT_DETAIL_SELECT = {
     select: { clientId: true, client: DETAIL_PARTICIPANT_SELECT },
   },
   dayClosures: PLACE_SELECT,
-  tenant: CLUB_REF_SELECT,
+  tenant: DETAIL_CLUB_SELECT,
   cancelReason: true,
 } as const;
 
@@ -357,7 +359,7 @@ export const TRAINING_DETAIL_SELECT = {
     select: { clientId: true, client: DETAIL_PARTICIPANT_SELECT },
   },
   dayClosures: PLACE_SELECT,
-  tenant: CLUB_REF_SELECT,
+  tenant: DETAIL_CLUB_SELECT,
   cancelReason: true,
 } as const;
 
@@ -382,7 +384,11 @@ type PlaceRow = {
   };
 };
 
-type DetailExtras = { dayClosures: PlaceRow[]; tenant: ClubRef; cancelReason: string | null };
+type DetailExtras = {
+  dayClosures: PlaceRow[];
+  tenant: ClubRef & { paymentMode: ClientPaymentMode };
+  cancelReason: string | null;
+};
 
 export function tournamentDetail(
   row: TournamentRow &
@@ -395,12 +401,13 @@ export function tournamentDetail(
 ): EventDetail {
   return {
     ...tournamentEvent(row, userId),
-    club: row.tenant,
+    club: clubRef(row.tenant),
     description: row.tournamentType.description,
     place: placeOf(row.dayClosures),
     coach: null,
     people: peopleOf(row.registrations, today),
     cancelReason: row.cancelReason,
+    paymentMode: row.tenant.paymentMode,
   };
 }
 
@@ -416,13 +423,19 @@ export function trainingDetail(
 ): EventDetail {
   return {
     ...trainingEvent(row, userId),
-    club: row.tenant,
+    club: clubRef(row.tenant),
     description: row.trainingType.description,
     place: placeOf(row.dayClosures),
     coach: { id: row.coach.userId, name: shortName(row.coach.membership.user.fullName) },
     people: peopleOf(row.bookings, today),
     cancelReason: row.cancelReason,
+    paymentMode: row.tenant.paymentMode,
   };
+}
+
+/** Ссылка на клуб — без лишнего: способ оплаты идёт своим полем. */
+function clubRef({ slug, name, accentColor }: ClubRef): ClubRef {
+  return { slug, name, accentColor };
 }
 
 function placeOf(rows: PlaceRow[]): EventPlace | null {

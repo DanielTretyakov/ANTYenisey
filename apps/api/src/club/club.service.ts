@@ -22,7 +22,14 @@ import type {
   UpdateHallRequest,
   WorkingHours,
 } from '@yenisey/types';
-import { adminHallsProblem, canEditHall, parseWorkingHours, readWorkingHours, type ClubActor } from '@yenisey/types';
+import {
+  adminHallsProblem,
+  canEditHall,
+  parseWorkingHours,
+  paymentModeProblem,
+  readWorkingHours,
+  type ClubActor,
+} from '@yenisey/types';
 import { FileIntake } from '../files/file-intake.service';
 import { FileStorage } from '../files/file-storage';
 import type { ClubContext } from '../auth/club-context';
@@ -62,6 +69,7 @@ const SETTINGS_SELECT = {
   attendanceReminderAfterMinutes: true,
   attendanceAutoNoShowAfterMinutes: true,
   subscriptionBurnsOnNoShowOnly: true,
+  paymentMode: true,
 } as const;
 
 const HALL_SELECT = {
@@ -135,6 +143,17 @@ export class ClubService {
       // повторены не ради надёжности, а ради формулировки: без этой проверки
       // администратор получил бы 500 и текст ошибки Postgres.
       throw new BadRequestException(violations);
+    }
+
+    // Онлайн и гибрид — только когда онлайн-оплата клиентов подключена:
+    // иначе клуб пообещал бы клиентам то, чего сайт не умеет. Прежнее
+    // значение, присланное формой целиком, — не выбор и не отказ.
+    if (patch.paymentMode !== undefined && patch.paymentMode !== current.paymentMode) {
+      const problem = paymentModeProblem(patch.paymentMode);
+
+      if (problem) {
+        throw new BadRequestException(problem);
+      }
     }
 
     const { values, vkUrl, maxUrl, ...rest } = patch;

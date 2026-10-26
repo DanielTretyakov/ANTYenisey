@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { openState, openStateLabel, type OpenState, type PublicTenant } from '@yenisey/types';
+import { PAYMENT_MODE_TITLE, openState, openStateLabel, type OpenState, type PublicTenant } from '@yenisey/types';
 import { RiverBackdrop } from '@/components/brand/RiverBackdrop';
 import { api, ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
@@ -159,6 +159,7 @@ function Facts({ tenant }: { tenant: PublicTenant }) {
         </span>
       )}
       {cheapest !== null && <span className={cn(pill, 'bg-white/15')}>стол от {formatKopecks(cheapest)}/час</span>}
+      <span className={cn(pill, 'bg-white/15')}>оплата: {PAYMENT_MODE_TITLE[tenant.paymentMode].toLowerCase()}</span>
       {open && (
         <span className={cn(pill, open.open ? 'bg-white text-ink-950' : 'bg-black/30 text-white/85')}>
           <span

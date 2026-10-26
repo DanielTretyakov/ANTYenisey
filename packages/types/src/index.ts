@@ -14,6 +14,7 @@ export * from './markup';
 export * from './names';
 export * from './news';
 export * from './numbers';
+export * from './payment-mode';
 export * from './notification';
 export * from './platform';
 export * from './player';

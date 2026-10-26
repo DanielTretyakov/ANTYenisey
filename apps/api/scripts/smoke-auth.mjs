@@ -358,16 +358,17 @@ async function main() {
     typeof r.body?.name === 'string' && r.body.name.length > 0,
   );
   assert(
-    'наружу отдана карточка клуба: код, название, черновик, города, оформление, контакты и соцсети, залы, описание, ценности и тренеры',
+    'наружу отдана карточка клуба: код, название, черновик, города, оформление, контакты и соцсети, залы, описание, ценности, тренеры и способ оплаты',
     Object.keys(r.body ?? {}).sort().join(',') ===
-      'accentColor,city,coaches,description,draft,email,halls,logoFileId,maxUrl,name,otherCities,phone,slug,suspended,values,vkUrl',
+      'accentColor,city,coaches,description,draft,email,halls,logoFileId,maxUrl,name,otherCities,paymentMode,phone,slug,suspended,values,vkUrl',
   );
   // Карточка в выдаче поиска отвечает до перехода (решение от 12.10.2026).
   {
     const found = (await call('/clubs?query=Енисей')).body?.find?.((club) => club.slug === 'yenisey');
+    // «Ближайшее» из карточки снято 17.10.2026 — его там быть не должно.
     assert(
-      'в выдаче поиска — стол «от», часы залов и ближайшее',
-      typeof found?.fromPrice === 'number' && Array.isArray(found?.hours) && 'next' in (found ?? {}),
+      'в выдаче поиска — стол «от» и часы залов, без ближайшего',
+      typeof found?.fromPrice === 'number' && Array.isArray(found?.hours) && !('next' in (found ?? {})),
     );
   }
   assert(
@@ -5135,7 +5136,7 @@ async function webPush() {
   await call('/dev/max/dispatch', { method: 'POST' });
 
   const delivered = await sentTo('a');
-  assert('дошло до браузера заголовком и текстом', delivered.at(-1)?.title === 'Енисей' && /Проверка связи/.test(delivered.at(-1)?.body ?? ''));
+  assert('дошло до браузера заголовком и текстом', delivered.at(-1)?.title === 'КНТ' && /Проверка связи/.test(delivered.at(-1)?.body ?? ''));
   assert('ведёт в настройки уведомлений', /\/cabinet#notifications$/.test(delivered.at(-1)?.url ?? ''));
 
   r = await asA('/me/notifications');
@@ -7536,6 +7537,23 @@ async function settingsRights() {
     check('и правило визита абонемента — тоже', 403, r.status);
     r = await asAdminProbe(`${club}/settings`, { method: 'PATCH', json: { noShowChargePercent: settings.noShowChargePercent, phone: settings.phone } });
     check('прежний процент рядом с другой правкой — не отказ', 200, r.status);
+
+    // --- Способ оплаты клиентов (решение от 26.10.2026): деньги клуба, и пока
+    // онлайн-оплаты нет — только «на месте».
+    assert('у клуба способ оплаты — «на месте»', settings.paymentMode === 'ON_SITE');
+    r = await asAdminProbe(`${club}/settings`, { method: 'PATCH', json: { paymentMode: 'HYBRID' } });
+    check('администратор способ оплаты не меняет', 403, r.status);
+    r = await asOwner(`${club}/settings`, { method: 'PATCH', json: { paymentMode: 'ONLINE' } });
+    check('онлайн без подключённой оплаты — отказ', 400, r.status);
+    r = await asOwner(`${club}/settings`, { method: 'PATCH', json: { paymentMode: 'HYBRID' } });
+    check('и гибрид — тоже', 400, r.status);
+    r = await asOwner(`${club}/settings`, { method: 'PATCH', json: { paymentMode: 'CASH' } });
+    check('выдуманный способ — отказ', 400, r.status);
+    r = await asAdminProbe(`${club}/settings`, { method: 'PATCH', json: { paymentMode: 'ON_SITE', phone: settings.phone } });
+    check('прежний способ рядом с другой правкой — не отказ', 200, r.status);
+    r = await asOwner(club);
+    check('карточка клуба открывается', 200, r.status);
+    assert('карточка клуба несёт способ оплаты', r.body?.paymentMode === 'ON_SITE');
 
     // --- Залы администратора (решение от 12.10.2026): без отметки — ни одного.
     r = await asAdminProbe(`${club}/halls/${other.id}`, { method: 'PATCH', json: { name: other.name } });

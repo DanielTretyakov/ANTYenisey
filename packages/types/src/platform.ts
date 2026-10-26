@@ -11,6 +11,7 @@ import type { PaidBySubscription } from './subscription';
 import type { Gender } from './auth';
 import type { EventRestrictions, RatingSystem } from './eligibility';
 import type { WorkingHours } from './working-hours';
+import type { ClientPaymentMode } from './payment-mode';
 
 /**
  * Город из справочника платформы.
@@ -383,4 +384,6 @@ export interface EventDetail extends ClubEvent {
    * на него нельзя.
    */
   cancelReason: string | null;
+  /** Как клуб берёт деньги — строкой у цены. */
+  paymentMode: ClientPaymentMode;
 }

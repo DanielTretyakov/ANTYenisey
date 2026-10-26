@@ -28,7 +28,7 @@ const RULES: Rule[] = [
   { match: club('/subscriptions'), slugs: ['abonementy-u-stojki', 'abonement', 'lyudi-kluba'] },
   { match: club('/posts'), slugs: ['lenta-kluba'] },
   { match: club('/people'), slugs: ['lyudi-kluba', 'roli-sotrudnikov', 'rebyonok-uchyotka', 'profil-igroka'] },
-  { match: club('/settings'), slugs: ['nastrojki-v-polnoch', 'otkrytie-kluba', 'roli-sotrudnikov', 'podpiska-knt'] },
+  { match: club('/settings'), slugs: ['nastrojki-v-polnoch', 'sposob-oplaty', 'otkrytie-kluba', 'roli-sotrudnikov', 'podpiska-knt'] },
   { match: club('/billing'), slugs: ['podpiska-knt'] },
   { match: club('/catalog'), slugs: ['kto-mozhet-zapisatsya', 'otmena-provedeniya', 'raspisanie-zala'] },
   // Тренер.

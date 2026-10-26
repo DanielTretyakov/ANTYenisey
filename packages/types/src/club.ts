@@ -21,6 +21,7 @@ import type { CoachInClub } from './coach';
 import type { ClubPersonFamily } from './family';
 import type { PlayerProfile } from './player';
 import type { ClientSubscription } from './subscription';
+import type { ClientPaymentMode } from './payment-mode';
 
 /**
  * Минимальный шаг брони стола. Набор закрытый: зал выбирает из вариантов,
@@ -98,6 +99,8 @@ export interface ClubSettings {
   attendanceAutoNoShowAfterMinutes: number;
   /** Визит абонемента сгорает только при неявке, а при отмене возвращается. */
   subscriptionBurnsOnNoShowOnly: boolean;
+  /** Как клиенты платят клубу: на месте, онлайн или на выбор. */
+  paymentMode: ClientPaymentMode;
 }
 
 /** Ценность клуба: короткий заголовок и пара строк пояснения. */

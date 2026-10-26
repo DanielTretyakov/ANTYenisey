@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { adminHallsProblem, moneyTouched, CLUB_MONEY_FIELDS, HALL_MONEY_FIELDS, type ClubActor, type Role } from '@yenisey/types';
+import {
+  adminHallsProblem,
+  moneyTouched,
+  paymentModeProblem,
+  CLUB_MONEY_FIELDS,
+  HALL_MONEY_FIELDS,
+  ONLINE_CLIENT_PAYMENTS_READY,
+  type ClubActor,
+  type Role,
+} from '@yenisey/types';
 import { changeRight, rightProblem } from './settings-rights.ts';
 
 const as = (...roles: Role[]): ClubActor => ({ userId: 'me', roles });
@@ -79,4 +88,19 @@ test('деньги в правке — только действительно �
     moneyTouched(HALL_MONEY_FIELDS, { robot30MinPrice: null, tableHourPrice: 40_000 }, { robot30MinPrice: null, tableHourPrice: 45_000 }),
     ['tableHourPrice'],
   );
+});
+
+test('способ оплаты клиентов — деньги клуба', () => {
+  assert.deepEqual(changeRight('CLUB', null, { data: { paymentMode: 'ON_SITE' } }), { right: 'clubMoney', hallId: null });
+  assert.deepEqual(moneyTouched(CLUB_MONEY_FIELDS, { paymentMode: 'ON_SITE' }, { paymentMode: 'ON_SITE' }), []);
+});
+
+test('онлайн и гибрид — только с подключённой онлайн-оплатой', () => {
+  assert.equal(paymentModeProblem('ON_SITE'), null);
+  // Пока ЮKassa для клиентов не подключена — отказ, а не обещание.
+  assert.equal(ONLINE_CLIENT_PAYMENTS_READY, false);
+  assert.match(paymentModeProblem('ONLINE') ?? '', /не подключена/);
+  assert.match(paymentModeProblem('HYBRID') ?? '', /не подключена/);
+  assert.equal(paymentModeProblem('ONLINE', true), null);
+  assert.equal(paymentModeProblem('HYBRID', true), null);
 });

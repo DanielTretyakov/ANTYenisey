@@ -1,7 +1,15 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { MAX_CLUB_VALUES, type ClubSettings, type ClubValue } from '@yenisey/types';
+import {
+  CLIENT_PAYMENT_MODES,
+  MAX_CLUB_VALUES,
+  PAYMENT_MODE_TITLE,
+  paymentModeAvailable,
+  type ClientPaymentMode,
+  type ClubSettings,
+  type ClubValue,
+} from '@yenisey/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -43,6 +51,7 @@ type FormState = {
   attendanceReminderAfterMinutes: string;
   attendanceAutoNoShowAfterMinutes: string;
   subscriptionBurnsOnNoShowOnly: boolean;
+  paymentMode: ClientPaymentMode;
 };
 
 function toForm(settings: ClubSettings): FormState {
@@ -60,6 +69,7 @@ function toForm(settings: ClubSettings): FormState {
     attendanceReminderAfterMinutes: String(settings.attendanceReminderAfterMinutes),
     attendanceAutoNoShowAfterMinutes: String(settings.attendanceAutoNoShowAfterMinutes),
     subscriptionBurnsOnNoShowOnly: settings.subscriptionBurnsOnNoShowOnly,
+    paymentMode: settings.paymentMode,
   };
 }
 
@@ -75,7 +85,7 @@ export function SettingsForm({
   onSaved,
 }: {
   initial: ClubSettings;
-  /** Процент неявки и правило абонемента — у руководства (решение от 11.10.2026). */
+  /** Процент неявки, правило абонемента и способ оплаты — у руководства (решение от 11.10.2026). */
   money: boolean;
   /** Название и оформление нужны шапке страницы — сообщаем наверх об изменении. */
   onSaved: (settings: ClubSettings) => void;
@@ -134,6 +144,7 @@ export function SettingsForm({
         attendanceReminderAfterMinutes,
         attendanceAutoNoShowAfterMinutes,
         subscriptionBurnsOnNoShowOnly: form.subscriptionBurnsOnNoShowOnly,
+        paymentMode: form.paymentMode,
       },
       baseline,
     );
@@ -289,6 +300,23 @@ export function SettingsForm({
 
       <Card>
         <CardHeader
+          title="Оплата"
+          description="Как клиенты платят клубу за занятия, турниры и аренду стола. Сроки отмены и неявки одни для любого способа."
+        />
+        <CardBody>
+          <PaymentModePicker
+            value={form.paymentMode}
+            disabled={!money}
+            onChange={(mode) => set('paymentMode', mode)}
+          />
+          {!money && (
+            <p className="mt-3 text-[0.8125rem] text-text-subtle">Меняют руководитель и управляющий клуба</p>
+          )}
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
           title="Присутствие и неявка"
           description="Что происходит, когда клиент не отменил бронь и не пришёл."
         />
@@ -342,6 +370,74 @@ export function SettingsForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+const PAYMENT_MODE_HINT: Record<ClientPaymentMode, string> = {
+  ON_SITE: 'Клиент записывается на сайте, а платит у стойки наличными или картой.',
+  ONLINE: 'Клиент платит картой на сайте при записи.',
+  HYBRID: 'Клиент сам выбирает при записи: оплатить онлайн или на месте.',
+};
+
+/**
+ * Способ оплаты клиентов (решение владельца от 26.10.2026). Онлайн и гибрид
+ * видны, но выбрать их нельзя, пока онлайн-оплата клиентов не подключена: тот
+ * же запрет стоит на сервере (`paymentModeProblem`).
+ */
+function PaymentModePicker({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: ClientPaymentMode;
+  disabled: boolean;
+  onChange: (mode: ClientPaymentMode) => void;
+}) {
+  return (
+    <fieldset className="grid gap-3 sm:grid-cols-3" disabled={disabled}>
+      <legend className="sr-only">Способ оплаты</legend>
+      {CLIENT_PAYMENT_MODES.map((mode) => {
+        const available = paymentModeAvailable(mode);
+
+        return (
+          <label
+            key={mode}
+            className={cn(
+              'relative flex gap-3 rounded-control border p-3.5 transition-colors',
+              value === mode ? 'border-[var(--accent)] bg-surface-accent-soft' : 'border-border',
+              available && !disabled ? 'cursor-pointer hover:border-border-strong' : 'cursor-not-allowed',
+              !available && 'opacity-60',
+            )}
+          >
+            <input
+              type="radio"
+              name="paymentMode"
+              value={mode}
+              checked={value === mode}
+              disabled={!available}
+              onChange={() => onChange(mode)}
+              className="mt-1 h-4 w-4 shrink-0 accent-accent"
+            />
+            <span className="min-w-0">
+              <span className="flex flex-wrap items-center gap-2 text-[0.9375rem] font-medium text-text">
+                {PAYMENT_MODE_TITLE[mode]}
+                {!available && (
+                  <span className="rounded-full bg-surface-sunken px-2 py-0.5 text-[0.75rem] font-normal text-text-muted">
+                    скоро
+                  </span>
+                )}
+              </span>
+              <span className="mt-1 block text-[0.8125rem] text-text-muted">{PAYMENT_MODE_HINT[mode]}</span>
+              {!available && (
+                <span className="mt-1 block text-[0.8125rem] text-text-subtle">
+                  Появится вместе с онлайн-оплатой на сайте.
+                </span>
+              )}
+            </span>
+          </label>
+        );
+      })}
+    </fieldset>
   );
 }
 

@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -12,7 +13,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import type { ClubValue, UpdateClubSettingsRequest } from '@yenisey/types';
+import { CLIENT_PAYMENT_MODES, type ClientPaymentMode, type ClubValue, type UpdateClubSettingsRequest } from '@yenisey/types';
 
 /**
  * Ценность клуба. Пределы длины здесь с запасом: точные и с понятной
@@ -147,4 +148,8 @@ export class UpdateClubSettingsDto implements UpdateClubSettingsRequest {
   @IsOptional()
   @IsBoolean()
   subscriptionBurnsOnNoShowOnly?: boolean;
+
+  @IsOptional()
+  @IsIn(CLIENT_PAYMENT_MODES, { message: 'Способ оплаты — на месте, онлайн или на выбор' })
+  paymentMode?: ClientPaymentMode;
 }

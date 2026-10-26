@@ -66,6 +66,12 @@ describe('changedFields', () => {
     ]);
   });
 
+  it('способ оплаты — словами, и он ждёт полуночи', () => {
+    const result = changedFields(CLUB_DEFERRED_FIELDS, { paymentMode: 'ON_SITE' }, { paymentMode: 'HYBRID' });
+    assert.deepEqual(result.data, { paymentMode: 'HYBRID' });
+    assert.deepEqual(result.lines, ['Оплата клиентов: на месте → онлайн или на месте']);
+  });
+
   it('оформление страницы в отложенные поля клуба не входит', () => {
     const result = changedFields(CLUB_DEFERRED_FIELDS, { description: 'а' }, { description: 'б', accentColor: '#000' });
     assert.deepEqual(result.data, {});

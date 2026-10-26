@@ -5,7 +5,9 @@ import { useRouter } from 'next/navigation';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BOOKING_HORIZON_DAYS,
+  PAYMENT_MODE_NOTE,
   type BookingQuote,
+  type ClientPaymentMode,
   type ClientBooking,
   type Hall,
   type PublicBlockKind,
@@ -27,7 +29,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
-import { ApiError } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { loginHref } from '@/lib/next';
 import { tintFill, tintMark } from '@/lib/personColor';
 import { rolesInClub } from '@/lib/membership';
@@ -99,6 +101,8 @@ export default function BookingPage() {
   const withStudent = sparring && student !== null && sparringTypeId !== '';
 
   const [halls, setHalls] = useState<Hall[] | null>(null);
+  // Как клуб берёт деньги — строкой под ценой. Не пришло — строки нет.
+  const [paymentMode, setPaymentMode] = useState<ClientPaymentMode | null>(null);
   const [hallId, setHallId] = useState('');
   const [date, setDate] = useState('');
   const [day, setDay] = useState<PublicDayBoard | null>(null);
@@ -126,6 +130,13 @@ export default function BookingPage() {
       })
       .catch((cause: unknown) => setError(messageOf(cause)));
   }, [club]);
+
+  useEffect(() => {
+    api
+      .tenant(slug)
+      .then((tenant) => setPaymentMode(tenant.paymentMode))
+      .catch(() => setPaymentMode(null));
+  }, [slug]);
 
   /**
    * Часовой пояс ВЫБРАННОГО ЗАЛА.
@@ -421,6 +432,10 @@ export default function BookingPage() {
                   оплачивается {formatDuration(quote.billedMinutes)}: начатые полчаса считаются
                   полными
                 </span>
+              )}
+              {/* Спарринг без ученика клиент не оплачивает — строка о способе ему ни к чему. */}
+              {paymentMode && (!sparring || withStudent) && (
+                <span className="mt-1 block text-[0.8125rem] text-text-muted">{PAYMENT_MODE_NOTE[paymentMode]}</span>
               )}
             </p>
 

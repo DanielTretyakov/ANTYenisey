@@ -5,9 +5,9 @@
  *
  * Чистый модуль без относительных импортов — его гоняет `node --test`.
  */
-import { formatRubles, readWorkingHours, workingHoursLines } from '@yenisey/types';
+import { PAYMENT_MODE_TITLE, formatRubles, readWorkingHours, workingHoursLines, type ClientPaymentMode } from '@yenisey/types';
 
-type Format = 'text' | 'money' | 'percent' | 'minutes' | 'bool' | 'step' | 'city' | 'hours';
+type Format = 'text' | 'money' | 'percent' | 'minutes' | 'bool' | 'step' | 'city' | 'hours' | 'payment';
 
 interface FieldSpec {
   label: string;
@@ -26,6 +26,7 @@ export const CLUB_DEFERRED_FIELDS: Record<string, FieldSpec> = {
   attendanceReminderAfterMinutes: { label: 'Напоминание об отметке', format: 'minutes' },
   attendanceAutoNoShowAfterMinutes: { label: 'Автонеявка', format: 'minutes' },
   subscriptionBurnsOnNoShowOnly: { label: 'Визит абонемента сгорает только при неявке', format: 'bool' },
+  paymentMode: { label: 'Оплата клиентов', format: 'payment' },
 };
 
 /** Поля зала. Код ФИАС и координаты не показываются — их несёт адрес. */
@@ -78,6 +79,8 @@ export function formatValue(format: Format, value: unknown, cities: Record<strin
       return cities[String(value)] ?? String(value);
     case 'hours':
       return workingHoursLines(readWorkingHours(value)).join(', ') || 'не заданы';
+    case 'payment':
+      return (PAYMENT_MODE_TITLE[String(value) as ClientPaymentMode] ?? String(value)).toLowerCase();
     default:
       return `«${String(value)}»`;
   }

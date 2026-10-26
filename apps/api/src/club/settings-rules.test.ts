@@ -28,6 +28,7 @@ function settings(overrides: Partial<ClubSettings> = {}): ClubSettings {
     attendanceReminderAfterMinutes: 60,
     attendanceAutoNoShowAfterMinutes: 1440,
     subscriptionBurnsOnNoShowOnly: true,
+    paymentMode: 'ON_SITE',
     ...overrides,
   };
 }

@@ -1,6 +1,7 @@
 import type { WorkingHours } from './working-hours';
 import type { ClubValue } from './club';
 import type { Gender } from './auth';
+import type { ClientPaymentMode } from './payment-mode';
 
 /**
  * Публичная карточка клуба.
@@ -53,6 +54,8 @@ export interface PublicTenant {
    * показывает им плашку «клуб не открыт».
    */
   draft: boolean;
+  /** Как клиенты платят клубу — строкой на обложке клуба. */
+  paymentMode: ClientPaymentMode;
   /**
    * Фирменный цвет, «#126b54». Страница клуба подменяет им акцент платформы;
    * пустой оставляет её в изумруде «Енисея».

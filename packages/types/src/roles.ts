@@ -131,7 +131,7 @@ export const HALL_MONEY_FIELDS = [
 ] as const;
 
 /** Поля настроек клуба, за которыми деньги. */
-export const CLUB_MONEY_FIELDS = ['noShowChargePercent', 'subscriptionBurnsOnNoShowOnly'] as const;
+export const CLUB_MONEY_FIELDS = ['noShowChargePercent', 'subscriptionBurnsOnNoShowOnly', 'paymentMode'] as const;
 
 /**
  * Какие из денежных полей правка действительно меняет: присланное, но равное

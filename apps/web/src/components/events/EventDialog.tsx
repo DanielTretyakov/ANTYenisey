@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   hasAnyRole,
   MANAGING_ROLES,
+  PAYMENT_MODE_NOTE,
   ratingNote,
   restrictionsLabel,
   type EventDetail,
@@ -146,10 +147,12 @@ export function EventDialog({
 
               <Fact label="Стоимость">
                 <span className="block font-display text-[1.0625rem]">{formatKopecks(event.price)}</span>
-                {event.payWith && !event.registered && (
+                {event.payWith && !event.registered ? (
                   <span className="block text-[0.875rem] text-text-muted">
                     спишется визит абонемента «{event.payWith.planName}»
                   </span>
+                ) : (
+                  <span className="block text-[0.875rem] text-text-muted">{PAYMENT_MODE_NOTE[event.paymentMode]}</span>
                 )}
               </Fact>
 
