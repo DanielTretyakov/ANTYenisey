@@ -288,7 +288,7 @@ export default function BookingPage() {
           withStudent ? { ...payload, studentId: student!.id, sparringTypeId } : payload,
         );
         // Тренер остаётся здесь: его спарринги живут на этой же странице, а в
-        // «Мои записи» не попадают — там записи клиента.
+        // «Мой календарь» не попадают — там записи клиента.
         setPick(null);
         loadDay();
         loadSparrings();
@@ -297,7 +297,7 @@ export default function BookingPage() {
 
       await club.createBooking(payload, family.forPerson);
 
-      // Записи уехали из кабинета в «Мои записи» — там же и свежая бронь; за
+      // Записи уехали из кабинета в «Мой календарь» — там же и свежая бронь; за
       // ребёнка — его записи.
       router.push(family.forPerson ? `/my-bookings?for=${family.forPerson}` : '/my-bookings');
     } catch (cause: unknown) {
@@ -466,7 +466,7 @@ export default function BookingPage() {
         <Card className="mt-6">
           <CardHeader
             title="Мои спарринги"
-            description="Спарринг с учеником виден ему в «Моих записях», и он платит цену типа спарринга. Без ученика стол записан на вас."
+            description="Спарринг с учеником виден ему в «Моём календаре», и он платит цену типа спарринга. Без ученика стол записан на вас."
           />
           <CardBody>
             {sparrings === null && <p className="text-[0.875rem] text-text-muted">Загружаем…</p>}

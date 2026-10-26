@@ -1,4 +1,5 @@
 import type { Gender } from './auth';
+import type { PublicRank } from './player';
 
 /**
  * Карточка тренера: фотография, достижения, инвентарь, соцсети.
@@ -24,6 +25,10 @@ export interface CoachCard {
   achievements: string | null;
   inventory: string | null;
   socialLinks: CoachSocialLink[];
+  /** «Обо мне» — простой текст с пометками (`parseMarkup`), до 2000 знаков. */
+  about: string | null;
+  /** С какого года тренирует; стаж — `coachingYearsLabel`. */
+  coachingSince: number | null;
 }
 
 /** Поле не прислано — не трогается; прислано пустым — стирается. */
@@ -31,6 +36,39 @@ export interface UpdateCoachCardRequest {
   achievements?: string | null;
   inventory?: string | null;
   socialLinks?: CoachSocialLink[];
+  about?: string | null;
+  coachingSince?: number | null;
+}
+
+/** Самый ранний год стажа — тот же предел держит CHECK `CoachCard_coaching_since_sane`. */
+export const EARLIEST_COACHING_YEAR = 1950;
+
+/** Отказ человеческими словами или `null` — год годится. Год из будущего — нет. */
+export function coachingSinceProblem(year: number, today: Date = new Date()): string | null {
+  if (!Number.isInteger(year) || year < EARLIEST_COACHING_YEAR || year > today.getFullYear()) {
+    return `Год начала стажа — от ${EARLIEST_COACHING_YEAR} до ${today.getFullYear()}`;
+  }
+
+  return null;
+}
+
+/**
+ * Стаж словами: «12 лет», «1 год», в год начала — «меньше года». Считается от
+ * года на сегодня — и сам растёт каждый январь.
+ */
+export function coachingYearsLabel(since: number, today: Date = new Date()): string {
+  const years = today.getFullYear() - since;
+
+  if (years < 1) {
+    return 'меньше года';
+  }
+
+  const mod10 = years % 10;
+  const mod100 = years % 100;
+  const word =
+    mod10 === 1 && mod100 !== 11 ? 'год' : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? 'года' : 'лет';
+
+  return `${years} ${word}`;
 }
 
 /**
@@ -68,6 +106,10 @@ export interface PublicCoach {
   achievements: string | null;
   inventory: string | null;
   socialLinks: CoachSocialLink[];
+  about: string | null;
+  coachingSince: number | null;
+  /** Разряд — как на странице игрока: отклонённого нет. */
+  rank: PublicRank | null;
   /** Клубы, где человек тренирует, с ценами в каждом. */
   clubs: CoachClub[];
 }

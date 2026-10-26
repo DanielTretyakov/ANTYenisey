@@ -14,11 +14,12 @@ import { dayKey, monthEnd, monthLabel, monthStart } from '@/lib/month';
 import { tintMark } from '@/lib/personColor';
 import { useClubApi } from '@/lib/useClubApi';
 import { weekDays, weekEnd, weekLabel, weekStart } from '@/lib/week';
+import { DayGroup, groupByDay } from './DayGroups';
 import { EventRow, KIND_PAINT, RowSkeleton, shortWhen } from './EventRow';
 import { MonthCalendar } from './MonthCalendar';
 import { HallMenu } from './HallMenu';
 import { SectionHeading } from './SectionHeading';
-import { dateIn, dayIn } from '@/lib/zonedTime';
+import { dayIn } from '@/lib/zonedTime';
 import { ViewerTime } from '@/components/events/FeedEventCard';
 
 /**
@@ -41,6 +42,9 @@ const KIND_MENUS: { kind: EventKind; label: string; all: string }[] = [
 export const UPCOMING_ANCHOR = 'raspisanie';
 
 const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+/** «Пн» … «Вс» — по дате, неделя с понедельника. */
+const dayName = (date: Date): string => DAY_NAMES[(date.getDay() + 6) % 7]!;
 /** Сколько месяцев вперёд листает календарь: дальше расписание не заводят. */
 const MONTHS_AHEAD = 5;
 /** Сколько ближайших проведений выбранного вида показать сверху. */
@@ -92,7 +96,9 @@ export function UpcomingEvents({
   const [open, setOpen] = useState<ClubEvent | null>(null);
 
   const [weekOffset, setWeekOffset] = useState(0);
-  const [day, setDay] = useState<number | null>(null);
+  // Выбранная вкладка дня: дата «2026-10-27», «вся неделя» или `null` — сама,
+  // первая из вкладок (ближайший день, где ещё есть на что записаться).
+  const [dayChoice, setDayChoice] = useState<string | 'week' | null>(null);
   const [query, setQuery] = useState('');
 
   const [monthOffset, setMonthOffset] = useState(0);
@@ -172,6 +178,24 @@ export function UpcomingEvents({
     !filter || (event.kind === filter.kind && (filter.typeId === null || event.typeId === filter.typeId));
   const inWindow = loaded === null ? null : loaded.filter(ofKind);
 
+  // Вкладки дней (решение владельца от 26.10.2026): первая — ближайший день,
+  // где ещё есть мероприятие, которое не началось; прошедшие дни и сегодня
+  // без оставшегося не показываются; «Вся неделя» — последней.
+  const firstDay =
+    inWindow === null
+      ? -1
+      : days.findIndex((date) =>
+          inWindow.some(
+            (event) => dayIn(event.startsAt, event.timezone) === dayKey(date) && Date.parse(event.startsAt) > Date.now(),
+          ),
+        );
+  const tabDays = firstDay === -1 ? [] : days.slice(firstDay).map((date) => ({ key: dayKey(date), date }));
+
+  const day =
+    dayChoice === 'week'
+      ? null
+      : (tabDays.find((tab) => tab.key === dayChoice) ?? tabDays[0] ?? null)?.key ?? null;
+
   const listed =
     inWindow === null
       ? null
@@ -181,7 +205,7 @@ export function UpcomingEvents({
               ? `${event.title} ${event.subtitle ?? ''}`.toLowerCase().includes(needle)
               // День мероприятия — по часам его зала: занятие в 01:00 по
               // Красноярску стоит в своём дне, а не в соседнем по Москве.
-              : day === null || dayIn(event.startsAt, event.timezone) === dayKey(days[day]!),
+              : day === null || dayIn(event.startsAt, event.timezone) === day,
           )
         : monthDay === null
           ? []
@@ -212,7 +236,8 @@ export function UpcomingEvents({
   // «Вся неделя» — по дням (решение владельца от 17.10.2026): дата один раз
   // у группы, по высоте посередине, у мероприятий — только время; дату от
   // мероприятий дня отделяет тонкая полоса. День — по часам зала мероприятия.
-  const grouped = view === 'week' && day === null && !searching;
+  // Вкладка одного дня — так же, одной группой (решение от 26.10.2026).
+  const grouped = view === 'week' && !searching;
 
   return (
     <section id={UPCOMING_ANCHOR} className="mb-16 scroll-mt-48">
@@ -222,7 +247,7 @@ export function UpcomingEvents({
           title="Предстоящие мероприятия"
           description={
             <>
-              Тренировки и турниры по дням, неделей или месяцем. Записаться можно прямо в строке. Фильтры ниже
+              Тренировки и турниры по дням, неделей или месяцем. «Записаться» откроет мероприятие — там подтвердите запись. Фильтры ниже
               оставляют только нужный вид, конкретное мероприятие или залы.
             </>
           }
@@ -296,11 +321,11 @@ export function UpcomingEvents({
               disabledForward={weekOffset >= 7 || searching}
               onBack={() => {
                 setWeekOffset((value) => value - 1);
-                setDay(null);
+                setDayChoice(null);
               }}
               onForward={() => {
                 setWeekOffset((value) => value + 1);
-                setDay(null);
+                setDayChoice(null);
               }}
             >
               <span className={cn(searching && 'text-text-subtle')}>
@@ -322,38 +347,29 @@ export function UpcomingEvents({
             </label>
           </div>
 
-          {!searching && (
+          {!searching && inWindow !== null && (
             <CompactSelect
               label="День"
-              value={day === null ? '' : String(day)}
+              value={day ?? 'week'}
               options={[
-                { value: '', label: 'Вся неделя' },
-                ...days.map((date, index) => ({
-                  value: String(index),
-                  label: `${DAY_NAMES[index]}, ${date.getDate()}${date < new Date(today.getFullYear(), today.getMonth(), today.getDate()) ? ' — прошёл' : ''}`,
-                })),
+                ...tabDays.map((tab) => ({ value: tab.key, label: `${dayName(tab.date)}, ${tab.date.getDate()}` })),
+                { value: 'week', label: 'Вся неделя' },
               ]}
-              onChange={(value) => setDay(value === '' ? null : Number(value))}
+              onChange={setDayChoice}
               className="sm:hidden"
             />
           )}
 
-          {!searching && (
+          {!searching && inWindow !== null && (
             <div className="hidden flex-wrap gap-1.5 sm:flex" role="tablist" aria-label="День недели">
-              <Tab inTablist active={day === null} onClick={() => setDay(null)}>
-                Вся неделя
-              </Tab>
-              {days.map((date, index) => (
-                <Tab key={date.toISOString()} inTablist active={day === index} onClick={() => setDay(index)}>
-                  <span
-                    className={cn(
-                      date < new Date(today.getFullYear(), today.getMonth(), today.getDate()) && 'opacity-50',
-                    )}
-                  >
-                    {DAY_NAMES[index]} {date.getDate()}
-                  </span>
+              {tabDays.map((tab) => (
+                <Tab key={tab.key} inTablist active={day === tab.key} onClick={() => setDayChoice(tab.key)}>
+                  {dayName(tab.date)} {tab.date.getDate()}
                 </Tab>
               ))}
+              <Tab inTablist active={day === null} onClick={() => setDayChoice('week')}>
+                Вся неделя
+              </Tab>
             </div>
           )}
         </div>
@@ -432,19 +448,10 @@ export function UpcomingEvents({
 
       {listed && listed.length > 0 && grouped && (
         <ul className="border-t border-border">
-          {byDay(listed).map((group) => (
-            <li key={group.key} className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 border-b border-border py-3 sm:grid-cols-[8.5rem_minmax(0,1fr)] sm:gap-x-5">
-              <div className="relative flex items-center pr-4">
-                <span aria-hidden="true" className="absolute inset-y-1 right-0 w-[3px] rounded-full bg-accent/70" />
-                <span className="block">
-                  <span className="block text-[0.75rem] tracking-[0.06em] text-text-subtle uppercase">{group.weekday}</span>
-                  <span className="block font-display text-[1rem] leading-tight text-text sm:text-[1.0625rem]">{group.date}</span>
-                </span>
-              </div>
-              <ul className="[&>li:last-child>div]:border-b-0 [&>li>div]:py-3.5">
-                {group.events.map((event) => row(event, true))}
-              </ul>
-            </li>
+          {groupByDay(listed).map((group) => (
+            <DayGroup key={group.key} weekday={group.weekday} date={group.date}>
+              {group.items.map((event) => row(event, true))}
+            </DayGroup>
           ))}
         </ul>
       )}
@@ -662,32 +669,4 @@ function KindMenu({
       )}
     </div>
   );
-}
-
-/**
- * Мероприятия недели, сложенные по дням — по часам зала каждого: занятие в
- * 01:00 по Красноярску стоит в своём дне, а не в соседнем по Москве. Порядок
- * дней и мероприятий внутри — как в списке (он уже по времени).
- */
-function byDay(events: readonly ClubEvent[]): { key: string; weekday: string; date: string; events: ClubEvent[] }[] {
-  const groups: { key: string; weekday: string; date: string; events: ClubEvent[] }[] = [];
-
-  for (const event of events) {
-    const key = dayIn(event.startsAt, event.timezone);
-    const last = groups[groups.length - 1];
-
-    if (last && last.key === key) {
-      last.events.push(event);
-      continue;
-    }
-
-    groups.push({
-      key,
-      weekday: dateIn(event.startsAt, event.timezone, { weekday: 'long' }),
-      date: dateIn(event.startsAt, event.timezone, { day: 'numeric', month: 'long' }),
-      events: [event],
-    });
-  }
-
-  return groups;
 }

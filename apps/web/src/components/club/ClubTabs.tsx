@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   availableInAny,
+  coachingYearsLabel,
+  publicRankLabel,
   ratingNote,
   restrictionsLabel,
   type ClubCatalogItem,
@@ -310,7 +312,6 @@ function CatalogTab({
   onShowSchedule: (item: ClubCatalogItem) => void;
 }) {
   const [kind, setKind] = useState<CatalogKind>('ALL');
-  const [showIdle, setShowIdle] = useState(false);
 
   if (!catalog) {
     return <CardsSkeleton />;
@@ -319,12 +320,13 @@ function CatalogTab({
   const count = (value: CatalogKind): number =>
     value === 'ALL' ? catalog.length : catalog.filter((item) => item.kind === value).length;
   const ofKind = kind === 'ALL' ? catalog : catalog.filter((item) => item.kind === kind);
-  // Виды без проведений впереди — свёрнуты (решение владельца от 11.10.2026):
-  // половина карточек «сейчас в расписании нет» прятала живые. Если живых нет
-  // вовсе — показываем, что есть, иначе вкладка была бы пустой.
-  const scheduled = ofKind.filter((item) => item.nextStartsAt !== null);
-  const idle = ofKind.filter((item) => item.nextStartsAt === null);
-  const shown = scheduled.length === 0 || showIdle ? ofKind : scheduled;
+  // Все виды сразу, чтобы число на вкладке совпадало с карточками (решение
+  // владельца от 26.10.2026; прежде виды без проведений сворачивались в «Ещё N
+  // без расписания»). Сперва идущие, следом те, что сейчас не в расписании.
+  const shown = [
+    ...ofKind.filter((item) => item.nextStartsAt !== null),
+    ...ofKind.filter((item) => item.nextStartsAt === null),
+  ];
 
   const kinds = (
     <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Вид мероприятий">
@@ -353,15 +355,6 @@ function CatalogTab({
         />
       )}
 
-      {scheduled.length > 0 && idle.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setShowIdle((value) => !value)}
-          className="mt-4 text-[0.875rem] text-text-accent underline-offset-2 hover:underline"
-        >
-          {showIdle ? 'Скрыть виды без расписания' : `Ещё ${idle.length} без расписания`}
-        </button>
-      )}
     </div>
   );
 }
@@ -487,31 +480,29 @@ function CoachCard({ coach }: { coach: Coach }) {
         // Обычный <img>, а не next/image: адрес — blob:, оптимизатору нечего с ним делать.
         <img src={url} alt="" className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
       ) : (
+        // Заглушка — кружком на обложке; прямоугольником во всю карточку —
+        // только настоящее фото (решение владельца от 26.10.2026).
         <span aria-hidden="true" className="absolute inset-x-[18%] top-[14%] block aspect-square overflow-hidden rounded-full opacity-90">
           <AvatarPlaceholder gender={coach.gender} />
         </span>
       )}
 
-      <span className="absolute inset-x-0 bottom-0 flex flex-col gap-1 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-4 pt-16 pb-4 text-white">
+      <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/90 via-black/60 to-transparent" />
+
+      {/* У всех одинаково (решение владельца от 26.10.2026): имя, разряд,
+          стаж и ссылка на профиль — четыре строки, и имена стоят вровень. Что
+          тренер ведёт и почём — на его странице. */}
+      <span className="absolute inset-x-0 bottom-0 flex flex-col gap-1 px-4 pb-4 text-white">
         <span className="font-display text-[1.0625rem] leading-tight group-hover:underline">{coach.name}</span>
-        {coach.leads.length > 0 && <span className="text-[0.8125rem] text-white/75">Ведёт: {coach.leads.join(', ')}</span>}
-        <span className="mt-2 flex flex-wrap gap-1.5">
-          {coach.groupPrice !== null && <PricePill label="Группа" price={coach.groupPrice} />}
-          {coach.individualPrice !== null && <PricePill label="Индивидуально" price={coach.individualPrice} />}
-          {coach.groupPrice === null && coach.individualPrice === null && (
-            <span className="text-[0.8125rem] text-white/70">Цены — у тренера</span>
-          )}
+        <span className="mt-1 truncate text-[0.8125rem] text-white/75" title={publicRankLabel(coach.rank)}>
+          Разряд: <span className="text-white">{publicRankLabel(coach.rank)}</span>
         </span>
+        <span className="text-[0.8125rem] text-white/75">
+          Стаж: <span className="text-white">{coach.coachingSince === null ? '—' : coachingYearsLabel(coach.coachingSince)}</span>
+        </span>
+        <span className="mt-2 text-[0.8125rem] text-white/85 underline underline-offset-2">Подробнее в профиле</span>
       </span>
     </Link>
-  );
-}
-
-function PricePill({ label, price }: { label: string; price: number }) {
-  return (
-    <span className="rounded-full bg-white/15 px-2 py-0.5 text-[0.75rem] text-white/80 backdrop-blur-sm">
-      {label} <span className="text-white">{formatKopecks(price)}</span>
-    </span>
   );
 }
 

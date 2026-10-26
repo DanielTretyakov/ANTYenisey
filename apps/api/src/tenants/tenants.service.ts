@@ -3,6 +3,7 @@ import { Role } from '@yenisey/database';
 import type { City, ClubCard, ClubSearchQuery, CitySearchQuery, PublicTenant } from '@yenisey/types';
 import { readWorkingHours, shortName } from '@yenisey/types';
 import { readClubValues } from '../club/settings-rules';
+import { publicRankOf, RANK_SELECT } from '../players/players.service';
 import { CARD_SELECT, toCard } from './club-card';
 import { cityLimit, cityPatterns } from './city-search';
 import { PrismaService } from '../prisma/prisma.service';
@@ -160,7 +161,15 @@ export class TenantsService {
           select: {
             userId: true,
             coachListOrder: true,
-            user: { select: { fullName: true, gender: true, coachCard: { select: { photoFileId: true } } } },
+            user: {
+              select: {
+                fullName: true,
+                gender: true,
+                coachCard: { select: { photoFileId: true, coachingSince: true } },
+                // Разряд и стаж — на карточке тренера во вкладке (26.10.2026).
+                sportRank: { select: RANK_SELECT },
+              },
+            },
             coachProfile: {
               select: {
                 groupPrice: true,
@@ -242,6 +251,8 @@ export class TenantsService {
             .map((session) => session.trainingType.name)
             .sort((a, b) => a.localeCompare(b, 'ru')),
           hallIds: row.coachProfile?.halls.map((link) => link.hallId) ?? [],
+          rank: publicRankOf(row.user.sportRank),
+          coachingSince: row.user.coachCard?.coachingSince ?? null,
         })),
       halls: tenant.halls.map((hall) => ({
         id: hall.id,

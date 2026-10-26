@@ -845,6 +845,17 @@ ALTER TABLE "CoachCard"
     AND ("inventory" IS NULL OR ("inventory" = btrim("inventory") AND char_length("inventory") BETWEEN 1 AND 1000))
   );
 
+-- «Обо мне» и год начала стажа (решение владельца от 26.10.2026). Год — не из
+-- будущего: это проверяет сервис, `now()` в CHECK не IMMUTABLE; здесь —
+-- только разумные границы. Накатано миграцией *_coach_about_experience.
+ALTER TABLE "CoachCard"
+  ADD CONSTRAINT "CoachCard_about_filled"
+  CHECK ("about" IS NULL OR ("about" = btrim("about") AND char_length("about") BETWEEN 1 AND 2000));
+
+ALTER TABLE "CoachCard"
+  ADD CONSTRAINT "CoachCard_coaching_since_sane"
+  CHECK ("coachingSince" IS NULL OR "coachingSince" BETWEEN 1950 AND 2100);
+
 -- Цены тренера — клубные: в соседнем клубе у того же человека другой прайс.
 -- Копейки, как и все деньги в схеме.
 ALTER TABLE "CoachProfile"

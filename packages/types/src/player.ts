@@ -294,3 +294,14 @@ export interface PlayerVisitTops {
   /** Игрок скрыл себя из рейтингов: блок видят только он и его родитель. */
   hiddenFromOthers: boolean;
 }
+
+/**
+ * Разряд коротко — на карточке тренера (решение владельца от 26.10.2026), как
+ * на странице игрока: подтверждённый — просто «КМС», заявленный — с пометкой,
+ * нет — прочерк. Отклонённый сюда не доходит: его нет в `PublicRank`.
+ */
+export function publicRankLabel(rank: PublicRank | null): string {
+  if (!rank) return '—';
+
+  return rank.status === 'VERIFIED' ? RANK_LABELS[rank.rank] : `${RANK_LABELS[rank.rank]}, не подтверждён`;
+}

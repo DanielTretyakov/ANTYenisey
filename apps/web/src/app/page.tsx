@@ -61,7 +61,7 @@ import { useSession } from '@/lib/useSession';
  * Сверху вниз (решение владельца от 24.09.2026):
  *  1. баннер с поиском — изумрудная плоскость с рекой, как разворот входа;
  *  2. клубы, где играют в выбранном городе (по умолчанию Красноярск);
- *  3. вошедшему — «Мои записи», «Мои клубы» и «Ближайшее в моих клубах»;
+ *  3. вошедшему — «Мой календарь», «Мои клубы» и «Ближайшее в моих клубах»;
  *  4. последние три новости платформы — всем (решение от 26.09.2026).
  *
  * Фотографий залов здесь нет намеренно. Стоковый снимок чужого зала под
@@ -529,7 +529,7 @@ function ClubTileFacts({ club }: { club: ClubCard }) {
 }
 
 /**
- * «Мои записи» коротко: три ближайшие и ссылка на раздел целиком.
+ * «Мой календарь» коротко: три ближайшие и ссылка на раздел целиком.
  *
  * Отмена и история — там, а не здесь: второй список с кнопками отмены
  * разошёлся бы с разделом в том, что обещает списать (ТЗ требует одного
@@ -557,7 +557,7 @@ function MyEntries() {
       className="flex scroll-mt-40 flex-col rounded-card border border-border bg-gradient-to-br from-surface-accent-soft to-surface-raised p-5"
     >
       <div className="flex items-start justify-between gap-3">
-        <p className={KICKER}>Мои записи</p>
+        <p className={KICKER}>Мой календарь</p>
         <Link href="/my-bookings">
           <Button variant="secondary" size="sm">
             Подробнее
@@ -619,7 +619,7 @@ function MyEntries() {
 
       {upcoming.length > 3 && (
         <p className="mt-auto pt-3 text-[0.8125rem] text-text-subtle">
-          И ещё {upcoming.length - 3} — в разделе «Мои записи».
+          И ещё {upcoming.length - 3} — в разделе «Мой календарь».
         </p>
       )}
     </section>
@@ -999,7 +999,7 @@ function useStartSections(signedIn: boolean): SectionNavState | undefined {
     { id: 'kluby', label: 'Клубы' },
     ...(signedIn
       ? [
-          { id: 'moi-zapisi', label: 'Мои записи' },
+          { id: 'moi-zapisi', label: 'Мой календарь' },
           { id: 'moi-kluby', label: 'Мои клубы' },
           { id: 'moi-trenery', label: 'Мои тренеры' },
           { id: 'novosti-klubov', label: 'Новости клубов' },

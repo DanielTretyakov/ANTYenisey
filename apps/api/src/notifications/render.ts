@@ -273,7 +273,7 @@ const NAMES_SHOWN = 10;
  * отправщик пометит строку неудачной и напишет причину.
  */
 export function renderNotification(type: string, payload: unknown, context: RenderContext): RenderedMessage {
-  const myBookings = { label: 'Мои записи', url: `${context.webOrigin}/my-bookings` };
+  const myBookings = { label: 'Мой календарь', url: `${context.webOrigin}/my-bookings` };
   const cabinet = { label: 'Личный кабинет', url: `${context.webOrigin}/cabinet` };
 
   switch (type) {

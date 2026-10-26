@@ -41,7 +41,8 @@ export function KindBadge({ kind }: { kind: EventKind }) {
 
 /**
  * Строка мероприятия в «Предстоящих»: когда, что, цена и места, кнопка
- * записи. Название открывает окно мероприятия.
+ * записи. Название и «Записаться» открывают окно мероприятия — записывает
+ * кнопка в нём; отмена — прямо в строке.
  */
 export function EventRow({
   slug,
@@ -51,6 +52,7 @@ export function EventRow({
   onChanged,
   onOpen,
   hideDate = false,
+  clubName,
 }: {
   slug: string;
   event: ClubEvent;
@@ -60,6 +62,8 @@ export function EventRow({
   onOpen: () => void;
   /** Строка в группе дня — дата у группы, здесь только время. */
   hideDate?: boolean;
+  /** Клуб — в «Моём календаре», где рядом мероприятия разных клубов. */
+  clubName?: string;
 }) {
   const { toggle, pending, error } = useEventAction(slug, forPerson, onChanged);
 
@@ -100,6 +104,12 @@ export function EventRow({
               мероприятия). Зала нет, только если вид идёт в нескольких залах, а
               проведение в сетку не поставлено. */}
           <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[0.8125rem] text-text-muted">
+            {clubName && (
+              <>
+                <span className="text-text">{clubName}</span>
+                <span aria-hidden="true">·</span>
+              </>
+            )}
             <span className={cn('inline-flex items-center gap-1', event.hall ? 'text-text' : 'text-text-subtle')}>
               <HallPin />
               {event.hall ?? 'зал уточняйте у клуба'}
@@ -144,7 +154,10 @@ export function EventRow({
             size="sm"
             pending={pending}
             disabled={full}
-            onClick={() => void toggle(event)}
+            // Записаться — через окно мероприятия (решение владельца от
+            // 26.10.2026): там описание, зал, цена и кнопка подтверждения, и
+            // случайный щелчок по строке никого не записывает.
+            onClick={() => (event.registered ? void toggle(event) : onOpen())}
           >
             {event.registered ? 'Отменить запись' : full ? 'Мест нет' : 'Записаться'}
           </Button>

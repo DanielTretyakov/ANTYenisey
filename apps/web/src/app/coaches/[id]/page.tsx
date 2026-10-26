@@ -1,176 +1,23 @@
 'use client';
 
-import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import type { FeedEvent, PublicCoach } from '@yenisey/types';
-import { CoachHeart } from '@/components/coach/CoachHeart';
-import { CoachCardBody, CoachPricesView } from '@/components/coach/CoachView';
-import { EventDialog } from '@/components/events/EventDialog';
-import { FeedEventCard } from '@/components/events/FeedEventCard';
 import { AppShell } from '@/components/layout/AppShell';
-import { PlayerAvatar } from '@/components/player/PlayerView';
-import { Alert } from '@/components/ui/Alert';
-import { api, ApiError } from '@/lib/api';
-import { useSession } from '@/lib/useSession';
+import { PersonPage } from '@/components/person/PersonPage';
 
 /**
- * Страница тренера — открыта всем, без входа.
+ * Страница тренера — открыта всем, без входа. С 26.10.2026 это раздел
+ * «Тренер» общей страницы человека (`PersonPage`): рядом — «Игрок», тот же,
+ * что на `/players/:id`.
  *
  * Имя — «Фамилия И.», как в списке мероприятий клуба; ни телефона, ни почты
- * сервер сюда не отдаёт. Возрастного ограничения, в отличие от страницы
- * игрока, здесь нет: тренером человек становится взрослым.
- *
- * Карточка одна на все клубы, а цены у каждого клуба свои — поэтому клубы
- * перечислены отдельным блоком, каждый со своей стоимостью занятий.
- *
- * С 02.10.2026 — сердечко «в мои тренеры» и «Ближайшие занятия» по всем его
- * клубам: ради них тренера и отмечают.
+ * сервер сюда не отдаёт.
  */
 export default function CoachPage() {
   const params = useParams<{ id: string }>();
-  const session = useSession();
-  const [coach, setCoach] = useState<PublicCoach | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [favourite, setFavourite] = useState<boolean | null>(null);
-  const [upcoming, setUpcoming] = useState<FeedEvent[] | null>(null);
-  const [open, setOpen] = useState<FeedEvent | null>(null);
-
-  const loadUpcoming = (): void => {
-    api
-      .coachUpcoming(params.id)
-      .then(setUpcoming)
-      .catch(() => setUpcoming([]));
-  };
-
-  useEffect(loadUpcoming, [params.id]);
-
-  // Отмечен ли — только у вошедшего; гостя сердечко ведёт на вход.
-  useEffect(() => {
-    if (session.status !== 'ready') return;
-
-    api
-      .myCoaches()
-      .then((list) => setFavourite(list.some((item) => item.id === params.id)))
-      .catch(() => setFavourite(false));
-  }, [session.status, params.id]);
-
-  useEffect(() => {
-    api
-      .coach(params.id)
-      .then(setCoach)
-      .catch((cause: unknown) =>
-        setError(
-          cause instanceof ApiError && cause.status === 404
-            ? 'Тренер не найден.'
-            : 'Нет связи. Проверьте интернет и попробуйте ещё раз',
-        ),
-      );
-  }, [params.id]);
 
   return (
     <AppShell>
-      {error && <Alert tone="warning">{error}</Alert>}
-
-      {!coach && !error && <Skeleton />}
-
-      {coach && (
-        <div className="grid gap-8">
-          <header className="flex flex-wrap items-center gap-6">
-            <PlayerAvatar fileId={coach.photoFileId} name={coach.name} gender={coach.gender} size="lg" />
-            <div className="min-w-0">
-              <p className="text-[0.75rem] tracking-[0.1em] text-text-subtle uppercase">Тренер</p>
-              <h1 className="mt-1 text-[2rem] leading-tight break-words">{coach.name}</h1>
-              <p className="mt-1.5 text-[0.9375rem] text-text-muted">
-                {'Тренер в клубах: '}
-                {coach.clubs.map((club, index) => (
-                  <span key={club.slug}>
-                    {index > 0 && ', '}
-                    <Link
-                      href={`/clubs/${club.slug}`}
-                      className="text-text-accent underline-offset-2 hover:underline"
-                    >
-                      {club.name}
-                    </Link>
-                  </span>
-                ))}
-              </p>
-            </div>
-            {/* Себя тренер в избранное не отмечает — база тоже не даст. */}
-            {!(session.status === 'ready' && session.user.id === coach.id) && (
-              <CoachHeart
-                coachId={coach.id}
-                anonymous={session.status === 'anonymous'}
-                favourite={session.status === 'anonymous' ? false : favourite}
-                onChange={(list) => setFavourite(list.some((item) => item.id === coach.id))}
-                className="ml-auto self-start"
-              />
-            )}
-          </header>
-
-          <section>
-            <h3 className="mb-3 text-[0.9375rem] font-medium">Ближайшие занятия</h3>
-            {upcoming === null && <div className="h-32 rounded-card border border-border bg-surface-raised" aria-busy="true" />}
-            {upcoming !== null && upcoming.length === 0 && (
-              <p className="text-[0.9375rem] text-text-muted">Ближайших занятий в расписании клубов пока нет.</p>
-            )}
-            {upcoming !== null && upcoming.length > 0 && (
-              <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {upcoming.map((event) => (
-                  <li key={`${event.club.slug}-${event.id}`}>
-                    <FeedEventCard event={event} onOpen={setOpen} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <CoachCardBody card={coach} />
-
-          {/* Цены — по клубу: в соседнем у того же тренера они другие, и общая
-              строка «1500 ₽» ввела бы в заблуждение. */}
-          <section>
-            <h3 className="mb-3 text-[0.9375rem] font-medium">Стоимость занятий</h3>
-            <ul className="grid gap-4">
-              {coach.clubs.map((club) => (
-                <li key={club.slug} className="rounded-card border border-border bg-surface-raised px-5 py-4">
-                  <Link
-                    href={`/clubs/${club.slug}`}
-                    className="text-[0.9375rem] font-medium text-text-accent underline-offset-2 hover:underline"
-                  >
-                    {club.name}
-                  </Link>
-                  <div className="mt-1.5">
-                    <CoachPricesView prices={club} />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </div>
-      )}
-
-      {open && (
-        <EventDialog
-          slug={open.club.slug}
-          kind={open.kind}
-          id={open.id}
-          onClose={() => setOpen(null)}
-          onChanged={loadUpcoming}
-        />
-      )}
+      <PersonPage id={params.id} initial="coach" />
     </AppShell>
-  );
-}
-
-function Skeleton() {
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-6" aria-busy="true">
-      <div className="flex items-center gap-6">
-        <span className="h-28 w-28 rounded-full bg-border/50" />
-        <span className="h-8 w-56 rounded-full bg-border/50" />
-      </div>
-      <div className="h-48 rounded-card border border-border bg-surface-raised" />
-    </div>
   );
 }

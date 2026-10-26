@@ -6,6 +6,7 @@ import type {
   PlayerProfile,
   PlayerRank,
   PublicPlayer,
+  PublicRank,
   RatingSystem,
   SportRankLevel,
 } from '@yenisey/types';
@@ -136,15 +137,7 @@ export class PlayersService {
       gender: row.gender,
       equipment: equipmentOf(row),
       achievements: row.achievements.map(toAchievement),
-      // Отклонённый разряд посторонним не показывается вовсе — см. PublicRank.
-      rank:
-        rank && rank.status !== SportRankStatus.REJECTED
-          ? {
-              rank: rank.rank as SportRankLevel,
-              status: rank.status,
-              verifiedBy: rank.status === SportRankStatus.VERIFIED ? reviewerOf(rank, false) : null,
-            }
-          : null,
+      rank: publicRankOf(rank),
       hiddenFromPublic: !isProfilePublic(row.birthDate, today),
       visits: canSeeVisits(row.ratingHidden, owner, viewer)
         ? await this.rating.playerTops(row.id, row.ratingHidden)
@@ -427,6 +420,20 @@ function toRank(row: RankRow): PlayerRank {
     rejectionReason: row.rejectionReason,
     version: row.updatedAt.toISOString(),
   };
+}
+
+/**
+ * Разряд для чужих глаз — одна сборка на страницу игрока, страницу тренера и
+ * карточку тренера в клубе. Отклонённый не показывается вовсе — см. PublicRank.
+ */
+export function publicRankOf(rank: RankRow | null): PublicRank | null {
+  return rank && rank.status !== SportRankStatus.REJECTED
+    ? {
+        rank: rank.rank as SportRankLevel,
+        status: rank.status,
+        verifiedBy: rank.status === SportRankStatus.VERIFIED ? reviewerOf(rank, false) : null,
+      }
+    : null;
 }
 
 function reviewerOf(row: RankRow, withName: boolean) {

@@ -1,6 +1,7 @@
 import type { WorkingHours } from './working-hours';
 import type { ClubValue } from './club';
 import type { Gender } from './auth';
+import type { PublicRank } from './player';
 import type { ClientPaymentMode } from './payment-mode';
 
 /**
@@ -30,6 +31,10 @@ export interface PublicClubCoach {
   leads: string[];
   /** Залы, где тренирует; пусто — во всех. По ним фильтрует страница клуба. */
   hallIds: string[];
+  /** Разряд — как на странице игрока (решение владельца от 26.10.2026). */
+  rank: PublicRank | null;
+  /** С какого года тренирует; пусто — не указал. */
+  coachingSince: number | null;
 }
 
 export interface PublicTenant {

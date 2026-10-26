@@ -18,7 +18,7 @@ import { currentSubscription, PushSetupError, pushSupport, subscribe, subscripti
  */
 const CATEGORY_TEXT: Partial<Record<NotificationCategoryName, { label: string; hint: string }>> = {
   MY_BOOKINGS: {
-    label: 'Мои записи',
+    label: 'Мой календарь',
     hint: 'Подтверждение и отмена записи, напоминание за три часа до начала, отмеченная неявка.',
   },
   MY_SUBSCRIPTION: {

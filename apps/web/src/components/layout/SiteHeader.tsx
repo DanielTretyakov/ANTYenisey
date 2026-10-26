@@ -90,7 +90,7 @@ export function SiteHeader({
           </NavLink>
           {signedIn && (
             <NavLink href="/my-bookings" active={active('/my-bookings')}>
-              Мои записи
+              Мой календарь
             </NavLink>
           )}
           <NavLink href="/help" active={active('/help')}>

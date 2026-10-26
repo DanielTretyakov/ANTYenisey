@@ -10,7 +10,8 @@ import type {
   FeedEvent,
   PublicCoach,
 } from '@yenisey/types';
-import { shortName } from '@yenisey/types';
+import { coachingSinceProblem, shortName } from '@yenisey/types';
+import { publicRankOf, RANK_SELECT } from '../players/players.service';
 import { coachStats, periodStart } from './coach-stats';
 import { upcomingCoachSessions } from '../events/coach-sessions';
 import { FileIntake } from '../files/file-intake.service';
@@ -19,8 +20,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { checkPriceNote, checkText, parseSocialLinks, readSocialLinks } from './coach-rules';
 import type { UpdateCoachCardDto, UpdateCoachPricesDto } from './dto/coach.dto';
 
-/** Сколько ближайших занятий показывает страница тренера. */
-const COACH_PAGE_UPCOMING = 5;
+/**
+ * Сколько ближайших занятий отдаёт страница тренера. Каруселью с фильтрами по
+ * клубу и виду (решение владельца от 26.10.2026) — с запасом, чтобы фильтр не
+ * оставался пустым у тренера с плотной неделей.
+ */
+const COACH_PAGE_UPCOMING = 40;
 
 const CARD_SELECT = {
   userId: true,
@@ -28,6 +33,8 @@ const CARD_SELECT = {
   achievements: true,
   inventory: true,
   socialLinks: true,
+  about: true,
+  coachingSince: true,
 } satisfies Prisma.CoachCardSelect;
 
 type CardRow = Prisma.CoachCardGetPayload<{ select: typeof CARD_SELECT }>;
@@ -77,7 +84,7 @@ export class CoachesService {
 
     const fields: Prisma.CoachCardUpdateInput = {};
 
-    for (const field of ['achievements', 'inventory'] as const) {
+    for (const field of ['achievements', 'inventory', 'about'] as const) {
       if (dto[field] === undefined) {
         continue;
       }
@@ -89,6 +96,16 @@ export class CoachesService {
       }
 
       fields[field] = checked.value;
+    }
+
+    if (dto.coachingSince !== undefined) {
+      const problem = dto.coachingSince === null ? null : coachingSinceProblem(dto.coachingSince);
+
+      if (problem) {
+        throw new BadRequestException(problem);
+      }
+
+      fields.coachingSince = dto.coachingSince;
     }
 
     if (dto.socialLinks !== undefined) {
@@ -210,6 +227,7 @@ export class CoachesService {
         fullName: true,
         gender: true,
         coachCard: { select: CARD_SELECT },
+        sportRank: { select: RANK_SELECT },
         memberships: {
           // Клуб-черновик (11.10.2026) на открытой странице тренера не называется.
           where: { roles: { has: 'COACH' }, deactivatedAt: null, coachProfile: { isNot: null }, tenant: { publishedAt: { not: null } } },
@@ -238,6 +256,9 @@ export class CoachesService {
       achievements: card.achievements,
       inventory: card.inventory,
       socialLinks: card.socialLinks,
+      about: card.about,
+      coachingSince: card.coachingSince,
+      rank: publicRankOf(person.sportRank),
       clubs: person.memberships.map((membership) => ({
         name: membership.tenant.name,
         slug: membership.tenant.slug,
@@ -398,10 +419,12 @@ function toCard(row: CardRow): CoachCard {
     achievements: row.achievements,
     inventory: row.inventory,
     socialLinks: readSocialLinks(row.socialLinks),
+    about: row.about,
+    coachingSince: row.coachingSince,
   };
 }
 
 /** Карточки ещё нет: форме нужно что-то показать, а тренеру — что заполнить. */
 function emptyCard(userId: string): CoachCard {
-  return { userId, photoFileId: null, achievements: null, inventory: null, socialLinks: [] };
+  return { userId, photoFileId: null, achievements: null, inventory: null, socialLinks: [], about: null, coachingSince: null };
 }

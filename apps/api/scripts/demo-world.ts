@@ -22,7 +22,7 @@
  * Перед запуском в базе нужен справочник городов: `pnpm db:seed-cities`.
  */
 import { randomUUID } from 'node:crypto';
-import { PrismaClient, Role, type Prisma } from '@yenisey/database';
+import { PrismaClient, Role, type Prisma, type SportRankLevel } from '@yenisey/database';
 import { hashPassword } from '../src/auth/password.ts';
 import { quote } from '../src/booking/pricing.ts';
 
@@ -568,6 +568,30 @@ async function cityId(name: string): Promise<string> {
   return city.id;
 }
 
+/** Год начала стажа демо-тренера: с 22 лет, но не позже позапрошлого года. */
+function demoCoachingSince(born: string): number {
+  return Math.min(Number(born.slice(0, 4)) + 22, new Date().getFullYear() - 2);
+}
+
+/** Разряд демо-тренера — по первой строке достижений. */
+function demoRank(achievements: string): SportRankLevel | null {
+  const first = achievements.split('\n')[0] ?? '';
+  if (first.startsWith('Мастер спорта')) return 'MS';
+  if (first.startsWith('Кандидат')) return 'KMS';
+  if (first.startsWith('Первый спортивный')) return 'SPORT_1';
+  return null;
+}
+
+/** «Обо мне» демо-тренера — из его же достижений и цен. */
+function demoAbout(coach: { name: string; group: number; individual: number; achievements: string }): string {
+  const [, ...rest] = coach.achievements.split('\n');
+  return [
+    `Тренирую детей и взрослых — от первой подачи до турниров. ${rest[0] ?? ''}`.trim(),
+    '- ставлю технику с нуля и правлю привычные ошибки\n- готовлю к турнирам и рейтинговым играм\n- индивидуально — под вашу игру',
+    `Групповое занятие — ${coach.group} ₽, индивидуальное — ${coach.individual} ₽. Первое занятие — бесплатно.`,
+  ].join('\n\n');
+}
+
 async function seedClub(def: ClubDef, staff: { ownerId: string; adminId: string; managerId?: string; coachIds: string[] }): Promise<ClubState> {
   const tenant = await prisma.tenant.upsert({
     where: { slug: def.slug },
@@ -675,6 +699,29 @@ async function seedClub(def: ClubDef, staff: { ownerId: string; adminId: string;
         socialLinks: [{ label: 'ВКонтакте', url: `https://vk.com/coach_${def.slug}_${index + 1}` }],
       },
     });
+    // «Обо мне», стаж и разряд (26.10.2026) — и уже заведённым карточкам:
+    // демо обновляется поверх прежних данных, а без них на карточке прочерки.
+    await prisma.coachCard.update({
+      where: { userId },
+      data: { about: demoAbout(coach), coachingSince: demoCoachingSince(coach.born) },
+    });
+    const rank = demoRank(coach.achievements);
+    if (rank) {
+      await prisma.sportRank.upsert({
+        where: { userId },
+        update: {},
+        create: {
+          userId,
+          rank,
+          orderNumber: `демо-${index + 1}`,
+          orderDate: new Date('2020-03-01'),
+          status: 'VERIFIED',
+          reviewedByUserId: staff.ownerId,
+          reviewedInTenantId: tenantId,
+          reviewedAt: new Date(),
+        },
+      });
+    }
     await prisma.coachProfile.upsert({
       where: { userId_tenantId: { userId, tenantId } },
       update: {},
@@ -922,6 +969,140 @@ async function seedDay(club: ClubState, hallIndex: number, date: string, now: Da
   return 1;
 }
 
+/** Сколько записей держать у демо-игрока на ближайшие две недели — по клубам. */
+const AGENDA: Record<string, { trainings: number; tournaments: number; rentals: number }> = {
+  yenisey: { trainings: 4, tournaments: 1, rentals: 2 },
+  baikal: { trainings: 1, tournaments: 0, rentals: 1 },
+};
+const AGENDA_DAYS = 14;
+
+/**
+ * Повестка демо-игрока на 14 дней вперёд: без неё «Мой календарь» на демо
+ * пуст — массовка записывает демо-учётки вперёд редко, а аренду не даёт вовсе
+ * (`DEMO_IDS`). Идемпотентно: считает уже стоящее и дозаписывает недостающее,
+ * не ближе двух дней друг к другу. Занятия — только виды без ограничений по возрасту и полу
+ * (взрослого не записать в детскую группу), с местами; аренда — на свободный
+ * от сетки и броней стол в часы работы зала.
+ */
+async function seedDemoAgenda(
+  club: ClubState,
+  userId: string,
+  plan: { trainings: number; tournaments: number; rentals: number },
+  now: Date,
+): Promise<void> {
+  const { tenantId, def } = club;
+  const from = new Date(now.getTime() + 3 * 3600_000);
+  const to = new Date(now.getTime() + AGENDA_DAYS * DAY_MS);
+  const random = rng(`agenda-${def.slug}-${localDate(now, club.halls[0]!.def.timezone)}`);
+
+  // Занятия.
+  const booked = await prisma.trainingBooking.findMany({
+    where: { tenantId, clientId: userId, status: 'BOOKED', session: { startsAt: { gte: from, lt: to } } },
+    select: { session: { select: { startsAt: true } } },
+  });
+  // Разнесены по двум неделям: не ближе двух дней друг к другу.
+  const picked = booked.map((row) => row.session.startsAt.getTime());
+  const near = (at: number): boolean => picked.some((other) => Math.abs(other - at) < 2 * DAY_MS);
+  if (booked.length < plan.trainings) {
+    const sessions = await prisma.trainingSession.findMany({
+      where: {
+        tenantId,
+        cancelledAt: null,
+        startsAt: { gte: from, lt: to },
+        trainingType: { minAge: null, maxAge: null, gender: null },
+        bookings: { none: { clientId: userId } },
+      },
+      select: { id: true, startsAt: true, capacity: true, trainingType: { select: { price: true } }, _count: { select: { bookings: { where: { status: 'BOOKED' } } } } },
+      orderBy: { startsAt: 'asc' },
+    });
+    let need = plan.trainings - booked.length;
+    for (const session of sessions) {
+      if (need === 0) break;
+      if (near(session.startsAt.getTime()) || session._count.bookings >= session.capacity || random() < 0.35) continue;
+      await prisma.trainingBooking.create({
+        data: { tenantId, sessionId: session.id, clientId: userId, priceAtBooking: session.trainingType.price, createdAt: now },
+      });
+      picked.push(session.startsAt.getTime());
+      need -= 1;
+    }
+  }
+
+  // Турниры.
+  const registered = await prisma.tournamentRegistration.count({
+    where: { tenantId, clientId: userId, status: 'BOOKED', tournament: { startsAt: { gte: from, lt: to } } },
+  });
+  if (registered < plan.tournaments) {
+    const tournaments = await prisma.tournament.findMany({
+      where: {
+        tenantId,
+        cancelledAt: null,
+        startsAt: { gte: from, lt: to },
+        tournamentType: { minAge: null, maxAge: null, gender: null },
+        registrations: { none: { clientId: userId } },
+      },
+      select: { id: true, tournamentType: { select: { price: true } } },
+      orderBy: { startsAt: 'asc' },
+      take: plan.tournaments - registered,
+    });
+    for (const tournament of tournaments) {
+      await prisma.tournamentRegistration.create({
+        data: { tenantId, tournamentId: tournament.id, clientId: userId, priceAtBooking: tournament.tournamentType.price, createdAt: now },
+      });
+    }
+  }
+
+  // Аренды — первый зал клуба, через два, семь, двенадцать дней.
+  const rented = await prisma.tableBooking.count({
+    where: { tenantId, clientId: userId, coachId: null, status: 'BOOKED', startsAt: { gte: from, lt: to } },
+  });
+  const hall = club.halls[0]!;
+  const today = localDate(now, hall.def.timezone);
+  let rentals = plan.rentals - rented;
+  for (let offset = 2; offset < AGENDA_DAYS && rentals > 0; offset += 5) {
+    const date = addDays(today, offset);
+    const open = hoursOn(hall.def.hours, isoWeekday(date));
+    const slot = def.rentals[0];
+    if (!open || !slot) continue;
+    const start = Math.max(open[0], minutesOf(slot.start));
+    const end = start + slot.minutes;
+    if (end > open[1]) continue;
+    const startsAt = instantAt(date, start, hall.def.timezone);
+    const endsAt = new Date(startsAt.getTime() + slot.minutes * 60_000);
+    if ((await prisma.tableBooking.count({ where: { tenantId, clientId: userId, startsAt: { gte: new Date(`${date}T00:00:00Z`), lt: new Date(`${addDays(date, 1)}T00:00:00Z`) } } })) > 0) continue;
+
+    // Стол, где в это время нет ни окна сетки, ни чужой брони.
+    const busy = new Set([
+      ...(
+        await prisma.dayClosure.findMany({
+          where: { schedule: { hallId: hall.id, date: new Date(`${date}T00:00:00Z`) }, startMinute: { lt: end }, endMinute: { gt: start } },
+          select: { tableId: true },
+        })
+      ).map((row) => row.tableId),
+      ...(
+        await prisma.tableBooking.findMany({
+          where: { tableId: { in: hall.tables }, status: { not: 'CANCELLED' }, startsAt: { lt: endsAt }, endsAt: { gt: startsAt } },
+          select: { tableId: true },
+        })
+      ).map((row) => row.tableId),
+    ]);
+    const tableId = [...hall.tables].reverse().find((id) => !busy.has(id));
+    if (!tableId) continue;
+
+    const pricing = {
+      tableHourPrice: hall.def.price * RUB,
+      tableExtra30MinPrice: hall.def.extra * RUB,
+      hasRobotOption: Boolean(hall.def.robot),
+      robot30MinPrice: hall.def.robot ? hall.def.robot.m30 * RUB : null,
+      robot60MinPrice: hall.def.robot ? hall.def.robot.m60 * RUB : null,
+      robotExtra30MinPrice: hall.def.robot ? hall.def.robot.extra * RUB : null,
+    };
+    await prisma.tableBooking.create({
+      data: { tenantId, tableId, clientId: userId, withRobot: false, startsAt, endsAt, priceAtBooking: quote(pricing, slot.minutes, false).price, createdAt: now },
+    });
+    rentals -= 1;
+  }
+}
+
 /**
  * Отметки прошедшего: всё, что закончилось и ещё «записан», — «пришёл»
  * (чаще) или «не пришёл», с визитом в журнале. Так же, как отметил бы
@@ -1122,6 +1303,15 @@ async function main(): Promise<void> {
 
   for (const club of clubs) {
     await seedSubscriptions(club, club.def.slug === 'yenisey' ? [player] : []);
+  }
+
+  // «Мой календарь» демо-игрока на две недели вперёд (26.10.2026): записи на
+  // занятия и турниры и аренды — дозаполняются при каждом обновлении.
+  for (const club of clubs) {
+    const plan = AGENDA[club.def.slug];
+    if (plan && club.clients.some((person) => person.id === player)) {
+      await seedDemoAgenda(club, player, plan, now);
+    }
   }
 
   // «Мои клубы» и «Мои тренеры»: у демо-клиента и у части массовки.

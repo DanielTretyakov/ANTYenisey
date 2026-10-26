@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it, test } from 'node:test';
+import { coachingSinceProblem, coachingYearsLabel } from '@yenisey/types';
 import { checkPriceNote, checkText, cleanText, parseSocialLinks, readSocialLinks } from './coach-rules.ts';
 
 describe('cleanText', () => {
@@ -75,4 +76,30 @@ describe('readSocialLinks', () => {
       { label: 'ВК', url: 'https://vk.com/a' },
     ]);
   });
+});
+
+test('стаж словами считается от года начала и растёт сам', () => {
+  const today = new Date('2026-10-26T12:00:00Z');
+
+  assert.equal(coachingYearsLabel(2026, today), 'меньше года');
+  assert.equal(coachingYearsLabel(2025, today), '1 год');
+  assert.equal(coachingYearsLabel(2023, today), '3 года');
+  assert.equal(coachingYearsLabel(2014, today), '12 лет');
+  assert.equal(coachingYearsLabel(2005, today), '21 год');
+  assert.equal(coachingYearsLabel(2015, new Date('2027-01-02T12:00:00Z')), '12 лет');
+});
+
+test('год начала стажа — не из будущего и не раньше 1950', () => {
+  const today = new Date('2026-10-26T12:00:00Z');
+
+  assert.equal(coachingSinceProblem(2014, today), null);
+  assert.equal(coachingSinceProblem(2026, today), null);
+  assert.match(coachingSinceProblem(2027, today) ?? '', /от 1950 до 2026/);
+  assert.match(coachingSinceProblem(1949, today) ?? '', /от 1950/);
+  assert.match(coachingSinceProblem(2014.5, today) ?? '', /от 1950/);
+});
+
+test('«Обо мне» — до 2000 знаков, пустое — null', () => {
+  assert.deepEqual(checkText('about', '   '), { ok: true, value: null });
+  assert.equal(checkText('about', 'а'.repeat(2001)).ok, false);
 });

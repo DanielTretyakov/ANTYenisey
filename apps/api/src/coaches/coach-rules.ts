@@ -7,10 +7,11 @@
  */
 import { MAX_COACH_SOCIAL_LINKS, type CoachSocialLink } from '@yenisey/types';
 
-/** Границы текстовых полей. Те же цифры держит CHECK `CoachCard_text_filled`. */
+/** Границы текстовых полей. Те же цифры держат CHECK `CoachCard_text_filled` и `CoachCard_about_filled`. */
 export const COACH_TEXT_LIMITS = {
   achievements: 2000,
   inventory: 1000,
+  about: 2000,
 } as const;
 
 /** Приписка к ценам — короткая строка: «первое занятие бесплатно». */
@@ -108,6 +109,7 @@ export function checkText(
 const FIELD_NAMES: Record<keyof typeof COACH_TEXT_LIMITS, string> = {
   achievements: 'Достижения',
   inventory: 'Инвентарь',
+  about: '«Обо мне»',
 };
 
 /** Приписка к ценам: пусто — это null, длина под CHECK. */

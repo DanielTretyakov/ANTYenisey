@@ -1,5 +1,6 @@
 'use client';
 
+import type { CSSProperties } from 'react';
 import type { ClubEvent } from '@yenisey/types';
 import { cn } from '@/lib/cn';
 import { dayKey, monthGrid } from '@/lib/month';
@@ -12,28 +13,57 @@ const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const CHIPS_PER_DAY = 3;
 
 /**
+ * Что календарю нужно от плашки: когда и что. Аренда стола (`TABLE`) бывает
+ * только в «Моём календаре» — у мероприятий клуба её нет.
+ */
+export type CalendarItem = Pick<ClubEvent, 'id' | 'startsAt' | 'timezone' | 'title'> & { kind: ClubEvent['kind'] | 'TABLE' };
+
+/** Краска плашки: заливка и полоса слева. Точка на телефоне — цветом полосы. */
+export interface CalendarPaint {
+  fill: string;
+  mark: string;
+  /** Цвет текста на плашке; не задан — обычный текст. */
+  text?: string;
+}
+
+/** По умолчанию — цвет вида мероприятия, как в «Предстоящих». */
+const kindPaint = (item: CalendarItem): CalendarPaint => {
+  const tone = KIND_PAINT[item.kind === 'TABLE' ? 'TRAINING' : item.kind];
+
+  return { fill: tintFill(tone), mark: tintMark(tone) };
+};
+
+/**
  * Календарь месяца: общая картина — в какие дни что есть (решение владельца
  * от 25.09.2026). Клетка — выбор дня (список дня выводит родитель), плашка —
  * окно мероприятия. На телефоне плашки не помещаются, и вместо них точки
- * цвета вида.
+ * цвета плашки.
+ *
+ * Краску задаёт зовущий (`paint`): в «Предстоящих» клуба — по виду, в «Моём
+ * календаре» — серым то, куда можно записаться, цветом платформы — куда
+ * записан (решение владельца от 26.10.2026).
  */
-export function MonthCalendar({
+export function MonthCalendar<T extends CalendarItem>({
   start,
   events,
   selected,
   onSelect,
   onOpen,
+  keyOf = (item) => `${item.kind}-${item.id}`,
+  paint = kindPaint,
 }: {
   /** Первое число показываемого месяца. */
   start: Date;
   /** Мероприятия месяца — уже отфильтрованные. */
-  events: ClubEvent[];
+  events: T[];
   /** Выбранный день — ключ `dayKey`. */
   selected: string | null;
   onSelect: (key: string) => void;
-  onOpen: (event: ClubEvent) => void;
+  onOpen: (event: T) => void;
+  keyOf?: (item: T) => string;
+  paint?: (item: T) => CalendarPaint;
 }) {
-  const byDay = new Map<string, ClubEvent[]>();
+  const byDay = new Map<string, T[]>();
 
   for (const event of events) {
     // День и время — по часам зала мероприятия, как в строке списка.
@@ -95,11 +125,7 @@ export function MonthCalendar({
               {list.length > 0 && (
                 <span className="pointer-events-none relative mt-1 flex flex-wrap gap-0.5 sm:hidden" aria-hidden="true">
                   {list.slice(0, 4).map((event) => (
-                    <span
-                      key={`${event.kind}-${event.id}`}
-                      className="h-1.5 w-1.5 rounded-full"
-                      style={{ background: tintMark(KIND_PAINT[event.kind]) }}
-                    />
+                    <span key={keyOf(event)} className="h-1.5 w-1.5 rounded-full" style={{ background: paint(event).mark }} />
                   ))}
                 </span>
               )}
@@ -108,17 +134,14 @@ export function MonthCalendar({
               <span className="relative mt-1 hidden gap-0.5 sm:grid">
                 {list.slice(0, CHIPS_PER_DAY).map((event) => (
                   <button
-                    key={`${event.kind}-${event.id}`}
+                    key={keyOf(event)}
                     type="button"
                     onClick={() => onOpen(event)}
                     className={cn(
                       'truncate rounded-[0.3125rem] px-1.5 py-0.5 text-left text-[0.75rem] leading-tight text-text hover:brightness-95',
                       past && 'opacity-60',
                     )}
-                    style={{
-                      background: tintFill(KIND_PAINT[event.kind]),
-                      boxShadow: `inset 2px 0 0 ${tintMark(KIND_PAINT[event.kind])}`,
-                    }}
+                    style={chipStyle(paint(event))}
                     title={[timeIn(event.startsAt, event.timezone), event.title, viewerTime(event.startsAt, null, event.timezone)]
                       .filter(Boolean)
                       .join(' ')}
@@ -138,4 +161,8 @@ export function MonthCalendar({
       </div>
     </div>
   );
+}
+
+function chipStyle({ fill, mark, text }: CalendarPaint): CSSProperties {
+  return { background: fill, boxShadow: `inset 2px 0 0 ${mark}`, ...(text ? { color: text } : {}) };
 }

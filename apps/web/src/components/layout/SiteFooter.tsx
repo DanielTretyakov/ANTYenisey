@@ -21,7 +21,7 @@ const DOCUMENTS = [
  * Подвал платформы — вариант Б (решение владельца от 03.10.2026, аудит):
  * полный на открытых страницах — стартовая, клуб, справка, новости, тренер,
  * игрок, документы, «Подключить клуб»; одной строкой на рабочих — смена,
- * расписание, настройки, кабинет, «Мои записи», вход. Рабочим экранам место
+ * расписание, настройки, кабинет, «Мой календарь», вход. Рабочим экранам место
  * нужнее, а документы, помощь и почта доступны с любой страницы.
  */
 export function SiteFooter({ variant = 'full', wide = false }: { variant?: 'full' | 'line'; wide?: boolean }) {
@@ -61,7 +61,7 @@ export function SiteFooter({ variant = 'full', wide = false }: { variant?: 'full
 
           <Column title="Игрокам">
             <FooterLink href="/">Найти клуб</FooterLink>
-            <FooterLink href="/my-bookings">Мои записи</FooterLink>
+            <FooterLink href="/my-bookings">Мой календарь</FooterLink>
             <FooterLink href="/help/zapis-na-zanyatie">Как записаться</FooterLink>
             <FooterLink href="/help/otmena-zapisi">Отмена и деньги</FooterLink>
           </Column>

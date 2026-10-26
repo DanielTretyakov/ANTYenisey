@@ -1371,6 +1371,14 @@ model CoachCard {
   inventory    String?
   socialLinks  Json? // ссылки на соцсети: [{ label, url }]
 
+  /// «Обо мне» — рассказ тренера о себе (решение владельца от 26.10.2026),
+  /// простой текст с пометками, как у новостей. До 2000 знаков.
+  about String?
+
+  /// С какого года тренирует. Стаж считается от него на сегодня и сам растёт
+  /// каждый год; число лет, введённое руками, через год стало бы неправдой.
+  coachingSince Int?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

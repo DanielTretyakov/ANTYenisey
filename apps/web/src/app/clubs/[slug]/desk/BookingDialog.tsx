@@ -119,7 +119,7 @@ export function BookingDialog({
       description={
         <>
           {day.hallName} · {formatDate(day.date)}. Бронь заведётся от имени человека — он увидит
-          её в «Моих записях» и сможет отменить сам.
+          её в «Моём календаре» и сможет отменить сам.
         </>
       }
     >

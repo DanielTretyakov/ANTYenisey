@@ -19,7 +19,7 @@ export default function NotFound() {
             Найти клуб
           </Link>
           <Link href="/my-bookings" className="text-text-accent underline underline-offset-2">
-            Мои записи
+            Мой календарь
           </Link>
           <Link href="/help" className="text-text-accent underline underline-offset-2">
             Помощь

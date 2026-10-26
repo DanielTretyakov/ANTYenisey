@@ -2,7 +2,8 @@
 
 import { useRef, useState, type FormEvent } from 'react';
 import type { CoachCard, CoachSocialLink, UpdateCoachCardRequest, Gender } from '@yenisey/types';
-import { MAX_COACH_SOCIAL_LINKS } from '@yenisey/types';
+import { EARLIEST_COACHING_YEAR, MAX_COACH_SOCIAL_LINKS, coachingSinceProblem, coachingYearsLabel } from '@yenisey/types';
+import { MarkupEditor } from '@/components/news/MarkupEditor';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -28,7 +29,7 @@ export interface CoachActions {
   removePhoto: () => Promise<CoachCard>;
 }
 
-/** Форма карточки тренера: фотография, два текста и ссылки. Цен здесь нет — они клубные. */
+/** Форма карточки тренера: фотография, «Обо мне», стаж, тексты и ссылки. Цен здесь нет — они клубные. */
 export function CoachEditor({
   profile,
   name,
@@ -174,20 +175,35 @@ function TextForm({
     achievements: profile.achievements ?? '',
     inventory: profile.inventory ?? '',
   }));
+  // «Обо мне» и год начала стажа (решение владельца от 26.10.2026).
+  const [about, setAbout] = useState(profile.about ?? '');
+  const [since, setSince] = useState(profile.coachingSince === null ? '' : String(profile.coachingSince));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
-  const changed = TEXTS.some((text) => draft[text.key] !== (profile[text.key] ?? ''));
+  const sinceValue = since.trim() === '' ? null : Number(since.trim());
+  const changed =
+    TEXTS.some((text) => draft[text.key] !== (profile[text.key] ?? '')) ||
+    about !== (profile.about ?? '') ||
+    sinceValue !== profile.coachingSince;
 
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault();
+
+    const problem = sinceValue === null ? null : coachingSinceProblem(sinceValue);
+
+    if (problem) {
+      setError(problem);
+      return;
+    }
+
     setPending(true);
     setError(null);
     setSaved(false);
 
     try {
-      onChange(await actions.update(draft));
+      onChange(await actions.update({ ...draft, about, coachingSince: sinceValue }));
       setSaved(true);
     } catch (cause) {
       setError(messageOf(cause));
@@ -198,6 +214,37 @@ function TextForm({
 
   return (
     <form onSubmit={(event) => void submit(event)}>
+      <MarkupEditor
+        label="Обо мне"
+        value={about}
+        onChange={(value) => {
+          setSaved(false);
+          setAbout(value);
+        }}
+        rows={6}
+        maxLength={2000}
+        hint="Как тренируете, с кем работаете, чего добиваются ученики. Видно в разделе «Тренер» вашей страницы."
+      />
+
+      <Field
+        label="Тренирую с"
+        hint={
+          sinceValue !== null && coachingSinceProblem(sinceValue) === null
+            ? `Год начала стажа. На сайте: «Стаж: ${coachingYearsLabel(sinceValue)}» — и сам растёт каждый год.`
+            : 'Год начала стажа — стаж посчитается сам и будет расти каждый год.'
+        }
+        inputMode="numeric"
+        placeholder="2014"
+        min={EARLIEST_COACHING_YEAR}
+        max={new Date().getFullYear()}
+        className="max-w-40"
+        value={since}
+        onChange={(event) => {
+          setSaved(false);
+          setSince(event.target.value.replace(/\D/g, '').slice(0, 4));
+        }}
+      />
+
       {TEXTS.map((text) => (
         <Field key={text.key} label={text.label} hint={text.hint} id={`coach-${text.key}`}>
           <textarea

@@ -1,8 +1,7 @@
 'use client';
 
-import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { BookingEntry, ClubCatalogItem, PublicPlan, PublicTenant } from '@yenisey/types';
+import type { ClubCatalogItem, PublicPlan, PublicTenant } from '@yenisey/types';
 import NotFound from '@/app/not-found';
 import { ClubAbout } from '@/components/club/ClubAbout';
 import { ClubHero } from '@/components/club/ClubHero';
@@ -11,10 +10,7 @@ import { ClubRatingColumn, RATING_ANCHOR } from '@/components/club/ClubRatingCol
 import { ABOUT_ANCHOR, useSectionNav } from '@/components/club/ClubSectionNav';
 import { ClubTabs, TABS_ANCHOR } from '@/components/club/ClubTabs';
 import { HallCards } from '@/components/club/HallCards';
-import { RowSkeleton } from '@/components/club/EventRow';
-import { SectionHeading } from '@/components/club/SectionHeading';
 import { UPCOMING_ANCHOR, UpcomingEvents, type KindFilter } from '@/components/club/UpcomingEvents';
-import { WhenSpan } from '@/components/club/When';
 import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { PLANS_ANCHOR } from '@/components/subscriptions/PlanList';
 import { SiteFooter } from '@/components/layout/SiteFooter';
@@ -23,7 +19,6 @@ import { Alert } from '@/components/ui/Alert';
 import { api, ApiError } from '@/lib/api';
 import { clubAccent } from '@/lib/clubTheme';
 import { eventViewerOf } from '@/lib/eventViewer';
-import { entryPriceLabel } from '@/lib/subscriptions';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { usePersonSwitch } from '@/lib/usePersonSwitch';
 import { useSession } from '@/lib/useSession';
@@ -38,7 +33,7 @@ import { useSession } from '@/lib/useSession';
  * 11.10.2026): человек, открывший клуб, хочет понять, когда прийти, куда и
  * почём. Раньше «Предстоящие» стояли последними — на телефоне на десятом
  * экране, под описанием, ценностями, новостями, рейтингом и карточками залов.
- * Сверху вниз: обложка; «Мои мероприятия» (только если есть); «Предстоящие»
+ * Сверху вниз: обложка; «Предстоящие»
  * неделей или месяцем, с фильтром по виду и по залам; вкладки
  * «Мероприятия · Тренеры · Абонементы»; карточки залов узкими прямоугольниками,
  * больше четырёх — каруселью; новости и рейтинг двумя колонками; «О клубе».
@@ -46,8 +41,8 @@ import { useSession } from '@/lib/useSession';
  * вкладку тренеров. Отдельный выбор зала над расписанием снят 17.10.2026 —
  * залы выбираются фильтром в самих «Предстоящих» и больше ничего не сужают.
  *
- * «Мои мероприятия» — выше «Предстоящих», как требует ТЗ: на страницу клуба
- * заходят чаще всего посмотреть, куда уже записан и когда идти.
+ * «Мои мероприятия» со страницы клуба сняты (решение владельца от
+ * 26.10.2026): куда записан — в «Моём календаре», по всем клубам сразу.
  *
  * Оформление берётся у клуба: `clubAccent` подменяет акцентные переменные на
  * обёртке страницы, и все компоненты внутри перекрашиваются сами — они
@@ -82,7 +77,6 @@ export default function ClubPage() {
   // Счётчик перечитываний «Предстоящих»: список грузит сам блок (у него своя
   // неделя), страница только говорит «после записи прочитай заново».
   const [eventsVersion, setEventsVersion] = useState(0);
-  const [mine, setMine] = useState<BookingEntry[] | null>(null);
   const [favourite, setFavourite] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Клуба нет — или он черновик, а смотрит посторонний (11.10.2026): сервер
@@ -197,32 +191,26 @@ export default function ClubPage() {
     );
   }, []);
 
-  // После записи или отмены — и в строке, и в окне — обновляются оба списка:
-  // «Мои мероприятия» и отметка «записан» в предстоящих.
+  // После записи или отмены — и в строке, и в окне — отметка «записан» в
+  // предстоящих. «Мои мероприятия» со страницы клуба сняты 26.10.2026: они
+  // живут в «Моём календаре» по всем клубам.
   const refreshEvents = useCallback(() => {
     setEventsVersion((value) => value + 1);
-    club.myEvents(forPerson).then(setMine).catch(() => undefined);
-  }, [club, forPerson]);
+  }, []);
 
-  // Мои мероприятия и отметка «мой клуб» — только для вошедших. Аноним видит
-  // открытый список: клуб выбирают до того, как заводят учётку.
+  // Отметка «мой клуб» — только для вошедших. Аноним видит открытый список:
+  // клуб выбирают до того, как заводят учётку.
   useEffect(() => {
     if (session.status !== 'ready') {
-      setMine(null);
       setFavourite(null);
       return;
     }
-
-    club
-      .myEvents(forPerson)
-      .then(setMine)
-      .catch(() => setMine([]));
 
     api
       .myClubs()
       .then((clubs) => setFavourite(clubs.some((item) => item.slug === slug)))
       .catch(() => setFavourite(null));
-  }, [session.status, club, slug, forPerson]);
+  }, [session.status, slug]);
 
   // Переход к блоку по якорю. Вкладка — сменой якоря: её открывает `ClubTabs`.
   const jump = useCallback((anchor: string) => {
@@ -289,14 +277,6 @@ export default function ClubPage() {
           className="mb-10"
         />
 
-        <MyEvents
-          entries={mine}
-          anonymous={session.status === 'anonymous'}
-          whose={family.selected ? firstName(family.selected.fullName) : null}
-          forPerson={forPerson}
-          readOnly={family.selfIsChild}
-        />
-
         <UpcomingEvents
           slug={slug}
           version={eventsVersion}
@@ -349,93 +329,5 @@ export default function ClubPage() {
 
       <SiteFooter />
     </div>
-  );
-}
-
-/** «Родителев Коля Олегович» → «Коля». */
-function firstName(fullName: string): string {
-  return fullName.trim().split(/\s+/)[1] ?? fullName;
-}
-
-/**
- * Мои мероприятия в этом клубе: записи на турниры и свои брони столов. С
- * выбранным ребёнком — его.
- */
-function MyEvents({
-  entries,
-  anonymous,
-  whose,
-  forPerson,
-  readOnly,
-}: {
-  entries: BookingEntry[] | null;
-  anonymous: boolean;
-  /** Имя выбранного ребёнка — тогда список его. */
-  whose: string | null;
-  /** Выбранный ребёнок — «Мои записи» открываются за него. */
-  forPerson: string | null;
-  /** Смотрит сам ребёнок младше 14: отменять он не может. */
-  readOnly: boolean;
-}) {
-  if (anonymous) {
-    return null;
-  }
-
-  const upcoming = (entries ?? []).filter(
-    (entry) => entry.status === 'BOOKED' && new Date(entry.startsAt).getTime() > Date.now(),
-  );
-
-  if (entries !== null && upcoming.length === 0) {
-    return null;
-  }
-
-  return (
-    <section id="moi" className="mb-14 scroll-mt-48">
-      <SectionHeading
-        title={whose ? `Мероприятия: ${whose}` : 'Мои мероприятия'}
-        description={
-          readOnly
-            ? 'Куда ты записан в этом клубе. Записывает и отменяет родитель.'
-            : 'Куда вы записаны в этом клубе — ближайшее сверху. Отменить запись можно в «Моих записях».'
-        }
-      />
-
-      {entries === null ? (
-        <RowSkeleton />
-      ) : (
-        <ul className="border-t border-border">
-          {upcoming.map((entry) => (
-            <li
-              key={entry.entryId}
-              className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-border py-4"
-            >
-              <WhenSpan startsAt={entry.startsAt} endsAt={entry.endsAt} timezone={entry.timezone} />
-
-              <span className="min-w-0 grow">
-                <span className="block text-[0.9375rem] text-text">{entry.title}</span>
-                {entry.subtitle && (
-                  <span className="block text-[0.8125rem] text-text-muted">{entry.subtitle}</span>
-                )}
-              </span>
-
-              <span className="text-[0.875rem] whitespace-nowrap text-text-muted">
-                {entryPriceLabel(entry)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <p className="mt-3 text-[0.8125rem] text-text-subtle">
-        {readOnly ? 'Прошедшие — в разделе' : 'Отменить запись и увидеть прошедшие можно в разделе'}{' '}
-        <Link
-          href={forPerson ? `/my-bookings?for=${forPerson}` : '/my-bookings'}
-          className="text-text-accent underline-offset-2 hover:underline"
-        >
-          «Мои записи»
-        </Link>
-        .
-      </p>
-    </section>
   );
 }

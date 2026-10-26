@@ -3622,6 +3622,17 @@ async function coachCard() {
   r = await asClient('/me/coach-card', { method: 'PATCH', json: { achievements: 'я тоже тренер' } });
   check('клиенту карточка тренера не открывается вовсе', 403, r.status);
 
+  // «Обо мне» и год начала стажа (решение от 26.10.2026).
+  r = await asCoach('/me/coach-card', { method: 'PATCH', json: { about: '  Тренирую с **2014** года  ', coachingSince: 2014 } });
+  check('тренер пишет «Обо мне» и год начала стажа', 200, r.status);
+  assert('«Обо мне» обрезано по краям, год сохранён', r.body?.about === 'Тренирую с **2014** года' && r.body?.coachingSince === 2014);
+  r = await asCoach('/me/coach-card', { method: 'PATCH', json: { coachingSince: new Date().getFullYear() + 1 } });
+  check('год стажа из будущего отклонён', 400, r.status);
+  r = await asCoach('/me/coach-card', { method: 'PATCH', json: { coachingSince: 1900 } });
+  check('и слишком ранний — тоже', 400, r.status);
+  r = await asCoach('/me/coach-card', { method: 'PATCH', json: { about: 'а'.repeat(2001) } });
+  check('«Обо мне» длиннее 2000 знаков отклонено', 400, r.status);
+
   // --- Цены. Они клубные, в отличие от карточки, и правит их тоже сам тренер:
   // администратору маршрута правки больше не существует.
   r = await asCoach('/clubs/yenisey/coach/prices');
@@ -3663,6 +3674,12 @@ async function coachCard() {
   assert('имя сокращено до «Фамилия И.»', r.body?.name === 'Тренеров П.');
   assert('клуб назван со своей ценой, и он один',
     r.body?.clubs?.length === 1 && r.body.clubs[0]?.slug === 'yenisey' && r.body.clubs[0]?.groupPrice === 60000);
+  assert('на странице тренера — «Обо мне», год стажа и разряд (пока не заявлен)',
+    r.body?.about === 'Тренирую с **2014** года' && r.body?.coachingSince === 2014 && r.body?.rank === null);
+  {
+    const inClub = (await call('/clubs/yenisey')).body?.coaches?.find?.((item) => item.id === coachId);
+    assert('в карточке клуба у тренера — разряд и стаж', inClub !== undefined && inClub.rank === null && inClub.coachingSince === 2014);
+  }
 
   const photo = await fetch(`${API}/files/${photoId}`);
   check('фотография отдаётся без входа', 200, photo.status);

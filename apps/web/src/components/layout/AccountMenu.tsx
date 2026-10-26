@@ -113,7 +113,7 @@ export function AccountMenu({ user }: { user: PublicUser }) {
         </div>
 
         <MenuLink href="/cabinet">Кабинет</MenuLink>
-        <MenuLink href="/my-bookings">Мои записи</MenuLink>
+        <MenuLink href="/my-bookings">Мой календарь</MenuLink>
 
         {user.memberships.length > 0 && <Group>Мои клубы</Group>}
         {user.memberships.map((membership) => {

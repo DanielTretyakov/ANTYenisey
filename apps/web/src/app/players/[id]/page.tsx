@@ -1,15 +1,12 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import type { PublicPlayer } from '@yenisey/types';
 import { AppShell } from '@/components/layout/AppShell';
-import { PlayerPublicSkeleton, PlayerPublicView } from '@/components/player/PlayerPublicView';
-import { Alert } from '@/components/ui/Alert';
-import { api, ApiError } from '@/lib/api';
+import { PersonPage } from '@/components/person/PersonPage';
 
 /**
- * Страница игрока — открыта всем, без входа.
+ * Страница игрока — открыта всем, без входа. С 26.10.2026 это раздел «Игрок»
+ * общей страницы человека (`PersonPage`): у тренера рядом — «Тренер».
  *
  * Расширение сверх ТЗ (решение владельца от 12.09.2026). Имя — «Фамилия И.»,
  * как в списках записавшихся; ни телефона, ни почты, ни даты рождения сервер
@@ -21,29 +18,10 @@ import { api, ApiError } from '@/lib/api';
  */
 export default function PlayerPage() {
   const params = useParams<{ id: string }>();
-  const [player, setPlayer] = useState<PublicPlayer | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api
-      .player(params.id)
-      .then(setPlayer)
-      .catch((cause: unknown) =>
-        setError(
-          cause instanceof ApiError && cause.status === 404
-            ? 'Игрок не найден или его страница закрыта.'
-            : 'Нет связи. Проверьте интернет и попробуйте ещё раз',
-        ),
-      );
-  }, [params.id]);
 
   return (
     <AppShell>
-      {error && <Alert tone="warning">{error}</Alert>}
-
-      {!player && !error && <PlayerPublicSkeleton />}
-
-      {player && <PlayerPublicView player={player} />}
+      <PersonPage id={params.id} initial="player" />
     </AppShell>
   );
 }

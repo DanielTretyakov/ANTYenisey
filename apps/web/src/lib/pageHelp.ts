@@ -44,7 +44,7 @@ const RULES: Rule[] = [
   },
   // Платформа.
   { match: exact('/'), slugs: ['najti-klub', 'odin-akkaunt', 'zapis-na-zanyatie', 'moi-trenery', 'uvedomleniya'] },
-  { match: under('/my-bookings'), slugs: ['otmena-zapisi', 'zapis-za-rebyonka', 'abonement', 'uvedomleniya'] },
+  { match: under('/my-bookings'), slugs: ['moj-kalendar', 'otmena-zapisi', 'zapis-za-rebyonka', 'abonement'] },
   { match: exact('/cabinet/edit/notifications'), slugs: ['uvedomleniya'] },
   { match: exact('/cabinet/edit/clubs'), slugs: ['najti-klub', 'moi-trenery', 'rebyonok-uchyotka', 'rebyonku-14'] },
   { match: under('/cabinet'), slugs: ['profil-igroka', 'odin-akkaunt', 'rebyonok-uchyotka', 'abonement', 'uvedomleniya'] },

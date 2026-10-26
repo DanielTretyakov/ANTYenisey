@@ -68,6 +68,16 @@ export class UpdateCoachCardDto implements UpdateCoachCardRequest {
   @ValidateNested({ each: true })
   @Type(() => CoachSocialLinkDto)
   socialLinks?: CoachSocialLinkDto[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000, { message: '«Обо мне» — не длиннее 2000 символов' })
+  about?: string | null;
+
+  /** Год начала стажа; что не из будущего, проверяет `coachingSinceProblem`. */
+  @IsOptional()
+  @IsInt({ message: 'Год начала стажа — целым числом' })
+  coachingSince?: number | null;
 }
 
 /**
