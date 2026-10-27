@@ -185,7 +185,7 @@ interface MonthItem {
   startsAt: string;
   timezone: string;
   title: string;
-  club: Pick<ClubRef, 'slug' | 'name'>;
+  club: ClubRef;
   tone: Tone;
   event: ClubEvent | null;
   entry: BookingEntry | null;
@@ -454,9 +454,10 @@ function MyMonth({
           ) : (
             <ul className="border-t border-border">
               {groupByDay(ofDay).map((group) => (
-                <DayGroup key={group.key} weekday={group.weekday} date={group.date}>
+                <DayGroup key={group.key} weekday={group.weekday} date={group.date} rule={false}>
                   {group.items.map((item) => (
                     <li key={item.key}>
+                      <ClubStripe color={item.club.accentColor}>
                       {item.event ? (
                         <EventRow
                           slug={item.club.slug}
@@ -478,6 +479,7 @@ function MyMonth({
                           showClub
                         />
                       ) : null}
+                      </ClubStripe>
                     </li>
                   ))}
                 </DayGroup>
@@ -596,6 +598,27 @@ function Legend({ paint, label }: { paint: CalendarPaint; label: string }) {
   );
 }
 
+/**
+ * Строка в цвете своего клуба (решение владельца от 26.10.2026): полоска
+ * слева у каждой записи, а не одна на день — в одном дне бывают разные клубы.
+ * Клуб без своего цвета — в изумруде платформы.
+ */
+function ClubStripe({ color, children }: { color: string | null; children: ReactNode }) {
+  return (
+    // Граница и отступ строки — у обёртки: их уплотняет и снимает у последней
+    // `DayGroup`, а строке внутри они не нужны.
+    <div className="relative border-b border-border pl-4 [&>div]:border-b-0 [&>div]:py-0">
+
+      <span
+        aria-hidden="true"
+        className="absolute inset-y-3 left-0 w-[3px] rounded-full"
+        style={{ background: color ?? 'var(--accent)' }}
+      />
+      {children}
+    </div>
+  );
+}
+
 /** История по умолчанию — за 30 дней от сегодня; старше — фильтром (решение от 26.10.2026). */
 const HISTORY_PERIODS = [
   { days: 30, label: '30 дней' },
@@ -643,14 +666,16 @@ function EntriesBlock({
 
   const row = (entry: BookingEntry, showClub: boolean) => (
     <li key={entry.entryId}>
-      <Row
-        entry={entry}
-        forPerson={forPerson}
-        canCancel={canCancel}
-        onChanged={onChanged}
-        onError={onError}
-        showClub={showClub}
-      />
+      <ClubStripe color={entry.club.accentColor}>
+        <Row
+          entry={entry}
+          forPerson={forPerson}
+          canCancel={canCancel}
+          onChanged={onChanged}
+          onError={onError}
+          showClub={showClub}
+        />
+      </ClubStripe>
     </li>
   );
 
@@ -756,7 +781,7 @@ function ByDay({
   return (
     <ul className={cn('border-t border-border', className)}>
       {groupByDay(entries).map((group) => (
-        <DayGroup key={`${group.key}-${group.items[0]!.entryId}`} weekday={group.weekday} date={group.date}>
+        <DayGroup key={`${group.key}-${group.items[0]!.entryId}`} weekday={group.weekday} date={group.date} rule={false}>
           {group.items.map(render)}
         </DayGroup>
       ))}

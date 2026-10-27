@@ -45,11 +45,22 @@ export function groupByDay<T extends { startsAt: string; timezone: string }>(ite
  * обёрткой, у которой своя нижняя граница и отступ: здесь они уплотняются,
  * а у последней граница снимается — её даёт сама группа.
  */
-export function DayGroup({ weekday, date, children }: { weekday: string; date: string; children: ReactNode }) {
+export function DayGroup({
+  weekday,
+  date,
+  children,
+  rule = true,
+}: {
+  weekday: string;
+  date: string;
+  children: ReactNode;
+  /** Общая черта дня. Без неё строки рисуют свою — в «Моём календаре» в цвете клуба записи. */
+  rule?: boolean;
+}) {
   return (
     <li className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 border-b border-border py-3 sm:grid-cols-[8.5rem_minmax(0,1fr)] sm:gap-x-5">
       <div className="relative flex items-center pr-4">
-        <span aria-hidden="true" className="absolute inset-y-1 right-0 w-[3px] rounded-full bg-accent/70" />
+        {rule && <span aria-hidden="true" className="absolute inset-y-1 right-0 w-[3px] rounded-full bg-accent/70" />}
         <span className="block">
           <span className="block text-[0.75rem] tracking-[0.06em] text-text-subtle uppercase">{weekday}</span>
           <span className="block font-display text-[1rem] leading-tight text-text sm:text-[1.0625rem]">{date}</span>
