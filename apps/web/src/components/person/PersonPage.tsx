@@ -4,13 +4,14 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { coachingYearsLabel, publicRankLabel, type FeedEvent, type PublicCoach, type PublicPlayer } from '@yenisey/types';
 import { CoachHeart } from '@/components/coach/CoachHeart';
-import { CoachCardBody, coachCardEmpty, CoachPricesView } from '@/components/coach/CoachView';
+import { CoachPricesView } from '@/components/coach/CoachView';
 import { EventDialog } from '@/components/events/EventDialog';
 import { FeedEventCard } from '@/components/events/FeedEventCard';
 import { NewsBody } from '@/components/news/NewsParts';
 import { PlayerPublicSkeleton, PlayerPublicView } from '@/components/player/PlayerPublicView';
 import { PlayerAvatar } from '@/components/player/PlayerView';
 import { Alert } from '@/components/ui/Alert';
+import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { CardRow } from '@/components/ui/CardRow';
 import { Tab } from '@/components/ui/Tab';
 import { api, ApiError } from '@/lib/api';
@@ -79,7 +80,7 @@ export function PersonPage({ id, initial }: { id: string; initial: PersonSection
   }
 
   return (
-    <div className="grid gap-6">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
       {has.player && has.coach && (
         <div className="flex gap-1.5" role="tablist" aria-label="Раздел страницы">
           <Tab inTablist active={shown === 'player'} onClick={() => choose('player')}>
@@ -98,8 +99,10 @@ export function PersonPage({ id, initial }: { id: string; initial: PersonSection
 }
 
 /**
- * Раздел «Тренер»: кто он, «Обо мне», ближайшие занятия каруселью с выбором
- * клуба и вида, стоимость по клубам, достижения, инвентарь и контакты.
+ * Раздел «Тренер» — в стиле страницы игрока (решение владельца от
+ * 26.10.2026): шапка со стажем, разрядом и контактами, карточки «Обо мне»,
+ * «Стоимость занятий» и «Ближайшие занятия». Достижения и инвентарь — в
+ * разделе «Игрок», здесь не повторяются.
  *
  * Карточка одна на все клубы, а цены у каждого клуба свои — поэтому клубы
  * перечислены отдельным блоком, каждый со своей стоимостью занятий.
@@ -135,10 +138,10 @@ function CoachSection({ coach }: { coach: PublicCoach }) {
   ];
 
   return (
-    <div className="grid gap-8">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
       <header className="flex flex-wrap items-center gap-6">
         <PlayerAvatar fileId={coach.photoFileId} name={coach.name} gender={coach.gender} size="lg" />
-        <div className="min-w-0">
+        <div className="min-w-0 grow">
           <p className="text-[0.75rem] tracking-[0.1em] text-text-subtle uppercase">Тренер</p>
           <h1 className="mt-1 text-[2rem] leading-tight break-words">{coach.name}</h1>
           <p className="mt-1.5 text-[0.9375rem] text-text-muted">
@@ -152,7 +155,31 @@ function CoachSection({ coach }: { coach: PublicCoach }) {
               </span>
             ))}
           </p>
-          <p className="mt-1 text-[0.9375rem] text-text">{facts.join(' · ')}</p>
+
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            <Fact label="Стаж" value={coach.coachingSince === null ? '—' : coachingYearsLabel(coach.coachingSince)} />
+            <Fact label="Разряд" value={publicRankLabel(coach.rank)} />
+          </div>
+
+          {/* Контакты — у имени, а не внизу страницы (решение владельца от
+              26.10.2026). `rel` обязателен: страница открыта без входа. */}
+          {coach.socialLinks.length > 0 && (
+            <ul className="mt-3 flex flex-wrap gap-1.5" aria-label="Контакты">
+              {coach.socialLinks.map((link) => (
+                <li key={`${link.label}:${link.url}`}>
+                  <a
+                    href={link.url}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-raised px-3 py-1 text-[0.8125rem] text-text-accent transition-colors hover:border-border-strong"
+                  >
+                    {link.label}
+                    <span aria-hidden="true">↗</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
         {/* Себя тренер в избранное не отмечает — база тоже не даст. */}
         {!(session.status === 'ready' && session.user.id === coach.id) && (
@@ -161,44 +188,50 @@ function CoachSection({ coach }: { coach: PublicCoach }) {
             anonymous={session.status === 'anonymous'}
             favourite={session.status === 'anonymous' ? false : favourite}
             onChange={(list) => setFavourite(list.some((item) => item.id === coach.id))}
-            className="ml-auto self-start"
+            className="self-start"
           />
         )}
       </header>
 
-      {coach.about && (
-        <section>
-          <h3 className="mb-2 text-[0.9375rem] font-medium">Обо мне</h3>
-          <NewsBody body={coach.about} className="text-[0.9375rem]" />
-        </section>
-      )}
+      {/* Как на странице игрока: слева рассказ, справа цены по клубам.
+          Достижения и инвентарь — на странице игрока, здесь их нет. */}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <Card>
+          <CardHeader title="Обо мне" description="Рассказывает сам тренер." />
+          <CardBody>
+            {coach.about ? (
+              <NewsBody body={coach.about} className="text-[0.9375rem]" />
+            ) : (
+              <p className="text-[0.875rem] text-text-muted">Тренер пока ничего о себе не рассказал.</p>
+            )}
+          </CardBody>
+        </Card>
+
+        {/* Цены — по клубу: в соседнем у того же тренера они другие, и общая
+            строка «1500 ₽» ввела бы в заблуждение. */}
+        <Card>
+          <CardHeader title="Стоимость занятий" description="В каждом клубе — своя." />
+          <CardBody>
+            <ul className="grid divide-y divide-border [&>li+li]:pt-4 [&>li]:pb-4 [&>li:last-child]:pb-0">
+              {coach.clubs.map((club) => (
+                <li key={club.slug}>
+                  <Link
+                    href={`/clubs/${club.slug}`}
+                    className="text-[0.9375rem] font-medium text-text-accent underline-offset-2 hover:underline"
+                  >
+                    {club.name}
+                  </Link>
+                  <div className="mt-1.5">
+                    <CoachPricesView prices={club} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
+      </div>
 
       <UpcomingSessions events={upcoming} onOpen={setOpen} />
-
-      {/* Цены — по клубу: в соседнем у того же тренера они другие, и общая
-          строка «1500 ₽» ввела бы в заблуждение. */}
-      <section>
-        <h3 className="mb-3 text-[0.9375rem] font-medium">Стоимость занятий</h3>
-        <ul className="grid gap-4 sm:grid-cols-2">
-          {coach.clubs.map((club) => (
-            <li key={club.slug} className="rounded-card border border-border bg-surface-raised px-5 py-4">
-              <Link
-                href={`/clubs/${club.slug}`}
-                className="text-[0.9375rem] font-medium text-text-accent underline-offset-2 hover:underline"
-              >
-                {club.name}
-              </Link>
-              <div className="mt-1.5">
-                <CoachPricesView prices={club} />
-              </div>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {/* «Карточка пока не заполнена» — только когда о тренере нет ничего:
-          рядом с «Обо мне» эта строка читалась бы как ошибка. */}
-      {(!coachCardEmpty(coach) || !coach.about) && <CoachCardBody card={coach} />}
 
       {open && (
         <EventDialog
@@ -210,6 +243,15 @@ function CoachSection({ coach }: { coach: PublicCoach }) {
         />
       )}
     </div>
+  );
+}
+
+/** Стаж или разряд — пилюлей под именем. */
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-raised px-3 py-1 text-[0.8125rem] text-text-muted">
+      {label}: <span className="font-medium text-text">{value}</span>
+    </span>
   );
 }
 
@@ -225,10 +267,12 @@ function UpcomingSessions({ events, onOpen }: { events: FeedEvent[] | null; onOp
 
   if (events === null) {
     return (
-      <section>
-        <h3 className="mb-3 text-[0.9375rem] font-medium">Ближайшие занятия</h3>
-        <div className="h-32 rounded-card border border-border bg-surface-raised" aria-busy="true" />
-      </section>
+      <Card>
+        <CardHeader title="Ближайшие занятия" />
+        <CardBody>
+          <div className="h-32 rounded-card bg-surface-sunken" aria-busy="true" />
+        </CardBody>
+      </Card>
     );
   }
 
@@ -268,20 +312,22 @@ function UpcomingSessions({ events, onOpen }: { events: FeedEvent[] | null; onOp
   );
 
   return (
-    <section>
-      <h3 className="mb-3 text-[0.9375rem] font-medium">Ближайшие занятия</h3>
-      {events.length === 0 ? (
-        <p className="text-[0.9375rem] text-text-muted">Ближайших занятий в расписании клубов пока нет.</p>
-      ) : (
-        <CardRow
-          items={shown}
-          keyOf={(event) => `${event.club.slug}-${event.id}`}
-          label="Ближайшие занятия тренера — листайте вбок"
-          toolbar={clubs.length > 1 || types.length > 1 ? filters : undefined}
-          render={(event) => <FeedEventCard event={event} onOpen={onOpen} />}
-        />
-      )}
-    </section>
+    <Card>
+      <CardHeader title="Ближайшие занятия" description="По всем клубам тренера. Нажмите на занятие — откроется его окно с записью." />
+      <CardBody>
+        {events.length === 0 ? (
+          <p className="text-[0.875rem] text-text-muted">Ближайших занятий в расписании клубов пока нет.</p>
+        ) : (
+          <CardRow
+            items={shown}
+            keyOf={(event) => `${event.club.slug}-${event.id}`}
+            label="Ближайшие занятия тренера — листайте вбок"
+            toolbar={clubs.length > 1 || types.length > 1 ? filters : undefined}
+            render={(event) => <FeedEventCard event={event} onOpen={onOpen} />}
+          />
+        )}
+      </CardBody>
+    </Card>
   );
 }
 

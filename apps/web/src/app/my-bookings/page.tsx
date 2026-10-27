@@ -169,6 +169,8 @@ export default function MyBookingsPage() {
           onError={setError}
         />
       )}
+      {/* Линия и в конце страницы — та же, что между разделами. */}
+      <div aria-hidden="true" className="section-rule mt-14 [--rule-gap:3.5rem]" />
     </AppShell>
   );
 }
@@ -680,7 +682,8 @@ function EntriesBlock({
   );
 
   return (
-    <section className="mb-14">
+    // Линия — над вторым и следующими блоками (решение владельца от 26.10.2026).
+    <section className="mb-14 [section+&]:section-rule [section+&]:[--rule-gap:3.5rem]">
       <SectionHeading title={title} description={description} />
 
       {!showAll &&
