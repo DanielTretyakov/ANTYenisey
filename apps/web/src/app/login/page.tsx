@@ -11,6 +11,7 @@ import { api, ApiError } from '@/lib/api';
 import { useMailEnabled } from '@/lib/mailStatus';
 import { registerHref, safeNext } from '@/lib/next';
 import { saveSession } from '@/lib/session';
+import { useSession } from '@/lib/useSession';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -22,10 +23,20 @@ export default function LoginPage() {
   const [next, setNext] = useState<string | null>(null);
   // «Забыли пароль?» — только когда почта сервиса работает (12.10.2026).
   const mailEnabled = useMailEnabled();
+  const session = useSession();
 
   useEffect(() => {
     setNext(safeNext(new URLSearchParams(window.location.search).get('next')));
   }, []);
+
+  // Уже вошедшему форма входа ни к чему — туда, куда он шёл.
+  useEffect(() => {
+    if (session.status === 'ready' && !pending) {
+      router.replace(safeNext(new URLSearchParams(window.location.search).get('next')) ?? '/cabinet');
+    }
+    // pending — только чтобы не перебивать переход после собственного входа.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.status, router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -53,14 +64,6 @@ export default function LoginPage() {
     <AuthLayout
       title="Вход"
       subtitle="Один аккаунт на все клубы платформы."
-      footer={
-        <>
-          Нет аккаунта?{' '}
-          <Link href={registerHref(next)} className="font-medium text-text-accent hover:underline">
-            Зарегистрироваться
-          </Link>
-        </>
-      }
     >
       {error && <Alert>{error}</Alert>}
 
@@ -87,6 +90,17 @@ export default function LoginPage() {
           {pending ? 'Проверяем…' : 'Войти'}
         </Button>
       </form>
+
+      {/* «Войти и записаться» приводит сюда и новичка — ему нужна регистрация,
+          а не мелкая ссылка в подвале формы (прогон 28.10.2026). */}
+      <div className="mt-6 border-t border-border pt-5 text-center">
+        <p className="mb-3 text-[0.875rem] text-text-muted">Впервые на КНТ?</p>
+        <Link href={registerHref(next)} className="block">
+          <Button variant="secondary" fullWidth size="lg">
+            Создать аккаунт
+          </Button>
+        </Link>
+      </div>
     </AuthLayout>
   );
 }

@@ -150,6 +150,28 @@ export default function ClubPage() {
     return () => window.removeEventListener('hashchange', scroll);
   }, [loaded]);
 
+  // Вкладка — по названию клуба: у всех страниц была одна подпись «КНТ — клубы
+  // настольного тенниса», и вкладки было не различить.
+  // Next ставит заголовок из метаданных потоком, уже после эффекта, поэтому
+  // свой держим несколько секунд после загрузки — и только на адресе клуба:
+  // при переходе новая страница ставит свой раньше, чем эта размонтируется.
+  useEffect(() => {
+    if (!tenant) return;
+    const wanted = `${tenant.name} · КНТ`;
+    const path = window.location.pathname;
+    const apply = (): void => {
+      if (window.location.pathname === path && document.title !== wanted) document.title = wanted;
+    };
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(document.head, { subtree: true, childList: true, characterData: true });
+    const stop = setTimeout(() => observer.disconnect(), 3000);
+    return () => {
+      clearTimeout(stop);
+      observer.disconnect();
+    };
+  }, [tenant]);
+
   useEffect(() => {
     api
       .tenant(slug)

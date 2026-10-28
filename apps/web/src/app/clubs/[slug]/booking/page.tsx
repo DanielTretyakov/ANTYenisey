@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BOOKING_HORIZON_DAYS,
   PAYMENT_MODE_NOTE,
@@ -31,6 +31,7 @@ import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
 import { api, ApiError } from '@/lib/api';
 import { loginHref } from '@/lib/next';
+import { useEventFromUrl } from '@/lib/eventLink';
 import { tintFill, tintMark } from '@/lib/personColor';
 import { rolesInClub } from '@/lib/membership';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
@@ -107,14 +108,29 @@ export default function BookingPage() {
   const [date, setDate] = useState('');
   const [day, setDay] = useState<PublicDayBoard | null>(null);
   const [event, setEvent] = useState<NonNullable<PublicBoardBlock['event']> | null>(null);
+  const [fromUrl, clearFromUrl] = useEventFromUrl();
+  const dialog = event ?? fromUrl;
 
   const [pick, setPick] = useState<Pick | null>(null);
   const [withRobot, setWithRobot] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Второе нажатие «Забронировать», пока первое в пути, запроса не шлёт:
+  // `pending` доходит до кнопки только со следующей отрисовкой.
+  const booking = useRef(false);
 
   const anonymous = session.status === 'anonymous';
+
+  // Выбор из адреса (`?date=&table=&start=&dur=`): его кладёт сюда сама
+  // страница, и он переживает вход с регистрацией и «Назад/Вперёд» — раньше
+  // человек, вернувшийся после регистрации, выбирал стол и время заново.
+  const restore = useRef<{ date: string; pick: Pick | null } | null>(null);
+  // Выбор кнопкой «Быстро» показываем прокруткой — иначе он прячется во
+  // внутренней прокрутке сетки и под ней, и кнопка кажется неработающей.
+  const reveal = useRef(false);
+  const confirmRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     club
@@ -124,8 +140,10 @@ export default function BookingPage() {
         // «Забронировать в этом зале» со страницы клуба приходит с ?hall=.
         // Из адреса читается здесь, а не через useSearchParams: страница
         // обходится без границы Suspense, как и переключатель «за кого».
-        const wanted = new URLSearchParams(window.location.search).get('hall');
+        const params = new URLSearchParams(window.location.search);
+        const wanted = params.get('hall');
         const preset = loaded.find((hall) => hall.id === wanted)?.id;
+        restore.current = pickFromQuery(params);
         setHallId((current) => current || preset || (loaded[0]?.id ?? ''));
       })
       .catch((cause: unknown) => setError(messageOf(cause)));
@@ -156,7 +174,14 @@ export default function BookingPage() {
   );
 
   useEffect(() => {
-    setDate((current) => (current && dates.includes(current) ? current : (dates[0] ?? '')));
+    const wanted = restore.current?.date;
+    setDate((current) =>
+      current && dates.includes(current)
+        ? current
+        : wanted && dates.includes(wanted)
+          ? wanted
+          : (dates[0] ?? ''),
+    );
   }, [dates]);
 
   const loadDay = useCallback(() => {
@@ -169,6 +194,16 @@ export default function BookingPage() {
       .then((loaded) => {
         setDay(loaded);
         setError(null);
+        // Выбор из адреса возвращается один раз — на свой день и только если
+        // начало ещё свободно: «Назад» после брони иначе показывал уже
+        // занятое время подтверждением «с 19:00 до 19:00».
+        const saved = restore.current;
+        if (saved && saved.date === loaded.date) {
+          restore.current = null;
+          const wanted = saved.pick;
+          const table = wanted ? loaded.tables.find((item) => item.tableId === wanted.tableId) : undefined;
+          if (wanted && table && cellState(loaded, table, wanted.startMinute) === 'free') setPick(wanted);
+        }
       })
       .catch((cause: unknown) => {
         setDay(null);
@@ -182,6 +217,36 @@ export default function BookingPage() {
     setPick(null);
     loadDay();
   }, [loadDay]);
+
+  // Зал, день и выбор — в адресе, без новой записи истории.
+  useEffect(() => {
+    if (!hallId || !date) return;
+    const params = new URLSearchParams(window.location.search);
+    params.set('hall', hallId);
+    params.set('date', date);
+    for (const key of ['table', 'start', 'dur']) params.delete(key);
+    if (pick) {
+      params.set('table', pick.tableId);
+      params.set('start', String(pick.startMinute));
+      params.set('dur', String(pick.durationMinutes));
+    }
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}?${params.toString()}`);
+  }, [hallId, date, pick]);
+
+  // После «Быстро» — сетку к выбранной клетке, страницу к подтверждению.
+  useEffect(() => {
+    if (!reveal.current || !pick) return;
+    reveal.current = false;
+    const frame = requestAnimationFrame(() => {
+      const scroller = gridRef.current;
+      const cell = scroller?.querySelector<HTMLElement>('[aria-pressed="true"]');
+      if (scroller && cell) {
+        scroller.scrollTop += cell.getBoundingClientRect().top - scroller.getBoundingClientRect().top - scroller.clientHeight / 3;
+      }
+      confirmRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pick]);
 
   const hall = halls?.find((item) => item.id === hallId) ?? null;
   const table = day?.tables.find((item) => item.tableId === pick?.tableId) ?? null;
@@ -268,10 +333,11 @@ export default function BookingPage() {
   }
 
   async function handleBook(): Promise<void> {
-    if (!day || !pick || !timezone || chosenDuration === 0) {
+    if (!day || !pick || !timezone || chosenDuration === 0 || booking.current) {
       return;
     }
 
+    booking.current = true;
     setPending(true);
     setError(null);
 
@@ -307,6 +373,7 @@ export default function BookingPage() {
       loadDay();
       setPick(null);
     } finally {
+      booking.current = false;
       setPending(false);
     }
   }
@@ -358,7 +425,7 @@ export default function BookingPage() {
       <Card className="mb-6">
         <CardHeader
           title="Время"
-          description="Щёлкните клетку начала, затем клетку конца на том же столе. На занятых клетках написано, чем они заняты; нажмите на занятие или турнир, чтобы записаться. Сетка показывает часы работы зала."
+          description="Нажмите клетку начала, затем клетку конца на том же столе. На занятых клетках написано, чем они заняты; нажмите на занятие или турнир, чтобы записаться. Сетка показывает часы работы зала."
         />
         <CardBody>
           {day?.closedDay ? (
@@ -366,9 +433,17 @@ export default function BookingPage() {
             <p className="text-[0.875rem] text-text-muted">В этот день зал не работает — выберите другую дату.</p>
           ) : day && day.tables.length > 0 ? (
             <>
-              <QuickPick day={day} onPick={setPick} />
+              <QuickPick
+                day={day}
+                pick={shownPick}
+                onPick={(next) => {
+                  reveal.current = true;
+                  setPick(next);
+                }}
+              />
               <Legend />
               <Grid
+                scrollerRef={gridRef}
                 day={day}
                 pick={shownPick}
                 onCell={(target, minute) => setPick(pickAfterClick(day, target, shownPick, minute))}
@@ -384,6 +459,7 @@ export default function BookingPage() {
       </Card>
 
       {pick && table && day && (
+        <div ref={confirmRef} className="scroll-mb-6">
         <Card>
           <CardHeader
             title="Подтверждение"
@@ -460,6 +536,7 @@ export default function BookingPage() {
             )}
           </CardBody>
         </Card>
+        </div>
       )}
 
       {sparring && (
@@ -507,14 +584,17 @@ export default function BookingPage() {
         </Card>
       )}
 
-      {event && (
+      {dialog && (
         <EventDialog
           slug={slug}
-          kind={event.kind}
-          id={event.id}
+          kind={dialog.kind}
+          id={dialog.id}
           forPerson={family.forPerson}
           selfIsChild={family.selfIsChild}
-          onClose={() => setEvent(null)}
+          onClose={() => {
+            setEvent(null);
+            clearFromUrl();
+          }}
           onChanged={loadDay}
         />
       )}
@@ -568,11 +648,14 @@ function Legend() {
  * мероприятия, где можно записаться. Склейку решает `blockSpans`.
  */
 function Grid({
+  scrollerRef,
   day,
   pick,
   onCell,
   onEvent,
 }: {
+  /** Своя область прокрутки сетки — к выбранной клетке её прокручивает страница. */
+  scrollerRef: React.RefObject<HTMLDivElement | null>;
   day: PublicDayBoard;
   pick: Pick | null;
   /** Щелчок по свободной клетке — что станет с выбором, решает `pickAfterClick`. */
@@ -604,7 +687,7 @@ function Grid({
     // Своя область прокрутки с прилипающей шапкой — как в расписании у
     // администратора: столов бывает дюжина, строк времени четыре десятка, и без
     // шапки столбцы на длинной сетке теряют имена.
-    <div className="max-h-[calc(100dvh-16rem)] touch-pan-y overflow-auto">
+    <div ref={scrollerRef} className="max-h-[calc(100dvh-16rem)] touch-pan-y overflow-auto">
       <div
         className="grid text-[0.8125rem]"
         style={{
@@ -839,6 +922,20 @@ function instantAt(date: string, minute: number, timezone: string): string {
   }
 
   return instant.toISOString();
+}
+
+/** Выбор из адреса страницы — тот, что она сама туда положила. */
+function pickFromQuery(params: URLSearchParams): { date: string; pick: Pick | null } | null {
+  const date = params.get('date');
+  const tableId = params.get('table');
+  const startMinute = Number(params.get('start'));
+  const durationMinutes = Number(params.get('dur'));
+
+  if (!date) return null;
+
+  const valid = tableId && Number.isInteger(startMinute) && Number.isInteger(durationMinutes) && durationMinutes > 0;
+
+  return { date, pick: valid ? { tableId, startMinute, durationMinutes } : null };
 }
 
 function messageOf(cause: unknown): string {

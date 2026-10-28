@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { BookingDay } from '@yenisey/types';
 import { Select } from '@/components/ui/Select';
+import { cn } from '@/lib/cn';
 import {
   bookableMinutes,
   formatDuration,
@@ -22,7 +23,16 @@ const PREFERRED_START = 19 * 60;
  * тот же выбор, что щелчки по сетке, и дальше путь один: подтверждение с
  * ценой от сервера. Занято всё — ближайшее время, когда есть стол.
  */
-export function QuickPick({ day, onPick }: { day: BookingDay; onPick: (pick: GridPick) => void }) {
+export function QuickPick({
+  day,
+  pick,
+  onPick,
+}: {
+  day: BookingDay;
+  /** Выбор на сетке: блок следует за ним, а выбранный стол горит. */
+  pick: GridPick | null;
+  onPick: (pick: GridPick) => void;
+}) {
   const starts = bookableMinutes(day);
   const durations = quickDurations(day);
   const [start, setStart] = useState<number | null>(null);
@@ -32,6 +42,18 @@ export function QuickPick({ day, onPick }: { day: BookingDay; onPick: (pick: Gri
   useEffect(() => {
     setStart(null);
   }, [day.hallId, day.date]);
+
+  // Выбрали щелчками по сетке — «Быстро» показывает то же время, а не своё
+  // прежнее «19:00» рядом с выбранными 21:00.
+  const pickStart = pick?.startMinute ?? null;
+  const pickDuration = pick?.durationMinutes ?? null;
+  useEffect(() => {
+    if (pickStart === null || pickDuration === null) return;
+    setStart(pickStart);
+    if (durations.includes(pickDuration)) setDuration(pickDuration);
+    // durations — новый массив на каждой отрисовке; следим только за выбором.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickStart, pickDuration]);
 
   if (starts.length === 0) {
     return null;
@@ -67,16 +89,31 @@ export function QuickPick({ day, onPick }: { day: BookingDay; onPick: (pick: Gri
           <span className="text-[0.8125rem] text-text-muted">
             Свободно с {formatMinute(chosen)} до {formatMinute(chosen + duration)}:
           </span>
-          {free.map((table) => (
-            <button
-              key={table.tableId}
-              type="button"
-              onClick={() => onPick({ tableId: table.tableId, startMinute: chosen, durationMinutes: duration })}
-              className="rounded-full border border-border-accent bg-surface-accent-soft px-3 py-1 text-[0.8125rem] text-text-accent transition-colors hover:brightness-110"
-            >
-              {table.label}
-            </button>
-          ))}
+          {free.map((table) => {
+            const active =
+              pick !== null &&
+              pick.tableId === table.tableId &&
+              pick.startMinute === chosen &&
+              pick.durationMinutes === duration;
+
+            return (
+              <button
+                key={table.tableId}
+                type="button"
+                aria-pressed={active}
+                onClick={() => onPick({ tableId: table.tableId, startMinute: chosen, durationMinutes: duration })}
+                className={cn(
+                  'min-h-9 rounded-full border px-3.5 py-1.5 text-[0.8125rem] transition-colors hover:brightness-110',
+                  active
+                    ? 'border-accent bg-accent text-accent-text'
+                    : 'border-border-accent bg-surface-accent-soft text-text-accent',
+                )}
+              >
+                {active && '✓ '}
+                {table.label}
+              </button>
+            );
+          })}
         </div>
       ) : (
         <p className="text-[0.8125rem] text-text-muted">

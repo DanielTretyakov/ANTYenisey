@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Role } from '@yenisey/database';
+import { Prisma, Role } from '@yenisey/database';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -28,8 +28,22 @@ export class MembershipService {
    *
    * Роль существующей привязки не трогаем: тренер, записавшийся на турнир или
    * забронировавший стол себе, не должен от этого стать клиентом.
+   *
+   * Два первых запроса новичка разом (двойное нажатие «Записаться») оба не
+   * находят привязку, и второй upsert упирается в уникальный ключ — человек
+   * видел «Internal server error» рядом с «Вы записаны» (прогон 28.10.2026).
+   * Повтор находит строку, созданную первым, и проходит.
    */
   async ensureClient(tenantId: string, userId: string): Promise<void> {
+    try {
+      await this.upsertClient(tenantId, userId);
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) throw error;
+      await this.upsertClient(tenantId, userId);
+    }
+  }
+
+  private async upsertClient(tenantId: string, userId: string): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       await tx.tenantMembership.upsert({
         where: { userId_tenantId: { userId, tenantId } },

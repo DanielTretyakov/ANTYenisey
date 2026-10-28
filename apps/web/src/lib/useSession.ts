@@ -3,6 +3,36 @@
 import { useEffect, useState } from 'react';
 import type { PublicUser } from '@yenisey/types';
 import { api } from './api';
+import { readAccessToken } from './session';
+
+/**
+ * Один запрос профиля на всю страницу. Сессию спрашивают шапка, меню, кнопки
+ * записи и сама страница — каждый своим `useSession`, — и на переход уходило
+ * 15–20 одинаковых `GET /auth/me` (прогон 28.10.2026). Ответ делится, пока
+ * запрос в пути, и ещё полторы секунды после; другой токен (вход, выход,
+ * обновление сессии) — новый запрос.
+ */
+const SHARE_MS = 1500;
+let shared: { token: string | null; promise: Promise<PublicUser>; settledAt: number | null } | null = null;
+
+function sharedMe(): Promise<PublicUser> {
+  const token = readAccessToken();
+  const fresh =
+    shared !== null &&
+    shared.token === token &&
+    (shared.settledAt === null || Date.now() - shared.settledAt < SHARE_MS);
+
+  if (fresh) return shared!.promise;
+
+  const entry: NonNullable<typeof shared> = { token, promise: api.me(), settledAt: null };
+  const settle = (): void => {
+    entry.settledAt = Date.now();
+  };
+  entry.promise.then(settle, settle);
+  shared = entry;
+
+  return entry.promise;
+}
 
 /**
  * Состояние сессии на странице.
@@ -30,8 +60,7 @@ export function useSession(): SessionState {
   useEffect(() => {
     let cancelled = false;
 
-    api
-      .me()
+    sharedMe()
       .then((user) => {
         if (!cancelled) setState({ status: 'ready', user });
       })

@@ -13,6 +13,7 @@ import { PersonSwitch } from '@/components/family/PersonSwitch';
 import { WhenSpan } from '@/components/club/When';
 import { Tab } from '@/components/ui/Tab';
 import { EventDialog } from '@/components/events/EventDialog';
+import { CancelEntry } from '@/components/events/CancelEntry';
 import { HelpHint } from '@/components/help/HelpHint';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert } from '@/components/ui/Alert';
@@ -93,6 +94,11 @@ export default function MyBookingsPage() {
     );
   }
 
+  const rentalsFirst =
+    entries === null ||
+    entries.some((entry) => entry.kind === 'TABLE') ||
+    !entries.some((entry) => entry.kind !== 'TABLE');
+
   return (
     <AppShell footer="line">
       <h1 className="text-[1.75rem]">
@@ -115,8 +121,10 @@ export default function MyBookingsPage() {
 
       {entries === null && <Skeleton />}
 
-      {/* Аренда — отдельным блоком и первой (решение владельца от 26.10.2026). */}
-      {entries && (
+      {/* Аренда — отдельным блоком и первой (решение владельца от 26.10.2026).
+          Пустая аренда при живых записях — ниже них: на телефоне она
+          отодвигала первую запись за край экрана (прогон 28.10.2026). */}
+      {entries && rentalsFirst && (
         <EntriesBlock
           title={family.selected ? 'Аренда' : 'Моя аренда'}
           description="Забронированные столы — по всем клубам, ближайшее сверху."
@@ -151,6 +159,27 @@ export default function MyBookingsPage() {
             </>
           }
           entries={entries.filter((entry) => entry.kind !== 'TABLE')}
+          forPerson={forPerson}
+          canCancel={!family.selfIsChild}
+          onChanged={replace}
+          onError={setError}
+        />
+      )}
+
+      {entries && !rentalsFirst && (
+        <EntriesBlock
+          title={family.selected ? 'Аренда' : 'Моя аренда'}
+          description="Забронированные столы — по всем клубам, ближайшее сверху."
+          empty={
+            <>
+              Впереди аренд нет. Забронировать стол можно на странице{' '}
+              <Link href="/" className="text-text-accent underline-offset-2 hover:underline">
+                клуба
+              </Link>
+              .
+            </>
+          }
+          entries={entries.filter((entry) => entry.kind === 'TABLE')}
           forPerson={forPerson}
           canCancel={!family.selfIsChild}
           onChanged={replace}
@@ -852,8 +881,6 @@ function Row({
 }) {
   // Строка всегда в группе дня (`DayGroup`): дата и черта — у группы, здесь
   // только время (решение владельца от 26.10.2026).
-  const [pending, setPending] = useState(false);
-
   /**
    * Отмена идёт КЛУБНЫМ маршрутом, а не платформенным.
    *
@@ -861,8 +888,6 @@ function Row({
    * разошёлся бы с клубным — сначала в мелочах, потом в деньгах.
    */
   async function cancel(): Promise<void> {
-    setPending(true);
-
     try {
       const club = clubApi(entry.club.slug);
 
@@ -878,8 +903,6 @@ function Row({
       );
     } catch (cause) {
       onError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
-    } finally {
-      setPending(false);
     }
   }
 
@@ -911,9 +934,16 @@ function Row({
       {/* Можно ли отменить, решает сервер: его часы — часы клуба, а после
           начала запись не отменяется, а отмечается. */}
       {entry.cancellable && canCancel && (
-        <Button variant="danger" size="sm" pending={pending} onClick={() => void cancel()}>
-          {cancelButtonLabel(entry)}
-        </Button>
+        <CancelEntry
+          kind={entry.kind}
+          id={entry.id}
+          forPerson={forPerson}
+          terms={entry}
+          label={cancelButtonLabel(entry)}
+          size="sm"
+          variant="danger"
+          onConfirm={cancel}
+        />
       )}
     </div>
   );

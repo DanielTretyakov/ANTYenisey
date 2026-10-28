@@ -16,7 +16,16 @@ import { cn } from '@/lib/cn';
  * чистый E.164 (+79991234567): именно в этом виде номер уходит в API и
  * попадает в базу, и именно его ждёт валидация на сервере.
  */
-export function PhoneField({ name = 'phone', initial = '' }: { name?: string; /** «+79991234567» */ initial?: string }) {
+export function PhoneField({
+  name = 'phone',
+  initial = '',
+  hint = 'Десять цифр без кода страны',
+}: {
+  name?: string;
+  /** «+79991234567» */
+  initial?: string;
+  hint?: string;
+}) {
   const [digits, setDigits] = useState(initial.replace(/^\+7/, '').replace(/\D/g, '').slice(0, 10));
 
   function handleChange(event: ChangeEvent<HTMLInputElement>): void {
@@ -67,7 +76,7 @@ export function PhoneField({ name = 'phone', initial = '' }: { name?: string; /*
       <input type="hidden" name={name} value={digits.length === 10 ? `+7${digits}` : ''} />
 
       <p id={`${name}-hint`} className="mt-1.5 text-[0.8125rem] text-text-subtle">
-        Десять цифр без кода страны
+        {hint}
       </p>
     </div>
   );

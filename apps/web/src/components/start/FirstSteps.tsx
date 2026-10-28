@@ -255,13 +255,15 @@ export function FirstSteps() {
         onClick={panel.toggle}
         {...panel.buttonProps}
         className={cn(
-          'flex items-center gap-2.5 rounded-full border border-border bg-surface-raised py-2 pr-4 pl-2 shadow-lg',
+          // На телефоне — одно кольцо: с подписью кнопка закрывала поле «Город».
+          'flex items-center gap-2.5 rounded-full border border-border bg-surface-raised p-1.5 shadow-lg sm:py-2 sm:pr-4 sm:pl-2',
           'transition-colors hover:border-border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
           panel.open && 'border-border-accent',
         )}
       >
         <ProgressRing count={count} total={total} />
-        <span className="text-[0.875rem] font-medium text-text">С чего начать</span>
+        <span className="hidden text-[0.875rem] font-medium text-text sm:inline">С чего начать</span>
+        <span className="sr-only sm:hidden">С чего начать</span>
         <span className="sr-only">
           — сделано {count} из {total}
         </span>

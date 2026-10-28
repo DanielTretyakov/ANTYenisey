@@ -4,10 +4,11 @@ import Link from 'next/link';
 import { ratingNote, restrictionsLabel, type ClubEvent, type EventKind } from '@yenisey/types';
 import { WhenSpan } from '@/components/club/When';
 import { Button } from '@/components/ui/Button';
+import { CancelEntry } from '@/components/events/CancelEntry';
 import { cn } from '@/lib/cn';
 import { seatsLabel, useEventAction, type EventViewer } from '@/lib/eventViewer';
 import { formatKopecks } from '@/lib/money';
-import { loginHref } from '@/lib/next';
+import { loginToEventHref } from '@/lib/eventLink';
 import { tintFill, tintMark } from '@/lib/personColor';
 import { dateIn, timeIn, viewerTime, viewerZone } from '@/lib/zonedTime';
 
@@ -83,7 +84,8 @@ export function EventRow({
           <button
             type="button"
             onClick={onOpen}
-            className="block text-left text-[1rem] text-text underline-offset-2 hover:underline"
+            // Повыше строки текста — чтобы попадать пальцем (было 25 px).
+            className="-my-1.5 block py-1.5 text-left text-[1rem] text-text underline-offset-2 hover:underline"
           >
             {event.title}
             {/* Планка рейтинга дописывается без повтора числа из названия: типы
@@ -134,7 +136,7 @@ export function EventRow({
                 {' · '}
                 {/* Состав — в окне, а не списком в строке: десяток фамилий в
                     каждой строке превратил бы расписание в простыню. */}
-                <button type="button" className="underline underline-offset-2 hover:text-text" onClick={onOpen}>
+                <button type="button" className="-my-2 py-2 underline underline-offset-2 hover:text-text" onClick={onOpen}>
                   кто записан
                 </button>
               </>
@@ -148,23 +150,28 @@ export function EventRow({
           )}
         </span>
 
-        {(viewer === 'client' || viewer === 'staff') && (
-          <Button
-            variant={event.registered ? 'secondary' : 'primary'}
-            size="sm"
-            pending={pending}
-            disabled={full}
-            // Записаться — через окно мероприятия (решение владельца от
-            // 26.10.2026): там описание, зал, цена и кнопка подтверждения, и
-            // случайный щелчок по строке никого не записывает.
-            onClick={() => (event.registered ? void toggle(event) : onOpen())}
-          >
-            {event.registered ? 'Отменить запись' : full ? 'Мест нет' : 'Записаться'}
+        {/* Записаться — через окно мероприятия (решение владельца от
+            26.10.2026): там описание, зал, цена и кнопка подтверждения, и
+            случайный щелчок по строке никого не записывает. Отмена — в строке,
+            но с вопросом и последствиями. */}
+        {(viewer === 'client' || viewer === 'staff') && !event.registered && (
+          <Button size="sm" pending={pending} disabled={full} onClick={onOpen}>
+            {full ? 'Мест нет' : 'Записаться'}
           </Button>
         )}
 
+        {(viewer === 'client' || viewer === 'staff') && event.registered && (
+          <CancelEntry
+            kind={event.kind}
+            id={event.id}
+            forPerson={forPerson}
+            size="sm"
+            onConfirm={() => toggle(event)}
+          />
+        )}
+
         {viewer === 'anonymous' && (
-          <Link href={loginHref()}>
+          <Link href={loginToEventHref(event.kind, event.id)}>
             <Button variant="secondary" size="sm">
               Войти и записаться
             </Button>

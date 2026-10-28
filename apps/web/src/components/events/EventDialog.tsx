@@ -18,11 +18,12 @@ import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { EnrollClientForm } from '@/components/events/EnrollClientForm';
+import { CancelEntry } from '@/components/events/CancelEntry';
 import { ApiError, clubApi } from '@/lib/api';
 import { eventViewerOf, seatsLabel, useEventAction } from '@/lib/eventViewer';
 import { formatKopecks } from '@/lib/money';
 import { rolesInClub } from '@/lib/membership';
-import { loginHref } from '@/lib/next';
+import { loginToEventHref } from '@/lib/eventLink';
 import { useSession } from '@/lib/useSession';
 import { ViewerTime } from '@/components/events/FeedEventCard';
 import { dateIn, timeIn } from '@/lib/zonedTime';
@@ -204,9 +205,10 @@ export function EventDialog({
             <EventActions
               event={event}
               viewer={viewer}
+              forPerson={forPerson}
               pending={action.pending}
               error={action.error}
-              onToggle={() => void action.toggle(event)}
+              onToggle={() => action.toggle(event)}
             />
 
             {/* Записать по звонку (10.10.2026): тем, кто работает в клубе, — и на
@@ -304,15 +306,17 @@ function Person({ person }: { person: EventParticipant }) {
 function EventActions({
   event,
   viewer,
+  forPerson,
   pending,
   error,
   onToggle,
 }: {
   event: EventDetail;
   viewer: ReturnType<typeof eventViewerOf>;
+  forPerson: string | null;
   pending: boolean;
   error: string | null;
-  onToggle: () => void;
+  onToggle: () => Promise<void>;
 }) {
   const started = new Date(event.startsAt).getTime() <= Date.now();
   // Мест нет — но записанному кнопка отмены нужна и на переполненном занятии.
@@ -333,19 +337,32 @@ function EventActions({
 
   return (
     <div className="flex flex-wrap items-center gap-3 border-t border-border pt-5">
-      {(viewer === 'client' || viewer === 'staff') && (
-        <Button
-          variant={event.registered ? 'secondary' : 'primary'}
-          pending={pending}
-          disabled={full}
-          onClick={onToggle}
-        >
-          {event.registered ? 'Отменить запись' : full ? 'Мест нет' : 'Записаться'}
+      {/* Записан — сперва об этом и куда смотреть, отмена — второй и с
+          подтверждением: самой заметной кнопкой после записи была «Отменить». */}
+      {event.registered && (viewer === 'client' || viewer === 'staff') && (
+        <p className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 text-[0.9375rem]" role="status">
+          <span className="font-medium text-text-accent">✓ Вы записаны</span>
+          <Link
+            href={forPerson ? `/my-bookings?for=${forPerson}` : '/my-bookings'}
+            className="text-[0.875rem] text-text-accent underline underline-offset-2"
+          >
+            Открыть «Мой календарь»
+          </Link>
+        </p>
+      )}
+
+      {!event.registered && (viewer === 'client' || viewer === 'staff') && (
+        <Button pending={pending} disabled={full} onClick={() => void onToggle()}>
+          {full ? 'Мест нет' : pending ? 'Записываем…' : 'Записаться'}
         </Button>
       )}
 
+      {event.registered && (viewer === 'client' || viewer === 'staff') && (
+        <CancelEntry kind={event.kind} id={event.id} forPerson={forPerson} size="sm" variant="ghost" onConfirm={onToggle} />
+      )}
+
       {viewer === 'anonymous' && (
-        <Link href={loginHref()}>
+        <Link href={loginToEventHref(event.kind, event.id)}>
           <Button>Войти и записаться</Button>
         </Link>
       )}
@@ -360,10 +377,6 @@ function EventActions({
         <p className="text-[0.875rem] text-text-muted">
           До 14 лет на мероприятия записывает родитель — или администратор клуба у стойки.
         </p>
-      )}
-
-      {event.registered && (viewer === 'client' || viewer === 'staff') && (
-        <span className="text-[0.875rem] text-text-muted">Вы записаны</span>
       )}
 
       {error && (

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { QuickHelp } from '@/components/help/QuickHelp';
 import { DevNotice } from '@/components/layout/DevNotice';
+import { NavigationProgress } from '@/components/layout/NavigationProgress';
 import { HELP_ARTICLES } from '@/content/help';
 import { onest, unbounded } from '@/lib/fonts';
 import { THEME_INIT_SCRIPT } from '@/lib/theme';
@@ -38,6 +39,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body>
+        {/* Полоса «загружаем страницу» — от нажатия на ссылку до смены адреса. */}
+        <NavigationProgress />
         {/* «Сервис в разработке» — над шапкой всех страниц (17.10.2026). */}
         <DevNotice />
         {children}

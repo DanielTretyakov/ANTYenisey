@@ -30,14 +30,14 @@ export function ConsentCheckbox({
 
   return (
     <div className="mb-4">
-      <label htmlFor={id} className="flex cursor-pointer items-start gap-3">
+      <label htmlFor={id} className="flex cursor-pointer items-start gap-3 py-1">
         <input
           id={id}
           type="checkbox"
           checked={checked}
           onChange={(event) => onChange(event.target.checked)}
           required
-          className="mt-0.5 h-4.5 w-4.5 shrink-0 cursor-pointer rounded-sm border border-border-strong accent-accent"
+          className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer rounded-sm border border-border-strong accent-accent"
         />
         {by === 'application' ? (
           <span className="text-[0.875rem] text-text">

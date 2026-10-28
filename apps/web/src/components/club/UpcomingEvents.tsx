@@ -10,6 +10,7 @@ import type { EventsFilter } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { useDisclosure } from '@/lib/useDisclosure';
 import type { EventViewer } from '@/lib/eventViewer';
+import { useEventFromUrl } from '@/lib/eventLink';
 import { dayKey, monthEnd, monthLabel, monthStart } from '@/lib/month';
 import { tintMark } from '@/lib/personColor';
 import { useClubApi } from '@/lib/useClubApi';
@@ -94,6 +95,9 @@ export function UpcomingEvents({
   const club = useClubApi();
   const [view, setView] = useState<'week' | 'month'>('week');
   const [open, setOpen] = useState<ClubEvent | null>(null);
+  // Вернулся после входа с «Войти и записаться» — окно того же мероприятия.
+  const [fromUrl, clearFromUrl] = useEventFromUrl();
+  const dialog = open ?? fromUrl;
 
   const [weekOffset, setWeekOffset] = useState(0);
   // Выбранная вкладка дня: дата «2026-10-27», «вся неделя» или `null` — сама,
@@ -245,10 +249,16 @@ export function UpcomingEvents({
         <SectionHeading
           className="mb-0"
           title="Предстоящие мероприятия"
+          // На телефоне — одна фраза: полный абзац с фильтрами занимал экран
+          // до первого мероприятия (прогон 28.10.2026).
           description={
             <>
-              Тренировки и турниры по дням, неделей или месяцем. «Записаться» откроет мероприятие — там подтвердите запись. Фильтры ниже
-              оставляют только нужный вид, конкретное мероприятие или залы.
+              «Записаться» откроет мероприятие — там подтвердите запись.
+              <span className="hidden sm:inline">
+                {' '}
+                Тренировки и турниры по дням, неделей или месяцем; фильтры ниже оставляют только нужный вид, конкретное
+                мероприятие или залы.
+              </span>
             </>
           }
         />
@@ -456,14 +466,17 @@ export function UpcomingEvents({
         </ul>
       )}
 
-      {open && (
+      {dialog && (
         <EventDialog
           slug={slug}
-          kind={open.kind}
-          id={open.id}
+          kind={dialog.kind}
+          id={dialog.id}
           forPerson={forPerson}
           selfIsChild={selfIsChild}
-          onClose={() => setOpen(null)}
+          onClose={() => {
+            setOpen(null);
+            clearFromUrl();
+          }}
           onChanged={onChanged}
         />
       )}

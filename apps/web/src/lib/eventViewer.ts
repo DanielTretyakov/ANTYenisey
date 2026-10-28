@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { ClubEvent } from '@yenisey/types';
 import { ApiError, clubApi } from './api';
 import { isStaff } from '@yenisey/types';
@@ -10,10 +10,12 @@ import type { SessionState } from './useSession';
 /**
  * Кем человек приходится клубу — с точки зрения кнопки «Записаться».
  *
+ * `loading` — профиль ещё не пришёл: кнопок записи нет никаких.
+ *
  * `child` — вошедшему нет 14, и он смотрит сам за себя: записывает его
  * родитель или администратор у стойки.
  */
-export type EventViewer = 'anonymous' | 'client' | 'staff' | 'child';
+export type EventViewer = 'loading' | 'anonymous' | 'client' | 'staff' | 'child';
 
 /**
  * Кто смотрит на мероприятие клуба `slug`.
@@ -37,6 +39,9 @@ export function eventViewerOf(
   forPerson: string | null,
   selfIsChild: boolean,
 ): EventViewer {
+  // Пока профиль не пришёл — ни «Войти и записаться», ни «Записаться»: вошедший
+  // видел гостевую кнопку несколько секунд, и нажатие уводило его на вход.
+  if (session.status === 'loading') return 'loading';
   if (session.status !== 'ready') return 'anonymous';
   if (forPerson) return 'client';
   if (isStaff(rolesInClub(session.user, slug))) return 'staff';
@@ -53,9 +58,14 @@ export function eventViewerOf(
 export function useEventAction(slug: string, forPerson: string | null, onChanged: () => void) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Двойное нажатие не шлёт второго запроса: `pending` блокирует кнопку только
+  // со следующей отрисовкой, а второй запрос записи приходил с ответом 500.
+  const busy = useRef(false);
 
   const toggle = useCallback(
     async (event: Pick<ClubEvent, 'id' | 'kind' | 'registered'>): Promise<void> => {
+      if (busy.current) return;
+      busy.current = true;
       const club = clubApi(slug);
 
       setPending(true);
@@ -76,6 +86,7 @@ export function useEventAction(slug: string, forPerson: string | null, onChanged
       } catch (cause) {
         setError(cause instanceof ApiError ? cause.message : 'Сервис недоступен');
       } finally {
+        busy.current = false;
         setPending(false);
       }
     },

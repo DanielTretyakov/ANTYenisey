@@ -82,6 +82,8 @@ export default function StartPage() {
 
   const [clubs, setClubs] = useState<ClubCard[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // «Повторить» после ошибки — тот же поиск ещё раз.
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,7 +146,7 @@ export default function StartPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, city, region]);
+  }, [query, city, region, attempt]);
 
   function chooseCity(next: City | null): void {
     setCity(next);
@@ -183,9 +185,34 @@ export default function StartPage() {
           onRegion={chooseRegion}
         />
 
-        {error && <Alert>{error}</Alert>}
+        {/* Не ответил сервер — так и говорим, с «Повторить», а не «клубов
+            пока нет»: новичок решал, что клубов на платформе нет вовсе. */}
+        {error && (
+          <Alert>
+            <span className="flex flex-wrap items-center justify-between gap-3">
+              <span>Не удалось загрузить клубы: {error}. Проверьте интернет и попробуйте ещё раз.</span>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  setError(null);
+                  setClubs(null);
+                  setAttempt((value) => value + 1);
+                }}
+              >
+                Повторить
+              </Button>
+            </span>
+          </Alert>
+        )}
 
-        <Results clubs={clubs} city={city ?? null} region={city ? null : (region ?? null)} query={query.trim()} />
+        <Results
+          clubs={error ? null : clubs}
+          failed={error !== null}
+          city={city ?? null}
+          region={city ? null : (region ?? null)}
+          query={query.trim()}
+        />
 
         {/* «С чего начать» — новичку и гостю, пока шаги не сделаны (решение от 02.10.2026);
             кнопкой в правом нижнем углу со списком над ней (15.10.2026). */}
@@ -316,6 +343,8 @@ function Hero({
             <input
               type="search"
               name="club"
+              // Длиннее сервер не ищет — и отвечал на это английской ошибкой.
+              maxLength={120}
               value={query}
               onChange={(event) => onQuery(event.target.value)}
               placeholder="Название клуба"
@@ -363,11 +392,14 @@ function Hero({
  */
 function Results({
   clubs,
+  failed = false,
   city,
   region,
   query,
 }: {
   clubs: ClubCard[] | null;
+  /** Поиск не ответил — ни карточек, ни «клубов нет»: об ошибке говорит плашка выше. */
+  failed?: boolean;
   city: City | null;
   /** Регион без города — тогда заголовок называет регион. */
   region: string | null;
@@ -376,8 +408,11 @@ function Results({
   // «в городе Красноярск», а не «в Красноярске»: склонять тысячу названий
   // справочника нечем, а неверный падеж хуже честного «в городе».
   const place = city ? ` в городе ${city.name}` : region ? ` — ${region}` : '';
+  // Запрос в заголовке — не длиннее строки: сплошная строка без пробелов
+  // раздвигала страницу вбок.
+  const shownQuery = query.length > 40 ? `${query.slice(0, 40)}…` : query;
   const title = query
-    ? `Клубы по запросу «${query}»${place}`
+    ? `Клубы по запросу «${shownQuery}»${place}`
     : city
       ? `Где играть в городе ${city.name}`
       : region
@@ -413,19 +448,21 @@ function Results({
           ) : undefined
         }
       >
-        {title}
+        <span className="[overflow-wrap:anywhere]">{title}</span>
       </SectionTitle>
 
-      {clubs === null && <CardsSkeleton />}
+      {clubs === null && !failed && <CardsSkeleton />}
 
       {clubs?.length === 0 && (
         <div className="rounded-card border border-dashed border-border px-6 py-10">
-          <p className="text-[1.0625rem] text-text">
-            {city
-              ? `В городе ${city.name} клубов пока нет`
-              : region
-                ? `В регионе «${region}» клубов пока нет`
-                : 'Ничего не нашлось'}
+          <p className="text-[1.0625rem] [overflow-wrap:anywhere] text-text">
+            {query
+              ? `По запросу «${shownQuery}»${place} ничего не нашлось`
+              : city
+                ? `В городе ${city.name} клубов пока нет`
+                : region
+                  ? `В регионе «${region}» клубов пока нет`
+                  : 'Ничего не нашлось'}
           </p>
           <p className="mt-2 max-w-md text-[0.9375rem] leading-relaxed text-text-muted">
             {query

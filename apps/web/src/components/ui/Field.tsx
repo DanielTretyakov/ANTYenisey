@@ -7,7 +7,8 @@ import { cn } from '@/lib/cn';
  *  составные поля — например, телефон с несъёмным префиксом. */
 export const inputClassName = cn(
   'block w-full rounded-control border border-border bg-surface-raised',
-  'px-3.5 py-2.5 text-[0.9375rem] text-text placeholder:text-text-subtle',
+  // 16 px на телефоне: мельче iOS Safari при фокусе увеличивает страницу.
+  'px-3.5 py-2.5 text-base text-text placeholder:text-text-subtle sm:text-[0.9375rem]',
   'transition-colors duration-150',
   'hover:border-border-strong',
   // Гашение системного контура здесь намеренно отсутствует: глобальное кольцо
