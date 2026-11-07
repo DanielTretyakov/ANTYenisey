@@ -5569,6 +5569,10 @@ async function hallScope() {
 
     r = await call(`/clubs/yenisey/events?${new URLSearchParams({ halls: probeHall, kind: 'TRAINING', typeId: type.id })}`);
     assert('в «своём» зале занятие видно', (r.body ?? []).some((event) => event.id === scopedSession));
+    // У вида уже есть проведения из сида и предыдущих разделов прогона.
+    // После привязки вида к залу они тоже законно попадают в его список;
+    // новое занятие через пять дней не обязано быть ближайшим.
+    const firstInHall = (r.body ?? [])[0]?.startsAt;
     r = await call(`/clubs/yenisey/events?${new URLSearchParams({ halls: otherHall, kind: 'TRAINING', typeId: type.id })}`);
     assert('в другом зале — нет', !(r.body ?? []).some((event) => event.id === scopedSession));
     r = await call(`/clubs/yenisey/events?${new URLSearchParams({ kind: 'TRAINING', typeId: type.id })}`);
@@ -5580,7 +5584,7 @@ async function hallScope() {
       ((await call(`/clubs/yenisey/catalog?${new URLSearchParams({ halls })}`)).body ?? []).find(
         (item) => item.kind === 'TRAINING' && item.typeId === type.id,
       );
-    assert('«Ближайшее» в своём зале — это занятие', (await nearestIn(probeHall))?.nextStartsAt === start.toISOString());
+    assert('«Ближайшее» в своём зале совпадает со списком', Boolean(firstInHall) && (await nearestIn(probeHall))?.nextStartsAt === firstInHall);
     assert('«Ближайшее» в другом зале его не называет', (await nearestIn(otherHall))?.nextStartsAt !== start.toISOString());
     r = await call('/clubs/yenisey/catalog?halls=,,');
     check('мусор в залах «Ближайшего» отклонён', 400, r.status);
@@ -6269,7 +6273,8 @@ async function visitRating() {
   r = await call('/clubs/yenisey/rating?period=all');
   assert('«всё время» без начала', r.status === 200 && r.body?.since === null);
 
-  // Постоянная учётка абонементов ходила в клуб в разделе 34 — она в рейтинге.
+  // Постоянная учётка абонементов есть после раздела 34, но там проверяются
+  // неявка и её прощение: ни одна из этих отметок не считается посещением.
   r = await post('/auth/login', { email: 'probe-subscriptions@example.com', password: PASSWORD });
 
   if (r.status !== 200) {
@@ -6289,6 +6294,14 @@ async function visitRating() {
 
   // «Больше всего посещений» в профиле (решение владельца от 30.09.2026).
   const meId = (await asClient('/auth/me')).body?.id;
+  const asAdmin = await adminSession();
+  if (asAdmin && meId) {
+    r = await asAdmin('/clubs/yenisey/desk/visits', {
+      method: 'POST',
+      json: { clientId: meId, visitedAt: new Date(Date.now() - 60_000).toISOString(), note: 'Проверка рейтинга посещений' },
+    });
+    check('визит для проверки рейтинга внесён', 201, r.status);
+  }
 
   r = await call(`/players/${meId}`);
   assert(
