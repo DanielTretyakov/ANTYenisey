@@ -2,12 +2,26 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { hasAnyRole, MANAGING_ROLES, type ClubPerson, type DeskBooking, type DeskDay, type DeskEvent, type DeskParticipant, type DeskTableNow, type DeskAccess, type Hall, type Role } from '@yenisey/types';
+import {
+  hasAnyRole,
+  MANAGING_ROLES,
+  type ClubPerson,
+  type DeskBooking,
+  type DeskDay,
+  type DeskEvent,
+  type DeskParticipant,
+  type DeskTableNow,
+  type DeskAccess,
+  type Hall,
+  type Role,
+} from '@yenisey/types';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { BookingDialog } from './BookingDialog';
+import { MobileDesk } from './MobileDesk';
+import { clockIn } from './time';
 import { MarkedBlock } from './MarkedBlock';
 import { NewClientDialog } from './NewClientDialog';
 import { PendingBlock } from './PendingBlock';
@@ -25,8 +39,12 @@ import { rolesInClub } from '@/lib/membership';
 import { formatKopecks } from '@/lib/money';
 import { useClubApi, useClubSlug } from '@/lib/useClubApi';
 import { useSession } from '@/lib/useSession';
-import { initialHallId, PreferredHallButton, usePreferredHall, withPreferredFirst } from '@/components/club/PreferredHall';
-
+import {
+  initialHallId,
+  PreferredHallButton,
+  usePreferredHall,
+  withPreferredFirst,
+} from '@/components/club/PreferredHall';
 
 /**
  * Экран смены — главная страница администратора клуба.
@@ -36,7 +54,7 @@ import { initialHallId, PreferredHallButton, usePreferredHall, withPreferredFirs
  * вовсе — администратор попадал на клиентскую страницу клуба и видел то же,
  * что посетитель.
  *
- * Порядок разделов — не хронологический, и это осознанно. Сверху стоит то, что
+ * На компьютере порядок разделов — не хронологический. Сверху стоит то, что
  * требует действия руками (неотмеченное присутствие), потом состояние зала
  * прямо сейчас, потом лента будущего и в конце — уже отмеченное. Хронология
  * здесь проиграла бы задаче: неотмеченное вчера важнее, чем занятие через три
@@ -45,6 +63,8 @@ import { initialHallId, PreferredHallButton, usePreferredHall, withPreferredFirs
  * Каждая запись стоит ровно в одном месте: не началась — в ленте, началась и
  * не отмечена — в «Требует отметки», отмечена — в «Отмечено в этот день».
  * Одна запись в двух списках читалась бы как две.
+ * На телефоне — «Сейчас», «Далее» и «Весь день»: хронология позволяет увидеть
+ * день целиком, а отметки и посадка клиента остаются под рукой.
  *
  * Адрес `/desk`, а не `/today`: экран показывает не только сегодня — вечером
  * смотрят завтра, в понедельник разбирают субботу, — и `today` начал бы врать
@@ -168,15 +188,15 @@ export default function DeskPage() {
 
   return (
     <AdminShell>
-      <header className="mb-6 flex flex-wrap items-end gap-x-6 gap-y-3">
+      <header className="mb-3 flex flex-wrap items-end gap-x-6 gap-y-3 sm:mb-6">
         <div>
           <h1 className="text-[1.75rem]">Смена</h1>
-          <p className="mt-1.5 text-[0.9375rem] text-text-muted">
+          <p className="mt-1.5 hidden text-[0.9375rem] text-text-muted sm:block">
             {day ? `${day.hallName} · ${formatDate(day.date)}` : 'Загружаем зал…'}
           </p>
           {/* Сегодня зала, а не выбранного дня: вопрос «кто рядом за стойкой». */}
           {access?.allowed && (
-            <p className="mt-1 text-[0.875rem] text-text-muted">
+            <p className="mt-1 hidden text-[0.875rem] text-text-muted sm:block">
               Администраторы сегодня:{' '}
               <span className="text-text">
                 {access.onShift.length > 0 ? access.onShift.join(', ') : 'никто не назначен'}
@@ -195,13 +215,13 @@ export default function DeskPage() {
         )}
       </header>
 
-      <div className="mb-6 flex flex-wrap items-center gap-2">
-        <label className="contents">
-          <span className="sr-only">Зал</span>
+      <div className="mb-3 grid grid-cols-2 items-end gap-2 sm:mb-6 sm:flex sm:flex-wrap sm:items-center">
+        <label className="block min-w-0 sm:contents">
+          <span className="mb-1 block text-[0.75rem] text-text-muted sm:sr-only">Зал</span>
           <select
             value={hallId}
             onChange={(event) => setHallId(event.target.value)}
-            className={cn(inputClassName, 'w-auto')}
+            className={cn(inputClassName, 'min-w-0 sm:w-auto!')}
           >
             {withPreferredFirst(halls ?? [], preferred.preferredHallId).map((item) => (
               <option key={item.id} value={item.id}>
@@ -212,21 +232,23 @@ export default function DeskPage() {
         </label>
 
         {(halls?.length ?? 0) > 1 && (
-          <PreferredHallButton
-            hallId={hallId}
-            preferredHallId={preferred.preferredHallId}
-            pending={preferred.pending}
-            onToggle={(id) => void preferred.toggle(id)}
-          />
+          <div className="hidden sm:block">
+            <PreferredHallButton
+              hallId={hallId}
+              preferredHallId={preferred.preferredHallId}
+              pending={preferred.pending}
+              onToggle={(id) => void preferred.toggle(id)}
+            />
+          </div>
         )}
 
-        <label className="contents">
-          <span className="sr-only">День</span>
+        <label className="block min-w-0 sm:contents">
+          <span className="mb-1 block text-[0.75rem] text-text-muted sm:sr-only">День</span>
           <input
             type="date"
             value={date}
             onChange={(event) => setDate(event.target.value)}
-            className={cn(inputClassName, 'w-auto')}
+            className={cn(inputClassName, 'min-w-0 px-2 sm:w-auto! sm:px-3.5')}
           />
         </label>
 
@@ -241,7 +263,7 @@ export default function DeskPage() {
         )}
 
         {day && hall && (
-          <span className="ml-auto flex flex-wrap gap-2">
+          <span className="ml-auto hidden flex-wrap gap-2 sm:flex">
             <Button variant="secondary" onClick={() => setNewClient(true)}>
               Новый клиент
             </Button>
@@ -252,6 +274,35 @@ export default function DeskPage() {
           </span>
         )}
       </div>
+
+      {day && hall && (
+        <details className="mb-3 rounded-control border border-border bg-surface-raised sm:hidden">
+          <summary className="min-h-11 cursor-pointer px-3 py-3 text-[0.8125rem] text-text-muted">
+            Действия и сотрудники смены
+          </summary>
+          <div className="grid gap-3 border-t border-border p-3">
+            <p className="text-[0.8125rem] text-text-muted">
+              Сегодня на смене: {access?.onShift.length ? access.onShift.join(', ') : 'никто не назначен'}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={() => setNewClient(true)}>
+                Новый клиент
+              </Button>
+              <Button variant="secondary" onClick={() => setVisiting(true)}>
+                Внести визит
+              </Button>
+              {(halls?.length ?? 0) > 1 && (
+                <PreferredHallButton
+                  hallId={hallId}
+                  preferredHallId={preferred.preferredHallId}
+                  pending={preferred.pending}
+                  onToggle={(id) => void preferred.toggle(id)}
+                />
+              )}
+            </div>
+          </div>
+        </details>
+      )}
 
       {access && !access.allowed && <OffShift access={access} />}
 
@@ -311,17 +362,45 @@ export default function DeskPage() {
         // grid-cols-1 — это minmax(0, 1fr): без нуля в минимуме колонка
         // растягивается по самому широкому содержимому, и график загрузки с
         // горизонтальной прокруткой раздувал весь экран на телефоне до 600px.
-        <div className="grid grid-cols-1 gap-6">
-          <Tiles day={day} pending={counts} />
+        <>
+          <MobileDesk
+            key={`${day.hallId}:${day.date}`}
+            day={day}
+            onSeat={() => setSeating(true)}
+            onChanged={load}
+            now={
+              <>
+                {day.today && <Now day={day} compact />}
+                <div id="mobile-desk-pending" className="scroll-mt-36">
+                  <PendingBlock day={day} onChanged={load} compact />
+                </div>
+              </>
+            }
+            ahead={<Ahead day={day} rows={ahead} onChanged={load} compact />}
+            history={
+              <details className="rounded-card border border-border bg-surface-raised">
+                <summary className="min-h-11 cursor-pointer p-4 text-[0.875rem] font-medium">
+                  Итог дня и история отметок
+                </summary>
+                <div className="grid min-w-0 gap-4 p-3">
+                  <Tiles day={day} pending={counts} />
+                  <MarkedBlock day={day} onChanged={load} />
+                </div>
+              </details>
+            }
+          />
+          <div className="hidden grid-cols-1 gap-6 sm:grid">
+            <Tiles day={day} pending={counts} />
 
-          <PendingBlock day={day} onChanged={load} />
+            <PendingBlock day={day} onChanged={load} />
 
-          {day.today && <Now day={day} />}
+            {day.today && <Now day={day} />}
 
-          <Ahead day={day} rows={ahead} onChanged={load} />
+            <Ahead day={day} rows={ahead} onChanged={load} />
 
-          <MarkedBlock day={day} onChanged={load} />
-        </div>
+            <MarkedBlock day={day} onChanged={load} />
+          </div>
+        </>
       )}
     </AdminShell>
   );
@@ -340,7 +419,7 @@ function Tiles({ day, pending }: { day: DeskDay; pending: { total: number; overd
     .filter((minute): minute is number => minute !== undefined);
 
   return (
-    <div className="grid gap-px overflow-hidden rounded-card border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-card border border-border bg-border lg:grid-cols-4">
       <Tile
         title="Визитов"
         value={String(day.money.count)}
@@ -440,29 +519,47 @@ function Tile({
    Сейчас
    ========================================================================== */
 
-function Now({ day }: { day: DeskDay }) {
+function Now({ day, compact = false }: { day: DeskDay; compact?: boolean }) {
   return (
     <Card>
-      <CardHeader
-        title="Сейчас"
-        description="Что происходит в зале прямо сейчас. Время, закрытое расписанием, администратор всё равно может занять."
-      />
-      <CardBody>
-        <ul className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+      {compact ? (
+        <div className="flex items-center justify-between gap-2 border-b border-border p-4">
+          <h2 className="text-lg">Сейчас</h2>
+          <span className="text-[0.8125rem] text-text-accent">
+            Свободно {day.tables.filter((table) => !table.busy).length} из {day.tables.length}
+          </span>
+        </div>
+      ) : (
+        <CardHeader
+          title="Сейчас"
+          description="Что происходит в зале прямо сейчас. Время, закрытое расписанием, администратор всё равно может занять."
+        />
+      )}
+      <CardBody className={compact ? 'px-3 py-3' : undefined}>
+        <ul className={cn('grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4', compact && 'grid-cols-2')}>
           {day.tables.map((table) => (
             <li key={table.tableId}>
-              <TableChip table={table} />
+              <TableChip table={table} compact={compact} />
             </li>
           ))}
         </ul>
 
-        <Load day={day} />
+        {compact ? (
+          <details className="mt-3 border-t border-border">
+            <summary className="min-h-11 cursor-pointer py-3 text-[0.8125rem] text-text-muted">
+              Загрузка столов по часам
+            </summary>
+            <Load day={day} />
+          </details>
+        ) : (
+          <Load day={day} />
+        )}
       </CardBody>
     </Card>
   );
 }
 
-function TableChip({ table }: { table: DeskTableNow }) {
+function TableChip({ table, compact = false }: { table: DeskTableNow; compact?: boolean }) {
   const busy = table.busy;
 
   return (
@@ -472,18 +569,11 @@ function TableChip({ table }: { table: DeskTableNow }) {
         busy ? 'border-border-accent bg-surface-accent-soft' : 'border-border bg-surface-raised',
       )}
     >
-      {busy && (
-        <span
-          aria-hidden="true"
-          className="absolute inset-y-0 left-0 w-[3px] bg-accent"
-        />
-      )}
+      {busy && <span aria-hidden="true" className="absolute inset-y-0 left-0 w-[3px] bg-accent" />}
 
-      <p className={cn('text-[0.8125rem] font-semibold', busy && 'text-text-accent')}>
-        {table.label}
-      </p>
+      <p className={cn('text-[0.8125rem] font-semibold', busy && 'text-text-accent')}>{table.label}</p>
 
-      <p className="truncate text-[0.8125rem] text-text-muted">
+      <p className={cn('text-[0.8125rem] text-text-muted', compact ? 'break-words' : 'truncate')}>
         {busy ? (busy.person ?? PURPOSE[busy.purpose]) : 'свободен'}
       </p>
 
@@ -564,9 +654,7 @@ function Load({ day }: { day: DeskDay }) {
                   key={level}
                   className={cn(
                     'h-3 rounded-[2px] border',
-                    level <= hour.busyTables
-                      ? 'border-accent bg-accent'
-                      : 'border-border bg-transparent',
+                    level <= hour.busyTables ? 'border-accent bg-accent' : 'border-border bg-transparent',
                   )}
                 />
               ))}
@@ -596,8 +684,8 @@ function Load({ day }: { day: DeskDay }) {
       </div>
 
       <p className="mt-2 text-[0.8125rem] text-text-subtle">
-        Клетка — стол, столбик — час. Стол считается занятым в часе, если занят хотя бы часть
-        часа: получасовая бронь в 19:30 делает девятнадцатый час занятым.
+        Клетка — стол, столбик — час. Стол считается занятым в часе, если занят хотя бы часть часа:
+        получасовая бронь в 19:30 делает девятнадцатый час занятым.
       </p>
     </div>
   );
@@ -611,10 +699,12 @@ function Ahead({
   day,
   rows,
   onChanged,
+  compact = false,
 }: {
   day: DeskDay;
   rows: Row[];
   onChanged: () => void;
+  compact?: boolean;
 }) {
   const club = useClubApi();
   const slug = useClubSlug();
@@ -627,13 +717,15 @@ function Ahead({
   return (
     <Card>
       <CardHeader
-        title={day.today ? 'Дальше сегодня' : 'В этот день'}
+        title={compact ? 'Далее' : day.today ? 'Дальше сегодня' : 'В этот день'}
         // Объяснение — только когда есть что объяснять: под пустым списком
         // подсказка про телефон в строке рассказывает о том, чего на экране нет.
         description={
-          rows.length > 0
-            ? 'Телефон стоит прямо в строке: чтобы позвонить, не нужно открывать карточку.'
-            : undefined
+          compact
+            ? 'Кто придёт следующим и какие мероприятия ещё начнутся.'
+            : rows.length > 0
+              ? 'Телефон стоит прямо в строке: чтобы позвонить, не нужно открывать карточку.'
+              : undefined
         }
       />
 
@@ -650,32 +742,51 @@ function Ahead({
       ) : (
         <ul className="divide-y divide-border">
           {rows.map((row) => (
-            <li key={row.key} className="flex flex-wrap items-center gap-x-5 gap-y-2 px-6 py-3.5">
-              <When at={row.at} note={row.note} />
-              <RowBody row={row} />
-              <span className="text-[0.875rem] whitespace-nowrap text-text-muted tabular-nums">
-                {formatKopecks(row.price)}
-              </span>
-              {row.bookingId && (
-                <ClubCancelButton
-                  cancel={(waiveCharge) => club.cancelDeskBooking(row.bookingId ?? '', { waiveCharge })}
-                  onDone={onChanged}
-                />
-              )}
-              {row.event && (
-                <span className="flex flex-wrap items-center gap-1">
-                  <Button variant="ghost" size="sm" onClick={() => setOpen(open === row.key ? null : row.key)}>
-                    Состав ({row.event.participants.length})
-                  </Button>
-                  <Button variant="secondary" size="sm" onClick={() => setEnrolling(row.event ?? null)}>
-                    Записать
-                  </Button>
-                  <Button variant="danger-ghost" size="sm" onClick={() => setCancelling(row.event ?? null)}>
-                    Отменить
-                  </Button>
+            <li
+              key={row.key}
+              className={
+                compact
+                  ? 'grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 p-4'
+                  : 'flex flex-wrap items-center gap-x-5 gap-y-2 px-6 py-3.5'
+              }
+            >
+              <When at={row.at} note={row.note} timezone={day.timezone} />
+              <RowBody row={row} compact={compact} />
+              <div
+                className={
+                  compact ? 'col-start-2 flex flex-wrap items-center gap-2 [&_button]:min-h-11' : 'contents'
+                }
+              >
+                <span className="text-[0.875rem] whitespace-nowrap text-text-muted tabular-nums">
+                  {formatKopecks(row.price)}
                 </span>
+                {row.bookingId && (
+                  <ClubCancelButton
+                    cancel={(waiveCharge) => club.cancelDeskBooking(row.bookingId ?? '', { waiveCharge })}
+                    onDone={onChanged}
+                  />
+                )}
+                {row.event && (
+                  <span className="flex flex-wrap items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setOpen(open === row.key ? null : row.key)}
+                    >
+                      Состав ({row.event.participants.length})
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={() => setEnrolling(row.event ?? null)}>
+                      Записать
+                    </Button>
+                    <Button variant="danger-ghost" size="sm" onClick={() => setCancelling(row.event ?? null)}>
+                      Отменить
+                    </Button>
+                  </span>
+                )}
+              </div>
+              {row.event && open === row.key && (
+                <Lineup event={row.event} onChanged={onChanged} compact={compact} />
               )}
-              {row.event && open === row.key && <Lineup event={row.event} onChanged={onChanged} />}
             </li>
           ))}
         </ul>
@@ -684,7 +795,13 @@ function Ahead({
       {enrolling && (
         <Dialog title="Записать клиента" description={enrolling.title} onClose={() => setEnrolling(null)}>
           <div className="px-6 py-5">
-            <EnrollClientForm slug={slug} kind={enrolling.kind} eventId={enrolling.id} started={false} onEnrolled={onChanged} />
+            <EnrollClientForm
+              slug={slug}
+              kind={enrolling.kind}
+              eventId={enrolling.id}
+              started={false}
+              onEnrolled={onChanged}
+            />
           </div>
         </Dialog>
       )}
@@ -712,15 +829,29 @@ function Ahead({
  * (решения владельца от 10.10.2026): звонок «я не приду» администратор
  * закрывает здесь же, по политике клуба или без списания.
  */
-function Lineup({ event, onChanged }: { event: NonNullable<Row['event']>; onChanged: () => void }) {
+function Lineup({
+  event,
+  onChanged,
+  compact = false,
+}: {
+  event: NonNullable<Row['event']>;
+  onChanged: () => void;
+  compact?: boolean;
+}) {
   const club = useClubApi();
 
   if (event.participants.length === 0) {
-    return <p className="basis-full pl-[4.5rem] text-[0.8125rem] text-text-muted">Пока никто не записался.</p>;
+    return (
+      <p
+        className={cn('basis-full text-[0.8125rem] text-text-muted', compact ? 'col-span-2' : 'pl-[4.5rem]')}
+      >
+        Пока никто не записался.
+      </p>
+    );
   }
 
   return (
-    <ul className="grid basis-full gap-1.5 pl-[4.5rem]">
+    <ul className={cn('grid basis-full gap-1.5', compact ? 'col-span-2' : 'pl-[4.5rem]')}>
       {event.participants.map((person) => (
         <li key={person.entryId} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.875rem]">
           <span className="min-w-0 flex-1">
@@ -729,7 +860,13 @@ function Lineup({ event, onChanged }: { event: NonNullable<Row['event']>; onChan
             {person.bySubscription && <span className="ml-2 text-text-subtle">по абонементу</span>}
           </span>
           <ClubCancelButton
-            cancel={(waiveCharge) => club.cancelClientEntry({ kind: event.kind, entryId: person.entryId, waiveCharge })}
+            cancel={(waiveCharge) =>
+              club.cancelClientEntry({
+                kind: event.kind,
+                entryId: person.entryId,
+                waiveCharge,
+              })
+            }
             onDone={onChanged}
           />
         </li>
@@ -738,20 +875,24 @@ function Lineup({ event, onChanged }: { event: NonNullable<Row['event']>; onChan
   );
 }
 
-function When({ at, note }: { at: string; note: string }) {
+function When({ at, note, timezone }: { at: string; note: string; timezone: string }) {
   return (
     <span className="grid min-w-[4.5rem] tabular-nums">
-      <span className="font-display text-[1.0625rem] leading-tight">{clock(at)}</span>
+      <span className="font-display text-[1.0625rem] leading-tight">{clockIn(at, timezone)}</span>
       <span className="text-[0.75rem] text-text-subtle">{note}</span>
     </span>
   );
 }
 
-function RowBody({ row }: { row: Row }) {
+function RowBody({ row, compact = false }: { row: Row; compact?: boolean }) {
   return (
     <span className="min-w-0 flex-1">
       <span className="block text-[0.9375rem]">{row.title}</span>
-      <span className="mt-0.5 block truncate text-[0.8125rem] text-text-muted">{row.subtitle}</span>
+      <span
+        className={cn('mt-0.5 block text-[0.8125rem] text-text-muted', compact ? 'break-words' : 'truncate')}
+      >
+        {row.subtitle}
+      </span>
     </span>
   );
 }
@@ -829,9 +970,13 @@ function aheadOf(day: DeskDay): Row[] {
     ...day.bookings
       .filter((booking) => booking.status !== 'CANCELLED' && booking.phase === 'UPCOMING')
       .map(bookingRow),
-    ...day.events.filter((event) => event.phase === 'UPCOMING').map((event) => eventRow(event, true)),
+    ...day.events
+      .filter((event) => event.phase === 'UPCOMING')
+      .map((event) => eventRow(event, true, day.timezone)),
     // Мероприятия вне сетки не видны ни в одном зале, кроме как здесь.
-    ...day.unplaced.filter((event) => event.phase === 'UPCOMING').map((event) => eventRow(event, false)),
+    ...day.unplaced
+      .filter((event) => event.phase === 'UPCOMING')
+      .map((event) => eventRow(event, false, day.timezone)),
   ];
 
   return rows.sort((a, b) => a.at.localeCompare(b.at));
@@ -862,30 +1007,27 @@ function bookingRow(booking: DeskBooking): Row {
   };
 }
 
-function eventRow(event: DeskEvent, placed: boolean): Row {
+function eventRow(event: DeskEvent, placed: boolean, timezone: string): Row {
   const participants = event.participants.filter((entry) => entry.status === 'BOOKED');
   const booked = participants.length;
   const title = [event.title, event.coachName].filter(Boolean).join(' · ');
 
   return {
     key: `event-${event.id}`,
-    event: { kind: event.kind, id: event.id, title: `${title} · ${clock(event.startsAt)}`, booked, placed, participants },
+    event: {
+      kind: event.kind,
+      id: event.id,
+      title: `${title} · ${clockIn(event.startsAt, timezone)}`,
+      booked,
+      placed,
+      participants,
+    },
     at: event.startsAt,
     note: event.kind === 'TRAINING' ? 'занятие' : 'турнир',
     title,
-    subtitle:
-      event.capacity === null
-        ? `записались ${booked}`
-        : `записались ${booked} из ${event.capacity}`,
+    subtitle: event.capacity === null ? `записались ${booked}` : `записались ${booked} из ${event.capacity}`,
     price: event.price,
   };
-}
-
-/** «18:30» из момента. Часовой пояс — браузера: администратор в своём зале. */
-function clock(at: string): string {
-  return new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(
-    new Date(at),
-  );
 }
 
 function duration(startsAt: string, endsAt: string): string {

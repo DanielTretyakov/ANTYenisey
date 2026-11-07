@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Уведомления в MAX</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --surface: #ffffff; --text: #1d2320; --muted: #5d6661; --subtle: #858c88;
+    --border: #e3e1da; --accent: #126b54; --accent-soft: #e4f1ec; --bubble: #ffffff; --chat: #e9ede9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141816; --surface: #1c211f; --text: #e8ece9; --muted: #a8b1ac; --subtle: #858e89;
+      --border: #2d3431; --accent: #5cc4a2; --accent-soft: #1f3a31; --bubble: #242b28; --chat: #181d1b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  .page { max-width: 900px; margin: 0 auto; padding: 48px 16px 64px; }
+  h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 12px; letter-spacing: -0.01em; text-wrap: balance; }
+  .intro { color: var(--muted); max-width: 640px; margin: 0 0 28px; }
+  .facts { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0 0 36px; padding: 0; list-style: none; }
+  @media (max-width: 600px) { .facts { grid-template-columns: 1fr; } }
+  .facts li { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; font-size: .9375rem; color: var(--muted); }
+  .facts b { display: block; margin-bottom: 4px; color: var(--text); }
+  nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 44px; }
+  nav a { color: var(--accent); background: var(--accent-soft); text-decoration: none; padding: 6px 12px; border-radius: 999px; font-size: .875rem; }
+  nav a:hover { text-decoration: underline; }
+  section { margin: 0 0 52px; scroll-margin-top: 16px; }
+  section > h2 { font-size: 1.375rem; margin: 0 0 4px; }
+  section > .lead { color: var(--muted); margin: 0 0 20px; max-width: 640px; }
+  .grid { display: grid; gap: 20px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); align-items: start; }
+  .msg { background: var(--chat); border-radius: 16px; padding: 16px; break-inside: avoid; }
+  .msg h3 { font-size: 1rem; margin: 0; }
+  .when { color: var(--subtle); font-size: .8125rem; margin: 2px 0 12px; }
+  .bubble { background: var(--bubble); border-radius: 4px 14px 14px 14px; padding: 10px 14px 12px; box-shadow: 0 1px 1px rgba(0,0,0,.07); font-size: .9375rem; }
+  .from { color: var(--accent); font-weight: 600; font-size: .8125rem; margin-bottom: 4px; }
+  .text { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .button { margin-top: 10px; text-align: center; border: 1px solid var(--border); border-radius: 10px; padding: 7px 10px; color: var(--accent); font-weight: 500; font-size: .875rem; }
+  footer { color: var(--subtle); font-size: .8125rem; border-top: 1px solid var(--border); padding-top: 16px; max-width: 700px; }
+  @media (max-width: 480px) { .page { padding-top: 32px; } h1 { font-size: 1.625rem; } }
+  @media print {
+    :root { --bg: #fff; --chat: #f1f3f1; --bubble: #fff; }
+    .page { padding: 0; max-width: none; }
+    nav { display: none; }
+    .bubble { box-shadow: none; border: 1px solid #e3e1da; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+  <h1>Уведомления в мессенджере MAX</h1>
+  <p class="intro">Какие сообщения присылает бот «Енисея» каждому участнику: владельцу платформы, руководству и администраторам клуба, тренерам и клиентам. Ниже — настоящие тексты сообщений; имена, суммы и даты в примерах выдуманы.</p>
+
+  <ul class="facts">
+    <li><b>Как подключить</b>Личный кабинет на сайте → «Подключить MAX» → в чате с ботом нажать «Начать».</li>
+    <li><b>Ночью не беспокоим</b>С 22:00 до 8:00 сообщения ждут утра — кроме ответа на то, что человек сделал сам, например записался.</li>
+    <li><b>Лишнее можно выключить</b>В личном кабинете отключается любая группа сообщений, кроме решения по разряду и заявки родителя.</li>
+    <li><b>Кнопка под сообщением</b>Открывает нужную страницу сайта. Решения — отметка, разряд, отмена — принимаются на сайте, а не в чате.</li>
+  </ul>
+
+  <nav aria-label="Роли"><a href="#owner">Владелец платформы</a><a href="#staff">Руководитель и администратор клуба</a><a href="#coach">Тренер</a><a href="#client">Клиент клуба</a><a href="#family">Родитель и ребёнок</a></nav>
+
+  <section id="owner">
+    <h2>Владелец платформы</h2>
+    <p class="lead">Одно сообщение в день — состояние всей платформы.</p>
+    <div class="grid">
+      <article class="msg">
+        <header><h3>Сводка платформы</h3><p class="when">Каждый день в 9:00</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Сводка платформы за 23 сентября<br><br>Учётки: +12 (всего 340)<br>Клубы: +1 (всего 3)<br>Своим отметили: 5 — АНТ «Енисей» 4, «Спин» 1<br>Новых записей: 57<br>Активных клиентов за 30 дней: 210<br><br>MAX: подключено 45, бот остановлен у 2, не доставлено за день 0</div>
+          <div class="button">Открыть сайт</div>
+        </div>
+      </article>
+    </div>
+  </section>
+  <section id="staff">
+    <h2>Руководитель и администратор клуба</h2>
+    <p class="lead">Руководитель клуба и администратор получают одинаковые сообщения: утреннюю сводку и то, что ждёт решения клуба.</p>
+    <div class="grid">
+      <article class="msg">
+        <header><h3>Сводка клуба</h3><p class="when">Каждый день в 9:00</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Сводка клуба АНТ «Енисей» за 23 сентября<br><br>Своим отметили: 2 (всего 57) — Иванов И., Петрова А.<br>Новых клиентов: 3 — Сидоров С., Орлова О., Ким Д.<br>Пришли: 14, не пришли: 2, отмен: 3<br>Итог дня: 12 400 ₽, абонементов продано 2 на 9 000 ₽<br>Без отметки: 4 — отметьте на экране смены<br><br>Сегодня: занятий 5 (записано 38 из 60), турниров 1, аренд 7<br><br>Абонемент кончается в ближайшие 3 дня:<br>Сидоров С. — «Взрослый, 8 занятий» до 25 сентября<br><br>Закончились визиты:<br>Орлова О. — «Детский, 4 занятия»</div>
+          <div class="button">Экран смены</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Присутствие не отмечено</h3><p class="when">Через час после окончания занятия, если никто не отметил</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Не отмечено присутствие<br>Занятие «Начинающие», чт, 24 сентября в 18:00–19:30 · Основной зал<br>Без отметки: 3 — Иванов И., Петрова А., Ким Д.<br>Через сутки после окончания система сама поставит неявку.</div>
+          <div class="button">Экран смены</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Неявки поставлены автоматически</h3><p class="when">Когда за сутки присутствие так и не отметили</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Автоматически отмечены неявки: 2<br>Иванов И., Ким Д.<br>Присутствие не отметили за сутки после окончания. Исправить можно на экране смены — с причиной.</div>
+          <div class="button">Экран смены</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Разряд на проверку</h3><p class="when">Когда игрок клуба указал или изменил разряд</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Разряд на проверку · Петрова А.<br>Заявлен разряд: КМС. Подтвердите или отклоните в карточке человека.</div>
+          <div class="button">Карточка человека</div>
+        </div>
+      </article>
+    </div>
+  </section>
+  <section id="coach">
+    <h2>Тренер</h2>
+    <p class="lead">О своих группах: кто записался и отменился, и план на день.</p>
+    <div class="grid">
+      <article class="msg">
+        <header><h3>Запись в группу</h3><p class="when">Сразу</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Запись в группу · Петрова А.<br>Занятие «Начинающие»<br>сб, 26 сентября в 18:00<br>Записано 8 из 10.</div>
+          <div class="button">Мои группы</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Отмена в группе</h3><p class="when">Сразу</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Отмена в группе · Петрова А.<br>Занятие «Начинающие»<br>сб, 26 сентября в 18:00<br>Записано 7 из 10.</div>
+          <div class="button">Мои группы</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>План на день</h3><p class="when">В 8:00, если в этот день есть занятия</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Сегодня у вас в клубе АНТ «Енисей»:<br>18:00 Начинающие — 7 из 10<br>20:00 Взрослые — 11 из 12</div>
+          <div class="button">Мои группы</div>
+        </div>
+      </article>
+    </div>
+  </section>
+  <section id="client">
+    <h2>Клиент клуба</h2>
+    <p class="lead">О своих записях, абонементе и разряде.</p>
+    <div class="grid">
+      <article class="msg">
+        <header><h3>Запись подтверждена</h3><p class="when">Сразу после записи</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Вы записаны<br>Занятие «Начинающие»<br>сб, 26 сентября в 18:00<br>Основной зал · клуб АНТ «Енисей»<br>Стоимость — 700 ₽.</div>
+          <div class="button">Мои записи</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Клиента записал администратор</h3><p class="when">Сразу</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Вас записал клуб<br>Аренда: Стол 3<br>сб, 26 сентября в 18:00<br>Основной зал · клуб АНТ «Енисей»<br>Стоимость — 800 ₽.</div>
+          <div class="button">Мои записи</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Запись по абонементу</h3><p class="when">Сразу после записи</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Вы записаны<br>Занятие «Начинающие»<br>сб, 26 сентября в 18:00<br>Основной зал · клуб АНТ «Енисей»<br>Оплата — визит с абонемента.</div>
+          <div class="button">Мои записи</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Напоминание</h3><p class="when">За 3 часа до начала; если это ночь — накануне в 20:00</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Напоминание о записи<br>Занятие «Начинающие»<br>сб, 26 сентября в 18:00<br>Основной зал · клуб АНТ «Енисей»<br>Отменить бесплатно можно до 17:00.</div>
+          <div class="button">Мои записи</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Отмена вовремя</h3><p class="when">Сразу после отмены</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Запись отменена<br>Занятие «Начинающие»<br>сб, 26 сентября в 18:00<br>Основной зал · клуб АНТ «Енисей»<br>Бесплатно: отмена в срок.</div>
+          <div class="button">Мои записи</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Поздняя отмена</h3><p class="when">Сразу после отмены</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Запись отменена<br>Занятие «Начинающие»<br>сб, 26 сентября в 18:00<br>Основной зал · клуб АНТ «Енисей»<br>По правилам клуба к оплате 350 ₽ (50%).</div>
+          <div class="button">Мои записи</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Отмена по абонементу</h3><p class="when">Сразу после отмены</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Запись отменена<br>Занятие «Начинающие»<br>сб, 26 сентября в 18:00<br>Основной зал · клуб АНТ «Енисей»<br>Визит вернулся на абонемент.</div>
+          <div class="button">Мои записи</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Клуб отменил запись</h3><p class="when">Сразу</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Клуб отменил запись<br>Аренда: Стол 3<br>сб, 26 сентября в 18:00<br>Основной зал · клуб АНТ «Енисей»<br>Бесплатно: отмена в срок.</div>
+          <div class="button">Мои записи</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Неявка</h3><p class="when">Когда администратор или система отметили неявку</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Отмечена неявка<br>Занятие «Начинающие»<br>сб, 26 сентября в 18:00<br>Основной зал · клуб АНТ «Енисей»<br>По правилам клуба к оплате 700 ₽.<br>Если это ошибка — обратитесь к администратору клуба.</div>
+          <div class="button">Мои записи</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Абонемент заканчивается</h3><p class="when">За 3 дня до конца срока</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Абонемент «Взрослый, 8 занятий» заканчивается 26 сентября. Осталось визитов: 3.<br>Продлить можно у администратора клуба АНТ «Енисей».</div>
+          <div class="button">Личный кабинет</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Последний визит</h3><p class="when">Когда на абонементе остался один визит</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">На абонементе «Взрослый, 8 занятий» остался один визит.<br>Продлить можно у администратора клуба АНТ «Енисей».</div>
+          <div class="button">Личный кабинет</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Визиты закончились</h3><p class="when">Когда визитов не осталось</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Визиты на абонементе «Взрослый, 8 занятий» закончились.<br>Продлить можно у администратора клуба АНТ «Енисей».</div>
+          <div class="button">Личный кабинет</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Разряд подтверждён</h3><p class="when">Когда клуб проверил разряд</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Клуб АНТ «Енисей» подтвердил ваш разряд: КМС.</div>
+          <div class="button">Личный кабинет</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Разряд не подтверждён</h3><p class="when">Когда клуб проверил разряд</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Клуб АНТ «Енисей» не подтвердил разряд КМС.<br>Причина: Номер приказа не совпадает со сканом</div>
+          <div class="button">Личный кабинет</div>
+        </div>
+      </article>
+    </div>
+  </section>
+  <section id="family">
+    <h2>Родитель и ребёнок</h2>
+    <p class="lead">Пока ребёнку нет 14 лет, родитель получает все сообщения о его записях и абонементе — с именем ребёнка в заголовке. Сам ребёнок тоже их получает.</p>
+    <div class="grid">
+      <article class="msg">
+        <header><h3>Родителю: запись ребёнка</h3><p class="when">Сразу</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Новая запись · Петров К.<br>Занятие «Начинающие»<br>сб, 26 сентября в 18:00<br>Основной зал · клуб АНТ «Енисей»<br>Стоимость — 700 ₽.</div>
+          <div class="button">Мои записи</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Родителю: напоминание</h3><p class="when">За 3 часа до начала</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Напоминание · Петров К.<br>Занятие «Начинающие»<br>сб, 26 сентября в 18:00<br>Основной зал · клуб АНТ «Енисей»<br>Отменить бесплатно можно до 17:00.</div>
+          <div class="button">Мои записи</div>
+        </div>
+      </article>
+      <article class="msg">
+        <header><h3>Ребёнку: заявка родителя</h3><p class="when">Когда родитель просит закрепить ребёнка за собой</p></header>
+        <div class="bubble">
+          <div class="from">Енисей · уведомления</div>
+          <div class="text">Петров О. просит закрепить вас за собой как ребёнка: тогда родитель сможет записывать вас и вести ваш профиль.<br>Согласиться или отказаться можно в личном кабинете.</div>
+          <div class="button">Личный кабинет</div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <footer>Сотрудник клуба, который сам записывается на занятия, получает и сообщения клиента. В сообщениях персоналу — только сокращённое имя клиента («Иванов И.»); полное имя и телефон — на сайте.</footer>
+</main>
+</body>
+</html>

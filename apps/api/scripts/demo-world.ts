@@ -25,6 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaClient, Role, type Prisma, type SportRankLevel } from '@yenisey/database';
 import { hashPassword } from '../src/auth/password.ts';
 import { quote } from '../src/booking/pricing.ts';
+import { MOBILE_DESK_NEWS } from './release-news.ts';
 
 const prisma = new PrismaClient();
 
@@ -1336,6 +1337,7 @@ async function main(): Promise<void> {
 
   // Новости платформы.
   for (const news of [
+    { ...MOBILE_DESK_NEWS, daysAgo: 0 },
     {
       section: 'UPDATES' as const,
       title: 'Мой календарь, страница тренера и способ оплаты',

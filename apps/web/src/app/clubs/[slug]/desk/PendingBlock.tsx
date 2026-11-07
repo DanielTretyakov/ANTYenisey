@@ -23,7 +23,15 @@ import { clockIn, dateIn, momentIn } from './time';
  * Список собирает сервер, фазу считает он же: по часам браузера запись могла
  * бы казаться просроченной, когда джоба ещё на неё не смотрит.
  */
-export function PendingBlock({ day, onChanged }: { day: DeskDay; onChanged: () => void }) {
+export function PendingBlock({
+  day,
+  onChanged,
+  compact = false,
+}: {
+  day: DeskDay;
+  onChanged: () => void;
+  compact?: boolean;
+}) {
   const groups = pendingDays(day);
   const [opened, setOpened] = useState<Set<string>>(new Set());
   const [full, setFull] = useState<Set<string>>(new Set());
@@ -43,7 +51,11 @@ export function PendingBlock({ day, onChanged }: { day: DeskDay; onChanged: () =
     <Card className="border-warning-border">
       <CardHeader
         title="Требует отметки"
-        description="Уже началось, но не отмечено, пришёл человек или нет. Здесь всё по клубу, за все залы и дни. Если не отметить, через сутки после окончания сайт сам поставит неявку со списанием."
+        description={
+          compact
+            ? 'По всему клубу, включая прошлые дни. Отметка доступна с начала записи.'
+            : 'Уже началось, но не отмечено, пришёл человек или нет. Здесь всё по клубу, за все залы и дни. Если не отметить, через сутки после окончания сайт сам поставит неявку со списанием.'
+        }
       />
 
       {/* По дням (решение владельца от 11.10.2026): сегодня раскрыт, прошлые
@@ -60,9 +72,7 @@ export function PendingBlock({ day, onChanged }: { day: DeskDay; onChanged: () =
             <li key={group.date}>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-surface-sunken/50 px-6 py-2.5 text-[0.8125rem]">
                 <span className="font-medium text-text">{group.label}</span>
-                <span className="text-text-muted">
-                  ждут отметки: {group.waiting}
-                </span>
+                <span className="text-text-muted">ждут отметки: {group.waiting}</span>
                 {group.overdue && (
                   <span className="rounded-full border border-warning-border bg-warning-soft px-2 py-px text-[0.75rem] text-warning">
                     просрочено
@@ -138,8 +148,16 @@ interface PendingDay {
  */
 function pendingDays(day: DeskDay): PendingDay[] {
   const items: PendingItem[] = [
-    ...day.pending.bookings.map((booking) => ({ key: `booking-${booking.id}`, at: booking.startsAt, booking })),
-    ...day.pending.events.map((event) => ({ key: `event-${event.kind}-${event.id}`, at: event.startsAt, event })),
+    ...day.pending.bookings.map((booking) => ({
+      key: `booking-${booking.id}`,
+      at: booking.startsAt,
+      booking,
+    })),
+    ...day.pending.events.map((event) => ({
+      key: `event-${event.kind}-${event.id}`,
+      at: event.startsAt,
+      event,
+    })),
   ];
   const byDate = new Map<string, PendingItem[]>();
 
@@ -159,7 +177,8 @@ function pendingDays(day: DeskDay): PendingDay[] {
         items: sorted,
         waiting: sorted.reduce(
           (sum, item) =>
-            sum + (item.booking ? 1 : item.event!.participants.filter((entry) => entry.status === 'BOOKED').length),
+            sum +
+            (item.booking ? 1 : item.event!.participants.filter((entry) => entry.status === 'BOOKED').length),
           0,
         ),
         overdue: sorted.some((item) => (item.booking ?? item.event)!.phase === 'OVERDUE'),
@@ -169,9 +188,12 @@ function pendingDays(day: DeskDay): PendingDay[] {
 
 /** «Сегодня» · «Вчера, 10 окт.» · «пт, 9 окт.» — дата зала. */
 function dayLabel(date: string, today: string): string {
-  const short = new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).format(
-    new Date(`${date}T00:00:00Z`),
-  );
+  const short = new Intl.DateTimeFormat('ru-RU', {
+    timeZone: 'UTC',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  }).format(new Date(`${date}T00:00:00Z`));
   const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
 
   return date === today ? 'Сегодня' : date === yesterday ? `Вчера, ${short}` : short;
@@ -212,15 +234,7 @@ function BookingItem({
   );
 }
 
-function EventItem({
-  event,
-  day,
-  onChanged,
-}: {
-  event: DeskEvent;
-  day: DeskDay;
-  onChanged: () => void;
-}) {
+function EventItem({ event, day, onChanged }: { event: DeskEvent; day: DeskDay; onChanged: () => void }) {
   const waiting = event.participants.filter((entry) => entry.status === 'BOOKED');
 
   return (
@@ -245,10 +259,7 @@ function EventItem({
 
       <ul className="mt-2.5 grid gap-1.5 border-l-2 border-border pl-4 sm:ml-[5.75rem]">
         {event.participants.map((entry) => (
-          <li
-            key={entry.entryId}
-            className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.875rem]"
-          >
+          <li key={entry.entryId} className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.875rem]">
             <span className="min-w-[12rem] flex-1">
               <PersonLink userId={entry.userId}>{entry.fullName}</PersonLink>{' '}
               <span className="text-[0.8125rem] text-text-subtle">{entry.phone}</span>
@@ -295,12 +306,18 @@ function MarkAll({ event, waiting, onDone }: { event: DeskEvent; waiting: number
       await club.markAttendanceBatch({
         marks: event.participants
           .filter((entry) => entry.status === 'BOOKED')
-          .map((entry) => ({ kind: event.kind, entryId: entry.entryId, status: 'ATTENDED' as const })),
+          .map((entry) => ({
+            kind: event.kind,
+            entryId: entry.entryId,
+            status: 'ATTENDED' as const,
+          })),
       });
       setAsking(false);
       onDone();
     } catch (cause: unknown) {
-      setError(cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз');
+      setError(
+        cause instanceof ApiError ? cause.message : 'Нет связи. Проверьте интернет и попробуйте ещё раз',
+      );
     } finally {
       setPending(false);
     }

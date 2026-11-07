@@ -363,3 +363,33 @@ function textOf(html: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+/**
+ * Сколько ждать до ближайшего «ЧЧ:ММ» по поясу `timeZone` (решение владельца
+ * от 28.10.2026: к ttfr.ru — раз в сутки). Проход привязан ко времени суток,
+ * а не к старту процесса: прежние «через 5 минут после старта и дальше каждые
+ * 24 часа» давали лишний проход на каждой выкладке.
+ *
+ * Ровно «сейчас» — это уже прошедший срок: следующий через сутки, иначе
+ * проход, закончившийся в ту же минуту, запустился бы снова. Перехода на
+ * летнее время в России нет; в поясе с ним срок в день перехода сдвинется на
+ * час — не беда для суточной сверки.
+ */
+export function msUntilDaily(now: Date, at: string, timeZone: string): number {
+  const [hours, minutes] = at.split(':').map(Number) as [number, number];
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes): number => Number(parts.find((item) => item.type === type)?.value ?? 0);
+
+  const nowSeconds = part('hour') * 3600 + part('minute') * 60 + part('second');
+  const targetSeconds = hours * 3600 + minutes * 60;
+  const DAY = 24 * 3600;
+  const wait = (((targetSeconds - nowSeconds) % DAY) + DAY) % DAY || DAY;
+
+  return wait * 1000 - now.getMilliseconds();
+}

@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   fntrCandidate,
   matchPerson,
+  msUntilDaily,
   normalizeName,
   parseRttwPage,
   profileUrl,
@@ -227,5 +228,32 @@ describe('разбор источников', () => {
     assert.equal(rttwLetter('Самсонов'), 'С');
     assert.equal(profileUrl('FNTR', '9'), 'https://ttfr.ru/sportsman/9');
     assert.equal(profileUrl('RTTW', '79aacdc'), 'https://r.ttw.ru/players/?id=79aacdc');
+  });
+});
+
+describe('msUntilDaily — проход раз в сутки по часам платформы', () => {
+  const MIN = 60_000;
+
+  it('ждёт до ближайших 05:00 по Красноярску', () => {
+    // 16:30 по Красноярску (UTC+7) = 09:30 UTC; до 05:00 — 12 ч 30 мин.
+    assert.equal(msUntilDaily(new Date('2026-10-28T09:30:00.000Z'), '05:00', 'Asia/Krasnoyarsk'), 750 * MIN);
+  });
+
+  it('утром до срока — в тот же день', () => {
+    // 04:00 по Красноярску = 21:00 UTC накануне.
+    assert.equal(msUntilDaily(new Date('2026-10-27T21:00:00.000Z'), '05:00', 'Asia/Krasnoyarsk'), 60 * MIN);
+  });
+
+  it('ровно в срок — следующий через сутки, а не сразу', () => {
+    assert.equal(msUntilDaily(new Date('2026-10-27T22:00:00.000Z'), '05:00', 'Asia/Krasnoyarsk'), 24 * 60 * MIN);
+  });
+
+  it('учитывает секунды и миллисекунды', () => {
+    assert.equal(msUntilDaily(new Date('2026-10-27T21:59:30.250Z'), '05:00', 'Asia/Krasnoyarsk'), 29_750);
+  });
+
+  it('пояс — свой у каждого: 05:00 по Москве', () => {
+    // 09:30 UTC = 12:30 по Москве; до 05:00 — 16 ч 30 мин.
+    assert.equal(msUntilDaily(new Date('2026-10-28T09:30:00.000Z'), '05:00', 'Europe/Moscow'), 990 * MIN);
   });
 });

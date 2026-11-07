@@ -67,7 +67,7 @@ export function MarkButtons({
   );
 
   return (
-    <span className="flex flex-wrap items-center gap-2 text-[0.8125rem]">
+    <span className="flex flex-wrap items-center gap-2 text-[0.8125rem] [&_button]:min-h-11 sm:[&_button]:min-h-0">
       {step === 'idle' && (
         <>
           <Button size="sm" pending={pending} onClick={() => void mark({ status: 'ATTENDED' })}>
